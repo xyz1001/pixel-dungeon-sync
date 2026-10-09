@@ -1,0 +1,146 @@
+{
+  "date": "2026-10-09",
+  "total": {
+    "tests": 285,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "suites": [
+    {
+      "module": "core",
+      "suite": "pdsync.AppendOnlyWebDavTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "87e64f07b0a1911008665aca29efc29f032dac2c48e6445669373ad65c7c90e0"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.AppendProfileSessionTest",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eedeb17fcb4e52f6554936ad4714c035b56505e5f43d875ff996e9696196af16"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.AppendRepositoryTest",
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "db05e38706d1582a5e29926d5eedfc2c03616e413829dd5d0e4805211ffcfbec"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.ConnectionProvisioningTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d4dddb9466998794a04369b96f69a211c9eb8505b5fd59d8c32fefda4252ab16"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.ConnectionSetupTest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b474402647ac7eb4d8c304435f9ab8f4dfc42ffbd70a9993d4e544e05e79f3a9"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.CoreTest",
+      "tests": 37,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "30c72ff3ac04422fc6a76be31431dd1b7332230c51ec8cc9b84eb32c55edb232"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.DefaultProfileLocationTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "33f905e73b0659a2681d4ce2ce23032cda7670c1ee445348e94475c9838ce90a"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.DefaultSavePathsTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3d47e6f55fb35eeefe67a564ffb2b2de351547fa367101365021b5cb308b8e42"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.LegacyImportTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "264fe7b21f1ae98f15b07e52cab1c10a6b1d7971ecfa9e6097a0a46c86ef236d"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.NamespaceCreationTest",
+      "tests": 30,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e43dae1e19e352af565008eb916564772621ff21d2e42d22b8854412e2b54ed3"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.ProfileSessionTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fb579976142e5ee98bb5c970fde6fb7d0c1f99eb72ab65d5b0d7397314f5d7bf"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.SaveVersionsTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "30dcc0f0d4149b0d21b5bac52d889f7d0eaeb121ae8badc8391256819369b825"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.SecretStoreTest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "448fae955d35fa5cdde5a955477d1766461f23b4d8b6e5e4c0ff70e2af334c56"
+    },
+    {
+      "module": "core",
+      "suite": "pdsync.VersionControllerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b5517138f913fecf49d6a3b82ba4c9e2998f252093d6c7ac3d6d1ba9cf8b00f1"
+    },
+    {
+      "module": "desktop",
+      "suite": "pdsync.ConnectionPageLifetimeTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8a2aff2ef12f324b1c7bcfc650a3a660cf254238bfbd07615d2e916f6235100b"
+    }
+  ]
+}

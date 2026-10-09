@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.AppendProfileSessionTest" tests="22" skipped="0" failures="0" errors="0" timestamp="2026-10-09T03:05:30.566Z" hostname="dd161cbb09b6" time="0.93">
+  <properties/>
+  <testcase name="retryReusesFrozenBytesAndEditsDuringPublicationRemainDirty()" classname="pdsync.AppendProfileSessionTest" time="0.169"/>
+  <testcase name="unbaselinedPopulatedDirectoryCannotUseOrdinaryRemoteApplyEvenIfBytesMatch()" classname="pdsync.AppendProfileSessionTest" time="0.036"/>
+  <testcase name="scopeIsolatesProfilesAndBaselineNeverUsesLegacyHeadFile()" classname="pdsync.AppendProfileSessionTest" time="0.041"/>
+  <testcase name="adapterIdentitySeparatesVariantsWithIdenticalLocalFiles()" classname="pdsync.AppendProfileSessionTest" time="0.018"/>
+  <testcase name="threeBranchesOfferAllChoicesAndResolutionParentsEveryObservedTip()" classname="pdsync.AppendProfileSessionTest" time="0.111"/>
+  <testcase name="editDuringObjectUploadDoesNotBecomeCleanPublishedState()" classname="pdsync.AppendProfileSessionTest" time="0.022"/>
+  <testcase name="failedVersionCheckArchivesRestorePlanInsteadOfLeavingItPublishable()" classname="pdsync.AppendProfileSessionTest" time="0.035"/>
+  <testcase name="lateSiblingAfterResolutionPublicationRemainsConflict()" classname="pdsync.AppendProfileSessionTest" time="0.071"/>
+  <testcase name="interruptedLocalApplyCannotBeReplayedAsPublicationBeforeExplicitArchive()" classname="pdsync.AppendProfileSessionTest" time="0.024"/>
+  <testcase name="changedLocalFilesInvalidateExplicitConflictChoiceBeforeAnyReplacement()" classname="pdsync.AppendProfileSessionTest" time="0.039"/>
+  <testcase name="missingPreviouslyEstablishedBaselineFailsClosedInsteadOfCreatingRoot()" classname="pdsync.AppendProfileSessionTest" time="0.017"/>
+  <testcase name="interruptedRemoteApplyGateBlocksBothRestoreAndPushUntilReviewed()" classname="pdsync.AppendProfileSessionTest" time="0.044"/>
+  <testcase name="failedResolutionUploadRetriesExactChosenSnapshotAfterLocalEdit()" classname="pdsync.AppendProfileSessionTest" time="0.058"/>
+  <testcase name="vanishedRemoteBaselineStopsPublicationAndNeverSilentlyStartsNewHistory()" classname="pdsync.AppendProfileSessionTest" time="0.009"/>
+  <testcase name="failedRemoteApplyKeepsRestartGateAndOriginalHistoryUntilExplicitArchive()" classname="pdsync.AppendProfileSessionTest" time="0.027"/>
+  <testcase name="ordinaryPublicationParentsOnlyItsRealBaselineAndKeepsSiblingBranches()" classname="pdsync.AppendProfileSessionTest" time="0.036"/>
+  <testcase name="readRemoteReturnsEveryObservedTipWithoutWritesOrChangingLocalBaseline()" classname="pdsync.AppendProfileSessionTest" time="0.026"/>
+  <testcase name="changedRemoteTipsReturnAllNewChoicesWithoutApplyingStaleChoice()" classname="pdsync.AppendProfileSessionTest" time="0.039"/>
+  <testcase name="oldAndNewSessionsUseIdenticalPhysicalRootLock()" classname="pdsync.AppendProfileSessionTest" time="0.003"/>
+  <testcase name="dirtyBaselineCannotBeOverwrittenAndEmptyTargetCanFastForward()" classname="pdsync.AppendProfileSessionTest" time="0.041"/>
+  <testcase name="historicalRestoreCreatesFrozenNewCommitAtCurrentBaselineWithoutRewinding()" classname="pdsync.AppendProfileSessionTest" time="0.021"/>
+  <testcase name="legacyRemoteAndLegacyPendingAreNeverSilentlyPublishedAsV2()" classname="pdsync.AppendProfileSessionTest" time="0.026"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

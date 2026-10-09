@@ -1,0 +1,397 @@
+[
+  {
+    "stage": "first-run",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 1120,
+        "height": 804
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 1110,
+        "height": 770
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      }
+    ]
+  },
+  {
+    "stage": "minimum-size-connection",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "connection-cancel-home",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "busy-double-connect-os-close",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "connect-success-home",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "settings-cancel-reopen",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "local-capture-confirmation",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "confirmation-back-reopen-reset",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 761,
+        "height": 640
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 751,
+        "height": 606
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 751,
+        "height": 606
+      }
+    ]
+  },
+  {
+    "stage": "fresh-app-idle-close",
+    "app_surfaces": [],
+    "top_level_windows": []
+  },
+  {
+    "stage": "existing-profile-startup",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 1120,
+        "height": 804
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 1110,
+        "height": 770
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      }
+    ]
+  },
+  {
+    "stage": "existing-authentication-failure",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 1120,
+        "height": 804
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 1110,
+        "height": 770
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      }
+    ]
+  },
+  {
+    "stage": "existing-profile-success-home",
+    "app_surfaces": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      },
+      {
+        "id": 37748764,
+        "title": "Content window",
+        "type": null,
+        "width": 1120,
+        "height": 804
+      },
+      {
+        "id": 37748768,
+        "title": "sun-awt-X11-XCanvasPeer",
+        "type": null,
+        "width": 1110,
+        "height": 770
+      }
+    ],
+    "top_level_windows": [
+      {
+        "id": 37748743,
+        "title": "像素地牢 · 存档同步",
+        "type": "normal",
+        "width": 1110,
+        "height": 770
+      }
+    ]
+  },
+  {
+    "stage": "all-test-apps-closed",
+    "app_surfaces": [],
+    "top_level_windows": []
+  }
+]

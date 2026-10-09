@@ -62,3 +62,9 @@ Windows 用户设备与 Apple Silicon Mac 尚未连接；Intel Mac 没有测试�
 连接界面现为地址、用户名、密码加固定可见的单个“连接”按钮，成功直接进入主界面。新空间由适配器自动指定，原有profile保留；显式连接验证DAV根并按需创建仅两级应用目录，无需用户手动建文件夹。错误固定可见、失败保留输入，自动检查仍只读。275个JVM测试、3个Python测试和完整构建通过；详见 `docs/ONE_STEP_CONNECTION_VALIDATION.md`。用户上一轮实际HTTP码未观察，不声称已确定404。
 
 本轮新原生短窗口连接复验通过：401保留输入、一次连接创建应用目录并进入主界面、取消不写、旧profile保留；隔离存档不变且无存档PUT。详情和5张新截图见 `docs/onboarding-v5-evidence/UI_SMOKE.md`。
+
+## 单窗口引导改造（2026-10-09，v6）
+
+首次连接、设置、冲突和操作确认改为同一个主窗口内的页面，移除连接DialogWindow和应用AlertDialog。保留显式JAR选择的标准文件选择器；没有开展Android实现。启动串行化和页面生命周期/代次保护防止旧回调或重复点击写入。285个JVM测试（核心275+桌面10）、3个Python测试及完整构建通过；见 `docs/SINGLE_WINDOW_VALIDATION.md`。
+
+本轮原生复验也通过：13次窗口检查（运行11次均1个根、退出2次均0），双击去重、忙碌关闭内联提示、设置取消与确认返回重置均验证。冲突选择页未实际点击；标准JAR选择器未打开。7张新截图与窗口清单见 `docs/single-window-v6-evidence/UI_SMOKE.md`。

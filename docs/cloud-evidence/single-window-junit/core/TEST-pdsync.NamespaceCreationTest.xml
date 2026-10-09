@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.NamespaceCreationTest" tests="30" skipped="0" failures="0" errors="0" timestamp="2026-10-09T03:05:33.923Z" hostname="dd161cbb09b6" time="1.873">
+  <properties/>
+  <testcase name="missingConfiguredRootIsNeverCreatedAndNoParentsAreVisited()" classname="pdsync.NamespaceCreationTest" time="0.004"/>
+  <testcase name="unsafeRawBasePathsAreRejectedBeforeHttpUrlCanNormalizeThem()" classname="pdsync.NamespaceCreationTest" time="0.004"/>
+  <testcase name="unsafeOrUnexpectedHrefsFailClosedBeforeAnyCreation()" classname="pdsync.NamespaceCreationTest" time="0.042"/>
+  <testcase name="bothMissingChildrenAreCreatedInOrderWithReadbackBeforeTheNextChild()" classname="pdsync.NamespaceCreationTest" time="0.092"/>
+  <testcase name="creationVerificationIsBoundToExactChildNotAnyCollectionUnderRoot()" classname="pdsync.NamespaceCreationTest" time="0.052"/>
+  <testcase name="mkcol405IsNotSuccessWhenStillMissingOrAFile()" classname="pdsync.NamespaceCreationTest" time="0.081"/>
+  <testcase name="redirectsFromRootOrMkcolNeverEscapeOrCountAsCreated()" classname="pdsync.NamespaceCreationTest" time="0.014"/>
+  <testcase name="baseWithoutTrailingSlashAndMatchingAbsoluteHrefsAreSupported()" classname="pdsync.NamespaceCreationTest" time="0.094"/>
+  <testcase name="partialAndOversizedProofsFailWithoutFollowingCursors()" classname="pdsync.NamespaceCreationTest" time="0.123"/>
+  <testcase name="mkcol201AlsoRequiresActualCollectionReadback()" classname="pdsync.NamespaceCreationTest" time="0.063"/>
+  <testcase name="resourceLevel404AlsoProvesMissingRootWithoutWriting()" classname="pdsync.NamespaceCreationTest" time="0.005"/>
+  <testcase name="anExistingChildFileIsNeverReplaced()" classname="pdsync.NamespaceCreationTest" time="0.15"/>
+  <testcase name="property404DoesNotMeanCollectionIsAbsentAndNeverTriggersMkcol()" classname="pdsync.NamespaceCreationTest" time="0.057"/>
+  <testcase name="rootAndSingleSegmentInjectionUseOnlyTheConfiguredAnchor()" classname="pdsync.NamespaceCreationTest" time="0.097"/>
+  <testcase name="timeoutAfterAcceptedMkcolAlsoUsesExactlyOneReadback()" classname="pdsync.NamespaceCreationTest" time="0.203"/>
+  <testcase name="existingDirectoriesNeedOnlyDepthZeroChecksAndNeverMkcolOrPut()" classname="pdsync.NamespaceCreationTest" time="0.091"/>
+  <testcase name="nestedAuthenticationAndForbiddenStatusesDoNotPermitCreation()" classname="pdsync.NamespaceCreationTest" time="0.113"/>
+  <testcase name="authenticationForbiddenAndConflictStatusesRemainDistinctAtReadAndCreation()" classname="pdsync.NamespaceCreationTest" time="0.05"/>
+  <testcase name="initialNetworkFailureNeverCreatesAnything()" classname="pdsync.NamespaceCreationTest" time="0.012"/>
+  <testcase name="suppliedAuthenticatorCannotReplayNamespaceAuthenticationFailures()" classname="pdsync.NamespaceCreationTest" time="0.004"/>
+  <testcase name="retryAfterZeroNeverReplaysNamespaceReadsOrMkcol()" classname="pdsync.NamespaceCreationTest" time="0.007"/>
+  <testcase name="disconnectAfterAcceptedMkcolIsResolvedByReadbackWithoutRepeatingWrite()" classname="pdsync.NamespaceCreationTest" time="0.056"/>
+  <testcase name="uncertainWriteThatRemainsMissingDoesNotRetryOrCreateDescendants()" classname="pdsync.NamespaceCreationTest" time="0.007"/>
+  <testcase name="cancellationBeforeAnyRequestHasNoSideEffects()" classname="pdsync.NamespaceCreationTest" time="0.005"/>
+  <testcase name="malformedAmbiguousAndUnsafeXmlNeverProvesCollectionExistence()" classname="pdsync.NamespaceCreationTest" time="0.036"/>
+  <testcase name="onlyTheMissingProfileIsCreated()" classname="pdsync.NamespaceCreationTest" time="0.106"/>
+  <testcase name="cancellationIsCheckedBeforeEachRequestIncludingMkcolAndItsReadback()" classname="pdsync.NamespaceCreationTest" time="0.178"/>
+  <testcase name="aConcurrentCreator405SucceedsOnlyAfterCollectionReadback()" classname="pdsync.NamespaceCreationTest" time="0.101"/>
+  <testcase name="failedPostWriteVerificationRetainsTypedAuthStatusAndStops()" classname="pdsync.NamespaceCreationTest" time="0.006"/>
+  <testcase name="configuredRootFileCannotBeMistakenForACollection()" classname="pdsync.NamespaceCreationTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[Oct 08, 2026 8:05:35 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[51575] connection from /127.0.0.1 didn't make a request
+]]></system-err>
+</testsuite>
