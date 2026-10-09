@@ -82,5 +82,42 @@ class DemoServerTest(unittest.TestCase):
                 webdav_demo.ROOT = original_root
 
 
+    def test_depth_zero_checks_only_the_three_preexisting_virtual_collections(self):
+        with tempfile.TemporaryDirectory(prefix='pds-demo-namespace-') as temp:
+            original_root = webdav_demo.ROOT
+            webdav_demo.ROOT = Path(temp)
+            (Path(temp) / 'untouched.txt').write_bytes(b'synthetic')
+            server = webdav_demo.ThreadingHTTPServer(('127.0.0.1', 0), webdav_demo.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            connection = http.client.HTTPConnection(*server.server_address, timeout=5)
+            auth = 'Basic ' + base64.b64encode(b'demo:demo').decode()
+            try:
+                for path in ('/', '/shattered/', '/shattered/demo/'):
+                    connection.request('PROPFIND', path, b'', {'Authorization': auth, 'Depth': '0'})
+                    response = connection.getresponse()
+                    self.assertEqual(207, response.status)
+                    root = ET.fromstring(response.read())
+                    self.assertEqual([path], [e.text for e in root.findall('{DAV:}response/{DAV:}href')])
+                    self.assertEqual(1, len(root.findall('{DAV:}response/{DAV:}propstat/{DAV:}prop/{DAV:}resourcetype/{DAV:}collection')))
+                for path, depth in (('/', '1'), ('/shattered/', '1'), ('/shattered/other/', '0'), ('/outside/', '0')):
+                    connection.request('PROPFIND', path, b'', {'Authorization': auth, 'Depth': depth})
+                    response = connection.getresponse()
+                    self.assertEqual(400, response.status)
+                    response.read()
+                connection.request('PROPFIND', '/', b'', {'Depth': '0'})
+                response = connection.getresponse()
+                self.assertEqual(401, response.status)
+                response.read()
+                self.assertEqual(['untouched.txt'], [p.name for p in Path(temp).iterdir()])
+                self.assertEqual(b'synthetic', (Path(temp) / 'untouched.txt').read_bytes())
+            finally:
+                connection.close()
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=5)
+                webdav_demo.ROOT = original_root
+
+
 if __name__ == '__main__':
     unittest.main()

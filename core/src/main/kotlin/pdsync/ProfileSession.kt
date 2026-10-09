@@ -44,6 +44,19 @@ object SafePaths {
  }
 }
 
+/** Reject ambiguous raw paths before HttpUrl can normalize away the configured root boundary. */
+private fun validateRawEndpoint(endpoint: String) {
+ require(endpoint.length <= 8192 && endpoint.none { it.isWhitespace() || it.isISOControl() || it == '\\' }) { "服务地址格式无效" }
+ val uri = try { java.net.URI(endpoint) } catch (_: Exception) { throw IllegalArgumentException("服务地址格式无效") }
+ require(uri.isAbsolute && !uri.isOpaque && uri.rawAuthority != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "服务地址不能含账号、查询参数或片段" }
+ val rawPath = uri.rawPath ?: ""
+ require("//" !in rawPath) { "服务地址包含不明确的路径" }
+ rawPath.split('/').forEach { raw ->
+  val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8) } catch (_: Exception) { throw IllegalArgumentException("服务地址编码无效") }
+  require(decoded != "." && decoded != ".." && decoded.none { it == '/' || it == '\\' || it == '%' || it.isISOControl() }) { "服务地址不能包含路径跳转或编码分隔符" }
+ }
+}
+
 @Serializable data class AppConfig(
  val saveRoot: String = "", val endpoint: String = "http://127.0.0.1:8765",
  val profile: String = "demo", val version: String? = null, val targetGame: String = "",
@@ -51,6 +64,7 @@ object SafePaths {
 ) {
  fun validated(): AppConfig {
   require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "档案名只允许 1–64 位字母、数字、下划线或连字符" }
+  validateRawEndpoint(endpoint)
   val url = endpoint.toHttpUrl()
   require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "服务地址不能含账号、密码、查询参数或片段" }
   require(url.scheme == "https" || url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost", "::1")) { "服务必须使用 HTTPS；仅本机演示允许 HTTP" }

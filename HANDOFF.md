@@ -56,3 +56,9 @@ Windows 用户设备与 Apple Silicon Mac 尚未连接；Intel Mac 没有测试�
 本轮另用官方 Shattered 4.0.2 新建隔离 A/B，真实游戏读入、继续、分支选择和历史恢复后继续均通过；5个远端对象和3个备份独立哈希核验。详见 `docs/real-game-validation/append-only-recheck/APPEND_GAME_RECHECK.md`。这是云端 Linux 单机双目录复验，不代表真实 Cloudreve 或跨平台完成。
 
 新 Compose 向导及只读双分支展示的有界原生冒烟也通过；默认 GL/字体渲染先失败，改用既有进程级软件渲染与现有字体配置后成功，未声称默认路径或完整冲突/恢复按钮流程通过。详见 `APPEND_UI_SMOKE.md`（同一实际游戏复验目录）。
+
+## 单步连接修复（2026-10-09，v5）
+
+连接界面现为地址、用户名、密码加固定可见的单个“连接”按钮，成功直接进入主界面。新空间由适配器自动指定，原有profile保留；显式连接验证DAV根并按需创建仅两级应用目录，无需用户手动建文件夹。错误固定可见、失败保留输入，自动检查仍只读。275个JVM测试、3个Python测试和完整构建通过；详见 `docs/ONE_STEP_CONNECTION_VALIDATION.md`。用户上一轮实际HTTP码未观察，不声称已确定404。
+
+本轮新原生短窗口连接复验通过：401保留输入、一次连接创建应用目录并进入主界面、取消不写、旧profile保留；隔离存档不变且无存档PUT。详情和5张新截图见 `docs/onboarding-v5-evidence/UI_SMOKE.md`。

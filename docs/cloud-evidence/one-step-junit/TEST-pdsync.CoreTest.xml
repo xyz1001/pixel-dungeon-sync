@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.CoreTest" tests="37" skipped="0" failures="0" errors="0" timestamp="2026-10-09T02:45:49.724Z" hostname="dd161cbb09b6" time="1.403">
+  <properties/>
+  <testcase name="credentialUrlsAndFakeLoopbackRejected()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="roundtripAndRecords()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="compressedZipSizeLimit()" classname="pdsync.CoreTest" time="0.04"/>
+  <testcase name="weakEtagBlocked()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="checksumFailure()" classname="pdsync.CoreTest" time="0.001"/>
+  <testcase name="expandedSizeLimit()" classname="pdsync.CoreTest" time="0.604"/>
+  <testcase name="offlineBranches()" classname="pdsync.CoreTest" time="0.017"/>
+  <testcase name="aliases()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="symlinkRejected()" classname="pdsync.CoreTest" time="0.001"/>
+  <testcase name="malformedEtagRejected()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="symlinkCaptureRootRejected()" classname="pdsync.CoreTest" time="0.001"/>
+  <testcase name="fileChecksumMismatch()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="webdavConditionalWrite()" classname="pdsync.CoreTest" time="0.009"/>
+  <testcase name="rollback()" classname="pdsync.CoreTest" time="0.007"/>
+  <testcase name="oversizedRemoteManifestRejected()" classname="pdsync.CoreTest" time="0.11"/>
+  <testcase name="uploadInterruption()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="retryAlreadyPublishedSnapshot()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="partialRestoreRollsBackAllRecords()" classname="pdsync.CoreTest" time="0.022"/>
+  <testcase name="partialUploadRetryIsIdempotent()" classname="pdsync.CoreTest" time="0.054"/>
+  <testcase name="gameRestartBeforeRestoreDoesNotOverwriteNewerSave()" classname="pdsync.CoreTest" time="0.004"/>
+  <testcase name="pendingSurvivesRestartWithoutCredentials()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="stoppedAndVersionRequired()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="tooManyManifestEntries()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="portablePathsRejected()" classname="pdsync.CoreTest" time="0.006"/>
+  <testcase name="backupAliasCannotOverlapSaves()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="retryRejectsDifferentImmutableObject()" classname="pdsync.CoreTest" time="0.055"/>
+  <testcase name="lostPublishResponseRetryReconcilesHead()" classname="pdsync.CoreTest" time="0.267"/>
+  <testcase name="zipTraversalRejected()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="conditionFailure()" classname="pdsync.CoreTest" time="0.001"/>
+  <testcase name="actualHttpRoundtrip()" classname="pdsync.CoreTest" time="0.104"/>
+  <testcase name="symlinkRestoreTargetRejected()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="redirectsNeverFollowed()" classname="pdsync.CoreTest" time="0.007"/>
+  <testcase name="authError()" classname="pdsync.CoreTest" time="0.004"/>
+  <testcase name="deletionDoesNotResurrect()" classname="pdsync.CoreTest" time="0.003"/>
+  <testcase name="chunkedManifestSizeLimit()" classname="pdsync.CoreTest" time="0.031"/>
+  <testcase name="corruptUploadNotPublished()" classname="pdsync.CoreTest" time="0.002"/>
+  <testcase name="regularFileCaptureRootRejected()" classname="pdsync.CoreTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

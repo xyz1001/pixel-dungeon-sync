@@ -5,12 +5,12 @@
       "sha256": "35f089bda89c064a54df17575c398656f624b794b8040640eac801207ddbef3f"
     },
     "HANDOFF.md": {
-      "size": 7176,
-      "sha256": "fdfbdddd18a641386d43f38f75d3211bab2ab838a15172aee76320657b685e31"
+      "size": 7990,
+      "sha256": "5033dc663b89ea096380b8acbebf0e126bbb7cedca34edd51a507e9520c1bda6"
     },
     "README.md": {
-      "size": 9896,
-      "sha256": "d23c7735e49e3935172fbd39930b8410aa479a27bab93f41ca34f403c730dd42"
+      "size": 11058,
+      "sha256": "908c035836ee4c0449820ccc13098fa5c92d3aa4026facbffe6273341fe77679"
     },
     "build.gradle.kts": {
       "size": 641,
@@ -29,20 +29,20 @@
       "sha256": "ef0b9ecb0cc109bf659d295c6a7defee96d2739eaef340f93260823ec270db0f"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
-      "size": 14818,
-      "sha256": "affc22b4a1650a475a74e0e71f0abc2993e46c25dbb6326fcf8967eefdd88259"
+      "size": 23668,
+      "sha256": "0f467501692c78fbededdba14dd1fd6126fa5f9d67fa8aa13ee735ce10807bda"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
       "size": 11027,
       "sha256": "78c45b9563754c2f59504808d78da347fe64243a2902f03e6d0f44bda7035768"
     },
     "core/src/main/kotlin/pdsync/ConnectionSetup.kt": {
-      "size": 6456,
-      "sha256": "ef7f62d011823f0b1d179d029ff00ac6f8375f4f20d2b7406f631b5745586c89"
+      "size": 8946,
+      "sha256": "58a9b347f2cecf4386a906da1b9f99c16cf7cbf1f44880c7372d1e67b77ac614"
     },
     "core/src/main/kotlin/pdsync/Core.kt": {
-      "size": 8979,
-      "sha256": "9877d23c7c5e0ec2ea6a82d79b68c3c45141b9e9202365250af56254a57e29ca"
+      "size": 9127,
+      "sha256": "896947ff0c29daa7971fa01ef79a1c65a97ef6879d9220804969bf6629a9423a"
     },
     "core/src/main/kotlin/pdsync/DefaultProfileLocation.kt": {
       "size": 1292,
@@ -61,8 +61,8 @@
       "sha256": "753fd541663e1fe8360344ae01fd4931730c7d10aceca0a7ea7d83137d23e121"
     },
     "core/src/main/kotlin/pdsync/ProfileSession.kt": {
-      "size": 21316,
-      "sha256": "c136b04b1e0e47d810e6869150861512f87da9950d0e48690229fd6efaf22499"
+      "size": 22475,
+      "sha256": "edbe1785b5e5bd4a384b5021679302de2187d4fa8eb52f742f872e6795cc35f0"
     },
     "core/src/main/kotlin/pdsync/SaveVersions.kt": {
       "size": 16854,
@@ -87,6 +87,10 @@
     "core/src/test/kotlin/pdsync/AppendRepositoryTest.kt": {
       "size": 43349,
       "sha256": "41723fc92e434613f01821700634b4aa183e694275f31d512fff14e86f805200"
+    },
+    "core/src/test/kotlin/pdsync/ConnectionProvisioningTest.kt": {
+      "size": 8643,
+      "sha256": "548dda99e2da53e5b1366cce6f45c946111d158429c2a4d30d1cda1064cbbf36"
     },
     "core/src/test/kotlin/pdsync/ConnectionSetupTest.kt": {
       "size": 16046,
@@ -116,6 +120,10 @@
       "size": 3667,
       "sha256": "ea9d95f9b8f288fa1af5b60fe16d07a7265ed39beb86414094b746be2493a929"
     },
+    "core/src/test/kotlin/pdsync/NamespaceCreationTest.kt": {
+      "size": 19438,
+      "sha256": "0b7a4bbc8ed9333c37236a706ee729d5986285fa2ce7c989dc67d2776f7da3cf"
+    },
     "core/src/test/kotlin/pdsync/ProfileSessionTest.kt": {
       "size": 11863,
       "sha256": "bce8bcbea475982f325e75af91ea6bb23a46c48907d2eb3ac39c13977a6a6769"
@@ -141,12 +149,12 @@
       "sha256": "4cb471588378804858b359caae0d46816515b44e16ce941e522ee88fc139f3a7"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 34406,
-      "sha256": "55cb60897571eef01ef79b781bd2f143bb230b6a365e00a42b8e906975673d1b"
+      "size": 33303,
+      "sha256": "0949950da748bf62ebc345520e20657446897cf78fa0c642ff8e7d5d38445f2a"
     },
     "docs/APPEND_ONLY_PROTOCOL.md": {
-      "size": 8100,
-      "sha256": "3a13a12de92207d512d102b7daeec42179a129d23c42b77b4a6f88609fcf4b53"
+      "size": 8315,
+      "sha256": "f3d65f0911ae5b35122a2f815c6ee354e58ba4fd03a05c4a3e4fd1dba56bf784"
     },
     "docs/APPEND_ONLY_VALIDATION.md": {
       "size": 6377,
@@ -167,6 +175,10 @@
     "docs/DEFAULT_PATH_SETUP_VALIDATION.md": {
       "size": 5055,
       "sha256": "8b55ff84f2b3cecdc0b4b951d13db89f0cecbfeb30a14d6d2a3e91087139f7bd"
+    },
+    "docs/ONE_STEP_CONNECTION_VALIDATION.md": {
+      "size": 4353,
+      "sha256": "089e4e65f23e5f0698bac3f5c1645ee08ea4f8b4ff94226f8c81b928161621df"
     },
     "docs/PHASE1.md": {
       "size": 2499,
@@ -364,6 +376,78 @@
       "size": 1387,
       "sha256": "3dffc53efb6fa7784db605d2d0efd889f554c23d4bd4210b327e3904ff8d43e9"
     },
+    "docs/cloud-evidence/one-step-build.log": {
+      "size": 2085,
+      "sha256": "1b1c2c6f51e2921948c1d2fddf50cbcf2ba6d93b4b085eeb7fe2c3422be2ea22"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.AppendOnlyWebDavTest.xml": {
+      "size": 2535,
+      "sha256": "9df82cb7c6342d5bea0c8fb95241647d855f7c5b29e2752b79154abaf5032c12"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.AppendProfileSessionTest.xml": {
+      "size": 3481,
+      "sha256": "917916d8d0123f35f16a7f4fcc2fbd22e9d839db06e82849e869fb41a031688a"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.AppendRepositoryTest.xml": {
+      "size": 7405,
+      "sha256": "64ae2c443968244354efddff74754a5b330c1e3683e3aaec5f3be138414c0782"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.ConnectionProvisioningTest.xml": {
+      "size": 1577,
+      "sha256": "4bb8ceb423aaf337323a584a0f9227c319d633927e79f3474dbdcbf5eed352c6"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.ConnectionSetupTest.xml": {
+      "size": 2912,
+      "sha256": "17d63d2c9259311fe30ac96bc42b7368eea987f445c3818df2cb30a7bf4d513e"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.CoreTest.xml": {
+      "size": 3584,
+      "sha256": "48986389ad455017ea736d3027b794a27a80fd4ef8b50a0f2ca0152655d397a7"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.DefaultProfileLocationTest.xml": {
+      "size": 1134,
+      "sha256": "a54111a06c914033576a5aaeca56b6522f9e4256da90c0e518c4621ad7cdc2c8"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.DefaultSavePathsTest.xml": {
+      "size": 2615,
+      "sha256": "b2e42af67c0582d31ff4717fc52330d1bb778d91d3fd0cd03aa3c0322b6c9302"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.LegacyImportTest.xml": {
+      "size": 785,
+      "sha256": "169af28f3edcd79f26b6a8df91838eb5a078b05eb013a971d73c1d5fcdbcf06b"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.NamespaceCreationTest.xml": {
+      "size": 4447,
+      "sha256": "d3f1a09db693994d9e9bd1b33a11f7e763e5fe92750938cb4c309b652dc617c3"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.ProfileSessionTest.xml": {
+      "size": 2447,
+      "sha256": "557d678b5abd3148382d9a49bf7b807ce5d5445badcb9c7420361dea78fc5f60"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.SaveVersionsTest.xml": {
+      "size": 2329,
+      "sha256": "a50a3ff6076ea9946ca1e8a7368337c1d292612b24d3d2f662b192b1c8ff5aa8"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.SecretStoreTest.xml": {
+      "size": 2786,
+      "sha256": "50971d5f1a4e8d389e4273ae51ab8699b41390b597a8c7b4c069fafd180b0646"
+    },
+    "docs/cloud-evidence/one-step-junit/TEST-pdsync.VersionControllerTest.xml": {
+      "size": 1052,
+      "sha256": "b30487507bbfec12b9438c6afe487189a0d6ab46decb267844ca22e5bf3d2fb9"
+    },
+    "docs/cloud-evidence/one-step-python.log": {
+      "size": 2455,
+      "sha256": "dfb8ca98565aa2bc4c1415cd38e2eb81dd121e72eda432a8084aa8acf0e0dbf4"
+    },
+    "docs/cloud-evidence/one-step-results.json": {
+      "size": 3214,
+      "sha256": "19b60bd5ab5122bc069ad0adc0ff2b55dd909129856dc38ec0977ced8beac932"
+    },
+    "docs/cloud-evidence/one-step-tests.log": {
+      "size": 756,
+      "sha256": "da72af165e4ac8fd9d98c69cb7c2a742d74fce8ddc4024007ebc827cf3d1c06c"
+    },
     "docs/cloud-evidence/pre-fix-core-tests.xml": {
       "size": 7120,
       "sha256": "9c82dde2e09fdaaddc2f0354432db4166ff5dc6fef3b0c95c833529feecb3b05"
@@ -443,6 +527,46 @@
     "docs/evidence/pd-mac-x64.pom": {
       "size": 1915,
       "sha256": "3f2a4a4ceedc3d48c174f8b6875bd86a4908a5533cae2e0b02f3ed62fb65592d"
+    },
+    "docs/onboarding-v5-evidence/UI_SMOKE.md": {
+      "size": 3900,
+      "sha256": "42c0b20a8bfad613b1eed39a6dd062567a44b774c2f062cc23fed32b89b97524"
+    },
+    "docs/onboarding-v5-evidence/auth-failure-draft-preserved.jpg": {
+      "size": 30993,
+      "sha256": "1701df6fc1b2dcba46cd454c1bab6370afcf4e55bd84535309c39b8cb8034086"
+    },
+    "docs/onboarding-v5-evidence/connect-success-main.jpg": {
+      "size": 70436,
+      "sha256": "f8fddab245a5f6b2eaf0c67db1dbe04600331dfb9ba760372dc248fbedf39514"
+    },
+    "docs/onboarding-v5-evidence/dav-requests.log": {
+      "size": 1235,
+      "sha256": "768fb2e2f470305f6554cc407dd390ba4fc9d4d9b73b215d5e8a589ea5adfab7"
+    },
+    "docs/onboarding-v5-evidence/evidence-sha256.txt": {
+      "size": 820,
+      "sha256": "be25f122cb8a487268fe67dc141eadd893fa6167efa8848902d366a286c8e47f"
+    },
+    "docs/onboarding-v5-evidence/existing-profile-connected-main.jpg": {
+      "size": 70550,
+      "sha256": "267d11d33d419a61f1b782f2764122cc8cea750dbd0fc76a489c6cd24e6d29e5"
+    },
+    "docs/onboarding-v5-evidence/existing-settings-three-fields.jpg": {
+      "size": 28671,
+      "sha256": "8293a1241089ae2c218b3415eb315b59215610e6281597f0b055e18c619c9d4c"
+    },
+    "docs/onboarding-v5-evidence/loopback_fixture.py": {
+      "size": 2403,
+      "sha256": "f2f2d8698714d577e01576a252eaa891a73fa17877e3605efabf14b26450dff3"
+    },
+    "docs/onboarding-v5-evidence/three-fields-short-window.jpg": {
+      "size": 24785,
+      "sha256": "e8d5adbbd68850cb506625a542f93d75525581fef4da1306a39d7b908b497146"
+    },
+    "docs/onboarding-v5-evidence/verification.json": {
+      "size": 1950,
+      "sha256": "3b665d0a1f7e9e8f649670fa099134ef1868b6e8b83523d2683c1850f9f3c7be"
     },
     "docs/real-game-validation/A-baseline-play.png": {
       "size": 137265,
@@ -621,12 +745,12 @@
       "sha256": "c997def5ed51d937111ddf7cfa1c9d5e92a0ec23fc2775b4f8ccfbd1ba4374aa"
     },
     "tools/test_webdav_demo.py": {
-      "size": 4280,
-      "sha256": "1e14bbc2a83ae47ab3e2973d2cac2632cf7282f54f0b5c124325859352903056"
+      "size": 6550,
+      "sha256": "c079cc2f8047136dd20f75ba0f0129d46623a414610b9fc92ba9d802a249847a"
     },
     "tools/webdav_demo.py": {
-      "size": 4379,
-      "sha256": "391e8f7a0cada9540af4167979550c948170afaec0466335cdccd8db3a45c410"
+      "size": 4714,
+      "sha256": "eae68e86336a936bf66c1d7a7d043ee8430844f7b18ab2a6a46e8fdcd877cbe8"
     }
   },
   "excluded": [
@@ -643,8 +767,10 @@
   ],
   "public_test_auth": "demo/demo fixtures only",
   "origin_archive_sha256": "a1c2ff347e2efd3b2f25fc9827402ce73c57b909b457de6af692e162b2101ebf",
-  "notes": "Append-only v2 milestone: immutable random object/commit IDs and parent DAG; no shared-head CAS dependency; persisted retries, verified ancestry, local dirty protection, explicit all-branch resolution and restore-as-new-commit. 236 JVM tests (zero failures/errors/skips), 2 Python tests, full Gradle build, loopback E2E, official 4.0.2 genuine isolated A/B gameplay transfer/conflict/resolution/history restore passed. Bounded new Compose UI smoke passed only with documented process-local software renderer/font setup after default rendering failed; final conflict/restore UI confirmation not exercised. No live Cloudreve, Windows/macOS/native credential-store, Steam concurrent writer, power-loss or hostile-path-race validation. Source recovered from verified ZIP without original .git history; current archive comment identifies the new local commit.",
+  "notes": "v5 one-step connection: only address/username/password and fixed Connect action, sticky errors, automatic adapter default namespace with existing profile IDs preserved, explicit safe Depth0/MKCOL/readback for only game/profile descendants under an existing verified DAV root. Automatic checks remain read-only. No new password persistence authorization; existing same-identity OS-store preference retained. 275 JVM tests zero failures/errors/skips, 3 Python tests, full build and fresh bounded native cloud UI flow passed, including 401 draft retention, short window, creation, cancel, unchanged local saves and old profile identity. v4 append-only DAG/gameplay verification retained as historical evidence; game logic unchanged and not rerun for v5. No user-server access, credentials, production Cloudreve or other-platform validation. Cloud UI uses documented software renderer/font setup; original source ZIP had no .git history.",
   "origin_source_commit": "1177a6babb4e85a7e80ce48f555bc1f59486bcd8",
   "original_git_history_included": false,
-  "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73"
+  "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73",
+  "previous_source_commit": "6a8a46c8479ad3fd5cc284b46255793535bb43c4",
+  "previous_source_archive_sha256": "0235cf52d36cfcdd4572c01f6277d37bbc48b71c5c24aec1a6c07b62eee6f9b8"
 }

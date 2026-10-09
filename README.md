@@ -14,12 +14,17 @@ Kotlin/JVM 独立核心 + Compose Desktop。目前使用游戏的系统默认存
 
 ```sh
 ./gradlew :core:test :desktop:classes
-python3 tools/webdav_demo.py
-# 另一个终端，在项目根目录
 ./gradlew :desktop:run
+# 独立 CLI 夹具（另一个终端启动 demo 服务后执行 core:run）
+python3 tools/webdav_demo.py
+./gradlew :core:run
 ```
 
-首次启动显示 WebDAV 连接向导，输入地址、用户名和密码并测试；确认后保存设置，取消不保存。连接成功后主界面只保留存档状态、同步/本地快照、历史与恢复。右上角“设置”可修改服务、档案与目标游戏 JAR。重启后优先从系统安全存储读取密码；未保存或凭据服务不可用时，只提示输入密码，不重填完整设置。测试只读：检查旧协议标记并完整读取 WebDAV PROPFIND 列表，不测试上传权限；目录必须已经存在并允许列举。旧版 head.json 会明确阻止新协议自动混用。
+首次启动只需输入 WebDAV 地址、用户名和密码，点击固定可见的“连接”：验证账号、按需创建应用目录、读取完整列表，成功后保存连接设置并直接进入主界面。没有测试/下一步/另行保存，也没有档案名或设备字段。失败提示与“连接”按钮始终在滚动表单外，错误保留输入便于修正重试。取消不保存本机配置；已经创建的空应用文件夹不会自动删除。
+
+服务地址指向已经存在的 WebDAV 根目录。客户端验证根目录确为集合，只在其下创建游戏和内部同步空间两级目录；不会创建根目录、遍历上层路径、覆盖同名文件或把405当作成功。新连接自动使用适配器默认空间，旧配置的内部ID保留，不重定向已有数据。旧版 head.json 继续阻止新旧协议静默混用。
+
+右上角设置仍可修改连接地址和账号。新连接密码默认只用于本次会话；同一地址/账号已明确启用的系统安全存储偏好继续沿用，改换身份不会继承保存权限。重启可读取该已保存密码，自动检查是只读的；需重新连接时仍使用相同的三个字段和一个按钮。目标游戏 JAR 在主界面的游戏版本区域单独选择，不阻塞首次连接；选择仅更新该字段，恢复前继续严格校验。
 
 存档根目录不可编辑，不再提供任意文件夹选择或合成演示切换。按官方 Shattered 4.0.2 规则解析：
 
@@ -27,9 +32,9 @@ python3 tools/webdav_demo.py
 - macOS：`user.home/Library/Application Support/Shattered Pixel Dungeon`
 - Linux：`XDG_DATA_HOME/.shatteredpixel/shattered-pixel-dungeon`；只有变量未设置时才使用 `user.home/.local/share`
 
-不存在的目录会明确提示先在游戏中创建存档并退出，不自动建目录或改用别处。空/相对 XDG、点路径片段、符号链接、未知系统等会失败关闭。[完整规则和来源](docs/DEFAULT_PATH_RULES.md)。目标游戏 JAR 与存档目录是两件事：仍在设置中单独选择，用于只读版本校验；详见 [自动版本识别](docs/AUTO_VERSION_VALIDATION.md)。
+不存在的目录会明确提示先在游戏中创建存档并退出，不自动建目录或改用别处。空/相对 XDG、点路径片段、符号链接、未知系统等会失败关闭。[完整规则和来源](docs/DEFAULT_PATH_RULES.md)。目标游戏 JAR 与存档目录是两件事：在主界面单独选择，用于只读版本校验；详见 [自动版本识别](docs/AUTO_VERSION_VALIDATION.md)。
 
-演示服务公开凭据为 demo/demo，远端档案名须填 demo。为了避免接触真实存档，Linux 测试应在隔离进程中同时给游戏与同步器设置相同的 `HOME`、`XDG_DATA_HOME` 与 JVM `-Duser.home`；不要向真实默认目录写合成文件。命令行 `:core:run` 仍是独立的合成演示，不改变桌面默认路径。
+演示服务公开凭据为 demo/demo，仅供固定 demo 空间的 CLI/自动化夹具。内部空间由测试配置注入，不重新暴露在正常界面。正常桌面连接应使用实际 WebDAV 根地址，其应用目录会按需自动创建。为了避免接触真实存档，Linux 测试应在隔离进程中同时给游戏与同步器设置相同的 `HOME`、`XDG_DATA_HOME` 与 JVM `-Duser.home`；不要向真实默认目录写合成文件。命令行 `:core:run` 仍是独立的合成演示，不改变桌面默认路径。
 
 ## 操作与安全约束
 
@@ -46,17 +51,17 @@ python3 tools/webdav_demo.py
 
 `.local/config.json` 只保存端点、用户名、档案名、目标游戏 JAR 路径、记住密码开关。不会存密码、旧手动版本号或可覆盖默认路径的目录配置。旧配置中的任意 saveRoot 只作为旧文件保留，不被执行；首次改写前无损备份旧 JSON。其他目录的旧历史/待上传数据不删除，也不猜测合并到新目录；如果原来就是同一规范目录，则继续相同 scope。
 
-“使用系统安全存储保存密码”通过 Windows Credential Manager、macOS Keychain、Linux Secret Service 读写此应用、此完整服务地址、此账号的专用条目。密码只经私有标准输入管道传递，不放进进程参数、环境变量、日志或普通文件。不可用/锁定/超时会提示，绝无明文落盘后备。取消勾选并保存可忘记同一连接的已存密码；取消窗口不更改凭据。原生三平台存取成功尚未实测，当前云端验证的是缺少 Secret Service 时安全退回本次会话。[验证与限制](docs/DEFAULT_PATH_SETUP_VALIDATION.md)。
+既有已启用的密码记忆通过 Windows Credential Manager、macOS Keychain、Linux Secret Service 读写此应用、此完整服务地址、此账号的专用条目。密码只经私有标准输入管道传递，不放进进程参数、环境变量、日志或普通文件。不可用/锁定/超时会提示，绝无明文落盘后备。当前三字段界面不新增保存密码授权，新连接默认不保存；更换地址或账号会清除继承的保存偏好。取消窗口不更改凭据。原生三平台存取成功尚未实测，当前云端验证的是缺少 Secret Service 时安全退回本次会话。[验证与限制](docs/DEFAULT_PATH_SETUP_VALIDATION.md)。
 
 地址不允许 userinfo、query 或 fragment；不要在 URL 路径中放凭据。HTTPS 是默认要求，只有精确 loopback 主机允许 HTTP。
 
 `.local/manager/profiles/<scope>/` 保存历史与备份；独立 `append-v2/` 保存已观察提交、冻结计划、真实本机基线及恢复中断标记。旧本机 head/队列只保留，绝不解释成 v2 基线。新 scope 绑定规范化真实目录、游戏适配器、远端端点和档案名；每份快照保留各局的自动版本信息。不同 scope 不共用父版本或重试队列。可证明属于同一目录/端点/档案的上一轮手动版本 scope 会非破坏性导入，校验快照且保留时间、备份历史和待上传 ID；多个待上传或同步基线有歧义时停止，不自动选择。原数据不删除。不要同时继续使用旧版客户端。旧第一轮 `.local/demo`、`.local/pending`、`.local/device-head` 不自动迁入新管理目录。
 
-WebDAV 适配层要求服务器预先创建 `<base>/shattered/<profile>/`。需要 GET、PUT 与完整的 PROPFIND 列表；不依赖 ETag、条件覆盖、LOCK/MOVE。发现旧 head 时阻止静默混用，须停用旧客户端并明确使用新档案迁移。`tools/webdav_demo.py` 只供 loopback 隔离测试，可用 `--port` 和 `--root` 启动独立测试存储，不能用作生产服务。
+WebDAV 适配层验证用户配置的根目录，再通过显式“连接”按需 MKCOL 两级应用目录。需要 GET、PUT、MKCOL 与完整的 PROPFIND 列表；不依赖 ETag、条件覆盖、LOCK/MOVE。发现旧 head 时阻止静默混用，须停用旧客户端并明确使用新档案迁移。`tools/webdav_demo.py` 只供 loopback 隔离测试，可用 `--port` 和 `--root` 启动独立测试存储，不能用作生产服务。
 
 ## 验证与限制
 
-最新本轮记录见 [追加式协议验证](docs/APPEND_ONLY_VALIDATION.md)。默认位置与设置的上一轮验证见 [默认位置与连接设置验证](docs/DEFAULT_PATH_SETUP_VALIDATION.md)。历史记录见 [云端验证](docs/CLOUD_VALIDATION.md) 和 [存档管理验证](docs/SAVE_MANAGEMENT_VALIDATION.md)。历史迁移记录保留在 [HANDOFF.md](HANDOFF.md)。
+最新连接修复见 [单步连接验证](docs/ONE_STEP_CONNECTION_VALIDATION.md)，追加协议记录见 [追加式协议验证](docs/APPEND_ONLY_VALIDATION.md)。默认位置与设置的上一轮验证见 [默认位置与连接设置验证](docs/DEFAULT_PATH_SETUP_VALIDATION.md)。历史记录见 [云端验证](docs/CLOUD_VALIDATION.md) 和 [存档管理验证](docs/SAVE_MANAGEMENT_VALIDATION.md)。历史迁移记录保留在 [HANDOFF.md](HANDOFF.md)。
 
 本轮仍未解决：断电事务、恶意并发路径替换的 TOCTOU 风险、可靠游戏进程检测、Steam Cloud 并发、系统安全存储原生实测、远端完整历史浏览、其他安装包/版本的识别规则和生产 WebDAV 兼容性。Windows、Apple Silicon Mac、Intel Mac 的构建运行/安装包尚未验证。Android 独立宿主未证明，iOS 路径另行评估。Linux 双目录测试不能冒充两台真实设备或跨平台验证。
 

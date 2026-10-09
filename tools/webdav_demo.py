@@ -32,7 +32,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_PROPFIND(self):
         if self.headers.get('Authorization') != 'Basic ' + base64.b64encode(b'demo:demo').decode():
             self.send_error(401); return
-        if self.path != '/shattered/demo/' or self.headers.get('Depth') != '1':
+        depth = self.headers.get('Depth')
+        # These three virtual collections already exist in this fixture. Do not create arbitrary
+        # URL parents, and keep the pre-existing profile-only Depth:1 listing unchanged.
+        if not ((depth == '0' and self.path in ('/', '/shattered/', '/shattered/demo/')) or
+                (depth == '1' and self.path == '/shattered/demo/')):
             self.send_error(400); return
         try:
             length = int(self.headers.get('Content-Length', '0'))
@@ -44,10 +48,10 @@ class Handler(BaseHTTPRequestHandler):
         # Full Depth:1 listing, no implicit page limit and no ETag requirement.
         multistatus = ET.Element('{DAV:}multistatus')
         with lock:
-            entries = [(self.path, True)] + [
+            entries = [(self.path, True)] + ([
                 (self.path + quote(p.name, safe='') + ('/' if p.is_dir() else ''), p.is_dir())
                 for p in sorted(ROOT.iterdir()) if not p.is_symlink()
-            ]
+            ] if depth == '1' else [])
         for href, collection in entries:
             response = ET.SubElement(multistatus, '{DAV:}response')
             ET.SubElement(response, '{DAV:}href').text = href

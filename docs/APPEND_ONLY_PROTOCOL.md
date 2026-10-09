@@ -4,7 +4,7 @@
 
 ## 文件与身份
 
-在已存在的 `<WebDAV base>/<game>/<profile>/` 集合中，仅新增两个平面文件类型：
+用户配置的 WebDAV 根必须已经存在。显式“连接”先验证根，再按需创建仅有的 `<game>/<profile>/` 两级应用集合并回读验证；普通同步和自动探测不创建目录。首次空间由适配器自动指定，原有配置ID不变。集合内仅新增两个平面文件类型：
 
 - `pdsync-v2-object-<随机 UUIDv4>.zip`
 - `pdsync-v2-commit-<独立随机 UUIDv4>.json`

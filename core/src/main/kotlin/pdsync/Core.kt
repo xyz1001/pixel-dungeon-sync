@@ -13,6 +13,8 @@ val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
 fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 interface GameAdapter {
  val id: String
+ /** New connections use a stable per-game namespace; existing profiles are never rewritten. */
+ val defaultRemoteProfile: String get() = "default"
  fun includes(name: String): Boolean
  fun compatible(source: String, target: String): Boolean
  fun canonical(path: Path): Path = path.toRealPath()

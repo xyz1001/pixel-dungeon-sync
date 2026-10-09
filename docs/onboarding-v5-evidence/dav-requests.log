@@ -1,0 +1,17 @@
+08/Oct/2026 19:47:26 "PROPFIND /dav-root/ HTTP/1.1" 401 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/ HTTP/1.1" 207 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/shattered/ HTTP/1.1" 404 -
+08/Oct/2026 19:48:11 "MKCOL /dav-root/shattered/ HTTP/1.1" 201 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/shattered/ HTTP/1.1" 207 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/shattered/default/ HTTP/1.1" 404 -
+08/Oct/2026 19:48:11 "MKCOL /dav-root/shattered/default/ HTTP/1.1" 201 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/shattered/default/ HTTP/1.1" 207 -
+08/Oct/2026 19:48:11 "GET /dav-root/shattered/default/head.json HTTP/1.1" 404 -
+08/Oct/2026 19:48:11 "PROPFIND /dav-root/shattered/default/ HTTP/1.1" 207 -
+08/Oct/2026 19:51:06 "PROPFIND /dav-root/ HTTP/1.1" 207 -
+08/Oct/2026 19:51:06 "PROPFIND /dav-root/shattered/ HTTP/1.1" 207 -
+08/Oct/2026 19:51:06 "PROPFIND /dav-root/shattered/legacy-kept42/ HTTP/1.1" 404 -
+08/Oct/2026 19:51:06 "MKCOL /dav-root/shattered/legacy-kept42/ HTTP/1.1" 201 -
+08/Oct/2026 19:51:06 "PROPFIND /dav-root/shattered/legacy-kept42/ HTTP/1.1" 207 -
+08/Oct/2026 19:51:06 "GET /dav-root/shattered/legacy-kept42/head.json HTTP/1.1" 404 -
+08/Oct/2026 19:51:06 "PROPFIND /dav-root/shattered/legacy-kept42/ HTTP/1.1" 207 -

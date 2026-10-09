@@ -103,9 +103,30 @@ fun main() = application {
     } finally { busy = false }
    }
   }
+  fun selectTargetGame() {
+   if (busy || connectingAtStartup) return
+   val saved = config ?: return
+   busy = true
+   scope.launch {
+    var updated: AppConfig? = null
+    try {
+     val chosen = chooseGame(window, saved.targetGame)
+     if (chosen != null) {
+      val next = saved.copy(targetGame = chosen)
+      withContext(Dispatchers.IO) { configFile.save(next) }
+      config = next; updated = next
+     }
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { status = "目标游戏未保存：${e.message ?: "请检查配置文件写入权限"}" }
+    finally { busy = false }
+    // Reload only after releasing the shared guard. This never reopens connection settings.
+    updated?.let { loadProfile(it) }
+   }
+  }
   fun authenticationFailed(e: Exception) {
    if (e is WebDavException && e.statusCode in setOf(401, 403)) {
     connected = false; password = ""; settings = SettingsMode.UNLOCK
+    connectionNotice = if (e.statusCode == 401) "认证失败（HTTP 401），请检查用户名和密码。" else "服务拒绝访问（HTTP 403），请检查账号权限或重新输入密码。"
     status = "云端验证已失效，请重新输入密码。本地快照与待上传内容已保留。"
    }
   }
@@ -177,7 +198,7 @@ fun main() = application {
      val checker = ConnectionSetup(saved); checker.update(saved, restored.password)
      val checked = withContext(Dispatchers.IO) { checker.testConnection() }
      if (checked is ConnectionTestResult.Success) { password = restored.password; connected = true }
-     else { settings = SettingsMode.UNLOCK; status = "自动连接未成功，请重新验证密码。" }
+     else { settings = SettingsMode.UNLOCK; connectionNotice = (checked as ConnectionTestResult.Failure).message; status = "自动连接未成功，请检查连接信息。" }
      checker.cancel()
     } else { settings = SettingsMode.UNLOCK; connectionNotice = if (restored is SecretReadResult.Unavailable) restored.message else "未找到已保存的密码，请重新输入。" }
    } else settings = SettingsMode.UNLOCK
@@ -218,7 +239,9 @@ fun main() = application {
          SelectionContainer { Text(pathText, style = MaterialTheme.typography.caption) }
          locationIssue?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.body2) }
          if (session != null) Text("${saveInfo?.runs?.size ?: 0} 个进行中的局 · 全局记录一同保存", style = MaterialTheme.typography.body2)
-         Text(when { targetError != null -> "目标游戏暂不可用，请到设置检查。"; targetInfo == null -> "尚未选择目标游戏。备份可用，恢复需在设置中选择 JAR。"; else -> "恢复目标：Shattered ${targetInfo!!.displayVersion}" }, color = muted, style = MaterialTheme.typography.caption)
+         Text(when { targetError != null -> "目标游戏暂不可用，请重新选择 JAR。"; targetInfo == null -> "尚未选择目标游戏。备份与上传可用；恢复前需选择 JAR。"; else -> "恢复目标：Shattered ${targetInfo!!.displayVersion}" }, color = muted, style = MaterialTheme.typography.caption)
+         OutlinedButton(enabled = config != null && !busy && !connectingAtStartup, onClick = { selectTargetGame() }) { Text(if (config?.targetGame.isNullOrBlank()) "选择目标游戏 JAR…" else "更换目标游戏 JAR…") }
+         Text("只读取游戏版本，不运行 JAR。", color = muted, style = MaterialTheme.typography.caption)
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }, contentPadding = PaddingValues(0.dp)) { Text("重新检查存档") }
         }
        }
@@ -281,8 +304,8 @@ fun main() = application {
     }
    }
    settings?.let { mode ->
-    ConnectionDialog(mode, configFile, config, password, secretStore, window, busy || connectingAtStartup,
-     onBusy = { busy = it }, onDismiss = { settings = null }, onFullSettings = { settings = SettingsMode.FULL },
+    ConnectionDialog(mode, configFile, config, password, secretStore, connectionNotice, busy || connectingAtStartup,
+     onBusy = { busy = it }, onDismiss = { settings = null },
      onApplied = { applied, note ->
       config = applied.config; password = applied.password; connected = true; settings = null
       connectionNotice = note; loadProfile(applied.config)
@@ -340,109 +363,100 @@ fun main() = application {
 }
 
 @Composable
-private fun ConnectionDialog(mode: SettingsMode, configFile: ConfigFile, initial: AppConfig?, currentPassword: String, secretStore: SecureCredentialStore, parent: java.awt.Component, busy: Boolean, onBusy: (Boolean) -> Unit, onDismiss: () -> Unit, onFullSettings: () -> Unit, onApplied: (AppliedConnection, String?) -> Unit) {
+private fun ConnectionDialog(mode: SettingsMode, configFile: ConfigFile, initial: AppConfig?, currentPassword: String, secretStore: SecureCredentialStore, initialNotice: String?, busy: Boolean, onBusy: (Boolean) -> Unit, onDismiss: () -> Unit, onApplied: (AppliedConnection, String?) -> Unit) {
  val controller = remember(mode, initial) { ConnectionSetup(initial) }
- var draft by remember(mode, initial) { mutableStateOf(initial ?: AppConfig(endpoint = "", profile = "default")) }
+ var draft by remember(mode, initial) { mutableStateOf(initial ?: newConnectionConfig()) }
  var secret by remember(mode, initial) { mutableStateOf(currentPassword) }
- var step by remember(mode, initial) { mutableStateOf(0) }
- var tested by remember(mode, initial) { mutableStateOf(false) }
- var message by remember(mode, initial) { mutableStateOf<String?>(null) }
- var testFailed by remember(mode, initial) { mutableStateOf(false) }
+ var message by remember(mode, initial) { mutableStateOf(initialNotice) }
+ var failed by remember(mode, initial) { mutableStateOf(false) }
+ // The local guard changes synchronously in the event handler, before parent recomposition.
+ var inFlight by remember(mode, initial) { mutableStateOf(false) }
+ var closed by remember(mode, initial) { mutableStateOf(false) }
  val scope = rememberCoroutineScope()
- fun edit(value: AppConfig = draft, password: String = secret) { secret = ConnectionDraft(draft, password).editingConfig(value).password; draft = value; tested = false; message = null; testFailed = false }
- fun cancel() { if (!busy) { controller.cancel(); secret = ""; onDismiss() } }
- DialogWindow(onCloseRequest = { cancel() }, title = if (mode == SettingsMode.UNLOCK) "连接云端" else "连接设置", state = rememberDialogState(width = 550.dp, height = if (mode == SettingsMode.UNLOCK) 490.dp else 660.dp), resizable = false) {
-  Surface(Modifier.fillMaxSize(), color = Color.White) {
-   Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-    Text(if (mode == SettingsMode.UNLOCK) "欢迎回来" else if (initial == null) "让存档跟着你" else "连接设置", style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
-    Text(if (mode == SettingsMode.UNLOCK) "输入密码即可连接已保存的云端。" else if (step == 0) "1 / 2   连接你的 WebDAV" else "2 / 2   确认游戏与连接", color = muted)
-    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-     if (mode == SettingsMode.UNLOCK) {
-      Text(draft.endpoint, style = MaterialTheme.typography.body2)
-      Text("账号：${draft.username.ifBlank { "未设置用户名" }}", color = muted, style = MaterialTheme.typography.body2)
-     } else if (step == 0) {
-      OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("WebDAV 地址") }, placeholder = { Text("https://example.com/dav") }, singleLine = true)
-      OutlinedTextField(draft.username, { edit(draft.copy(username = it)) }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("用户名") }, singleLine = true)
-     }
-     if (mode == SettingsMode.UNLOCK || step == 0) {
-      OutlinedTextField(secret, { edit(password = it) }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-      Row(verticalAlignment = Alignment.CenterVertically) {
-       Checkbox(draft.rememberPassword, { edit(draft.copy(rememberPassword = it)) }, enabled = !busy)
-       Text("使用系统安全存储保存密码", style = MaterialTheme.typography.body2)
-      }
-      Text("只保存此地址与账号的密码。安全存储不可用时，仅在本次会话使用。取消不会保存更改。", color = muted, style = MaterialTheme.typography.caption)
-      if (initial?.rememberPassword == true) Text("取消勾选并保存，将忘记此连接已保存的密码。", color = muted, style = MaterialTheme.typography.caption)
-      if (mode == SettingsMode.FULL) {
-       OutlinedTextField(draft.profile, { edit(draft.copy(profile = it)) }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("远端档案名") }, singleLine = true)
-       Text("服务器需预先创建 shattered/${draft.profile}/。测试读取完整 PROPFIND 目录列表，不上传存档。", color = muted, style = MaterialTheme.typography.caption)
-      }
-      OutlinedButton(enabled = !busy, onClick = {
-       onBusy(true); message = "正在验证连接…"; testFailed = false
-       scope.launch {
-        try {
-         controller.update(draft, secret)
-         when (val result = withContext(Dispatchers.IO) { controller.testConnection() }) {
-          is ConnectionTestResult.Success -> { tested = true; message = if (result.hasRemote) "连接成功，完整目录列表中发现新版提交。" else "完整目录列表读取成功，此次未观察到新版提交；写入权限会在同步时验证。" }
-          is ConnectionTestResult.Failure -> { tested = false; testFailed = true; message = result.message }
-         }
-        } catch (e: Exception) { tested = false; testFailed = true; message = e.message ?: "连接未成功" }
-        finally { onBusy(false) }
+ val controlsBusy = busy || inFlight
+ DisposableEffect(controller) { onDispose { controller.cancel() } }
+ fun edit(value: AppConfig = draft, password: String = secret) {
+  if (busy || inFlight || closed) return
+  val next = ConnectionDraft(draft, password).editingConfig(value)
+  draft = next.config; secret = next.password
+  // Keep the last failure visible while correcting inputs, until the next explicit attempt.
+ }
+ fun cancel() {
+  if (busy || inFlight || closed) return
+  closed = true; controller.cancel(); onDismiss(); secret = ""
+ }
+ fun connect() {
+  if (busy || inFlight || closed) return
+  inFlight = true; onBusy(true); failed = false; message = "正在验证连接并准备应用目录…"
+  val submitted = ConnectionDraft(draft, secret)
+  scope.launch {
+   var applied: AppliedConnection? = null
+   var note: String? = null
+   var secretChanged = false
+   var verified = false
+   try {
+    controller.update(submitted.config, submitted.password)
+    when (val checked = withContext(Dispatchers.IO) { controller.connect() }) {
+     is ConnectionTestResult.Failure -> { message = checked.message; failed = true }
+     is ConnectionTestResult.Success -> {
+      verified = true
+      applied = withContext(Dispatchers.IO) {
+       // Only a previously opted-in, unchanged identity can retain secure password storage.
+       // Identity edits clear this preference in ConnectionDraft; fresh connections default off.
+       var stored = false
+       if (submitted.config.rememberPassword) {
+        val written = secretStore.save(submitted.config.endpoint, submitted.config.username, submitted.password)
+        stored = written is SecretWriteResult.Success
+        secretChanged = stored
+        if (!stored) note = "安全存储不可用，密码仅用于本次会话。${(written as SecretWriteResult.Unavailable).message}"
        }
-      }, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "正在连接…" else "测试连接") }
-     } else {
-      Text("Shattered 的存档位置由系统自动确定，无需选择文件夹。", style = MaterialTheme.typography.body2)
-      OutlinedTextField(draft.targetGame, { edit(draft.copy(targetGame = it)); step = 1 }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("目标游戏 JAR（恢复时需要）") }, maxLines = 2)
-      OutlinedButton(enabled = !busy, onClick = {
-       onBusy(true)
-       scope.launch {
-        val chosen = chooseGame(parent, draft.targetGame)
-        if (chosen != null) { draft = draft.copy(targetGame = chosen); controller.update(draft, secret); tested = false; message = "保存前会重新验证连接。" }
-        onBusy(false)
-       }
-      }) { Text("选择游戏 JAR…") }
-      Text("只读取游戏版本，不运行文件。暂时跳过也能备份与上传；恢复前可在设置中补充。", color = muted, style = MaterialTheme.typography.caption)
-      Divider()
-      Text("连接：${draft.endpoint}\n账号：${draft.username}\n档案：${draft.profile}", style = MaterialTheme.typography.body2)
-      Text("旧版手选目录与历史不会被删除，也不会混入默认位置。", color = muted, style = MaterialTheme.typography.caption)
+       controller.apply(configFile, stored)
+      }
      }
-     message?.let { Text(it, color = if (testFailed) Color(0xFFAD4634) else green, style = MaterialTheme.typography.body2) }
     }
-    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-     TextButton(enabled = !busy, onClick = { cancel() }) { Text("取消") }
-     if (mode == SettingsMode.UNLOCK) TextButton(enabled = !busy, onClick = { controller.cancel(); secret = ""; onFullSettings() }) { Text("修改设置") }
-     else if (step == 1) TextButton(enabled = !busy, onClick = { step = 0 }) { Text("上一步") }
-     Spacer(Modifier.weight(1f))
-     if (mode == SettingsMode.FULL && step == 0) Button(enabled = !busy && tested, onClick = { step = 1 }) { Text("下一步") }
-     else Button(enabled = !busy && (tested || mode == SettingsMode.FULL && step == 1), onClick = {
-      onBusy(true)
-      scope.launch {
-       var secretChanged = false
-       try {
-        var note: String? = null
-        val result = withContext(Dispatchers.IO) {
-         if (!tested) {
-          controller.update(draft, secret)
-          val rechecked = controller.testConnection()
-          require(rechecked is ConnectionTestResult.Success) { (rechecked as ConnectionTestResult.Failure).message }
-         }
-         var stored = false
-         if (draft.rememberPassword) {
-          val written = secretStore.save(draft.endpoint, draft.username, secret)
-          stored = written is SecretWriteResult.Success
-          secretChanged = stored
-          if (!stored) note = "安全存储不可用，密码仅用于本次会话。${(written as SecretWriteResult.Unavailable).message}"
-         } else if (initial?.rememberPassword == true && initial.validated().endpoint == draft.validated().endpoint && initial.username == draft.username) {
-          val forgotten = secretStore.delete(initial.endpoint, initial.username)
-          require(forgotten is SecretWriteResult.Success) { "无法忘记已保存密码：${(forgotten as SecretWriteResult.Unavailable).message}。设置未保存。" }
-          secretChanged = true
-         }
-         controller.apply(configFile, stored)
-        }
-        secret = ""; onBusy(false); onApplied(result, note)
-       } catch (e: Exception) { message = "设置未保存：${e.message}" + if (secretChanged) " 系统安全存储中的密码已更新；其他设置尚未保存，可重试。" else ""; testFailed = true; onBusy(false) }
+   } catch (e: CancellationException) { throw e }
+   catch (e: Exception) {
+    message = if (verified) "连接已通过，但本机设置未保存：${e.message ?: "请检查配置文件写入权限后重试"}" else "连接未完成，请检查地址、网络与服务状态后重试。"
+    if (secretChanged) message += " 系统安全存储中的密码已更新，其他设置尚未保存。"
+    failed = true
+   } finally { inFlight = false; onBusy(false) }
+   applied?.let {
+    closed = true
+    onApplied(it, note)
+    secret = ""
+   }
+  }
+ }
+ DialogWindow(onCloseRequest = { cancel() }, title = "连接云端", state = rememberDialogState(width = 550.dp, height = 560.dp), resizable = true) {
+  LaunchedEffect(Unit) { window.minimumSize = java.awt.Dimension(480, 520) }
+  Surface(Modifier.fillMaxSize(), color = Color.White) {
+   Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Text(if (mode == SettingsMode.UNLOCK) "欢迎回来" else if (initial == null) "让存档跟着你" else "连接云端", style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
+    Text("输入 WebDAV 地址、用户名和密码即可连接。", color = muted, style = MaterialTheme.typography.body2)
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+     OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("WebDAV 地址") }, placeholder = { Text("https://example.com/dav") }, singleLine = true)
+     OutlinedTextField(draft.username, { edit(draft.copy(username = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("用户名") }, singleLine = true)
+     OutlinedTextField(secret, { edit(password = it) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+     Text(if (draft.rememberPassword) "沿用此连接的系统安全密码存储。" else "密码仅用于本次会话，不保存到磁盘。", color = muted, style = MaterialTheme.typography.caption)
+     Text("无需手动建目录。连接会按需创建应用空文件夹；取消不会删除已创建的文件夹。", color = muted, style = MaterialTheme.typography.caption)
+    }
+    // Feedback and the single submit action remain visible independently of form scrolling.
+    message?.let {
+     // Bound long filesystem/provider errors without truncating them or moving the footer.
+     val feedbackScroll = rememberScrollState()
+     LaunchedEffect(it) { feedbackScroll.scrollTo(0) }
+     Box(Modifier.fillMaxWidth().heightIn(max = 96.dp)) {
+      Text(it, Modifier.fillMaxWidth().verticalScroll(feedbackScroll).padding(end = 12.dp), color = if (failed) Color(0xFFAD4634) else muted, style = MaterialTheme.typography.body2)
+      Box(Modifier.matchParentSize()) {
+       VerticalScrollbar(rememberScrollbarAdapter(feedbackScroll), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
       }
-     }) { Text(if (mode == SettingsMode.UNLOCK) "连接" else "保存并开始") }
+     }
+    }
+    if (controlsBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+     TextButton(enabled = !controlsBusy, onClick = { cancel() }) { Text("取消") }
+     Spacer(Modifier.weight(1f))
+     Button(enabled = !controlsBusy, onClick = { connect() }) { Text(if (inFlight) "正在连接…" else "连接") }
     }
    }
   }
