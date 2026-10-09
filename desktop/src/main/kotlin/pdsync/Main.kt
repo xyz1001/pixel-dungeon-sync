@@ -153,7 +153,7 @@ internal fun runSyncApplication(
     // a sole verified remote tip (or the user's click) supplies the normal selection.
     selected = null; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
-    status = if (value == null) "默认存档位置已找到。连接云端后即可管理快照。" else "已开始观察存档。已有同步基线会自动补传离线变化；新档案可先点击上传，后续自动处理。"
+    status = if (value == null) "默认目录已就绪；存档内容尚待第 3 步核验与比较。" else "已开始观察存档。已有同步基线会自动补传离线变化；新档案可先点击上传，后续自动处理。"
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
     if (appClosed) return
@@ -368,11 +368,7 @@ internal fun runSyncApplication(
    if (appClosed) return
    discovery = found
    discoveredTarget = found.suggestedTarget
-   discoveryNotice = when {
-    discoveredTarget != null -> "已识别可信游戏版本，未运行游戏。"
-    found.trustedTargets.size > 1 -> "找到多个游戏，请明确选择要使用的一份。"
-    else -> "未能唯一确认可信游戏，请手动选择官方游戏 JAR。"
-   }
+   discoveryNotice = null
   }
   fun rescanDiscovery() {
    if (busy || connectingAtStartup || appClosed) return
@@ -635,7 +631,7 @@ internal fun runSyncApplication(
      Box(Modifier.weight(1f).fillMaxWidth()) {
       when (page) {
        Page.DISCOVERY -> GuidedPage(
-        title = "1 / 3  找到游戏与本机存档", subtitle = "只检查默认存档位置和有限的游戏安装位置，不运行游戏。",
+        title = "1 / 3  确认游戏与存档位置", subtitle = "这里只检查目标位置和游戏安装；存档内容将在第 3 步核验，不运行游戏。",
         footer = {
          discoveryNotice?.let { Text(it, color = muted, style = MaterialTheme.typography.body2) }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -647,11 +643,9 @@ internal fun runSyncApplication(
         }
        ) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-         Text("默认存档位置", fontWeight = FontWeight.Medium)
+         Text("默认存档目标位置", fontWeight = FontWeight.Medium)
          SelectionContainer { Text(pathText, color = muted, style = MaterialTheme.typography.body2) }
-         Text(if (discovery?.defaultSave?.available == true) "已找到默认目录。下一步连接后再比较云端与本机进度。"
-          else "尚未找到默认目录。继续会仅准备这个空目录，供之后恢复；不会创建游戏存档或上传内容。", color = muted)
-         discovery?.defaultSave?.reason?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
+         Text(DiscoveryCopy.directory(discovery?.defaultSave), color = muted)
          Divider()
          Text("目标游戏", fontWeight = FontWeight.Medium)
          discoveredTarget?.let { Text("Shattered ${it.displayVersion} · 内部版本 ${it.versionCode}", color = green); SelectionContainer { Text(it.path, style = MaterialTheme.typography.caption) } }
@@ -662,7 +656,7 @@ internal fun runSyncApplication(
           }
          }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text("手动选择游戏 JAR…") }
-         Text("未找到游戏、存在多个版本或当前安装方式无法识别时，请手动选择。当前只信任已核实的官方 4.0.2 JAR；不会根据存档猜测安装版本。", color = muted, style = MaterialTheme.typography.caption)
+         Text(DiscoveryCopy.game(discovery, discoveredTarget), color = muted, style = MaterialTheme.typography.caption)
          discovery?.diagnostics?.forEach { Text(it, color = muted, style = MaterialTheme.typography.caption) }
         }
        }
