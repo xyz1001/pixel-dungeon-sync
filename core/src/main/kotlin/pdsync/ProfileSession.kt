@@ -57,10 +57,13 @@ private fun validateRawEndpoint(endpoint: String) {
  }
 }
 
+@Serializable enum class OnboardingProgress { LEGACY, PENDING, COMPLETE, DEFERRED }
+
 @Serializable data class AppConfig(
  val saveRoot: String = "", val endpoint: String = "http://127.0.0.1:8765",
  val profile: String = "demo", val version: String? = null, val targetGame: String = "",
- val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false
+ val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
+ val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY
 ) {
  fun validated(): AppConfig {
   require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "档案名只允许 1–64 位字母、数字、下划线或连字符" }
@@ -76,7 +79,8 @@ private fun validateRawEndpoint(endpoint: String) {
 class ConfigFile(private val path: Path) {
  @Serializable private data class Persisted(
   val endpoint: String, val profile: String, val targetGame: String = "",
-  val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false
+  val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
+  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY
  )
  fun exists(): Boolean = SafePaths.checked(path).exists()
  fun load(): AppConfig? = if (exists())
@@ -84,7 +88,7 @@ class ConfigFile(private val path: Path) {
    .copy(saveRoot = "").validated() else null
  fun save(config: AppConfig) {
   val safe = config.validated()
-  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused)).encodeToByteArray()
+  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress)).encodeToByteArray()
   require(bytes.size <= 16 * 1024) { "配置过大，未保存" }
   preserveLegacy()
   SafePaths.atomicWrite(path, bytes)

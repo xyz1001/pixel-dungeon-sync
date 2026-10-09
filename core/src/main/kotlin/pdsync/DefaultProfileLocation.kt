@@ -23,6 +23,15 @@ class DefaultProfileLocation(
   }
   return root
  }
+ /** Called only after the discovery page explicitly says Continue prepares this empty default target. */
+ fun prepareDefaultDirectory(): Path {
+  val root = SafePaths.checked(resolve())
+  require(root.parent != null && root != Path.of(context.userHome ?: "").toAbsolutePath().normalize()) { "默认目录无效" }
+  if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return requireDirectory()
+  // Check every ancestor before and after creating only the adapter's exact default path.
+  Files.createDirectories(root)
+  return requireDirectory()
+ }
  fun open(config: AppConfig, stateRoot: Path): AppendProfileSession =
   AppendProfileSession(config.copy(saveRoot = requireDirectory().toString()), stateRoot, adapter, versions)
 }

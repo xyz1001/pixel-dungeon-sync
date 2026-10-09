@@ -3,7 +3,7 @@ package pdsync
 import java.io.IOException
 
 /** Only fresh setup uses this automatic namespace; persisted/injected profiles remain unchanged. */
-fun newConnectionConfig(adapter: GameAdapter = Shattered) = AppConfig(endpoint = "", profile = adapter.defaultRemoteProfile)
+fun newConnectionConfig(adapter: GameAdapter = Shattered) = AppConfig(endpoint = "", profile = adapter.defaultRemoteProfile, onboardingProgress = OnboardingProgress.PENDING)
 
 /** A dialog draft. Secrets are session-only and are deliberately excluded from debug output. */
 data class ConnectionDraft(val config: AppConfig, val password: String = "") {
@@ -11,7 +11,7 @@ data class ConnectionDraft(val config: AppConfig, val password: String = "") {
  /** An identity edit must never carry a different service/account's active password with it. */
  fun editingConfig(next: AppConfig): ConnectionDraft {
   val identityChanged = next.endpoint != config.endpoint || next.username != config.username
-  return ConnectionDraft(if (identityChanged) next.copy(rememberPassword = false) else next, if (identityChanged) "" else password)
+  return ConnectionDraft(if (identityChanged) next.copy(rememberPassword = false, onboardingProgress = OnboardingProgress.PENDING) else next, if (identityChanged) "" else password)
  }
 }
 

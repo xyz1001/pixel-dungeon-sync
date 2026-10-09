@@ -61,4 +61,23 @@ class DefaultProfileLocationTest {
   }
  }
 
+ @Test fun explicitPreparationCreatesOnlyEmptyDefaultDirectory() {
+  val location = DefaultProfileLocation(context())
+  assertFalse(location.resolve().exists())
+  assertEquals(location.resolve().toAbsolutePath(), location.prepareDefaultDirectory())
+  assertTrue(location.resolve().isDirectory())
+  assertTrue(Files.list(location.resolve()).use { it.findAny().isEmpty })
+  assertEquals(location.resolve(), location.prepareDefaultDirectory())
+ }
+ @Test fun explicitPreparationRejectsAncestorSymlinksAndExistingFiles() {
+  val source = context(); val home = java.nio.file.Path.of(source.userHome!!)
+  val outside = Files.createTempDirectory("prepare-outside")
+  Files.createSymbolicLink(home.resolve(".local"), outside)
+  assertFails { DefaultProfileLocation(source).prepareDefaultDirectory() }
+  assertTrue(Files.list(outside).use { it.findAny().isEmpty })
+  val second = DefaultProfileLocation(context()); second.resolve().parent.createDirectories(); second.resolve().writeText("keep")
+  assertFails { second.prepareDefaultDirectory() }
+  assertEquals("keep", second.resolve().readText())
+ }
+
 }
