@@ -24,7 +24,7 @@ sealed interface AppendPushResult {
  */
 class AppendProfileSession(
  config: AppConfig, stateRoot: Path, adapter: GameAdapter = Shattered,
- versions: ProfileVersions = ShatteredProfileVersions, captureQuietMillis: Long = 2000
+ versions: ProfileVersions = ShatteredProfileVersions, private val captureQuietMillis: Long = 2000
 ) {
  private val local = ProfileSession(config, stateRoot, adapter, versions, captureQuietMillis)
  val config get() = local.config
@@ -33,6 +33,7 @@ class AppendProfileSession(
  val directory get() = local.directory
  private val repository = AppendRepository(directory.resolve("append-v2"), adapter, config.profile)
  private val applyMarker = directory.resolve("append-v2/apply-required.txt")
+ private val comparisonOwner = Any()
 
  fun history() = local.history()
  fun deviceIdentity() = local.deviceIdentity()
@@ -121,6 +122,9 @@ class AppendProfileSession(
 
  /** Ordinary fast-forward is allowed only for a clean baseline or a genuinely empty new target. */
  fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult = local.locked {
+  restoreRemoteLocked(snapshotId, store, stopped)
+ }
+ private fun restoreRemoteLocked(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
   require(repository.pending() == null) { "请先重试或明确归档待上传操作" }
   val graph = discover(store)
@@ -143,7 +147,7 @@ class AppendProfileSession(
   val restored = local.restore(chosen, stopped)
   repository.setBaseline(commit.id, graph)
   SafePaths.checked(applyMarker).deleteExisting()
-  restored
+  return restored
  }
 
  /** A persisted restart gate precedes plan creation; this is not an fsync/power-loss transaction. */
@@ -179,10 +183,13 @@ class AppendProfileSession(
 
  /** Explicit whole-snapshot choice; every observed tip is retained as a resolution parent. */
  fun resolve(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+  resolveLocked(conflict, chosenSnapshotId, store, stopped)
+ }
+ private fun resolveLocked(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
   require(repository.pending() == null) { "请先重试或明确归档待上传操作" }
   val graph = discover(store)
-  if (graph.tips != conflict.observedTips) return@locked AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
+  if (graph.tips != conflict.observedTips) return AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
   require(graph.tips.size >= 2) { "冲突分支已变化，请重新读取云端" }
   require(currentFiles() == conflict.observedLocalFiles) { "选择期间本地进度已变化；未覆盖。请重新同步保留当前分支。" }
   val branch = conflict.branches.single { it.snapshot.manifest.id == chosenSnapshotId }
@@ -197,7 +204,172 @@ class AppendProfileSession(
   }
   // Apply precedes publication. Failed network work can only retry this exact chosen snapshot.
   // Changes after this point remain dirty relative to the published baseline.
+  return publish(plan, store, stopped)
+ }
+
+ /** Read-only save comparison. Remote verification/history caches may be populated; saves and
+  * baseline never change, and no remote object/commit is published by this operation. */
+ fun compareOnboarding(store: AppendStore, stopped: () -> Boolean): OnboardingComparison = try {
+  local.locked {
+   local.guard(stopped); local.validateRoot()
+   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+   val fingerprint = stability.awaitStable()
+   val baseline = repository.baseline()
+   if (needsApply()) return@locked blockedComparison("上次恢复尚未确认完成，请先明确归档并检查保留的快照与备份。", fingerprint, baseline)
+   if (local.legacyPending() != null) return@locked blockedComparison("旧版待上传快照仍保留，请先明确归档；不会作为新版操作上传。", fingerprint, baseline)
+   val pending = repository.pending()
+   // A failed/missing page or object must not become an apparently empty cloud.
+   val graph = discover(store)
+   val entries = graph.tips.sorted().map { id ->
+    val commit = graph.commits.getValue(id)
+    AppendRemoteEntry(commit, local.remember(repository.download(store, commit), "首次比较 · 已校验云端分支 ${id.take(8)}", repository.observedAt(id)))
+   }
+   stability.requireUnchanged(fingerprint)
+   val lineage = when {
+    baseline == null -> OnboardingLineage.NONE
+    graph.tips.size > 1 -> OnboardingLineage.BRANCHED
+    graph.tips.singleOrNull() == baseline -> OnboardingLineage.SAME_TIP
+    graph.tips.singleOrNull()?.let { graph.descendsFrom(it, baseline) } == true -> OnboardingLineage.ANCESTOR_OF_TIP
+    else -> OnboardingLineage.BLOCKED
+   }
+   val kind = when {
+    pending != null -> OnboardingKind.BLOCKED
+    graph.tips.size > 1 -> OnboardingKind.BRANCHED
+    fingerprint.files.isEmpty() && graph.tips.isEmpty() -> OnboardingKind.BOTH_EMPTY
+    graph.tips.isEmpty() -> OnboardingKind.LOCAL_ONLY
+    fingerprint.files.isEmpty() -> OnboardingKind.REMOTE_ONLY
+    fingerprint.files == graph.commits.getValue(graph.tips.single()).snapshot.files -> OnboardingKind.IDENTICAL
+    else -> OnboardingKind.DIFFERENT
+   }
+   OnboardingComparison(kind, fingerprint.files, baseline, lineage, entries, graph.tips,
+    blocker = if (pending == null) null else "已有冻结的待上传操作；重试会使用原快照，不会重新采集当前存档。",
+    canAdoptRemote = kind == OnboardingKind.IDENTICAL && lineage in setOf(OnboardingLineage.NONE, OnboardingLineage.SAME_TIP, OnboardingLineage.ANCESTOR_OF_TIP),
+    retryablePending = pending != null, pendingCommitId = pending?.commit?.id,
+    owner = comparisonOwner, fingerprint = fingerprint, graph = graph, pendingCommit = pending?.commit)
+  }
+ } catch (failure: Exception) {
+  if (failure is InterruptedException) Thread.currentThread().interrupt()
+  val message = when (failure) {
+   is SaveNotStableException -> "游戏正在运行、状态未知或存档仍在变化；比较已停止，请退出游戏并等待存档稳定后重试。"
+   is LegacyProtocolException -> "发现旧版云端协议；已停止比较，不会当作空云端或自动迁移。"
+   is UnsettledRemoteException -> "云端存在缺失、未完整上传或无法验证的提交；比较已停止，请稍后重试。"
+   is RemoteIntegrityException -> "云端不可变历史校验失败；比较已停止，双方存档均未覆盖。"
+   else -> "无法完成本地与完整云端历史的安全比较；请检查连接、目录和同步记录后重试。"
+  }
+  blockedComparison(message)
+ }
+
+ private fun blockedComparison(message: String, fingerprint: SaveFingerprint? = null, baseline: String? = null) =
+  OnboardingComparison(OnboardingKind.BLOCKED, fingerprint?.files.orEmpty(), baseline, OnboardingLineage.BLOCKED,
+   emptyList(), emptySet(), blocker = message, owner = comparisonOwner)
+
+ /** Never trust UI-visible collections or an old comparison without repeating every safety gate. */
+ private fun revalidateComparison(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean,
+  allowPending: Boolean = false): CommitGraph {
+  require(comparison.owner === comparisonOwner) { "比较不属于当前档案，请重新比较" }
+  require(comparison.kind != OnboardingKind.BLOCKED || (allowPending && comparison.retryablePending)) { "请先完成安全比较或处理被阻止的操作" }
+  local.guard(stopped); noLegacyPending(); appliedOnly(); local.validateRoot()
+  val expected = requireNotNull(comparison.fingerprint) { "比较未完成，请重试" }
+  val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+  require(stability.awaitStable() == expected) { "比较后本地存档发生变化；未使用旧选择，请重新比较" }
+  require(repository.baseline() == comparison.baselineId) { "比较后同步基线已变化，请重新比较" }
+  val pending = repository.pending()
+  require(pending?.commit == comparison.pendingCommit) { "待上传操作已变化，请重新比较" }
+  require(allowPending || pending == null) { "请先重试或明确归档待上传操作" }
+  val graph = discover(store)
+  require(graph == comparison.graph) { "比较后云端分支已变化；未使用旧选择，请重新比较" }
+  stability.requireUnchanged(expected)
+  return graph
+ }
+
+ /** Finish a no-action first-run choice only while its exact empty/already-linked state remains
+  * current. This does not create a baseline or enable automatic uploads itself. */
+ fun confirmOnboardingReady(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean) = local.locked {
+  revalidateComparison(comparison, store, stopped)
+  require(comparison.kind == OnboardingKind.BOTH_EMPTY ||
+   (comparison.kind == OnboardingKind.IDENTICAL && comparison.baselineLineage == OnboardingLineage.SAME_TIP)) {
+   "当前比较仍需明确选择上传、恢复或云端关联"
+  }
+ }
+
+ /** Explicit association of equal bytes with an exact verified tip, never hash-based ancestry. */
+ fun adoptOnboardingRemote(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendCommit = local.locked {
+  var graph = revalidateComparison(comparison, store, stopped)
+  require(comparison.kind == OnboardingKind.IDENTICAL && comparison.canAdoptRemote) { "不能自动关联无共同历史的分支，请明确保留并选择分支" }
+  require(graph.tips.size == 1)
+  val commit = graph.commits.getValue(graph.tips.single())
+  require(commit.snapshot.files == comparison.localFiles)
+  comparison.baselineId?.let { require(graph.descendsFrom(commit.id, it)) { "云端分支不是当前基线的后续；不能直接关联" } }
+  local.remember(repository.download(store, commit), "明确采用云端关联", repository.observedAt(commit.id))
+  // No game bytes are written or loaded. Restore-only target/version checks would incorrectly
+  // reject equal global-record-only saves; future restores still use the unchanged version gate.
+  graph = revalidateComparison(comparison, store, stopped)
+  repository.setBaseline(commit.id, graph)
+  commit
+ }
+
+ /** Upload is explicit, including a retry of an already frozen operation. Never freeze empty saves. */
+ fun onboardingUpload(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+  revalidateComparison(comparison, store, stopped, allowPending = true)
+  val plan = repository.pending() ?: run {
+   require(comparison.localFiles.isNotEmpty()) { "本地没有存档，不能上传空快照" }
+   val captured = local.capture(stopped, null)
+   require(captured.manifest.files == comparison.localFiles) { "比较后本地存档发生变化，请重新比较" }
+   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+   repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
+  }
   publish(plan, store, stopped)
+ }
+
+ /**
+  * A first-run remote choice never discards populated unbased/dirty local bytes. Publish those
+  * bytes as their own branch first; then resolve only the exact branch set the user observed plus
+  * that new local commit. Late siblings are returned as a fresh conflict, never silently absorbed.
+  */
+ fun onboardingRestore(comparison: OnboardingComparison, snapshotId: String, store: AppendStore, stopped: () -> Boolean): OnboardingRestoreResult = local.locked {
+  var graph = revalidateComparison(comparison, store, stopped)
+  val selected = graph.tips.map(graph.commits::getValue).singleOrNull { it.snapshot.id == snapshotId }
+   ?: throw IllegalArgumentException("所选快照不属于已比较的云端分支，请重新比较")
+  val chosen = repository.download(store, selected)
+  local.remember(chosen, "首次恢复 · 已校验选择", repository.observedAt(selected.id))
+  if (chosen.manifest.files != comparison.localFiles) local.checkRestore(snapshotId)
+  graph = revalidateComparison(comparison, store, stopped)
+  val before = comparison.localFiles
+  val baselineFiles = comparison.baselineId?.let { graph.commits.getValue(it).snapshot.files }
+  val preserveLocal = before.isNotEmpty() && (comparison.baselineId == null || before != baselineFiles)
+  if (preserveLocal) {
+   val captured = local.capture(stopped, null)
+   require(captured.manifest.files == before) { "比较后本地存档发生变化，未恢复" }
+   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+   val plan = repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
+   val expectedTips = (graph.tips - plan.commit.parents.toSet()) + plan.commit.id
+   publish(plan, store, stopped)
+   graph = discover(store)
+   if (graph.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(graph, store, stopped)))
+   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+  }
+  if (graph.tips.size > 1) {
+   val conflict = preserveConflict(graph, store, stopped)
+   require(conflict.observedLocalFiles == before) { "选择期间本地存档发生变化，未恢复" }
+   return@locked OnboardingRestoreResult.Published(resolveLocked(conflict, snapshotId, store, stopped))
+  }
+  if (!preserveLocal && (comparison.baselineId == null || before == baselineFiles)) {
+   return@locked OnboardingRestoreResult.Restored(restoreRemoteLocked(snapshotId, store, stopped))
+  }
+  // Local publication may have advanced the selected former tip. Retain that progress and record
+  // the explicit older-snapshot choice as a new restore commit, never rewind the baseline. An
+  // empty dirty target also creates only a nonempty chosen restore, never an empty local upload.
+  val expectedGraph = graph
+  require(graph.commits[selected.id] == selected) { "所选历史已变化，未恢复" }
+  val parent = repository.baseline() ?: graph.tips.single()
+  val currentFingerprint = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).awaitStable()
+  require(currentFingerprint.files == before) { "选择期间本地存档发生变化，未恢复" }
+  require(discover(store) == expectedGraph) { "云端分支已变化，请重新比较" }
+  val plan = prepareAndApply(chosen, listOf(parent), "restore", "首次恢复 · 保留本地后明确选择云端") { plan ->
+   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(currentFingerprint)
+   if (before != chosen.manifest.files) local.restore(snapshot(plan), stopped)
+  }
+  OnboardingRestoreResult.Published(publish(plan, store, stopped))
  }
 
  /** Explicit confirmation removes retry markers only, after every original is kept in history. */
