@@ -22,11 +22,11 @@ object IsolatedDefaultPathTransfer {
   val config = AppConfig(saveRoot = base.resolve("ignored-manual-path").toString(), endpoint = endpoint, profile = "demo", targetGame = jar, username = "demo")
   val source = fromLocation.open(config, base.resolve("state")); val target = toLocation.open(config, base.resolve("state"))
   val before = Snapshots.capture(fromRoot, Shattered, "demo", "fixture", null)
-  val store = WebDav(endpoint, "shattered", "demo", "demo", "demo")
+  val store = AppendOnlyWebDav(endpoint, "shattered", "demo", "demo", "demo")
   val setup = ConnectionSetup(config); setup.update(config, "demo")
   check(setup.testConnection() is ConnectionTestResult.Success)
-  check(source.push(store) { true } is PushResult.Success)
-  val remote = target.readRemote(store) ?: error("No remote snapshot")
+  check(source.push(store) { true } is AppendPushResult.Success)
+  val remote = target.readRemote(store).single().entry
   val restored = target.restoreRemote(remote.manifest.id, store) { true }
   check(Snapshots.capture(toRoot, Shattered, "demo", "fixture", null).manifest.files == before.manifest.files)
   check(Snapshots.capture(fromRoot, Shattered, "demo", "fixture", null).manifest.files == before.manifest.files)

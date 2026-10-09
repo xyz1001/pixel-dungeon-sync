@@ -24,6 +24,11 @@ class ConnectionSetupTest {
  )
  private fun setup(config: AppConfig, probe: ((ConnectionDraft) -> RemoteHead?)? = null) =
   ConnectionSetup(config, probe = probe).also { it.update(config, secret) }
+ private fun listing(vararg ids: String) = MockResponse().setResponseCode(207).setBody(
+  "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/dav/shattered/hero/</d:href><d:status>HTTP/1.1 200 OK</d:status></d:response>" +
+   ids.joinToString("") { "<d:response><d:href>/dav/shattered/hero/pdsync-v2-commit-$it.json</d:href><d:status>HTTP/1.1 200 OK</d:status></d:response>" } + "</d:multistatus>"
+ )
+
 
  @Test fun absentConfigurationStartsBlankAndDoesNotPersistOrAutoConnect() {
   val model = ConnectionSetup()
@@ -34,8 +39,8 @@ class ConnectionSetupTest {
   assertFalse(file().exists())
  }
 
- @Test fun emptyRemoteTestIsOnlyOneGetAndApplyPersistsOnlySafeFields() = MockWebServer().use { server ->
-  server.enqueue(MockResponse().setResponseCode(404)); server.start()
+ @Test fun emptyRemoteRequiresFullListingAndApplyPersistsOnlySafeFields() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(listing()); server.start()
   val initial = config(server).copy(saveRoot = "/arbitrary/manual/root", version = "forged", rememberPassword = true)
   val model = setup(initial)
   assertEquals(ConnectionTestResult.Success(false), model.testConnection())
@@ -43,7 +48,11 @@ class ConnectionSetupTest {
   val request = server.takeRequest(1, TimeUnit.SECONDS)!!
   assertEquals("GET", request.method); assertEquals("/dav/shattered/hero/head.json", request.path)
   assertEquals(Credentials.basic("player", secret), request.getHeader("Authorization"))
-  assertEquals(0L, request.bodySize); assertEquals(1, server.requestCount)
+  assertEquals(0L, request.bodySize)
+  val discovery = server.takeRequest(1, TimeUnit.SECONDS)!!
+  assertEquals("PROPFIND", discovery.method); assertEquals("/dav/shattered/hero/", discovery.path)
+  assertEquals("1", discovery.getHeader("Depth")); assertEquals(Credentials.basic("player", secret), discovery.getHeader("Authorization"))
+  assertEquals(2, server.requestCount)
   assertFalse(model.draft.toString().contains(secret))
   val applied = model.apply(file())
   assertEquals(secret, applied.password); assertEquals("", applied.config.saveRoot); assertNull(applied.config.version)
@@ -54,23 +63,49 @@ class ConnectionSetupTest {
   listOf(secret, "saveRoot", "forged", "arbitrary", "\"password\"").forEach { assertFalse(written.contains(it), it) }
   assertEquals("", model.draft.password); assertFalse(model.canApply)
   assertFailsWith<IllegalStateException> { model.apply(file()) }
-  assertEquals(1, server.requestCount)
+  assertEquals(2, server.requestCount)
   val restarted = ConnectionSetup(file().load())
   assertEquals("player", restarted.draft.config.username); assertEquals("", restarted.draft.password)
-  assertFalse(restarted.canApply); assertEquals(1, server.requestCount)
+  assertFalse(restarted.canApply); assertEquals(2, server.requestCount)
  }
 
- @Test fun populatedHeadTestReadsOnlyManifest() = MockWebServer().use { server ->
-  val head = Manifest(game = "shattered", profile = "hero", version = "v1", id = UUID.randomUUID().toString(), parent = null, sha256 = "0".repeat(64), files = emptyMap())
-  server.enqueue(MockResponse().setResponseCode(200).setBody(json.encodeToString(head)).setHeader("ETag", "\"test\"")); server.start()
+ @Test fun populatedListingProvesDiscoveryWithoutUploadingOrReadingObjects() = MockWebServer().use { server ->
+  val id = UUID.randomUUID().toString()
+  server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(listing(id)); server.start()
   val model = setup(config(server))
   assertEquals(ConnectionTestResult.Success(true), model.testConnection())
-  assertEquals(1, server.requestCount); assertEquals("GET", server.takeRequest().method)
+  assertEquals(2, server.requestCount); assertEquals("GET", server.takeRequest().method); assertEquals("PROPFIND", server.takeRequest().method)
   assertFalse(file().exists())
  }
 
+ @Test fun existingLegacyHeadBlocksSetupRatherThanApprovingMixedProtocol() = MockWebServer().use { server ->
+  val head = Manifest(game = "shattered", profile = "hero", version = "v1", id = UUID.randomUUID().toString(), parent = null, sha256 = "0".repeat(64), files = emptyMap())
+  server.enqueue(MockResponse().setResponseCode(200).setBody(json.encodeToString(head))); server.start()
+  val model = setup(config(server))
+  val failure = assertIs<ConnectionTestResult.Failure>(model.testConnection())
+  assertTrue(failure.message.contains("旧版")); assertFalse(model.canApply); assertEquals(1, server.requestCount)
+ }
+
+ @Test fun head404AloneDoesNotProveDiscoveryCapability() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(MockResponse().setResponseCode(405)); server.start()
+  val model = setup(config(server))
+  assertEquals(405, assertIs<ConnectionTestResult.Failure>(model.testConnection()).status)
+  assertFalse(model.canApply); assertFalse(file().exists()); assertEquals(2, server.requestCount)
+ }
+
+ @Test fun connectionTestFollowsEveryDiscoveryPage() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setResponseCode(404))
+  server.enqueue(listing().setHeader("Link", "</dav/shattered/hero/?page=2>; rel=\"next\""))
+  server.enqueue(listing(UUID.randomUUID().toString())); server.start()
+  val model = setup(config(server))
+  assertEquals(ConnectionTestResult.Success(true), model.testConnection()); assertTrue(model.canApply)
+  assertEquals(3, server.requestCount); assertEquals("GET", server.takeRequest().method)
+  assertEquals("PROPFIND", server.takeRequest().method)
+  val second = server.takeRequest(); assertEquals("PROPFIND", second.method); assertEquals("/dav/shattered/hero/?page=2", second.path)
+ }
+
  @Test fun authFailureHasTypedStatusAndRetryDoesNotPersist() = MockWebServer().use { server ->
-  server.enqueue(MockResponse().setResponseCode(401)); server.enqueue(MockResponse().setResponseCode(404)); server.start()
+  server.enqueue(MockResponse().setResponseCode(401)); server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(listing()); server.start()
   val model = setup(config(server))
   val failed = assertIs<ConnectionTestResult.Failure>(model.testConnection())
   assertEquals(401, failed.status); assertTrue(failed.message.contains("401")); assertFalse(failed.message.contains(secret))
@@ -78,8 +113,8 @@ class ConnectionSetupTest {
   assertFailsWith<IllegalStateException> { model.apply(file()) }
   model.update(model.draft.config, "corrected-secret")
   assertIs<ConnectionTestResult.Success>(model.testConnection())
-  assertTrue(model.canApply); assertFalse(file().exists()); assertEquals(2, server.requestCount)
-  repeat(2) { assertEquals("GET", server.takeRequest().method) }
+  assertTrue(model.canApply); assertFalse(file().exists()); assertEquals(3, server.requestCount)
+  repeat(2) { assertEquals("GET", server.takeRequest().method) }; assertEquals("PROPFIND", server.takeRequest().method)
  }
 
  @Test fun forbiddenAndRedirectsAreFailuresWithoutFollowingRedirect() = MockWebServer().use { server ->

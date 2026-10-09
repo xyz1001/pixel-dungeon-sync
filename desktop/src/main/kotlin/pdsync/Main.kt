@@ -23,10 +23,10 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 private val workspace = Path.of(System.getProperty("pdsync.workspace", ".")).toAbsolutePath().normalize()
-private enum class Action { CAPTURE, PUSH, RESTORE, LOCAL, REMOTE, REMOTE_LATEST, ARCHIVE }
+private enum class Action { CAPTURE, PUSH, RESTORE, RESOLVE, REMOTE_TIP, ARCHIVE }
 private enum class SettingsMode { FULL, UNLOCK }
-private data class OperationResult(val message: String, val conflict: PreservedConflict? = null)
-private data class LoadedProfile(val session: ProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?)
+private data class OperationResult(val message: String, val conflict: AppendConflict? = null)
+private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
 
@@ -60,15 +60,16 @@ fun main() = application {
   var connectingAtStartup by remember { mutableStateOf(true) }
   var connectionNotice by remember { mutableStateOf<String?>(null) }
   var settings by remember { mutableStateOf<SettingsMode?>(null) }
-  var session by remember { mutableStateOf<ProfileSession?>(null) }
+  var session by remember { mutableStateOf<AppendProfileSession?>(null) }
   var saveInfo by remember { mutableStateOf<SaveVersions?>(null) }
   var targetInfo by remember { mutableStateOf<TargetGame?>(null) }
   var targetError by remember { mutableStateOf<String?>(null) }
   var history by remember { mutableStateOf(emptyList<HistoryEntry>()) }
   var selected by remember { mutableStateOf<String?>(null) }
-  var latestRemote by remember { mutableStateOf<String?>(null) }
+  var remoteTips by remember { mutableStateOf(emptySet<String>()) }
+  var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
-  var conflict by remember { mutableStateOf<PreservedConflict?>(null) }
+  var conflict by remember { mutableStateOf<AppendConflict?>(null) }
   var showConflict by remember { mutableStateOf(false) }
   var confirm by remember { mutableStateOf<Action?>(null) }
   var restoreIssue by remember { mutableStateOf<String?>("请选择快照") }
@@ -94,7 +95,7 @@ fun main() = application {
      }
      locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
      saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
-     selected = history.firstOrNull()?.manifest?.id; latestRemote = null; conflict = null; showConflict = false
+     selected = history.firstOrNull()?.manifest?.id; remoteTips = emptySet(); conflictSelection = null; conflict = null; showConflict = false
      status = if (value == null) "默认存档位置已找到。连接云端后即可管理快照。" else "存档与历史已刷新。操作前请退出游戏并暂停其他同步。"
     } catch (e: Exception) {
      session = null; history = emptyList(); saveInfo = null; targetInfo = null; pending = false
@@ -111,36 +112,32 @@ fun main() = application {
   fun execute(action: Action) {
    if (busy) return
    val manager = session ?: return
-   val chosen = selected; val divergence = conflict; val account = config?.username ?: ""; val secret = password
+   val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
    busy = true; confirm = null
    status = when (action) {
-    Action.RESTORE, Action.REMOTE, Action.REMOTE_LATEST -> "正在校验并备份当前档案，然后恢复…"
-    Action.PUSH, Action.LOCAL -> "正在保留快照并校验云端…"
+    Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
+    Action.PUSH -> "正在保留快照并校验云端…"
     else -> "正在处理…"
    }
    scope.launch {
     try {
      val result = withContext(Dispatchers.IO) {
       val stopped = { true }
-      fun store() = WebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)
-      fun pushed(result: PushResult): OperationResult = when (result) {
-       is PushResult.Success -> OperationResult("同步成功，云端已回读校验。当前存档未被改写。")
-       is PushResult.Diverged -> OperationResult("发现不同的存档进度，双方快照均已保留。请查看并选择。", result.conflict)
+      fun store() = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)
+      fun pushed(result: AppendPushResult): OperationResult = when (result) {
+       is AppendPushResult.Success -> OperationResult("追加提交已回读校验。" + (if (result.localDirty) "当前本地还有未上传变化；下一次同步会另建提交。" else "所选进度已成为本机同步基线。") + (if (result.remoteAhead) "另有已观察后续分支，可读取查看。" else ""))
+       is AppendPushResult.Diverged -> OperationResult("发现 ${result.conflict.branches.size} 个进度分支，全部快照均已保留。请明确选择。", result.conflict)
       }
       when (action) {
        Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult("本地快照已保存，可随时从历史中恢复。") }
        Action.PUSH -> pushed(manager.push(store(), stopped))
-       Action.REMOTE_LATEST -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。") }
-       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成。恢复前备份已加入历史。") }
-       Action.LOCAL -> pushed(manager.chooseLocal(requireNotNull(divergence), store(), stopped))
-       Action.REMOTE -> manager.chooseRemote(requireNotNull(divergence), store(), stopped).let { (_, changed) ->
-        if (changed != null) OperationResult("云端进度又有变化，请重新选择；本地存档未改动。", changed.conflict)
-        else OperationResult("已采用云端存档。恢复前备份与双方快照均保留。")
-       }
+       Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。") }
+       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。新的恢复提交已冻结，点击重试待上传快照即可发布。") }
+       Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped))
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
      }
-     status = result.message; conflict = result.conflict; showConflict = result.conflict != null
+     status = result.message; conflict = result.conflict; conflictSelection = null; showConflict = result.conflict != null
     } catch (e: Exception) { status = "操作未完成：${e.message}。已保存的历史与备份保留。"; authenticationFailed(e) }
     finally {
      try {
@@ -158,10 +155,10 @@ fun main() = application {
    busy = true; status = "正在读取并校验云端快照…"
    scope.launch {
     try {
-     val entry = withContext(Dispatchers.IO) { manager.readRemote(WebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) }
-     latestRemote = entry?.manifest?.id; if (entry != null) selected = entry.manifest.id
+     val entries = withContext(Dispatchers.IO) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) }
+     remoteTips = entries.map { it.entry.manifest.id }.toSet(); if (entries.size == 1) selected = entries.single().entry.manifest.id
      history = withContext(Dispatchers.IO) { manager.history() }
-     status = if (entry == null) "云端还没有快照。可先同步当前存档。" else "云端快照已加入历史。本地存档未改动，可选择备份后恢复。"
+     status = if (entries.isEmpty()) "此次未观察到云端提交。可先同步当前存档。" else "已观察到 ${entries.size} 个云端分支，均已加入历史，本地未改动。普通恢复只允许单一分支及干净本地基线。已有本地进度可先同步，再明确选择；空目录可先从历史选定快照恢复，之后同步解决分支。"
     } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
     finally { busy = false }
    }
@@ -191,10 +188,10 @@ fun main() = application {
    val manager = session; val id = selected
    if (manager != null && id != null && !busy) restoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkRestore(id) }.exceptionOrNull()?.message }
   }
-  LaunchedEffect(session, conflict, busy) {
+  LaunchedEffect(session, conflict, conflictSelection, busy) {
    conflictRestoreIssue = "正在校验实际版本…"
    val manager = session; val value = conflict
-   if (manager != null && value != null && !busy) conflictRestoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkRestore(value.remote.manifest.id) }.exceptionOrNull()?.message }
+   if (manager != null && value != null && conflictSelection != null && !busy) conflictRestoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkResolution(requireNotNull(conflictSelection)) }.exceptionOrNull()?.message }
   }
   MaterialTheme(colors = lightColors(primary = green, secondary = Color(0xFF8A6B42)), shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
    Surface(Modifier.fillMaxSize(), color = Color(0xFFF3F5F1)) {
@@ -233,7 +230,7 @@ fun main() = application {
          }
          if (config == null) OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { settings = SettingsMode.FULL }, modifier = Modifier.fillMaxWidth()) { Text("配置云端连接") }
          OutlinedButton(enabled = session != null && !busy && !connectingAtStartup, onClick = { confirm = Action.CAPTURE }, modifier = Modifier.fillMaxWidth()) { Text("创建本地快照") }
-         TextButton(enabled = session != null && connected && !busy && !connectingAtStartup, onClick = { readRemote() }, modifier = Modifier.fillMaxWidth()) { Text("查看云端最新快照") }
+         TextButton(enabled = session != null && connected && !busy && !connectingAtStartup, onClick = { readRemote() }, modifier = Modifier.fillMaxWidth()) { Text("查看云端已观察分支") }
          if (pending) {
           Text("待上传的是上次冻结的快照。重试会继续原内容。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
           TextButton(enabled = !busy && !connectingAtStartup, onClick = { confirm = Action.ARCHIVE }) { Text("归档待上传，稍后重新采集") }
@@ -271,7 +268,7 @@ fun main() = application {
          Divider()
          Text("恢复将替换整个档案；系统会先保存当前进度。", style = MaterialTheme.typography.caption, color = muted)
          Button(enabled = session != null && !busy && !connectingAtStartup && !pending && restoreIssue == null, onClick = { confirm = Action.RESTORE }) { Text("备份后恢复所选快照") }
-         if (selected == latestRemote) TextButton(enabled = !busy && !connectingAtStartup && connected && !pending && restoreIssue == null, onClick = { confirm = Action.REMOTE_LATEST }) { Text("恢复云端并设为同步基线") }
+         if (selected in remoteTips && remoteTips.size == 1) TextButton(enabled = !busy && !connectingAtStartup && connected && !pending && restoreIssue == null, onClick = { confirm = Action.REMOTE_TIP }) { Text("恢复此分支并设为同步基线") }
          if (restoreIssue != null) Text("恢复暂不可用：$restoreIssue", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
          if (pending) Text("请先处理或归档待上传快照。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
         }
@@ -293,17 +290,28 @@ fun main() = application {
    }
    if (showConflict && conflict != null) {
     val value = conflict!!
-    AlertDialog(onDismissRequest = { if (!busy && !connectingAtStartup) showConflict = false }, title = { Text("两份进度都已保留") }, text = {
-     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Text("本地 ${value.local.manifest.id.take(8)} · ${value.local.manifest.saveVersions?.summary() ?: "将自动校验"}")
-      Text("云端 ${value.remote.manifest.id.take(8)} · ${value.remote.manifest.saveVersions?.summary() ?: "将自动校验"}")
-      conflictRestoreIssue?.let { Text("云端恢复受阻：$it", style = MaterialTheme.typography.caption) }
-      Text("采用本地会发布已保存的本地分支。采用云端会先备份当前存档再恢复。双方原始快照继续保留，不合并二进制存档。")
+    AlertDialog(onDismissRequest = { if (!busy && !connectingAtStartup) showConflict = false }, title = { Text("${value.branches.size} 个分支均已保留") }, text = {
+     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Text("选择整份快照。会创建引用本次全部分支的新解决提交；未观察到的后来分支仍会显示冲突，不按时间自动选胜者。")
+      value.branches.forEach { branch ->
+       val m = branch.snapshot.manifest
+       Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { conflictSelection = m.id }, verticalAlignment = Alignment.CenterVertically) {
+        RadioButton(selected = conflictSelection == m.id, onClick = { conflictSelection = m.id }, enabled = !busy)
+        Column {
+         Text("分支 ${branch.commit.id.take(8)} · ${m.files.size} 个文件")
+         if (m.files == value.observedLocalFiles) Text("与当前本地进度一致", color = green, style = MaterialTheme.typography.caption)
+         if (branch.commit.id == value.publishedLocalCommit) Text("本机最近发布的分支", color = muted, style = MaterialTheme.typography.caption)
+         if (m.files != value.observedLocalFiles && branch.commit.id != value.publishedLocalCommit) Text("其他已观察分支 · 内容校验 ${m.sha256.take(12)}", color = muted, style = MaterialTheme.typography.caption)
+         Text(m.saveVersions?.summary() ?: m.version, style = MaterialTheme.typography.caption)
+        }
+       }
+      }
+      conflictRestoreIssue?.let { Text("选择后校验：$it", style = MaterialTheme.typography.caption) }
+      Text("需要替换当前档案时会先备份，再恢复所选快照。所有原始分支保留，不合并二进制。")
      }
     }, buttons = {
      Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(enabled = !busy && !connectingAtStartup && connected, onClick = { showConflict = false; confirm = Action.LOCAL }) { Text("采用本地") }
-      OutlinedButton(enabled = !busy && !connectingAtStartup && connected && conflictRestoreIssue == null, onClick = { showConflict = false; confirm = Action.REMOTE }) { Text("采用云端") }
+      Button(enabled = !busy && !connectingAtStartup && connected && conflictSelection != null && conflictRestoreIssue == null, onClick = { showConflict = false; confirm = Action.RESOLVE }) { Text("采用所选快照") }
       TextButton(enabled = !busy && !connectingAtStartup, onClick = { showConflict = false }) { Text("稍后处理") }
      }
     })
@@ -311,15 +319,15 @@ fun main() = application {
    if (closeBlocked) AlertDialog(onDismissRequest = { closeBlocked = false }, title = { Text("请等待当前操作结束") }, text = { Text("操作中暂不关闭，以免中断备份、恢复或连接验证。") }, confirmButton = { TextButton(onClick = { closeBlocked = false }) { Text("继续等待") } })
    confirm?.let { action ->
     var stopped by remember(action) { mutableStateOf(false) }; var paused by remember(action) { mutableStateOf(false) }
-    val restoring = action in setOf(Action.RESTORE, Action.REMOTE, Action.REMOTE_LATEST)
+    val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP)
     AlertDialog(onDismissRequest = { confirm = null }, title = { Text(if (restoring) "备份并恢复整个档案" else if (action == Action.ARCHIVE) "归档待上传快照？" else "操作前确认") }, text = {
      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Text("默认目录：${session?.root}", style = MaterialTheme.typography.caption)
-      if (action == Action.ARCHIVE) Text("只移除待上传标记，历史保留。下次同步重新采集，不删除云端内容。")
+      if (action == Action.ARCHIVE) Text("只移除待上传标记，历史保留，不删除云端内容。若此前恢复中断，请先核对当前档案与备份；归档也会解除中断恢复保护，下次同步将重新采集当前档案。")
       else {
        if (restoring) Text("先生成可恢复备份，再替换所有局与全局记录。快照中没有的局将移除。旧档可能在游戏加载时升级；原档备份保留。")
        if (action == Action.PUSH && pending) Text("将重试已冻结的快照，可能不同于当前目录的最新内容。")
-       if (action == Action.LOCAL) Text("将发布冲突中的本地分支，云端旧版本仍保留。")
+       if (action == Action.RESOLVE) Text("将采用所选分支 ${conflictSelection?.take(8)}，并追加多父提交。全部原始快照继续保留。")
        Row { Checkbox(stopped, { stopped = it }); Text("我已完全退出游戏", Modifier.padding(top = 12.dp)) }
        Row { Checkbox(paused, { paused = it }); Text("Steam Cloud 及其他程序不会同时写入", Modifier.padding(top = 12.dp)) }
        Text("这是人工确认。未知兼容性与降级将被阻止，断电及并发写入仍有风险。", style = MaterialTheme.typography.caption)
@@ -366,7 +374,7 @@ private fun ConnectionDialog(mode: SettingsMode, configFile: ConfigFile, initial
       if (initial?.rememberPassword == true) Text("取消勾选并保存，将忘记此连接已保存的密码。", color = muted, style = MaterialTheme.typography.caption)
       if (mode == SettingsMode.FULL) {
        OutlinedTextField(draft.profile, { edit(draft.copy(profile = it)) }, Modifier.fillMaxWidth(), enabled = !busy, label = { Text("远端档案名") }, singleLine = true)
-       Text("服务器需预先创建 shattered/${draft.profile}/。测试只读取，不上传存档。", color = muted, style = MaterialTheme.typography.caption)
+       Text("服务器需预先创建 shattered/${draft.profile}/。测试读取完整 PROPFIND 目录列表，不上传存档。", color = muted, style = MaterialTheme.typography.caption)
       }
       OutlinedButton(enabled = !busy, onClick = {
        onBusy(true); message = "正在验证连接…"; testFailed = false
@@ -374,7 +382,7 @@ private fun ConnectionDialog(mode: SettingsMode, configFile: ConfigFile, initial
         try {
          controller.update(draft, secret)
          when (val result = withContext(Dispatchers.IO) { controller.testConnection() }) {
-          is ConnectionTestResult.Success -> { tested = true; message = if (result.hasRemote) "连接成功，已找到云端快照。" else "服务可访问，此路径没有快照（404）。请确认目录已建好；写入权限会在同步时验证。" }
+          is ConnectionTestResult.Success -> { tested = true; message = if (result.hasRemote) "连接成功，完整目录列表中发现新版提交。" else "完整目录列表读取成功，此次未观察到新版提交；写入权限会在同步时验证。" }
           is ConnectionTestResult.Failure -> { tested = false; testFailed = true; message = result.message }
          }
         } catch (e: Exception) { tested = false; testFailed = true; message = e.message ?: "连接未成功" }

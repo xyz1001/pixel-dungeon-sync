@@ -50,6 +50,8 @@ object Snapshots {
      val bytes = Files.newInputStream(p).use { it.readNBytes(remaining + 1) }
      total += bytes.size; require(total <= MAX_SNAPSHOT_BYTES)
      files[name] = bytes
+    } else {
+     require(Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) { "Save entry disappeared or is not a regular file/directory" }
     }
    }
   } }
@@ -102,7 +104,10 @@ object Snapshots {
   // No restore mutation has occurred yet. A restarted game must not trigger rollback.
   require(guard()) { "Game-running status changed before restore" }
   require(capture(root,adapter,snapshot.manifest.profile,version,null).manifest.files == backup.manifest.files) { "Save files changed after backup; restore cancelled without rollback" }
-  try { replace(emptyMap()); beforeWrite(); replace(files,true) } catch(e: Exception) {
+  try {
+   replace(emptyMap()); beforeWrite(); replace(files,true)
+   require(capture(root, adapter, snapshot.manifest.profile, version, null).manifest.files == snapshot.manifest.files) { "Restored files failed verification" }
+  } catch(e: Exception) {
    try { replace(verify(backup,adapter)) } catch(rollback: Exception) { val failed = IllegalStateException("Restore and rollback failed; backup retained at $backupPath",e); failed.addSuppressed(rollback); throw failed }
    throw e
   }

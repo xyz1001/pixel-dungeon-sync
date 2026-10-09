@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.AppendRepositoryTest" tests="51" skipped="0" failures="0" errors="0" timestamp="2026-10-09T01:47:55.951Z" hostname="dd161cbb09b6" time="0.469">
+  <properties/>
+  <testcase name="malformedJsonUnknownFieldsInvalidUtf8AndOversizedMetadataStayPending()" classname="pdsync.AppendRepositoryTest" time="0.025"/>
+  <testcase name="modifiedCallerPlanCannotChangePersistedPublication()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="downloadRevalidatesRemoteManifestObjectLengthHashAndFileContents()" classname="pdsync.AppendRepositoryTest" time="0.016"/>
+  <testcase name="acceptedWriteWithLostResponseCanCompleteOnlyAfterExactReadback()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="resolutionNamesEveryChosenBranchWithoutRewritingParentsOrInventingMergeBytes()" classname="pdsync.AppendRepositoryTest" time="0.011"/>
+  <testcase name="missingOrCorruptObjectsNeverTurnDescendantsIntoGenesis()" classname="pdsync.AppendRepositoryTest" time="0.026"/>
+  <testcase name="remoteReadFailuresPropagateAndCannotBeMistakenForMissingOrEmptyHistory()" classname="pdsync.AppendRepositoryTest" time="0.01"/>
+  <testcase name="explicitLegacyImportIsRootOnlyAndStillDoesNotAuthorizeMixingAnExistingLegacyRemote()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="twoOfflineDevicesPublishingFromOneParentPreserveBothBranchesWithoutCas()" classname="pdsync.AppendRepositoryTest" time="0.012"/>
+  <testcase name="separateDevicesPreparingIdenticalBytesGenerateIndependentPublicationIdentities()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="unboundedUniquePaginationFailsRatherThanReturningEmptyHistory()" classname="pdsync.AppendRepositoryTest" time="0.02"/>
+  <testcase name="damagedLocalPendingBytesFailClosedWithoutRemoteActivity()" classname="pdsync.AppendRepositoryTest" time="0.007"/>
+  <testcase name="structurallyValidButIncompleteManifestCannotBecomeBaseline()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="malformedPublishedMetadataRemainsPendingAndIsNeverAnEmptyRemote()" classname="pdsync.AppendRepositoryTest" time="0.03"/>
+  <testcase name="omittedParentsAreFetchedDirectlyUntilAncestryIsComplete()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="branchAppearingAfterPlanIsFrozenIsNotSilentlyAddedToResolutionParents()" classname="pdsync.AppendRepositoryTest" time="0.013"/>
+  <testcase name="downloadReturnsOnlyTheVerifiedFrozenSnapshot()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="aggregateDeclaredObjectBudgetFailsBeforeRequestingTheExcessObject()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="knownManifestRewriteEvenWhitespaceOnlyIsAnIntegrityErrorAcrossRestart()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="nonexistentParentBlocksPublicationBeforeObjectUpload()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="legacyDetectionBlocksNewProtocolEvenWhenV2CommitsAlsoExist()" classname="pdsync.AppendRepositoryTest" time="0.011"/>
+  <testcase name="allInterruptedUploadAndReadbackStagesReplayExactPersistedPlanAfterRestart()" classname="pdsync.AppendRepositoryTest" time="0.053"/>
+  <testcase name="commitCorruptionAfterSuccessfulWriteRetainsPendingAndNeverRetriesOverwrite()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="knownBranchesSurviveStaleOrEmptyListingsAcrossRestart()" classname="pdsync.AppendRepositoryTest" time="0.007"/>
+  <testcase name="cyclesAndDescendantsRemainPendingAlongsideUnrelatedVerifiedRoots()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="missingParentsAndTheirDescendantsRemainPendingUntilTheActualParentAppears()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="collidingObjectIsNeverOverwrittenEvenAfterRestart()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="tooManyListedCommitsFailBeforeReadsOrPublication()" classname="pdsync.AppendRepositoryTest" time="0.019"/>
+  <testcase name="onlySettledVerifiedKnownCommitCanBePersistedAsBaseline()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="excessivelyNestedMetadataRemainsPendingWithoutRecursiveParserFailure()" classname="pdsync.AppendRepositoryTest" time="0.002"/>
+  <testcase name="duplicateOuterNestedAndEscapedEquivalentMetadataKeysStayPending()" classname="pdsync.AppendRepositoryTest" time="0.007"/>
+  <testcase name="completePaginationIsCollectedBeforeAnyCommitReadAndDuplicateIdsAreDeduplicated()" classname="pdsync.AppendRepositoryTest" time="0.008"/>
+  <testcase name="underreportedObjectLengthsCannotBypassTheActualByteBudget()" classname="pdsync.AppendRepositoryTest" time="0.018"/>
+  <testcase name="archiveContentsMustExactlyMatchDeclaredFullFileSet()" classname="pdsync.AppendRepositoryTest" time="0.002"/>
+  <testcase name="objectBytesAreReadBackAndVerifiedBeforeAnyCommitWrite()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="preparingFreezesIndependentCanonicalIdentitiesBytesAndSortedParents()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="invalidLocalAncestryKindsAndEmptySnapshotsCannotPreparePublication()" classname="pdsync.AppendRepositoryTest" time="0.005"/>
+  <testcase name="disappearedKnownManifestStaysPendingRatherThanUsingCachedBytesAsRemoteTruth()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="laterListingFailureNeverLooksLikeEmptyOrPartialHistory()" classname="pdsync.AppendRepositoryTest" time="0.002"/>
+  <testcase name="repeatedContinuationNeverReturnsAPartialGraphOrPublishes()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="retryNeverRewritesAlreadyAcceptedObjectOrCommit()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="unsafeArchiveNamesAndIncompleteRunsAreRejectedEvenWhenHashesMatch()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="pendingOperationMustBeExplicitlyClearedBeforeNewCaptureAndClearPreservesFiles()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="missingAndMalformedObservedIdsRemainPendingWhenFutureListingsOmitThem()" classname="pdsync.AppendRepositoryTest" time="0.012"/>
+  <testcase name="commitCollisionHiddenByStaleListingIsNeverOverwritten()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="objectCorruptionAfterSuccessfulWriteNeverPublishesCommit()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="independentRootsRemainSeparateAndDoNotGetAnImplicitWinner()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="listedPartialPendingCommitStopsExplicitlyAndPreservesExactOperationAcrossRestart()" classname="pdsync.AppendRepositoryTest" time="0.006"/>
+  <testcase name="invalidListedIdentifiersNeverReachDirectFetchOrPublication()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <testcase name="lostOrCorruptedEstablishedBaselineNeverLooksLikeFirstUse()" classname="pdsync.AppendRepositoryTest" time="0.004"/>
+  <testcase name="invalidParentManifestCannotBeSkippedToAdoptItsChild()" classname="pdsync.AppendRepositoryTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

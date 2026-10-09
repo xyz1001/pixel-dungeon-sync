@@ -20,7 +20,7 @@ sealed interface ConnectionTestResult {
 }
 
 /**
- * Transactional dialog model: testing only reads head.json; only an explicit apply writes config.
+ * Transactional dialog model: testing reads legacy detection and complete v2 PROPFIND listings; only explicit apply writes config.
  * Call testConnection off the UI thread. Every edit invalidates its proof, including credential,
  * JAR and remember-checkbox edits. The UI should share its operation-busy guard with this model.
  * Dropping password references is best effort; JVM Strings cannot be securely erased in place.
@@ -65,10 +65,24 @@ class ConnectionSetup(
    val validated = draft.copy(config = draft.config.validated())
    require(game.matches(Regex("[A-Za-z0-9_-]+")))
    require(!validated.config.username.contains(':'))
-   val head = if (probe != null) probe.invoke(validated) else WebDav(
-    validated.config.endpoint, game, validated.config.profile, validated.config.username, validated.password
-   ).head()
-   ConnectionTestResult.Success(hasRemote = head != null)
+   val hasRemote = if (probe != null) probe.invoke(validated) != null else {
+    val store = AppendOnlyWebDav(validated.config.endpoint, game, validated.config.profile, validated.config.username, validated.password)
+    if (store.legacyPresent()) throw LegacyProtocolException()
+    val cursors = mutableSetOf<String>(); val ids = mutableSetOf<String>()
+    var cursor: String? = null; var pages = 0; var listed = 0
+    do {
+     require(++pages <= MAX_COMMITS)
+     val page = store.listCommits(cursor)
+     listed += page.ids.size; require(listed <= MAX_COMMITS)
+     ids.addAll(page.ids); require(ids.size <= MAX_COMMITS)
+     cursor = page.next
+     if (cursor != null) require(cursors.add(cursor))
+    } while (cursor != null)
+    ids.isNotEmpty()
+   }
+   ConnectionTestResult.Success(hasRemote = hasRemote)
+  } catch (_: LegacyProtocolException) {
+   ConnectionTestResult.Failure("发现旧版 head.json。请停用旧客户端，使用新的远端档案或明确安排迁移；未写入任何内容。")
   } catch (e: WebDavException) {
    ConnectionTestResult.Failure(when (e.statusCode) {
     401 -> "认证失败（HTTP 401），请检查用户名和密码。"
@@ -79,7 +93,7 @@ class ConnectionSetup(
    ConnectionTestResult.Failure("无法连接 WebDAV：请检查网络、地址、证书及服务状态后重试。")
   } catch (_: Exception) {
    // Do not echo arbitrary URL/parser/transport exceptions that might contain entered secrets.
-   ConnectionTestResult.Failure("服务地址、档案名、用户名或远端档案内容无效。需使用 HTTPS（本机可用 HTTP），档案名为 1–64 位字母、数字、下划线或连字符，用户名不能含冒号。")
+   ConnectionTestResult.Failure("服务地址、账号或云端目录列表无效。服务需支持完整 PROPFIND 列表；使用 HTTPS（仅本机允许 HTTP），档案名为 1–64 位字母、数字、下划线或连字符，用户名不能含冒号。")
   } catch (e: Throwable) {
    synchronized(lock) { running = false }
    throw e

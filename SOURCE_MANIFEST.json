@@ -5,12 +5,12 @@
       "sha256": "35f089bda89c064a54df17575c398656f624b794b8040640eac801207ddbef3f"
     },
     "HANDOFF.md": {
-      "size": 5956,
-      "sha256": "3d759d2c7f7c6011999a64c9becee750792ec8425fc0517da9d73b088d3c6380"
+      "size": 7176,
+      "sha256": "fdfbdddd18a641386d43f38f75d3211bab2ab838a15172aee76320657b685e31"
     },
     "README.md": {
-      "size": 8678,
-      "sha256": "200080a5f579364e6224d9069f4596a52ecdfeb0194fe987cfc396c3dfc5d0cf"
+      "size": 9896,
+      "sha256": "d23c7735e49e3935172fbd39930b8410aa479a27bab93f41ca34f403c730dd42"
     },
     "build.gradle.kts": {
       "size": 641,
@@ -24,33 +24,45 @@
       "size": 5026,
       "sha256": "3d7b16cc9d61f675a3361ebf18fe3edcbf245bd3dff31be6ca51faa661b4a4fc"
     },
+    "core/src/main/kotlin/pdsync/AppendOnly.kt": {
+      "size": 14555,
+      "sha256": "ef0b9ecb0cc109bf659d295c6a7defee96d2739eaef340f93260823ec270db0f"
+    },
+    "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
+      "size": 14818,
+      "sha256": "affc22b4a1650a475a74e0e71f0abc2993e46c25dbb6326fcf8967eefdd88259"
+    },
+    "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
+      "size": 11027,
+      "sha256": "78c45b9563754c2f59504808d78da347fe64243a2902f03e6d0f44bda7035768"
+    },
     "core/src/main/kotlin/pdsync/ConnectionSetup.kt": {
-      "size": 5636,
-      "sha256": "c8be51ff49652a519fada7c193d5129d712e91ae25f76cafcb33e7d5161d51c0"
+      "size": 6456,
+      "sha256": "ef7f62d011823f0b1d179d029ff00ac6f8375f4f20d2b7406f631b5745586c89"
     },
     "core/src/main/kotlin/pdsync/Core.kt": {
-      "size": 8675,
-      "sha256": "1e7bc45bc54a6c86a90b043d7419e2ceee0bc44d4ab076e1cf9a5e227ef846b3"
+      "size": 8979,
+      "sha256": "9877d23c7c5e0ec2ea6a82d79b68c3c45141b9e9202365250af56254a57e29ca"
     },
     "core/src/main/kotlin/pdsync/DefaultProfileLocation.kt": {
-      "size": 1280,
-      "sha256": "08b1571e83240505bf1776860d7fa039faf5513cefe9576f12a22a494d65030f"
+      "size": 1292,
+      "sha256": "f84bc277120548405932c6bc7e23e642680267f03f6168fcd94318f982a6af78"
     },
     "core/src/main/kotlin/pdsync/DefaultSavePaths.kt": {
       "size": 3339,
       "sha256": "89e5d5a5b6e96ecf673fa13763d4f0c8711903f0264ed71666a0b8df35d2eecd"
     },
     "core/src/main/kotlin/pdsync/Demo.kt": {
-      "size": 1673,
-      "sha256": "3f42b8ac51bbde88d8dfa84ab38c5ca8122e4754918c498bafc84df910606e67"
+      "size": 2346,
+      "sha256": "0910d3ab243377073b4e5170cf015b7f73112a17e6b4c179fe186a5a54c358a5"
     },
     "core/src/main/kotlin/pdsync/PendingSnapshots.kt": {
       "size": 2636,
       "sha256": "753fd541663e1fe8360344ae01fd4931730c7d10aceca0a7ea7d83137d23e121"
     },
     "core/src/main/kotlin/pdsync/ProfileSession.kt": {
-      "size": 21111,
-      "sha256": "e51ea65d827b732ffe296200a60e92afbf3ce72bb98b641b33e4c75b61a5a790"
+      "size": 21316,
+      "sha256": "c136b04b1e0e47d810e6869150861512f87da9950d0e48690229fd6efaf22499"
     },
     "core/src/main/kotlin/pdsync/SaveVersions.kt": {
       "size": 16854,
@@ -64,9 +76,21 @@
       "size": 4089,
       "sha256": "8499f75d39062ee73ae49d62e94d319f505f5b1a5c3d835905aa31fbe183e590"
     },
+    "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
+      "size": 14357,
+      "sha256": "e807dd20ecd51eb9b85b6c3c1b735a5249be2f73396cf8b9b260642f9e84b0b7"
+    },
+    "core/src/test/kotlin/pdsync/AppendProfileSessionTest.kt": {
+      "size": 16994,
+      "sha256": "41ecb6e4e43aa1c38973dbdf1548966f45077ca439882bdd9681a84ec49f7832"
+    },
+    "core/src/test/kotlin/pdsync/AppendRepositoryTest.kt": {
+      "size": 43349,
+      "sha256": "41723fc92e434613f01821700634b4aa183e694275f31d512fff14e86f805200"
+    },
     "core/src/test/kotlin/pdsync/ConnectionSetupTest.kt": {
-      "size": 13522,
-      "sha256": "7bb8de2182da0264a87111bac78e43ed761755517bc355053f2fbbcd8a2776d8"
+      "size": 16046,
+      "sha256": "6748c27bb65969093b4bdc714940974e04a64044bae936c2907bfc6f8345691d"
     },
     "core/src/test/kotlin/pdsync/CoreTest.kt": {
       "size": 14171,
@@ -82,7 +106,7 @@
     },
     "core/src/test/kotlin/pdsync/IsolatedDefaultPathTransfer.kt": {
       "size": 2823,
-      "sha256": "7ac96f0b7831942b647c94f8f0d0354911e5ed543e92941f376dc254957bd309"
+      "sha256": "013983efc5a752087f38ef87bb74fb0d3bbe50dc295d09246675f72c28d07b94"
     },
     "core/src/test/kotlin/pdsync/IsolatedGameTransfer.kt": {
       "size": 1473,
@@ -117,8 +141,16 @@
       "sha256": "4cb471588378804858b359caae0d46816515b44e16ce941e522ee88fc139f3a7"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 32830,
-      "sha256": "de0da1a6fd88b65e75db170fecaefd8afba944a989211d8340a1fc751987bdba"
+      "size": 34406,
+      "sha256": "55cb60897571eef01ef79b781bd2f143bb230b6a365e00a42b8e906975673d1b"
+    },
+    "docs/APPEND_ONLY_PROTOCOL.md": {
+      "size": 8100,
+      "sha256": "3a13a12de92207d512d102b7daeec42179a129d23c42b77b4a6f88609fcf4b53"
+    },
+    "docs/APPEND_ONLY_VALIDATION.md": {
+      "size": 6377,
+      "sha256": "2b38cc7e8c0a8d238b1941c5b807ecb0057150791d3b6001f00e3014cccd66d8"
     },
     "docs/AUTO_VERSION_VALIDATION.md": {
       "size": 5910,
@@ -147,6 +179,70 @@
     "docs/VALIDATION.md": {
       "size": 4373,
       "sha256": "f92179068f4cd1a0c056aa4abcd7d9d952de28d51161ab23737362d515cd5f3a"
+    },
+    "docs/cloud-evidence/append-only-build.log": {
+      "size": 2117,
+      "sha256": "ac9342f59d79ce1983fe9c9551d675378028a10d7a4863ac6cfd0ae82681cee0"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.AppendOnlyWebDavTest.xml": {
+      "size": 2533,
+      "sha256": "2ee8911fa1078f36a1b61d5ae64709420b51ecd5d0c5af3544310902a21acda2"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.AppendProfileSessionTest.xml": {
+      "size": 3484,
+      "sha256": "59ac14233c25f46def63d06eca1209fa20dd28ea64f1a14e3442226527bc372f"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.AppendRepositoryTest.xml": {
+      "size": 7407,
+      "sha256": "77aef81cf7af85f66a347bdda9d4d2315301da6f894cb4d08db351cd61094b69"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.ConnectionSetupTest.xml": {
+      "size": 2916,
+      "sha256": "f4a8af6f3596f0fb32e9afcb84f9d0e3c59df9e6b0c117419f3ba6e5b579c94b"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.CoreTest.xml": {
+      "size": 3586,
+      "sha256": "a99b35c3631f4cd15d8a177c52795ba6d889d955dee06ab73c98941178aa1985"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.DefaultProfileLocationTest.xml": {
+      "size": 1134,
+      "sha256": "eb8189a1acee0b887c739e0a935769e7b7a86cb4fe94b125524d7e26b56107e9"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.DefaultSavePathsTest.xml": {
+      "size": 2613,
+      "sha256": "8f247c96ab1222a4823a55cc806f0cfbbe7f7af64e88020b93a033bd9cb94a47"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.LegacyImportTest.xml": {
+      "size": 785,
+      "sha256": "a786e557426cad85899ac1783542ea2d1a13005f43c0c14b23c2d8b3605e5c90"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.ProfileSessionTest.xml": {
+      "size": 2446,
+      "sha256": "ff564cf00a652f1e180540ecbc25e1a675d8705f12a77bb37dd8b933f43721cc"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.SaveVersionsTest.xml": {
+      "size": 2329,
+      "sha256": "10b1b37fed8138ac92b1ba56204fc104b6943225db686b12dd186922719c4b18"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.SecretStoreTest.xml": {
+      "size": 2784,
+      "sha256": "b59d74079bf6904565e833c8b9e6b7f4aaf7bab1ef25362bb3946f2a8b64cbbf"
+    },
+    "docs/cloud-evidence/append-only-junit/TEST-pdsync.VersionControllerTest.xml": {
+      "size": 1051,
+      "sha256": "9e0746e5c7a0ddba1ff949724d20e7eba7c286c7fe6ea970a4d460fb3b5a1484"
+    },
+    "docs/cloud-evidence/append-only-loopback.log": {
+      "size": 103,
+      "sha256": "30f1bf18541eee8e42c5f6398438ffc560d32d8733eee28de253794c88abb30d"
+    },
+    "docs/cloud-evidence/append-only-results.json": {
+      "size": 2766,
+      "sha256": "8b644e0537379856f0c26291173e6d53e8118792b9a261056f8f4b392a3dc2c5"
+    },
+    "docs/cloud-evidence/append-only-tests.log": {
+      "size": 1296,
+      "sha256": "4d7da3f871cdec88737918caf395677165b18e77dfb501cfaf147ead5654ae5e"
     },
     "docs/cloud-evidence/auto-detected-versions.png": {
       "size": 99268,
@@ -384,6 +480,94 @@
       "size": 5019,
       "sha256": "0399b61972938b1b97ed24c6d6659de63dc21dbd92cc46ef5a3b4a100db7a794"
     },
+    "docs/real-game-validation/append-only-recheck/A-baseline-playable.jpg": {
+      "size": 112243,
+      "sha256": "637a55757900186393209cef3e7fa06422434903ab3d6165d18faeb1ae285d2b"
+    },
+    "docs/real-game-validation/append-only-recheck/A-diverged-playable.jpg": {
+      "size": 105085,
+      "sha256": "529dc7138e9dddada24538fbe80b8332d44098d5a6f1bddb215a6be17b4fc494"
+    },
+    "docs/real-game-validation/append-only-recheck/A-history-advanced.jpg": {
+      "size": 108607,
+      "sha256": "957d430a25c09a2425faaced1f95ae08acba4c142f8833ae067b5eb19600fd3e"
+    },
+    "docs/real-game-validation/append-only-recheck/A-history-restored-playable.jpg": {
+      "size": 103660,
+      "sha256": "f559e069250c910eed073025ecfc5f12e930da53ea728039bf2b4c22277dd014"
+    },
+    "docs/real-game-validation/append-only-recheck/A-resolved-advanced.jpg": {
+      "size": 109522,
+      "sha256": "9c70e3b8bae2b55260a79413bb384ad89f7ba22dce99a07efef3e72d1ba4f6c2"
+    },
+    "docs/real-game-validation/append-only-recheck/A-resolved-playable.jpg": {
+      "size": 108812,
+      "sha256": "cfc21e71f1709745690c007362f1f3f5fe26ab0b873510f9806b9c0079a45ef4"
+    },
+    "docs/real-game-validation/append-only-recheck/APPEND_GAME_RECHECK.json": {
+      "size": 16514,
+      "sha256": "c469445ed3af357ee8971f6559ed72e61c5f39fed8e4cfe4d0cf7d17dfe25a07"
+    },
+    "docs/real-game-validation/append-only-recheck/APPEND_GAME_RECHECK.md": {
+      "size": 5390,
+      "sha256": "a69743fe65117c6369894a94483d77d015967ec42379f03e7cefe8c4353b662c"
+    },
+    "docs/real-game-validation/append-only-recheck/APPEND_UI_SMOKE.md": {
+      "size": 3068,
+      "sha256": "d47da370953219f67820054a7b3d8f985fc5313e14578700610a63293fae20b1"
+    },
+    "docs/real-game-validation/append-only-recheck/AppendGameDriver.java": {
+      "size": 5613,
+      "sha256": "2052b5f1b68f7b79b867a20995383e329cdce3e95d82c326402b0ef68c4cab8d"
+    },
+    "docs/real-game-validation/append-only-recheck/B-advanced-playable.jpg": {
+      "size": 108807,
+      "sha256": "1327d1550cad4c63fd9037a0999f35748f5f59fac748362dfbfd4ff54ceab8dd"
+    },
+    "docs/real-game-validation/append-only-recheck/B-restored-playable.jpg": {
+      "size": 103693,
+      "sha256": "79f27575099d1150150370eaa720781e27021d1a2657aa9dd087a7d93584b397"
+    },
+    "docs/real-game-validation/append-only-recheck/UI-branch-detail.jpg": {
+      "size": 90993,
+      "sha256": "ccb8c3615db67fd1f2f936c4a38b515311e6ce1a9aea2595796ee7a113ea9480"
+    },
+    "docs/real-game-validation/append-only-recheck/UI-first-launch-wizard.jpg": {
+      "size": 30599,
+      "sha256": "3d26903fef9bcb7b17390d18b3c72c71ee96231f803e0c44805313f38ba49b19"
+    },
+    "docs/real-game-validation/append-only-recheck/UI-observed-branches.jpg": {
+      "size": 81060,
+      "sha256": "a1aa739e41e6f43e7ecb72c7e0e64e8c49b638e7a83dc9e3dfb1ed6dc3016040"
+    },
+    "docs/real-game-validation/append-only-recheck/UI-wizard-step2.jpg": {
+      "size": 35303,
+      "sha256": "b321bdd0b5d3d131241925cbc0bac9caf428599f7a58eadf97800664162a3da7"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-push-b.log": {
+      "size": 104,
+      "sha256": "380e7044b791513ef2521135b1e888093b52609578e155882e0dad53a9033412"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-resolve-a-choose-b.log": {
+      "size": 312,
+      "sha256": "95a90db10abae90036af4646a1ee593fe3fdedee535a1e0d793fb7eed2c32462"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-restore-history.log": {
+      "size": 181,
+      "sha256": "c25540f8d7163ec94867e0e1e29e7727ce78aa1c980a66a139f8c04e37ca95fd"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-transfer.log": {
+      "size": 253,
+      "sha256": "c391b65454bf110093c2871a2643fd99e05345f1c44a67ffbfc6b9226b8f24ed"
+    },
+    "docs/real-game-validation/append-only-recheck/evidence-sha256.txt": {
+      "size": 1904,
+      "sha256": "b8dddbde80c2aeb7eecc1238903a9b4d9fb41249dd77b4649954a6c155b73d94"
+    },
+    "docs/real-game-validation/append-only-recheck/ui-smoke-verification.log": {
+      "size": 473,
+      "sha256": "2b6f138ff72ed3460fc2c8ca5e7c462f1708dbf2700c8cfe66cf328468eb6f16"
+    },
     "docs/real-game-validation/auto-version-recheck/AUTO_VERSION_RECHECK.json": {
       "size": 2156,
       "sha256": "35c326e5987a3fcfd72c7670076cbf4873550783694c837622d08b43359fd2b6"
@@ -437,12 +621,12 @@
       "sha256": "c997def5ed51d937111ddf7cfa1c9d5e92a0ec23fc2775b4f8ccfbd1ba4374aa"
     },
     "tools/test_webdav_demo.py": {
-      "size": 2016,
-      "sha256": "9f5aaf75acd3adf503f1cfeb1c6bc17825e794fd0138c0d921ce0bdd8c86c555"
+      "size": 4280,
+      "sha256": "1e14bbc2a83ae47ab3e2973d2cac2632cf7282f54f0b5c124325859352903056"
     },
     "tools/webdav_demo.py": {
-      "size": 2490,
-      "sha256": "568808470cc4ccce739148f93060d5a336d5bf7f64935c8f03d97846ebef7b82"
+      "size": 4379,
+      "sha256": "391e8f7a0cada9540af4167979550c948170afaec0466335cdccd8db3a45c410"
     }
   },
   "excluded": [
@@ -458,6 +642,9 @@
     "private signing material"
   ],
   "public_test_auth": "demo/demo fixtures only",
-  "origin_archive_sha256": "00aa943aec65b0f01597cda514810d86f8f2bb0d7cfda893862047c56232c3a3",
-  "notes": "Current milestone: official fixed save paths, first-run WebDAV setup and compact main UI, safe OS credential-store adapters and fallback. 144 JVM tests +1 Python test pass; full rebuild; isolated official-game fixture bytes transferred via default resolver and loopback with backup/hash checks. Current cloud CUA input unavailable, so new UI/native game runtime verification is incomplete and no new UI screenshot is supplied. Native secure-store successful persistence and Windows/macOS runtime remain unverified. Previous milestone screenshots and actual-game runs are historical only. Steam concurrency, power-loss and hostile path-race safety not solved."
+  "origin_archive_sha256": "a1c2ff347e2efd3b2f25fc9827402ce73c57b909b457de6af692e162b2101ebf",
+  "notes": "Append-only v2 milestone: immutable random object/commit IDs and parent DAG; no shared-head CAS dependency; persisted retries, verified ancestry, local dirty protection, explicit all-branch resolution and restore-as-new-commit. 236 JVM tests (zero failures/errors/skips), 2 Python tests, full Gradle build, loopback E2E, official 4.0.2 genuine isolated A/B gameplay transfer/conflict/resolution/history restore passed. Bounded new Compose UI smoke passed only with documented process-local software renderer/font setup after default rendering failed; final conflict/restore UI confirmation not exercised. No live Cloudreve, Windows/macOS/native credential-store, Steam concurrent writer, power-loss or hostile-path-race validation. Source recovered from verified ZIP without original .git history; current archive comment identifies the new local commit.",
+  "origin_source_commit": "1177a6babb4e85a7e80ce48f555bc1f59486bcd8",
+  "original_git_history_included": false,
+  "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73"
 }

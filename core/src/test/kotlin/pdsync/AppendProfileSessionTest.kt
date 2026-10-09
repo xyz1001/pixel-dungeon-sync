@@ -1,0 +1,269 @@
+package pdsync
+
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import kotlin.io.path.*
+import kotlin.test.*
+
+class AppendProfileSessionTest {
+ @TempDir lateinit var temp: Path
+ private var next = 0
+ private class Memory: AppendStore {
+  val commits = linkedMapOf<String, ByteArray>()
+  val objects = linkedMapOf<String, ByteArray>()
+  var failWrite = false
+  var legacy = false
+  var beforeObject: (() -> Unit)? = null
+  var afterCommit: (() -> Unit)? = null
+  override fun listCommits(cursor: String?) = CommitPage(commits.keys.toList())
+  override fun readCommit(id: String) = commits[id]?.copyOf()
+  override fun readObject(id: String) = objects[id]?.copyOf()
+  override fun writeCommit(id: String, bytes: ByteArray) { if (failWrite) error("offline"); commits[id] = bytes.copyOf(); afterCommit?.also { afterCommit = null }?.invoke() }
+  override fun writeObject(id: String, bytes: ByteArray) { beforeObject?.also { beforeObject = null }?.invoke(); if (failWrite) error("offline"); objects[id] = bytes.copyOf() }
+  override fun legacyPresent() = legacy
+ }
+ private fun root(value: String? = "alive"): Path = temp.resolve("root-${next++}").createDirectory().also {
+  if (value != null) { it.resolve("game1").createDirectory(); it.resolve("game1/game.dat").writeText(value) }
+ }
+ private fun versions(version: String = "v1") = object: ProfileVersions {
+  override fun annotate(snapshot: Snapshot) = snapshot.copy(manifest = snapshot.manifest.copy(version = version))
+  override fun target(path: String): TargetGame? = null
+  override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) { "incompatible" } }
+ }
+ private fun session(root: Path = root(), state: Path = temp.resolve("state-${next++}"), profile: String = "demo", version: String = "v1") =
+  AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), state, versions = versions(version))
+ private fun content(session: AppendProfileSession) = session.root.resolve("game1/game.dat").readText()
+ private fun edit(session: AppendProfileSession, value: String) = session.root.resolve("game1/game.dat").writeText(value)
+ private fun published(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit
+ private fun graph(session: AppendProfileSession, store: Memory) = AppendRepository(session.directory.resolve("append-v2"), Shattered, "demo").discover(store)
+
+ @Test fun ordinaryPublicationParentsOnlyItsRealBaselineAndKeepsSiblingBranches() {
+  val store = Memory(); val a = session(); val first = published(a, store)
+  val b = session(root(null)); b.restoreRemote(b.readRemote(store).single().entry.manifest.id, store) { true }
+  edit(a, "a-later"); val second = published(a, store)
+  edit(b, "b-later"); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  assertEquals(2, conflict.branches.size)
+  assertEquals(setOf(second.id, b.baseline()), conflict.observedTips)
+  val own = conflict.branches.single { it.commit.id == b.baseline() }.commit
+  assertEquals(listOf(first.id), own.parents); assertFalse(second.id in own.parents)
+  assertEquals("b-later", content(b)); assertEquals(3, store.commits.size)
+ }
+
+ @Test fun unbaselinedPopulatedDirectoryCannotUseOrdinaryRemoteApplyEvenIfBytesMatch() {
+  val store = Memory(); val a = session(); published(a, store)
+  val b = session(); val remote = b.readRemote(store).single()
+  assertFailsWith<IllegalArgumentException> { b.restoreRemote(remote.entry.manifest.id, store) { true } }
+  assertNull(b.baseline()); assertEquals("alive", content(b)); assertEquals(1, store.commits.size)
+ }
+
+ @Test fun dirtyBaselineCannotBeOverwrittenAndEmptyTargetCanFastForward() {
+  val store = Memory(); val a = session(); published(a, store)
+  val b = session(root(null)); b.restoreRemote(b.readRemote(store).single().entry.manifest.id, store) { true }
+  edit(a, "next"); val next = published(a, store)
+  edit(b, "dirty"); val entry = b.readRemote(store).single()
+  assertFails { b.restoreRemote(entry.entry.manifest.id, store) { true } }
+  assertEquals("dirty", content(b)); assertNotEquals(next.id, b.baseline())
+  edit(b, "alive"); val restored = b.restoreRemote(entry.entry.manifest.id, store) { true }
+  assertEquals("next", content(b)); assertEquals(next.id, b.baseline()); assertTrue(restored.backupPath.exists())
+ }
+
+ @Test fun retryReusesFrozenBytesAndEditsDuringPublicationRemainDirty() {
+  val store = Memory(); val local = session(); store.failWrite = true
+  assertFails { local.push(store) { true } }; assertTrue(local.hasPending())
+  val repo = AppendRepository(local.directory.resolve("append-v2"), Shattered, "demo")
+  val frozen = repo.pending()!!
+  edit(local, "new-local"); store.failWrite = false
+  val result = assertIs<AppendPushResult.Success>(local.push(store) { true })
+  assertEquals(frozen.commit.id, result.commit.id); assertTrue(result.localDirty)
+  assertContentEquals(frozen.manifestBytes, store.commits.getValue(frozen.commit.id))
+  assertContentEquals(frozen.zip, store.objects.getValue(frozen.commit.snapshot.id)); assertEquals("new-local", content(local))
+  val next = published(local, store); assertEquals(listOf(result.commit.id), next.parents)
+ }
+
+ @Test fun editDuringObjectUploadDoesNotBecomeCleanPublishedState() {
+  val store = Memory(); val local = session(); store.beforeObject = { edit(local, "during-upload") }
+  val result = assertIs<AppendPushResult.Success>(local.push(store) { true })
+  assertTrue(result.localDirty); assertEquals("during-upload", content(local))
+  assertNotEquals(hash("during-upload".encodeToByteArray()), result.commit.snapshot.files["game1/game.dat"])
+ }
+
+ @Test fun historicalRestoreCreatesFrozenNewCommitAtCurrentBaselineWithoutRewinding() {
+  val store = Memory(); val local = session(); val first = published(local, store)
+  edit(local, "second"); val second = published(local, store)
+  val restored = local.restoreHistory(first.snapshot.id) { true }
+  assertEquals("alive", content(local)); assertTrue(restored.backupPath.exists()); assertEquals(second.id, local.baseline())
+  edit(local, "post-restore-edit")
+  val result = assertIs<AppendPushResult.Success>(local.push(store) { true })
+  assertEquals("restore", result.commit.kind); assertEquals(listOf(second.id), result.commit.parents)
+  assertNotEquals(first.id, result.commit.id); assertNotEquals(first.snapshot.id, result.commit.snapshot.id)
+  assertEquals(first.snapshot.files, result.commit.snapshot.files); assertTrue(result.localDirty)
+ }
+
+ @Test fun failedVersionCheckArchivesRestorePlanInsteadOfLeavingItPublishable() {
+  val store = Memory(); val newer = session(version = "v2"); published(newer, store)
+  val local = session(); val remote = local.readRemote(store).single()
+  assertFails { local.restoreHistory(remote.entry.manifest.id) { true } }
+  assertFalse(local.hasPending()); assertEquals("alive", content(local)); assertNull(local.baseline())
+  assertTrue(local.history().any { it.manifest.id == remote.entry.manifest.id })
+ }
+
+ @Test fun threeBranchesOfferAllChoicesAndResolutionParentsEveryObservedTip() {
+  val store = Memory(); published(session(root("a")), store)
+  val b = session(root("b")); assertIs<AppendPushResult.Diverged>(b.push(store) { true })
+  val c = session(root("c")); val conflict = assertIs<AppendPushResult.Diverged>(c.push(store) { true }).conflict
+  assertEquals(3, conflict.branches.size); val choice = conflict.branches.single { it.commit.id == b.baseline() }
+  val result = assertIs<AppendPushResult.Success>(c.resolve(conflict, choice.snapshot.manifest.id, store) { true })
+  assertEquals("resolution", result.commit.kind); assertEquals(conflict.observedTips, result.commit.parents.toSet())
+  assertEquals("b", content(c)); assertEquals(4, store.commits.size)
+  assertTrue(c.history().any { it.reason == "恢复前自动备份" && it.manifest.files["game1/game.dat"] == hash("c".encodeToByteArray()) })
+  assertEquals(setOf(result.commit.id), graph(c, store).tips)
+ }
+
+ @Test fun changedLocalFilesInvalidateExplicitConflictChoiceBeforeAnyReplacement() {
+  val store = Memory(); published(session(root("remote")), store)
+  val local = session(root("local")); val conflict = assertIs<AppendPushResult.Diverged>(local.push(store) { true }).conflict
+  edit(local, "changed-during-dialog")
+  assertFails { local.resolve(conflict, conflict.branches.first().snapshot.manifest.id, store) { true } }
+  assertEquals("changed-during-dialog", content(local)); assertEquals(2, store.commits.size); assertFalse(local.hasPending())
+ }
+
+ @Test fun changedRemoteTipsReturnAllNewChoicesWithoutApplyingStaleChoice() {
+  val store = Memory(); published(session(root("a")), store)
+  val b = session(root("b")); val old = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  session(root("c")).push(store) { true }
+  val current = assertIs<AppendPushResult.Diverged>(b.resolve(old, old.branches.first().snapshot.manifest.id, store) { true }).conflict
+  assertEquals(3, current.branches.size); assertEquals("b", content(b)); assertEquals(3, store.commits.size)
+  assertFalse(b.hasPending())
+ }
+
+ @Test fun lateSiblingAfterResolutionPublicationRemainsConflict() {
+  val store = Memory(); val a = session(root("a")); published(a, store)
+  val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  val thirdStore = Memory(); thirdStore.commits.putAll(store.commits); thirdStore.objects.putAll(store.objects)
+  val c = session(root("late")); c.push(thirdStore) { true }
+  val late = thirdStore.commits.keys - store.commits.keys
+  store.afterCommit = { late.forEach { store.commits[it] = thirdStore.commits.getValue(it) }; store.objects.putAll(thirdStore.objects) }
+  val result = assertIs<AppendPushResult.Diverged>(b.resolve(conflict, conflict.branches.first().snapshot.manifest.id, store) { true })
+  assertEquals(2, result.conflict.observedTips.size); assertTrue(result.conflict.observedTips.containsAll(late))
+  assertEquals(4, store.commits.size)
+ }
+
+ @Test fun failedResolutionUploadRetriesExactChosenSnapshotAfterLocalEdit() {
+  val store = Memory(); val a = session(root("a")); published(a, store)
+  val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  val choice = conflict.branches.single { it.commit.id == a.baseline() }
+  store.failWrite = true
+  assertFails { b.resolve(conflict, choice.snapshot.manifest.id, store) { true } }
+  assertEquals("a", content(b)); assertTrue(b.hasPending())
+  val plan = AppendRepository(b.directory.resolve("append-v2"), Shattered, "demo").pending()!!
+  edit(b, "newer"); store.failWrite = false
+  val done = assertIs<AppendPushResult.Success>(b.push(store) { true })
+  assertEquals(plan.commit, done.commit); assertTrue(done.localDirty); assertEquals("newer", content(b))
+ }
+
+ @Test fun interruptedLocalApplyCannotBeReplayedAsPublicationBeforeExplicitArchive() {
+  val store = Memory(); val local = session(); val first = published(local, store)
+  edit(local, "untouched-newer")
+  val marker = local.directory.resolve("append-v2/apply-required.txt")
+  marker.writeText("restore")
+  val repo = AppendRepository(local.directory.resolve("append-v2"), Shattered, "demo")
+  val plan = repo.prepare(local.loadSnapshot(first.snapshot.id), listOf(first.id), "restore")
+  assertTrue(local.hasPending())
+  assertFails { local.push(store) { true } }
+  assertEquals(1, store.commits.size); assertEquals("untouched-newer", content(local))
+  local.archivePending(); assertFalse(local.hasPending()); assertFalse(marker.exists())
+  assertTrue(local.history().any { it.manifest.id == plan.commit.snapshot.id })
+ }
+
+ @Test fun interruptedRemoteApplyGateBlocksBothRestoreAndPushUntilReviewed() {
+  val store = Memory(); published(session(), store)
+  val local = session(root(null)); val remote = local.readRemote(store).single()
+  val marker = local.directory.resolve("append-v2/apply-required.txt")
+  marker.parent.createDirectories(); marker.writeText("remote-restore")
+  assertTrue(local.hasPending())
+  assertFails { local.restoreRemote(remote.entry.manifest.id, store) { true } }
+  assertFails { local.push(store) { true } }
+  assertNull(local.baseline()); assertFalse(local.root.resolve("game1").exists())
+  local.archivePending(); local.restoreRemote(remote.entry.manifest.id, store) { true }
+  assertEquals(remote.commit.id, local.baseline()); assertFalse(marker.exists())
+ }
+
+ @Test fun failedRemoteApplyKeepsRestartGateAndOriginalHistoryUntilExplicitArchive() {
+  val store = Memory(); published(session(), store)
+  val local = session(root(null)); val remote = local.readRemote(store).single(); var checks = 0
+  assertFails { local.restoreRemote(remote.entry.manifest.id, store) { ++checks == 1 } }
+  assertTrue(local.hasPending()); assertNull(local.baseline())
+  assertTrue(local.history().any { it.manifest.id == remote.entry.manifest.id })
+  assertFails { local.push(store) { true } }
+  local.archivePending(); assertFalse(local.hasPending())
+ }
+
+ @Test fun missingPreviouslyEstablishedBaselineFailsClosedInsteadOfCreatingRoot() {
+  val store = Memory(); val local = session(); published(local, store)
+  local.directory.resolve("append-v2/baseline.txt").deleteExisting()
+  assertFails { local.push(store) { true } }; assertEquals(1, store.commits.size)
+ }
+
+ @Test fun vanishedRemoteBaselineStopsPublicationAndNeverSilentlyStartsNewHistory() {
+  val store = Memory(); val local = session(); val first = published(local, store)
+  store.commits.remove(first.id); edit(local, "next")
+  assertFails { local.push(store) { true } }; assertEquals(0, store.commits.size); assertFalse(local.hasPending())
+ }
+
+ @Test fun readRemoteReturnsEveryObservedTipWithoutWritesOrChangingLocalBaseline() {
+  val store = Memory(); published(session(root("a")), store); session(root("b")).push(store) { true }
+  val local = session(); val remote = local.readRemote(store)
+  assertEquals(2, remote.size); assertEquals(2, store.commits.size); assertNull(local.baseline()); assertEquals("alive", content(local))
+  assertFails { local.restoreRemote(remote.first().entry.manifest.id, store) { true } }
+ }
+
+ @Test fun legacyRemoteAndLegacyPendingAreNeverSilentlyPublishedAsV2() {
+  val store = Memory(); val local = session(); store.legacy = true
+  assertFailsWith<LegacyProtocolException> { local.push(store) { true } }; assertTrue(store.commits.isEmpty())
+  store.legacy = false
+  val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions())
+  val oldStore = object: Store {
+   override fun head(): RemoteHead? = null
+   override fun upload(snapshot: Snapshot) { error("offline") }
+   override fun download(manifest: Manifest): Snapshot = error("unused")
+   override fun publish(manifest: Manifest, expected: RemoteHead?) = error("unused")
+  }
+  assertFails { old.push(oldStore) { true } }
+  val facade = session(local.root, temp.resolve("legacy-state")); assertTrue(facade.hasPending())
+  assertFails { facade.push(store) { true } }; assertTrue(store.commits.isEmpty())
+  facade.archivePending(); assertFalse(facade.hasPending()); assertTrue(facade.history().isNotEmpty())
+  val first = published(facade, store); assertTrue(first.parents.isEmpty())
+ }
+
+ @Test fun oldAndNewSessionsUseIdenticalPhysicalRootLock() {
+  val root = root(); val state = temp.resolve("lock-state"); val local = session(root, state)
+  val path = state.resolve("locks/${hash(root.toRealPath().toString().encodeToByteArray())}.lock")
+  FileChannel.open(path, StandardOpenOption.WRITE).use { channel -> channel.lock().use {
+   assertFailsWith<IllegalStateException> { local.createSnapshot { true } }
+   assertFailsWith<IllegalStateException> { local.push(Memory()) { true } }
+  } }
+ }
+
+ @Test fun adapterIdentitySeparatesVariantsWithIdenticalLocalFiles() {
+  val root = root(); val state = temp.resolve("variants"); val shattered = session(root, state)
+  val variant = object: GameAdapter by Shattered { override val id = "variant" }
+  val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions())
+  assertNotEquals(shattered.directory, other.directory)
+  val store = Memory(); published(shattered, store)
+  assertNull(other.baseline()); assertTrue(other.history().isEmpty())
+  assertFails { other.readRemote(store) }
+ }
+
+ @Test fun scopeIsolatesProfilesAndBaselineNeverUsesLegacyHeadFile() {
+  val root = root(); val state = temp.resolve("scopes"); val a = session(root, state)
+  val b = session(root, state, "other"); assertNotEquals(a.directory, b.directory)
+  val store = Memory(); val first = published(a, store)
+  assertNull(b.baseline()); assertFalse(b.hasPending())
+  a.directory.resolve("head.txt").writeText(java.util.UUID.randomUUID().toString())
+  edit(a, "next"); assertEquals(listOf(first.id), published(a, store).parents)
+ }
+}

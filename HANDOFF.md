@@ -48,3 +48,11 @@ Windows 用户设备与 Apple Silicon Mac 尚未连接；Intel Mac 没有测试�
 当前已取消主界面任意存档目录输入和选择，按官方系统路径只读解析。WebDAV 移入首次启动/设置对话框；重启可从系统安全存储取密码，否则显示简短密码提示。密码保存依赖操作系统凭据服务，没有明文后备。旧配置先备份，旧目录历史不删除不混用。
 
 本轮 144 个 JVM 测试与 Python 回归通过；真实游戏存档的隔离副本通过默认路径解析器上传/回读/备份恢复校验。云端 CUA 返回过期 AT-SPI 进程错误，重置与重新绑定、启动终端后仍不能输入，因此本轮新 UI 视觉/按钮流程与实际游戏读档均未完成，不借用历史截图冒充新界面。原生凭据存取成功与 Windows/macOS 运行未验证。详见 `docs/DEFAULT_PATH_SETUP_VALIDATION.md`。
+
+## 追加式协议 v2（2026-10-09）
+
+桌面与隔离 CLI 已改用随机独立 ZIP/提交 + 父 DAG。旧共享 head/CAS 不再是当前桌面发布路径；旧协议检测阻止静默混用。完整重新运行 236 JVM 测试与 2 Python 测试通过，完整 Gradle build 与 loopback 分支/解决闭环通过。协议、明确迁移/恢复边界见 `docs/APPEND_ONLY_PROTOCOL.md`，本轮证据/限制见 `docs/APPEND_ONLY_VALIDATION.md`。源码从验证后的 ZIP 恢复，没有原 `.git` 历史；新本地 Git 基线不能冒称原提交祖先。
+
+本轮另用官方 Shattered 4.0.2 新建隔离 A/B，真实游戏读入、继续、分支选择和历史恢复后继续均通过；5个远端对象和3个备份独立哈希核验。详见 `docs/real-game-validation/append-only-recheck/APPEND_GAME_RECHECK.md`。这是云端 Linux 单机双目录复验，不代表真实 Cloudreve 或跨平台完成。
+
+新 Compose 向导及只读双分支展示的有界原生冒烟也通过；默认 GL/字体渲染先失败，改用既有进程级软件渲染与现有字体配置后成功，未声称默认路径或完整冲突/恢复按钮流程通过。详见 `APPEND_UI_SMOKE.md`（同一实际游戏复验目录）。

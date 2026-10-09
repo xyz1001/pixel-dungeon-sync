@@ -152,7 +152,7 @@ class ProfileSession(
    require(it > 0 || Files.list(root).use { entries -> entries.findAny().isEmpty }) { "未发现 gameN/game.dat 或 rankings / badges / journal；请选择档案根目录（或全空的恢复目标目录）" }
   }
  }
- private fun <T> locked(action: () -> T): T {
+ internal fun <T> locked(action: () -> T): T {
   SafePaths.checked(state.resolve("locks")).createDirectories()
   val lock = SafePaths.checked(state.resolve("locks/${hash(root.toString().encodeToByteArray())}.lock"))
   FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
@@ -221,12 +221,12 @@ class ProfileSession(
   candidates.forEach { SafePaths.atomicWrite(directory.resolve("imported-${it.key}.txt"), "copied-and-verified".encodeToByteArray()) }
  }
 
- private fun guard(stopped: () -> Boolean) { require(stopped()) { "请确认游戏已完全退出，Steam Cloud 等其他同步已暂停" } }
+ internal fun guard(stopped: () -> Boolean) { require(stopped()) { "请确认游戏已完全退出，Steam Cloud 等其他同步已暂停" } }
  private fun checkedManifest(manifest: Manifest) {
   require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
   require(manifest.game == adapter.id && manifest.profile == config.profile) { "快照游戏或档案不匹配" }
  }
- private fun capture(stopped: () -> Boolean, parent: String? = head()): Snapshot {
+ internal fun capture(stopped: () -> Boolean, parent: String? = head()): Snapshot {
   guard(stopped); validateRoot()
   val snapshot = versions.annotate(Snapshots.capture(root, adapter, config.profile, "自动识别", parent))
   require(snapshot.manifest.files.isNotEmpty()) { "空目录只能用于恢复，不能创建或上传空快照" }
@@ -237,7 +237,7 @@ class ProfileSession(
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
   SafePaths.boundedRead(headPath, 128).decodeToString().trim().also { require(it.matches(Regex("[0-9a-fA-F-]{36}"))) } else null
  private fun setHead(id: String) = SafePaths.atomicWrite(headPath, id.encodeToByteArray())
- private fun remember(snapshot: Snapshot, reason: String): HistoryEntry {
+ internal fun remember(snapshot: Snapshot, reason: String): HistoryEntry {
   checkedManifest(snapshot.manifest); Snapshots.verify(snapshot, adapter)
   snapshot.manifest.saveVersions?.let { evidence ->
    require(versions.annotate(snapshot).manifest.saveVersions == evidence) { "快照的版本元数据与实际内容不一致" }
@@ -276,6 +276,10 @@ class ProfileSession(
  // Immutable history reads do not take the mutation lock. Restore repeats this check under the lock.
  fun checkRestore(id: String) = versions.checkRestore(loadSnapshot(id), config.targetGame)
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = locked { remember(capture(stopped), "本地快照") }
+ internal fun legacyPending(): Snapshot? = queue.load(queueKey)
+ internal fun archiveLegacyPending() {
+  queue.load(queueKey)?.let { remember(it, "已归档旧版待上传快照") }; queue.clear()
+ }
  fun hasPending(): Boolean = locked { queue.load(queueKey) != null }
  fun readRemote(store: Store): HistoryEntry? = locked {
   val remote = store.head() ?: return@locked null
@@ -329,7 +333,7 @@ class ProfileSession(
   queue.replace(queueKey, chosen)
   pushPending(chosen, store)
  }
- private fun restore(snapshot: Snapshot, stopped: () -> Boolean): RestoreResult {
+ internal fun restore(snapshot: Snapshot, stopped: () -> Boolean): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
   var entry: HistoryEntry? = null
   val backupPath = Snapshots.restore(snapshot, root, backupRoot, adapter, "自动识别", stopped,

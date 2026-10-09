@@ -23,6 +23,6 @@ class DefaultProfileLocation(
   }
   return root
  }
- fun open(config: AppConfig, stateRoot: Path): ProfileSession =
-  ProfileSession(config.copy(saveRoot = requireDirectory().toString()), stateRoot, adapter, versions)
+ fun open(config: AppConfig, stateRoot: Path): AppendProfileSession =
+  AppendProfileSession(config.copy(saveRoot = requireDirectory().toString()), stateRoot, adapter, versions)
 }

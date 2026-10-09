@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-09",
+  "total": {
+    "tests": 236,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "suites": [
+    {
+      "suite": "pdsync.AppendOnlyWebDavTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2ee8911fa1078f36a1b61d5ae64709420b51ecd5d0c5af3544310902a21acda2"
+    },
+    {
+      "suite": "pdsync.AppendProfileSessionTest",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "59ac14233c25f46def63d06eca1209fa20dd28ea64f1a14e3442226527bc372f"
+    },
+    {
+      "suite": "pdsync.AppendRepositoryTest",
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "77aef81cf7af85f66a347bdda9d4d2315301da6f894cb4d08db351cd61094b69"
+    },
+    {
+      "suite": "pdsync.ConnectionSetupTest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f4a8af6f3596f0fb32e9afcb84f9d0e3c59df9e6b0c117419f3ba6e5b579c94b"
+    },
+    {
+      "suite": "pdsync.CoreTest",
+      "tests": 37,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a99b35c3631f4cd15d8a177c52795ba6d889d955dee06ab73c98941178aa1985"
+    },
+    {
+      "suite": "pdsync.DefaultProfileLocationTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eb8189a1acee0b887c739e0a935769e7b7a86cb4fe94b125524d7e26b56107e9"
+    },
+    {
+      "suite": "pdsync.DefaultSavePathsTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8f247c96ab1222a4823a55cc806f0cfbbe7f7af64e88020b93a033bd9cb94a47"
+    },
+    {
+      "suite": "pdsync.LegacyImportTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a786e557426cad85899ac1783542ea2d1a13005f43c0c14b23c2d8b3605e5c90"
+    },
+    {
+      "suite": "pdsync.ProfileSessionTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "ff564cf00a652f1e180540ecbc25e1a675d8705f12a77bb37dd8b933f43721cc"
+    },
+    {
+      "suite": "pdsync.SaveVersionsTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "10b1b37fed8138ac92b1ba56204fc104b6943225db686b12dd186922719c4b18"
+    },
+    {
+      "suite": "pdsync.SecretStoreTest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b59d74079bf6904565e833c8b9e6b7f4aaf7bab1ef25362bb3946f2a8b64cbbf"
+    },
+    {
+      "suite": "pdsync.VersionControllerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9e0746e5c7a0ddba1ff949724d20e7eba7c286c7fe6ea970a4d460fb3b5a1484"
+    }
+  ]
+}
