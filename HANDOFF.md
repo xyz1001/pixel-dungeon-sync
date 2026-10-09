@@ -68,3 +68,7 @@ Windows 用户设备与 Apple Silicon Mac 尚未连接；Intel Mac 没有测试�
 首次连接、设置、冲突和操作确认改为同一个主窗口内的页面，移除连接DialogWindow和应用AlertDialog。保留显式JAR选择的标准文件选择器；没有开展Android实现。启动串行化和页面生命周期/代次保护防止旧回调或重复点击写入。285个JVM测试（核心275+桌面10）、3个Python测试及完整构建通过；见 `docs/SINGLE_WINDOW_VALIDATION.md`。
 
 本轮原生复验也通过：13次窗口检查（运行11次均1个根、退出2次均0），双击去重、忙碌关闭内联提示、设置取消与确认返回重置均验证。冲突选择页未实际点击；标准JAR选择器未打开。7张新截图与窗口清单见 `docs/single-window-v6-evidence/UI_SMOKE.md`。
+
+## 待上传重试诊断（2026-10-09，v7）
+
+未修改 v6 的隔离原生 A3/B5 恢复→实际确认重试通过，未复现本机静默返回。v7 增加仅本机的闭合枚举操作事件（有界轮转、无凭据/URL/存档内容/异常文本）与明确取消反馈。完整构建、295 JVM 测试和3 Python测试通过；原生 restore→取消重试→HTTP503失败→成功重试的阶段日志及计划/基线/存档校验通过。核心业务和依赖未变，不声称本机根因修复。详见 `docs/RETRY_DIAGNOSTICS_VALIDATION.md`。

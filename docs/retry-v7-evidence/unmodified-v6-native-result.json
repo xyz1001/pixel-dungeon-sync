@@ -1,0 +1,34 @@
+{
+  "head": "945be6df8ae137e31c5af1d04970956ec868a5a8",
+  "desktopSha256": "a948267bba43c9ed0c1f07b666a9cd1824572de84efec1b24f73f5917de6e0e1",
+  "coreSha256": "b1846624bd8ef8a7e915957094b1f5b41f175d64af235c0afd32a4b3ddb68a43",
+  "commits": [
+    {
+      "id": "40f3e55e-9741-4c24-a202-3177afba2624",
+      "kind": "snapshot",
+      "parents": [],
+      "files": 3
+    },
+    {
+      "id": "ac0bd7e6-3e81-4ade-8ace-703fe61b2f35",
+      "kind": "snapshot",
+      "parents": [
+        "40f3e55e-9741-4c24-a202-3177afba2624"
+      ],
+      "files": 5
+    },
+    {
+      "id": "3eb48e88-5463-4620-a8e6-f5e62c1ea21c",
+      "kind": "restore",
+      "parents": [
+        "ac0bd7e6-3e81-4ade-8ace-703fe61b2f35"
+      ],
+      "files": 3
+    }
+  ],
+  "baseline": "3eb48e88-5463-4620-a8e6-f5e62c1ea21c",
+  "historyCount": 4,
+  "nativeAction": "Restore A3 from B5, then actual Confirm pending upload; successful",
+  "serverLogLines": 82,
+  "activePlanExistsAfterSubmit": false
+}

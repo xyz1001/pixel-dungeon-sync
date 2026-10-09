@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.OperationEventsTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-10-09T04:21:21.525Z" hostname="dd161cbb09b6" time="0.304">
+  <properties/>
+  <testcase name="persistsAcrossRecorderInstancesAndKeepsOneOpaqueIdForEachAction()" classname="pdsync.OperationEventsTest" time="0.036"/>
+  <testcase name="invalidOrUnwritableDestinationCannotChangeTheOperationOutcome()" classname="pdsync.OperationEventsTest" time="0.003"/>
+  <testcase name="unsafeDestinationFailureIsBestEffortAndDoesNotPermanentlyDisableRecorder()" classname="pdsync.OperationEventsTest" time="0.003"/>
+  <testcase name="rotatesAtTheBoundAndRetainsOnlyOnePreviousGeneration()" classname="pdsync.OperationEventsTest" time="0.06"/>
+  <testcase name="acceptsOnlyTheFixedSchemaAndOptionalEnumFields()" classname="pdsync.OperationEventsTest" time="0.053"/>
+  <testcase name="refusesSymbolicLinkPreviousGenerationBeforeRotation()" classname="pdsync.OperationEventsTest" time="0.005"/>
+  <testcase name="refusesSymbolicLinkLogAndAncestorWithoutTouchingTheirTargets()" classname="pdsync.OperationEventsTest" time="0.003"/>
+  <testcase name="concurrentRecordersProduceCompleteNonInterleavedLines()" classname="pdsync.OperationEventsTest" time="0.113"/>
+  <testcase name="classifiesTypedErrorsWithoutGuessingFromTheirMessages()" classname="pdsync.OperationEventsTest" time="0.016"/>
+  <testcase name="neverInspectsOrWritesExceptionMessagesAndPrivateSentinels()" classname="pdsync.OperationEventsTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

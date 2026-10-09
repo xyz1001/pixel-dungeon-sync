@@ -5,12 +5,12 @@
       "sha256": "35f089bda89c064a54df17575c398656f624b794b8040640eac801207ddbef3f"
     },
     "HANDOFF.md": {
-      "size": 8782,
-      "sha256": "93fb38a0f9550996829f453abe22176ea2aa6d5fc5e3c636d7e4a5df83725768"
+      "size": 9337,
+      "sha256": "43273ee85e5dfdc073c425f5d06d00124864c587df5d9bbff0fa32908d739890"
     },
     "README.md": {
-      "size": 11428,
-      "sha256": "d137d5126d5dee07a0c313f9b7097b1b8f229958808d29c4889bb4ab97eb281b"
+      "size": 11588,
+      "sha256": "cdfbaa4d06981cd0f682a06799b7912ac281e581b34227325ae5a8d80dd00809"
     },
     "build.gradle.kts": {
       "size": 641,
@@ -153,12 +153,20 @@
       "sha256": "58b602595a11cc1d7ba603f6b1f666d5afab313bff19fcc61608f9b315c4cdfd"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 38421,
-      "sha256": "7f8d6f04b55878f8f4fa9af02f8556cb56632435401ba408f66fe0764d636d0d"
+      "size": 41274,
+      "sha256": "806799233c03d37c0daec3f3b68b9fe9dec0d189ce0c91686c433388e61a48c7"
+    },
+    "desktop/src/main/kotlin/pdsync/OperationEvents.kt": {
+      "size": 6445,
+      "sha256": "bd1c7c109b4738a099f080cc5e0ddb3020df70345a88c1660a7d2ef49688920b"
     },
     "desktop/src/test/kotlin/pdsync/ConnectionPageLifetimeTest.kt": {
       "size": 5024,
       "sha256": "1f3539a46223ba8dbdb8b05ddf82e78f670f65cfdd4ae11fcf29f5b47f32b5af"
+    },
+    "desktop/src/test/kotlin/pdsync/OperationEventsTest.kt": {
+      "size": 11461,
+      "sha256": "b74e3b56615bf10cc3d6b769c98df8e07e68f3ea20737078dddaf739b2eeb008"
     },
     "docs/APPEND_ONLY_PROTOCOL.md": {
       "size": 8312,
@@ -191,6 +199,10 @@
     "docs/PHASE1.md": {
       "size": 2499,
       "sha256": "f6404bcca0e36d544e7721a43dbde1cad7d882aecb25abb3202a9839aaf6064f"
+    },
+    "docs/RETRY_DIAGNOSTICS_VALIDATION.md": {
+      "size": 5739,
+      "sha256": "68adeef61c6f280a5cab1ca45d55dc772a415aaa36ae9f9a710110137137d326"
     },
     "docs/SAVE_MANAGEMENT_VALIDATION.md": {
       "size": 3389,
@@ -804,6 +816,62 @@
       "size": 11012,
       "sha256": "987d857fab4acb692232caaff3f958bb68df59bf8da70df796c7c51af718d32e"
     },
+    "docs/retry-v7-evidence/OperationEventsTest.xml": {
+      "size": 1642,
+      "sha256": "f333a3acb5ce600aca6087bf29a5ddc49298cfbc22f83cebd91f4b63b5878d73"
+    },
+    "docs/retry-v7-evidence/full-build.txt": {
+      "size": 2175,
+      "sha256": "76901838f537e22ced2c9f99df8f469149dbd3d2057f92493cf5d19499137354"
+    },
+    "docs/retry-v7-evidence/loopback_failure_fixture.py": {
+      "size": 880,
+      "sha256": "8bae818e85aa8037182e8be08807e78bb185e328af33707f060bfec6eddfa50f"
+    },
+    "docs/retry-v7-evidence/native-action-events.txt": {
+      "size": 3498,
+      "sha256": "6ff32626a7cf30b760bc42b953b72e11b38f6f7200e162e1d478891be2c60337"
+    },
+    "docs/retry-v7-evidence/python-tests.txt": {
+      "size": 2455,
+      "sha256": "5e9f880a9bc6d105e9d69e0b0e86577f1337d568a6cccad39b1b2ab47f695ada"
+    },
+    "docs/retry-v7-evidence/test-results.json": {
+      "size": 181,
+      "sha256": "0518eb2949f2ed811d71d09035303a8b501b277375dfaa8fbb82668774d8b481"
+    },
+    "docs/retry-v7-evidence/unmodified-v6-native-result.json": {
+      "size": 968,
+      "sha256": "9863a97e876a2dd77279caf3195a6fa3ee23d7ed777f868ac32abc4e189ca4e3"
+    },
+    "docs/retry-v7-evidence/v6-loopback-requests.txt": {
+      "size": 8520,
+      "sha256": "25f5eb99d84fd5951a1daaa4d96e755818e0c3b2079bbd7665b504a5bb653500"
+    },
+    "docs/retry-v7-evidence/v6-native-retry-success.jpg": {
+      "size": 85442,
+      "sha256": "0b2103915921fd33cbcb4bf58e7cb7107404c851c819d197832478b579b9e283"
+    },
+    "docs/retry-v7-evidence/v7-cancel-pending.jpg": {
+      "size": 83786,
+      "sha256": "54174f71f561cd3ad0342768b15edd5df87f7da471f3cc0c55ca636cc1d28cfa"
+    },
+    "docs/retry-v7-evidence/v7-failed-retry.jpg": {
+      "size": 86829,
+      "sha256": "91c763a4e40f8db090b6f92081686b3e5969161b399ab6701d03a66585e5cb7d"
+    },
+    "docs/retry-v7-evidence/v7-loopback-requests.txt": {
+      "size": 5015,
+      "sha256": "b1a9e2b56285002a8c4c5454ffdbfa1f020ccefade6c9dbc7683f95aa4266a4b"
+    },
+    "docs/retry-v7-evidence/v7-native-result.json": {
+      "size": 2152,
+      "sha256": "e71f975c0c66976e90d48b5e10880ad618be06d670924193cb99c031ae3782cd"
+    },
+    "docs/retry-v7-evidence/v7-successful-retry.jpg": {
+      "size": 85019,
+      "sha256": "6e9f6d47e59f45fa6db33076dd0af5200dc692ced1c62c433fdd68393989b388"
+    },
     "docs/single-window-v6-evidence/UI_SMOKE.md": {
       "size": 5111,
       "sha256": "5da7b5aa817fac386a6d0595ed955ed4c6f7e90a90bba362638a6188d13e0e02"
@@ -903,10 +971,9 @@
   ],
   "public_test_auth": "demo/demo fixtures only",
   "origin_archive_sha256": "a1c2ff347e2efd3b2f25fc9827402ce73c57b909b457de6af692e162b2101ebf",
-  "notes": "v6 single-window guided navigation: one app root Window; Connection/Home/Settings/Conflict/Confirmation pages instead of DialogWindow/AlertDialog; busy-close inline notice. v5 three-field one-Connect flow, safe namespace provisioning, existing profile IDs and credential permission behavior preserved. Startup is sequential and page lifetimes reject duplicate/stale callbacks; already-started persistence completes before forced disposal. 285 JVM tests (core275 + desktop10) all zero failures/errors/skips, 3 Python tests and full build passed. Fresh native cloud UI: 13 window checkpoints, 11 active with one root and 2 closed with zero, double-click deduplication, delayed-connect busy Close, same-window success, Settings Cancel and confirmation checkbox reset, unchanged saves and no upload/password persistence. Conflict page and explicit standard JAR picker not clicked; picker is retained exception. No Android implementation, user-computer/production-server/credentials access, or new game protocol changes. Existing cloud software-renderer/font, cross-platform and power-loss limits remain. Source ZIP originally lacked .git history; current local commit history starts at verified recovery.",
+  "notes": "v7 diagnostic-only pending retry investigation. Unmodified v6 native isolated A3/B5 history restore then actual pending upload confirmation succeeded; local reported silent return remains unreproduced. Added closed-schema bounded local action events and explicit cancel feedback. No core/protocol/dependency changes. Full build, 295 JVM tests (core275 + desktop20), 3 Python tests passed. v7 native restore, pending retry cancellation, controlled HTTP503 failure and exact frozen-plan successful retry verified with stage logs and unchanged saves. No user-computer, real server or credential access in this cloud task. Existing cross-platform, power-loss and lifecycle limitations remain; not a claimed root-cause fix. Source patch against 945be6d checked on a clean base.",
   "origin_source_commit": "1177a6babb4e85a7e80ce48f555bc1f59486bcd8",
   "original_git_history_included": false,
   "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73",
-  "previous_source_commit": "a46841f59d122e79014b3c3ca4a77b07a4f9f90d",
-  "previous_source_archive_sha256": "2a6257841f32dfff6fcbd5beedd00e5b6331a0dabbd90e72addf752e25994d40"
+  "previous_source_commit": "945be6df8ae137e31c5af1d04970956ec868a5a8"
 }

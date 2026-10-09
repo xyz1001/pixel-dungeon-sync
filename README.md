@@ -61,6 +61,8 @@ WebDAV 适配层验证用户配置的根目录，再通过显式“连接”按�
 
 ## 验证与限制
 
+待上传重试诊断与取消反馈见 [v7 操作诊断](docs/RETRY_DIAGNOSTICS_VALIDATION.md)。本机现象尚未复现，此轮不声称根因已修复。
+
 最新单窗口改造见 [单窗口验证](docs/SINGLE_WINDOW_VALIDATION.md)，单步连接修复见 [单步连接验证](docs/ONE_STEP_CONNECTION_VALIDATION.md)，追加协议记录见 [追加式协议验证](docs/APPEND_ONLY_VALIDATION.md)。默认位置与设置的上一轮验证见 [默认位置与连接设置验证](docs/DEFAULT_PATH_SETUP_VALIDATION.md)。历史记录见 [云端验证](docs/CLOUD_VALIDATION.md) 和 [存档管理验证](docs/SAVE_MANAGEMENT_VALIDATION.md)。历史迁移记录保留在 [HANDOFF.md](HANDOFF.md)。
 
 本轮仍未解决：断电事务、恶意并发路径替换的 TOCTOU 风险、可靠游戏进程检测、Steam Cloud 并发、系统安全存储原生实测、远端完整历史浏览、其他安装包/版本的识别规则和生产 WebDAV 兼容性。Windows、Apple Silicon Mac、Intel Mac 的构建运行/安装包尚未验证。Android 独立宿主未证明，iOS 路径另行评估。Linux 双目录测试不能冒充两台真实设备或跨平台验证。

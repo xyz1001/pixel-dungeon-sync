@@ -24,7 +24,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 private val workspace = Path.of(System.getProperty("pdsync.workspace", ".")).toAbsolutePath().normalize()
-private enum class Action { CAPTURE, PUSH, RESTORE, RESOLVE, REMOTE_TIP, ARCHIVE }
+private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
 private enum class Page { HOME, CONNECTION, CONFLICT, CONFIRM }
 private data class OperationResult(val message: String, val conflict: AppendConflict? = null)
@@ -77,7 +77,9 @@ fun main() = application {
   var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
   var conflict by remember { mutableStateOf<AppendConflict?>(null) }
-  var confirm by remember { mutableStateOf<Action?>(null) }
+  var confirm by remember { mutableStateOf<OperationTrace?>(null) }
+  val operationEvents = remember { OperationEvents(workspace.resolve(".local/operation-events.log")) }
+  var confirmationNotice by remember { mutableStateOf<String?>(null) }
   var restoreIssue by remember { mutableStateOf<String?>("请选择快照") }
   var conflictRestoreIssue by remember { mutableStateOf<String?>("尚未校验") }
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
@@ -97,7 +99,7 @@ fun main() = application {
   }
   fun requestConfirmation(action: Action) {
    if (busy || connectingAtStartup || appClosed) return
-   confirm = action; navigate(Page.CONFIRM)
+   confirm = operationEvents.begin(action); confirmationNotice = null; navigate(Page.CONFIRM)
   }
   suspend fun refreshProfile(value: AppConfig?) {
    try {
@@ -153,26 +155,54 @@ fun main() = application {
     status = "云端验证已失效，请重新输入密码。本地快照与待上传内容已保留。"
    }
   }
-  fun execute(action: Action) {
-   if (busy || connectingAtStartup || appClosed) return
-   val manager = session ?: return
+  fun cancelConfirmation(trace: OperationTrace) {
+   if (busy || connectingAtStartup) return
+   trace.record(OperationEvent.CONFIRMATION_CANCELED)
+   status = if (trace.action == Action.PUSH && pending) "已取消上传，待上传快照仍保留。" else "已取消本次操作。"
+   confirm = null; confirmationNotice = null; navigate(Page.HOME)
+  }
+  fun execute(trace: OperationTrace) {
+   val action = trace.action
+   trace.record(OperationEvent.CONFIRMATION_SUBMITTED)
+   val rejected = when {
+    appClosed -> OperationGuard.CLOSED
+    connectingAtStartup -> OperationGuard.STARTUP
+    busy -> OperationGuard.BUSY
+    session == null -> OperationGuard.NO_SESSION
+    else -> null
+   }
+   if (rejected != null) {
+    trace.record(OperationEvent.GUARD_REJECTED, guard = rejected)
+    confirmationNotice = when (rejected) {
+     OperationGuard.CLOSED -> "操作未开始：窗口已关闭，请重新打开。"
+     OperationGuard.STARTUP -> "操作未开始：正在读取存档与连接状态，请稍后重试。"
+     OperationGuard.BUSY -> "操作未开始：请等待当前操作完成。"
+     OperationGuard.NO_SESSION -> "操作未开始：存档尚未就绪，请返回主页重新检查存档。"
+    }
+    return
+   }
+   val manager = requireNotNull(session)
    val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
-   busy = true; confirm = null; navigate(Page.HOME)
+   busy = true; confirm = null; confirmationNotice = null; navigate(Page.HOME)
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
     Action.PUSH -> "正在保留快照并校验云端…"
     else -> "正在处理…"
    }
+   var terminalFailure: OperationFailure? = null
+   trace.record(OperationEvent.OPERATION_QUEUED)
    scope.launch {
+    trace.record(OperationEvent.OPERATION_STARTED)
     try {
      val result = withContext(Dispatchers.IO) {
+      trace.record(OperationEvent.WORK_STARTED)
       val stopped = { true }
       fun store() = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
        is AppendPushResult.Success -> OperationResult("追加提交已回读校验。" + (if (result.localDirty) "当前本地还有未上传变化；下一次同步会另建提交。" else "所选进度已成为本机同步基线。") + (if (result.remoteAhead) "另有已观察后续分支，可读取查看。" else ""))
        is AppendPushResult.Diverged -> OperationResult("发现 ${result.conflict.branches.size} 个进度分支，全部快照均已保留。请明确选择。", result.conflict)
       }
-      when (action) {
+      val completed = when (action) {
        Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult("本地快照已保存，可随时从历史中恢复。") }
        Action.PUSH -> pushed(manager.push(store(), stopped))
        Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。") }
@@ -180,18 +210,41 @@ fun main() = application {
        Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped))
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
+      trace.record(OperationEvent.WORK_SUCCEEDED)
+      completed
      }
      status = result.message; conflict = result.conflict; conflictSelection = null
      if (result.conflict != null) navigate(Page.CONFLICT)
-    } catch (e: Exception) { status = "操作未完成：${e.message}。已保存的历史与备份保留。"; authenticationFailed(e) }
+    } catch (e: CancellationException) {
+     terminalFailure = OperationFailure.CANCELED
+     trace.record(OperationEvent.OPERATION_CANCELED, failure = terminalFailure)
+     status = "本次操作已中断，已保存的历史与备份保留。请核对待上传状态后重试。"
+     throw e
+    } catch (e: Exception) {
+     terminalFailure = operationFailure(e)
+     trace.record(OperationEvent.WORK_FAILED, failure = terminalFailure)
+     status = "操作未完成：${e.message}。已保存的历史与备份保留。"; authenticationFailed(e)
+    }
     finally {
      try {
+      trace.record(OperationEvent.HISTORY_REFRESH_STARTED)
       val data = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), manager.currentVersions()) }
       history = data.first; pending = data.second; saveInfo = data.third
       if (selected == null) selected = history.firstOrNull()?.manifest?.id
-     } catch (e: Exception) { status += " 历史刷新失败：${e.message}" }
+      trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
+     } catch (e: CancellationException) {
+      if (terminalFailure == null) terminalFailure = OperationFailure.CANCELED
+      trace.record(OperationEvent.HISTORY_REFRESH_FAILED, failure = OperationFailure.CANCELED)
+     } catch (e: Exception) {
+      val refreshFailure = operationFailure(e)
+      if (terminalFailure == null) terminalFailure = refreshFailure
+      trace.record(OperationEvent.HISTORY_REFRESH_FAILED, failure = refreshFailure)
+      status += " 历史刷新失败：${e.message}"
+     }
      busy = false
     }
+   }.invokeOnCompletion { cause ->
+    trace.record(OperationEvent.OPERATION_FINISHED, failure = terminalFailure ?: cause?.let(::operationFailure))
    }
   }
   fun readRemote() {
@@ -370,10 +423,10 @@ fun main() = application {
          onBack = { if (!busy && !connectingAtStartup) navigate(Page.HOME) },
          onConfirm = { requestConfirmation(Action.RESOLVE) })
        }
-       Page.CONFIRM -> confirm?.let { action ->
-        ConfirmationPage(action, session?.root?.toString(), pending, conflictSelection, busy || connectingAtStartup,
-         onBack = { if (!busy && !connectingAtStartup) { confirm = null; navigate(Page.HOME) } },
-         onConfirm = { execute(action) })
+       Page.CONFIRM -> confirm?.let { trace ->
+        ConfirmationPage(trace.action, session?.root?.toString(), pending, conflictSelection, busy || connectingAtStartup, confirmationNotice,
+         onBack = { cancelConfirmation(trace) },
+         onConfirm = { execute(trace) })
        }
       }
      }
@@ -552,7 +605,7 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
 }
 
 @Composable
-private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, busy: Boolean, onBack: () -> Unit, onConfirm: () -> Unit) {
+private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
  var stopped by remember(action) { mutableStateOf(false) }
  var paused by remember(action) { mutableStateOf(false) }
  val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP)
@@ -560,6 +613,7 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
   title = if (restoring) "备份并恢复整个档案" else if (action == Action.ARCHIVE) "归档待上传快照" else "操作前确认",
   subtitle = "请核对操作范围。取消会返回主页，当前存档不会改变。",
   footer = {
+   notice?.let { Text(it, color = Color(0xFFAD4634), style = MaterialTheme.typography.body2) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     TextButton(enabled = !busy, onClick = onBack) { Text("取消，返回主页") }
     Spacer(Modifier.weight(1f))

@@ -1,0 +1,73 @@
+{
+  "desktopSha256": "528fd4a1eb7b20fa518e9b554ba4d627a18ebc3f9ebd401986d8f052f012a8fa",
+  "coreSha256": "b1846624bd8ef8a7e915957094b1f5b41f175d64af235c0afd32a4b3ddb68a43",
+  "operationGroups": [
+    {
+      "operationId": "1ccc1eb1-a56d-4d1d-bd9e-3fb34390ddb2",
+      "action": "RESTORE",
+      "events": [
+        "CONFIRMATION_ENTERED",
+        "CONFIRMATION_SUBMITTED",
+        "OPERATION_QUEUED",
+        "OPERATION_STARTED",
+        "WORK_STARTED",
+        "WORK_SUCCEEDED",
+        "HISTORY_REFRESH_STARTED",
+        "HISTORY_REFRESH_SUCCEEDED",
+        "OPERATION_FINISHED"
+      ],
+      "terminalFailure": null
+    },
+    {
+      "operationId": "73aa4021-3dfa-4c26-96aa-252d4d4e571e",
+      "action": "PUSH",
+      "events": [
+        "CONFIRMATION_ENTERED",
+        "CONFIRMATION_CANCELED"
+      ],
+      "terminalFailure": null
+    },
+    {
+      "operationId": "68bd9a13-438d-4f8e-a394-785b7c539aab",
+      "action": "PUSH",
+      "events": [
+        "CONFIRMATION_ENTERED",
+        "CONFIRMATION_SUBMITTED",
+        "OPERATION_QUEUED",
+        "OPERATION_STARTED",
+        "WORK_STARTED",
+        "WORK_FAILED",
+        "HISTORY_REFRESH_STARTED",
+        "HISTORY_REFRESH_SUCCEEDED",
+        "OPERATION_FINISHED"
+      ],
+      "terminalFailure": "NETWORK"
+    },
+    {
+      "operationId": "401b8ff9-03e2-48d6-ba92-70bb16f23898",
+      "action": "PUSH",
+      "events": [
+        "CONFIRMATION_ENTERED",
+        "CONFIRMATION_SUBMITTED",
+        "OPERATION_QUEUED",
+        "OPERATION_STARTED",
+        "WORK_STARTED",
+        "WORK_SUCCEEDED",
+        "HISTORY_REFRESH_STARTED",
+        "HISTORY_REFRESH_SUCCEEDED",
+        "OPERATION_FINISHED"
+      ],
+      "terminalFailure": null
+    }
+  ],
+  "cancelKeptPendingBaselineRemoteSavesAndNoRequests": true,
+  "failedRetryKeptSamePlanBaselineRemoteAndSaves": true,
+  "successfulRetryUsedExactFrozenPlan": true,
+  "activePlanExistsAfterSuccess": false,
+  "publishedCommit": "cfdd6460-3242-40d7-9687-ac223e76b6d0",
+  "publishedParent": [
+    "3eb48e88-5463-4620-a8e6-f5e62c1ea21c"
+  ],
+  "baselineAfterSuccess": "cfdd6460-3242-40d7-9687-ac223e76b6d0",
+  "loggedSensitiveSentinels": false
+}
