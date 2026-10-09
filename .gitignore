@@ -1,0 +1,54 @@
+# Local runtimes, build products, caches, and IDE state
+.local/
+.gradle/
+.kotlin/
+**/build/
+out/
+.idea/
+*.iml
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+
+# Runtime logs, crash reports, and memory dumps
+*.log
+hs_err_pid*
+replay_pid*
+core.[0-9]*
+*.hprof
+*.dmp
+
+# Reviewed, static validation evidence belongs with the source
+!/docs/evidence/*.log
+!/docs/cloud-evidence/*.log
+
+# Local settings, credentials, and private signing material
+.env
+.env.*
+local.properties
+credentials*
+.credentials/
+.secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Game saves, snapshots, and local/remote demo data
+saves/
+save-data/
+backups/
+pending/
+webdav/
+game[0-9]*/
+*.dat
+*.zip
+*.sqlite
+*.sqlite3
+*.db

@@ -1,0 +1,6 @@
+DEFAULT_PATH_REAL_FIXTURE_TRANSFER_OK files=6 versions=game1: 922 (1 inactive slots)
+source=/workspace/scratch/76bd29442ef4/game-validation/default-path/fixture-transfer/A/data/.shatteredpixel/shattered-pixel-dungeon
+target=/workspace/scratch/76bd29442ef4/game-validation/default-path/fixture-transfer/B/home/.local/share/.shatteredpixel/shattered-pixel-dungeon
+remote=0467a12d-4474-496f-877c-5673ef419a2c
+backup=4038898b-3c40-4011-bc9e-5327b216c183
+Source/target bytes match; original fixture untouched. Native game launch and UI are not covered by this driver.

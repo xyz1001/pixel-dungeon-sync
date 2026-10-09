@@ -1,0 +1,12 @@
+127.0.0.1 - - [08/Oct/2026 02:59:32] code 404, message Not Found
+127.0.0.1 - - [08/Oct/2026 02:59:32] "GET /shattered/demo/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [08/Oct/2026 02:59:32] "PUT /shattered/demo/head.json HTTP/1.1" 201 -
+127.0.0.1 - - [08/Oct/2026 02:59:32] "GET /shattered/demo/head.json HTTP/1.1" 200 -
+127.0.0.1 - - [08/Oct/2026 02:59:32] code 412, message Precondition Failed
+127.0.0.1 - - [08/Oct/2026 02:59:32] "PUT /shattered/demo/head.json HTTP/1.1" 412 -
+127.0.0.1 - - [08/Oct/2026 02:59:32] "GET /shattered/demo/head.json HTTP/1.1" 200 -
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.508s
+
+OK

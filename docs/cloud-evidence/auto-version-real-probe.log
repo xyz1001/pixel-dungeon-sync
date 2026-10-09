@@ -1,0 +1,2 @@
+REAL_VERSION_PROBE_OK TargetGame(path=/workspace/scratch/76bd29442ef4/game-validation/ShatteredPD-v4.0.2-Java.jar, displayVersion=4.0.2, versionCode=922, sha256=bcefd52a9c14f69c69d3ccc08a212cdd3830b2dc60d78d80895cd803fa1ec602, trusted=true, minimumSaveVersion=850, reason=Verified official Shattered Pixel Dungeon 4.0.2 JAR; supported save writers: 850–922)
+SaveVersions(runs={game1=922}, inactiveSlots=[game2], unknownReason=null)

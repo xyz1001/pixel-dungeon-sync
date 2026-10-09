@@ -1,0 +1,25 @@
+{
+  "first_attempt": {
+    "result": "safe failure: unexpected end of stream",
+    "pending_snapshot": "f6180748-fe42-4d57-9378-b35ec806b9d2",
+    "remote_head_not_published": true
+  },
+  "retry_after_restart": {
+    "head": "f6180748-fe42-4d57-9378-b35ec806b9d2",
+    "pending_cleared": true,
+    "same_snapshot_preserved": true,
+    "checksum_and_synthetic_bytes_verified": true
+  },
+  "repeat_sync": {
+    "head": "a134d5e2-642c-4184-b76b-1809ebd6139d",
+    "parent": "f6180748-fe42-4d57-9378-b35ec806b9d2",
+    "pending_cleared": true,
+    "checksum_verified": true
+  },
+  "runtime": {
+    "jdk": "Temurin 21.0.12.1+1",
+    "render_api": "SOFTWARE",
+    "font_config": "project-local DejaVu and Noto CJK",
+    "real_saves_accessed": false
+  }
+}

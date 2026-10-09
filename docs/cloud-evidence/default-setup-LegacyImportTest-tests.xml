@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.LegacyImportTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-08T11:22:55.536Z" hostname="45d28391169b" time="0.048">
+  <properties/>
+  <testcase name="conflictingPendingOrHeadsAreNotChosen()" classname="pdsync.LegacyImportTest" time="0.017"/>
+  <testcase name="corruptedLegacyArchiveStopsImportAndOriginalRemains()" classname="pdsync.LegacyImportTest" time="0.005"/>
+  <testcase name="importsHistoryBackupMetadataAndPendingWithoutChangingIdentity()" classname="pdsync.LegacyImportTest" time="0.018"/>
+  <testcase name="neverImportsOtherRootsOrEndpoints()" classname="pdsync.LegacyImportTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

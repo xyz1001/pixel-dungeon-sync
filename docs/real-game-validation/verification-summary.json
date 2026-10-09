@@ -1,0 +1,403 @@
+{
+  "status": "PASS",
+  "completedAtUTC": "2026-10-08T09:19:51Z",
+  "game": {
+    "release": "https://github.com/00-Evan/shattered-pixel-dungeon/releases/tag/v4.0.2",
+    "tag": "v4.0.2",
+    "publishedAt": "2026-10-07T16:13:50Z",
+    "asset": "https://github.com/00-Evan/shattered-pixel-dungeon/releases/download/v4.0.2/ShatteredPD-v4.0.2-Java.jar",
+    "assetDigest": "sha256:bcefd52a9c14f69c69d3ccc08a212cdd3830b2dc60d78d80895cd803fa1ec602",
+    "artifactUnmodified": true
+  },
+  "runtime": "Eclipse Temurin 21.0.12.1+1-LTS, Linux cloud Xfce, software OpenGL",
+  "forwardSnapshot": "7dd4b3af-7dc0-448b-b428-79c740fd633b",
+  "reverseSnapshot": "9a6432da-8bc8-4080-9d63-9399b6b133a9",
+  "forwardBackup": "0a8561ed-d304-4f2f-a2d2-015c430646a2",
+  "reverseBackup": "c609fdc3-8b77-438e-ba99-27c9c3b64b11",
+  "states": [
+    {
+      "phase": "A baseline",
+      "state": {
+        "version": 922,
+        "init_ver": 922,
+        "seed": 3699376585355,
+        "depth": 1,
+        "duration": 10,
+        "gold": 0,
+        "enemiesSlain": 0,
+        "hero": {
+          "class": "WARRIOR",
+          "lvl": 1,
+          "HP": 20,
+          "HT": 20,
+          "pos": 1153,
+          "exp": 0,
+          "STR": 10
+        },
+        "inventory": [
+          {
+            "type": "ThrowingStone",
+            "quantity": 3
+          },
+          {
+            "type": "Food",
+            "quantity": 1
+          },
+          {
+            "type": "Waterskin",
+            "quantity": 1
+          },
+          {
+            "type": "VelvetPouch",
+            "quantity": 1
+          }
+        ],
+        "equipment": {
+          "weapon": "WornShortsword",
+          "armor": "ClothArmor"
+        }
+      },
+      "managedFiles": {
+        "badges.dat": {
+          "size": 52,
+          "sha256": "718edb3889ff86b6e15d2afc5e25f831b8972d15c20212c6ef910e1227f8083b"
+        },
+        "game1/depth1.dat": {
+          "size": 1917,
+          "sha256": "daf42760db20a74facb09d5752c36ae4c70efaff06d2a51aec9799a66465e52f"
+        },
+        "game1/game.dat": {
+          "size": 3211,
+          "sha256": "702e22d1b6cd92206b6d58486c34e653aa72c54998f30ac61914860fe34e2fde"
+        },
+        "game2/game.dat": {
+          "size": 1,
+          "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+        },
+        "journal.dat": {
+          "size": 365,
+          "sha256": "725976c0c122880e72874f885dcae32c673e311359657110b1e6972b5b259b18"
+        },
+        "rankings.dat": {
+          "size": 1244,
+          "sha256": "2d3a5e91e43f7d35f4fcc4980f25791726ea27688355030bc1ae7190406528df"
+        }
+      },
+      "globalRecordCount": 1,
+      "totalRuns": 1,
+      "badges": [
+        "DEATH_FROM_HUNGER"
+      ]
+    },
+    {
+      "phase": "B restored",
+      "state": {
+        "version": 922,
+        "init_ver": 922,
+        "seed": 3699376585355,
+        "depth": 1,
+        "duration": 10,
+        "gold": 0,
+        "enemiesSlain": 0,
+        "hero": {
+          "class": "WARRIOR",
+          "lvl": 1,
+          "HP": 20,
+          "HT": 20,
+          "pos": 1153,
+          "exp": 0,
+          "STR": 10
+        },
+        "inventory": [
+          {
+            "type": "ThrowingStone",
+            "quantity": 3
+          },
+          {
+            "type": "Food",
+            "quantity": 1
+          },
+          {
+            "type": "Waterskin",
+            "quantity": 1
+          },
+          {
+            "type": "VelvetPouch",
+            "quantity": 1
+          }
+        ],
+        "equipment": {
+          "weapon": "WornShortsword",
+          "armor": "ClothArmor"
+        }
+      },
+      "managedFiles": {
+        "badges.dat": {
+          "size": 52,
+          "sha256": "718edb3889ff86b6e15d2afc5e25f831b8972d15c20212c6ef910e1227f8083b"
+        },
+        "game1/depth1.dat": {
+          "size": 1917,
+          "sha256": "daf42760db20a74facb09d5752c36ae4c70efaff06d2a51aec9799a66465e52f"
+        },
+        "game1/game.dat": {
+          "size": 3211,
+          "sha256": "702e22d1b6cd92206b6d58486c34e653aa72c54998f30ac61914860fe34e2fde"
+        },
+        "game2/game.dat": {
+          "size": 1,
+          "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+        },
+        "journal.dat": {
+          "size": 365,
+          "sha256": "725976c0c122880e72874f885dcae32c673e311359657110b1e6972b5b259b18"
+        },
+        "rankings.dat": {
+          "size": 1244,
+          "sha256": "2d3a5e91e43f7d35f4fcc4980f25791726ea27688355030bc1ae7190406528df"
+        }
+      },
+      "globalRecordCount": 1,
+      "totalRuns": 1,
+      "badges": [
+        "DEATH_FROM_HUNGER"
+      ]
+    },
+    {
+      "phase": "B played",
+      "state": {
+        "version": 922,
+        "init_ver": 922,
+        "seed": 3699376585355,
+        "depth": 1,
+        "duration": 14,
+        "gold": 0,
+        "enemiesSlain": 0,
+        "hero": {
+          "class": "WARRIOR",
+          "lvl": 1,
+          "HP": 20,
+          "HT": 20,
+          "pos": 1277,
+          "exp": 0,
+          "STR": 10
+        },
+        "inventory": [
+          {
+            "type": "ThrowingStone",
+            "quantity": 3
+          },
+          {
+            "type": "Food",
+            "quantity": 1
+          },
+          {
+            "type": "Waterskin",
+            "quantity": 1
+          },
+          {
+            "type": "VelvetPouch",
+            "quantity": 1
+          }
+        ],
+        "equipment": {
+          "weapon": "WornShortsword",
+          "armor": "ClothArmor"
+        }
+      },
+      "managedFiles": {
+        "badges.dat": {
+          "size": 52,
+          "sha256": "718edb3889ff86b6e15d2afc5e25f831b8972d15c20212c6ef910e1227f8083b"
+        },
+        "game1/depth1.dat": {
+          "size": 1917,
+          "sha256": "be2cae907207aa209fd097976d4b2d6a64173e0298e7ec5780973d7a984640a7"
+        },
+        "game1/game.dat": {
+          "size": 3211,
+          "sha256": "fe25b8c278b9b89538e28e233d34782a09014345c0c232f377ea2620ea5c64c4"
+        },
+        "game2/game.dat": {
+          "size": 1,
+          "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+        },
+        "journal.dat": {
+          "size": 365,
+          "sha256": "725976c0c122880e72874f885dcae32c673e311359657110b1e6972b5b259b18"
+        },
+        "rankings.dat": {
+          "size": 1244,
+          "sha256": "2d3a5e91e43f7d35f4fcc4980f25791726ea27688355030bc1ae7190406528df"
+        }
+      },
+      "globalRecordCount": 1,
+      "totalRuns": 1,
+      "badges": [
+        "DEATH_FROM_HUNGER"
+      ]
+    },
+    {
+      "phase": "A reverse restored",
+      "state": {
+        "version": 922,
+        "init_ver": 922,
+        "seed": 3699376585355,
+        "depth": 1,
+        "duration": 14,
+        "gold": 0,
+        "enemiesSlain": 0,
+        "hero": {
+          "class": "WARRIOR",
+          "lvl": 1,
+          "HP": 20,
+          "HT": 20,
+          "pos": 1277,
+          "exp": 0,
+          "STR": 10
+        },
+        "inventory": [
+          {
+            "type": "ThrowingStone",
+            "quantity": 3
+          },
+          {
+            "type": "Food",
+            "quantity": 1
+          },
+          {
+            "type": "Waterskin",
+            "quantity": 1
+          },
+          {
+            "type": "VelvetPouch",
+            "quantity": 1
+          }
+        ],
+        "equipment": {
+          "weapon": "WornShortsword",
+          "armor": "ClothArmor"
+        }
+      },
+      "managedFiles": {
+        "badges.dat": {
+          "size": 52,
+          "sha256": "718edb3889ff86b6e15d2afc5e25f831b8972d15c20212c6ef910e1227f8083b"
+        },
+        "game1/depth1.dat": {
+          "size": 1917,
+          "sha256": "be2cae907207aa209fd097976d4b2d6a64173e0298e7ec5780973d7a984640a7"
+        },
+        "game1/game.dat": {
+          "size": 3211,
+          "sha256": "fe25b8c278b9b89538e28e233d34782a09014345c0c232f377ea2620ea5c64c4"
+        },
+        "game2/game.dat": {
+          "size": 1,
+          "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+        },
+        "journal.dat": {
+          "size": 365,
+          "sha256": "725976c0c122880e72874f885dcae32c673e311359657110b1e6972b5b259b18"
+        },
+        "rankings.dat": {
+          "size": 1244,
+          "sha256": "2d3a5e91e43f7d35f4fcc4980f25791726ea27688355030bc1ae7190406528df"
+        }
+      },
+      "globalRecordCount": 1,
+      "totalRuns": 1,
+      "badges": [
+        "DEATH_FROM_HUNGER"
+      ]
+    },
+    {
+      "phase": "A played",
+      "state": {
+        "version": 922,
+        "init_ver": 922,
+        "seed": 3699376585355,
+        "depth": 1,
+        "duration": 16,
+        "gold": 0,
+        "enemiesSlain": 0,
+        "hero": {
+          "class": "WARRIOR",
+          "lvl": 1,
+          "HP": 20,
+          "HT": 20,
+          "pos": 1359,
+          "exp": 0,
+          "STR": 10
+        },
+        "inventory": [
+          {
+            "type": "ThrowingStone",
+            "quantity": 3
+          },
+          {
+            "type": "Food",
+            "quantity": 1
+          },
+          {
+            "type": "Waterskin",
+            "quantity": 1
+          },
+          {
+            "type": "VelvetPouch",
+            "quantity": 1
+          }
+        ],
+        "equipment": {
+          "weapon": "WornShortsword",
+          "armor": "ClothArmor"
+        }
+      },
+      "managedFiles": {
+        "badges.dat": {
+          "size": 52,
+          "sha256": "718edb3889ff86b6e15d2afc5e25f831b8972d15c20212c6ef910e1227f8083b"
+        },
+        "game1/depth1.dat": {
+          "size": 1915,
+          "sha256": "ebbea5bca28b278325404680510ada7c1fb55879e3e815dac19c3fb8cb5f29e9"
+        },
+        "game1/game.dat": {
+          "size": 3212,
+          "sha256": "66cfcc3a5296722a3f553f5f8cc37220d1f0fb3e1777d15de0c5532f7386116c"
+        },
+        "game2/game.dat": {
+          "size": 1,
+          "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+        },
+        "journal.dat": {
+          "size": 365,
+          "sha256": "725976c0c122880e72874f885dcae32c673e311359657110b1e6972b5b259b18"
+        },
+        "rankings.dat": {
+          "size": 1244,
+          "sha256": "2d3a5e91e43f7d35f4fcc4980f25791726ea27688355030bc1ae7190406528df"
+        }
+      },
+      "globalRecordCount": 1,
+      "totalRuns": 1,
+      "badges": [
+        "DEATH_FROM_HUNGER"
+      ]
+    }
+  ],
+  "byteChecks": {
+    "forwardManagedExact": true,
+    "reverseManagedExact": true,
+    "forwardBackupExact": true,
+    "reverseBackupExact": true,
+    "settingsPreserved": true,
+    "bonesPreservedOnA": true
+  },
+  "limits": [
+    "Two isolated Linux profiles on one cloud computer; no physical cross-OS claim",
+    "Loopback authenticated WebDAV fixture only; no production server certification",
+    "Managed scope: gameN slots, rankings.dat, badges.dat, journal.dat; excludes settings.xml and bones.dat",
+    "Game rankings retain at most 11 records, not complete lifetime run history"
+  ]
+}
