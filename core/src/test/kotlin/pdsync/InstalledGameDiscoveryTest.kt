@@ -6,12 +6,13 @@ import java.nio.file.attribute.PosixFilePermission
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 import kotlin.test.*
 
 class InstalledGameDiscoveryTest {
  @TempDir lateinit var temp: Path
- private fun context() = SavePathContext("Linux", temp.resolve("home").toString(), emptyMap())
+ private fun context() = SavePathContext(System.getProperty("os.name"), temp.resolve("home").toString(), emptyMap())
  private fun saveRoot() = Path.of(ShatteredDefaultSavePaths.resolve(context()))
  private fun root(path: Path) = InstallationSearchRoot(path.toString(), relativeDirectories = listOf(""))
  private fun file(name: String): Path = temp.resolve(name).also { Files.createDirectories(it.parent); Files.write(it, byteArrayOf(1, 2)) }
@@ -44,7 +45,7 @@ class InstalledGameDiscoveryTest {
  }
 
  @Test fun invalidDefaultEnvironmentDoesNotFallBack() {
-  val result = ShatteredInstallationDiscovery(context().copy(environment = mapOf("XDG_DATA_HOME" to "")), emptyList()).discover()
+  val result = ShatteredInstallationDiscovery(SavePathContext("Linux", "/fixture-home", mapOf("XDG_DATA_HOME" to "")), emptyList()).discover()
   assertFalse(result.defaultSave.available); assertNull(result.defaultSave.path)
   assertContains(result.defaultSave.reason.orEmpty(), "XDG_DATA_HOME")
  }
@@ -156,6 +157,7 @@ class InstalledGameDiscoveryTest {
 
  @Test fun unreadableDirectoryIsReportedAsIncompleteRatherThanNotFound() {
   val directory = Files.createDirectory(temp.resolve("unreadable"))
+  assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"), "Requires POSIX directory permissions; Windows ACL denial is not covered by this test")
   val permissions = Files.getPosixFilePermissions(directory)
   try {
    Files.setPosixFilePermissions(directory, emptySet<PosixFilePermission>())

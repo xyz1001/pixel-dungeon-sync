@@ -6,7 +6,7 @@ import kotlin.io.path.*
 import kotlin.test.*
 
 class DefaultProfileLocationTest {
- private fun context() = SavePathContext("Linux", Files.createTempDirectory("fixed-home").toString(), emptyMap())
+ private fun context() = SavePathContext(System.getProperty("os.name"), Files.createTempDirectory("fixed-home").toString(), emptyMap())
  @Test fun missingDefaultDoesNotCreateOrFallBackToManualConfig() {
   val context = context(); val location = DefaultProfileLocation(context)
   val manual = Files.createTempDirectory("old-manual"); manual.resolve("rankings.dat").writeText("old")
@@ -39,9 +39,9 @@ class DefaultProfileLocationTest {
   assertEquals(snapshot.manifest.id, old.history().single().manifest.id)
  }
  @Test fun explicitXdgAndFutureAdapterAreInjectableWithoutHostReads() {
-  val home = Files.createTempDirectory("fixed-home"); val data = Files.createTempDirectory("fixed-xdg")
-  val location = DefaultProfileLocation(SavePathContext("Linux", home.toString(), mapOf("XDG_DATA_HOME" to data.toString())))
-  assertEquals(data.resolve(".shatteredpixel/shattered-pixel-dungeon"), location.resolve())
+  // Foreign-platform policy is lexical; do not feed it host-native temporary paths.
+  val linux = SavePathContext("Linux", "/fixture-home", mapOf("XDG_DATA_HOME" to "/fixture-data"))
+  assertEquals("/fixture-data/.shatteredpixel/shattered-pixel-dungeon", ShatteredDefaultSavePaths.resolve(linux))
   val other = Files.createTempDirectory("adapter-root")
   val resolver = object : GameSavePaths { override fun resolve(context: SavePathContext) = other.toString() }
   assertEquals(other, DefaultProfileLocation(context(), resolver).requireDirectory())
@@ -55,8 +55,8 @@ class DefaultProfileLocationTest {
   val home = Files.createTempDirectory("dot-home")
   val outside = Files.createTempDirectory("dot-outside"); outside.resolve("child").createDirectories()
   Files.createSymbolicLink(home.resolve("link"), outside.resolve("child"))
-  listOf(home.resolve("link/../data").toString(), home.resolve("./data").toString()).forEach { xdg ->
-   val location = DefaultProfileLocation(SavePathContext("Linux", home.toString(), mapOf("XDG_DATA_HOME" to xdg)))
+  listOf(home.resolve("link/../data").toString(), home.resolve("./data").toString()).forEach { unsafeHome ->
+   val location = DefaultProfileLocation(SavePathContext(System.getProperty("os.name"), unsafeHome, emptyMap()))
    assertFailsWith<IllegalArgumentException> { location.resolve() }
   }
  }
@@ -72,7 +72,8 @@ class DefaultProfileLocationTest {
  @Test fun explicitPreparationRejectsAncestorSymlinksAndExistingFiles() {
   val source = context(); val home = java.nio.file.Path.of(source.userHome!!)
   val outside = Files.createTempDirectory("prepare-outside")
-  Files.createSymbolicLink(home.resolve(".local"), outside)
+  val firstAncestor = home.relativize(DefaultProfileLocation(source).resolve()).getName(0)
+  Files.createSymbolicLink(home.resolve(firstAncestor), outside)
   assertFails { DefaultProfileLocation(source).prepareDefaultDirectory() }
   assertTrue(Files.list(outside).use { it.findAny().isEmpty })
   val second = DefaultProfileLocation(context()); second.resolve().parent.createDirectories(); second.resolve().writeText("keep")
