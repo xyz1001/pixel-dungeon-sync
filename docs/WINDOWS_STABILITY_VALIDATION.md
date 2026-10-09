@@ -12,7 +12,9 @@ timestamp preceded the child file creation timestamp.
 The guard now explicitly reads each included entry's BasicFileAttributes with
 NOFOLLOW_LINKS instead of recording cached tree-enumeration attributes. Content,
 size, timestamp, identity, limits and link checks remain enforced. No comparison
-or safety check was relaxed, and file identity is now retained on this host.
+or safety check was relaxed. File keys remain compared when the provider exposes
+them; a direct native probe on this host still returned null, so no additional
+file-identity guarantee is claimed.
 
 All 15 SaveStabilityGuard tests passed offline, including two new regressions:
 20 freshly created fixture trees retain direct-read timestamps/identities, and
