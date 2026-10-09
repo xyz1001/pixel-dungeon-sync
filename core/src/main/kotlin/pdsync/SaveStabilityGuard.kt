@@ -82,7 +82,10 @@ class SaveStabilityGuard(
   val result = sortedMapOf<String, SaveFileMetadata>()
   var bytes = 0L
   var files = 0
-  fun record(path: Path, attrs: BasicFileAttributes) {
+  fun record(path: Path) {
+   // Windows directory enumeration can return cached timestamps and no file key.
+   // Read the entry itself for fresh metadata and identity; never follow links.
+   val attrs = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
    require(!attrs.isSymbolicLink && (attrs.isDirectory || attrs.isRegularFile)) { "Unsafe save entry" }
    require(result.size < MAX_SNAPSHOT_FILES * 4) { "Too many save entries" }
    if (attrs.isRegularFile) {
@@ -97,11 +100,11 @@ class SaveStabilityGuard(
     if (dir == root) return FileVisitResult.CONTINUE
     val name = root.relativize(dir).toString().replace('\\', '/')
     if (!adapter.includes(name)) return FileVisitResult.SKIP_SUBTREE
-    record(dir, attrs)
+    record(dir)
     return FileVisitResult.CONTINUE
    }
    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-    if (adapter.includes(root.relativize(file).toString().replace('\\', '/'))) record(file, attrs)
+    if (adapter.includes(root.relativize(file).toString().replace('\\', '/'))) record(file)
     return FileVisitResult.CONTINUE
    }
   })

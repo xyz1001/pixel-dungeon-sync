@@ -8,6 +8,25 @@ import kotlin.test.*
 import org.junit.jupiter.api.Test
 
 class SaveStabilityGuardTest {
+ @Test fun fingerprintsRetainFreshNativeFileIdentityAfterDirectoryEnumeration() {
+  repeat(20) {
+   val root = root()
+   val fingerprint = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0).fingerprint()
+   for (name in listOf("game1", "game1/game.dat", "rankings.dat")) {
+    val attrs = Files.readAttributes(root.resolve(name), java.nio.file.attribute.BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+    assertEquals(attrs.fileKey()?.toString(), fingerprint.metadata.getValue(name).fileKey)
+    assertEquals(attrs.lastModifiedTime(), fingerprint.metadata.getValue(name).modified)
+   }
+  }
+ }
+ @Test fun directoryMetadataChangesStillBlockEvenWhenContentsMatch() {
+  val root = root(); val directory = root.resolve("game1")
+  val guard = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0)
+  val before = guard.fingerprint()
+  Files.setLastModifiedTime(directory, FileTime.fromMillis(Files.getLastModifiedTime(directory).toMillis() + 10_000))
+  assertEquals(before.files, guard.fingerprint().files)
+  assertFailsWith<SaveNotStableException> { guard.requireUnchanged(before) }
+ }
  private fun root(): Path = Files.createTempDirectory("stable-save-").also {
   it.resolve("game1").createDirectories(); it.resolve("game1/game.dat").writeText("initial")
   it.resolve("rankings.dat").writeText("rank")
