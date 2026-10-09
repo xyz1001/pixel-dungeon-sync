@@ -712,7 +712,7 @@ internal fun runSyncApplication(
           Surface(color = Color(0xFFE3EFE6)) {
            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("本机 · ${device?.displayLabel() ?: "设备未知"}")
-            Text("${value.localFiles.size} 个文件 · ${saveInfo?.summary() ?: "无可识别存档"}", color = muted, style = MaterialTheme.typography.caption)
+            Text("${OnboardingGate.localFileCountLabel(value.kind, value.localFiles.size, value.retryablePending)} · ${saveInfo?.summary() ?: "无可识别存档"}", color = muted, style = MaterialTheme.typography.caption)
             value.localLatestModifiedAt?.let { Text("存档修改 ${localTime(it)}", color = muted, style = MaterialTheme.typography.caption) }
             comparisonCheckedAt?.let { Text("本次核验 ${localTime(it)}", color = muted, style = MaterialTheme.typography.caption) }
            }

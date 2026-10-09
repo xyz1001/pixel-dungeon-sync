@@ -44,4 +44,10 @@ class OnboardingGateTest {
   assertNull(OnboardingGate.homeSelection("verified-commit", mapOf("verified-commit" to "restored-snapshot", "other" to "branch")))
  }
 
+ @Test fun blockedUnknownLocalCountIsNeverRenderedAsEmpty() {
+  assertEquals("文件数量尚未完成核验", OnboardingGate.localFileCountLabel(OnboardingKind.BLOCKED, 0, false))
+  assertEquals("0 个文件", OnboardingGate.localFileCountLabel(OnboardingKind.BOTH_EMPTY, 0, false))
+  assertEquals("3 个文件", OnboardingGate.localFileCountLabel(OnboardingKind.BLOCKED, 3, true))
+ }
+
 }

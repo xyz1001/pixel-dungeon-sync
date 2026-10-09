@@ -11,6 +11,9 @@ internal object OnboardingGate {
  /** A safety backup must not become the default selected restore target after successful setup. */
  fun homeSelection(baselineId: String?, tipSnapshots: Map<String, String>): String? =
   if (baselineId != null && tipSnapshots.keys == setOf(baselineId)) tipSnapshots[baselineId] else null
+ /** An incomplete comparison carries no proven local count; zero would falsely imply emptiness. */
+ fun localFileCountLabel(kind: OnboardingKind, count: Int, retryablePending: Boolean): String =
+  if (kind == OnboardingKind.BLOCKED && !retryablePending) "文件数量尚未完成核验" else "$count 个文件"
  fun allowsAutomatic(progress: OnboardingProgress?, wizardActive: Boolean, cloudVerified: Boolean): Boolean =
   progress == OnboardingProgress.COMPLETE && !wizardActive && cloudVerified
 }
