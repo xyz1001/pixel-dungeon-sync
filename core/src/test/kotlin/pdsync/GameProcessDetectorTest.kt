@@ -22,6 +22,14 @@ class GameProcessDetectorTest {
   alive: Boolean = true) = ObservedGameProcess(pid, "/usr/bin/java", args, cwd, alive)
  private fun status(vararg processes: ObservedGameProcess): GameProcessStatus = GameProcessDetector(target,
   ProcessInventory { ProcessInventorySnapshot(processes.toList()) }, GameProcessPlatform.LINUX, -1).status()
+ private fun jarWithMain(name: String, main: String): Path = root.resolve(name).also { file ->
+  val manifest = JarManifest().apply {
+   mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"; mainAttributes[Attributes.Name.MAIN_CLASS] = main
+  }
+  JarOutputStream(Files.newOutputStream(file), manifest).use { zip ->
+   zip.putNextEntry(JarEntry("fixture.txt")); zip.write(byteArrayOf(1)); zip.closeEntry()
+  }
+ }
 
  @Test fun absoluteSelectedJarIsRunningAndCollectsEveryGamePid() {
   assertEquals(GameProcessStatus.Running(setOf(100L, 101L)), status(java(), java(101),
@@ -48,10 +56,12 @@ class GameProcessDetectorTest {
   assertEquals(GameProcessStatus.Stopped, detector.status())
   assertTrue(detector.isStopped())
  }
- @Test fun missingJavaArgumentsAndMissingExecutableFailClosed() {
+ @Test fun unreadableKnownJavaBlocksButOpaqueUnassociatedHelperDoesNot() {
   assertIs<GameProcessStatus.Unknown>(status(java(args = null)))
   assertIs<GameProcessStatus.Unknown>(status(java(args = emptyList())))
-  assertIs<GameProcessStatus.Unknown>(status(ObservedGameProcess(123, null, null)))
+  assertEquals(GameProcessStatus.Stopped, status(ObservedGameProcess(123, null, null)))
+  assertEquals(GameProcessStatus.Stopped, status(ObservedGameProcess(2, null, listOf("helper-option"), owner = "player")))
+  assertIs<GameProcessStatus.Unknown>(status(ObservedGameProcess(123, null, listOf("-jar", jar.toString()))))
  }
  @Test fun unreadableArgumentFilesAndUnknownLauncherOptionsFailClosed() {
   assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("@secret-options"))))
@@ -106,7 +116,7 @@ class GameProcessDetectorTest {
  @Test fun macAbsoluteJarUsesCanonicalPathAndMissingRelativeCwdIsUnknown() {
   val absolute = ProcessInventory { ProcessInventorySnapshot(listOf(java())) }
   assertIs<GameProcessStatus.Running>(GameProcessDetector(target, absolute, GameProcessPlatform.MAC, -1).status())
-  assertIs<GameProcessStatus.Unknown>(GameProcessDetector(target, ProcessInventory {
+  assertEquals(GameProcessStatus.Stopped, GameProcessDetector(target, ProcessInventory {
    ProcessInventorySnapshot(listOf(java(args = listOf("-jar", "game.jar"))))
   }, GameProcessPlatform.MAC, -1).status())
  }
@@ -114,10 +124,61 @@ class GameProcessDetectorTest {
   val second = root.resolve("another").createDirectories().resolve(jar.fileName).also { it.writeText("other installation") }
   assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", second.toString()))))
  }
- @Test fun renamedOrOtherJarCannotBeProvedUnrelatedFromFilename() {
+ @Test fun unrelatedUnreadableJarIsOutsideScopeWithoutGameAssociation() {
   val other = root.resolve("unrelated.jar").also { it.writeText("fixture") }
-  assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", other.toString()))))
-  assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", root.resolve("unreadable.jar").toString()))))
+  assertEquals(GameProcessStatus.Stopped, status(java(args = listOf("-jar", other.toString()))))
+  assertEquals(GameProcessStatus.Stopped, status(java(args = listOf("-jar", root.resolve("unreadable.jar").toString()))))
+  assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", root.resolve("ShatteredPD-unreadable.jar").toString()))))
+ }
+ @Test fun boundedManifestRecognizesRenamedGameAndExcludesUnrelatedJavaJar() {
+  val renamed = jarWithMain("completely-renamed.jar", GameProcessDetector.SHATTERED_MAIN)
+  val other = jarWithMain("unrelated-launcher.jar", "org.example.OtherMain")
+  assertIs<GameProcessStatus.Running>(status(java(args = listOf("-jar", renamed.toString()))))
+  assertEquals(GameProcessStatus.Stopped, status(java(args = listOf("-jar", other.toString()))))
+  val misleadingName = jarWithMain("Shattered-name-but-other-main.jar", "org.example.OtherMain")
+  assertEquals(GameProcessStatus.Stopped, status(java(args = listOf("-jar", misleadingName.toString()))))
+ }
+ @Test fun malformedOrOversizedAssociatedManifestStaysUnknown() {
+  val oversized = root.resolve("Shattered-oversized.jar")
+  JarOutputStream(Files.newOutputStream(oversized)).use { zip ->
+   zip.putNextEntry(JarEntry("META-INF/MANIFEST.MF")); zip.write(ByteArray(64 * 1024 + 1) { 'x'.code.toByte() }); zip.closeEntry()
+  }
+  assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", oversized.toString()))))
+  val ambiguous = root.resolve("Shattered-ambiguous.jar")
+  JarOutputStream(Files.newOutputStream(ambiguous)).use { zip ->
+   zip.putNextEntry(JarEntry("META-INF/MANIFEST.MF")); zip.write("Manifest-Version: 1.0\r\nMain-Class: other.Main\r\nMain-Class: ${GameProcessDetector.SHATTERED_MAIN}\r\n\r\n".encodeToByteArray()); zip.closeEntry()
+  }
+  assertIs<GameProcessStatus.Unknown>(status(java(args = listOf("-jar", ambiguous.toString()))))
+ }
+ @Test fun sameDetectorRemembersGameThatBecomesOpaqueAndClearsVisiblePidReuse() {
+  var observed = java().copy(startToken = "start-one", owner = "player")
+  val detector = GameProcessDetector(target, ProcessInventory { ProcessInventorySnapshot(listOf(observed), currentOwner = "player") }, GameProcessPlatform.LINUX, -1)
+  assertIs<GameProcessStatus.Running>(detector.status())
+  observed = observed.copy(command = null, arguments = null, startToken = null)
+  assertIs<GameProcessStatus.Unknown>(detector.status()); assertIs<GameProcessStatus.Unknown>(detector.status())
+  observed = observed.copy(startToken = "start-two")
+  assertEquals(GameProcessStatus.Stopped, detector.status())
+ }
+ @Test fun associationIsInstanceScopedAndRemovedAfterACompleteExitObservation() {
+  var observed = listOf(java().copy(startToken = "start-one"))
+  val inventory = ProcessInventory { ProcessInventorySnapshot(observed) }
+  val detector = GameProcessDetector(target, inventory, GameProcessPlatform.LINUX, -1)
+  assertIs<GameProcessStatus.Running>(detector.status())
+  observed = listOf(observed.single().copy(command = null, arguments = null))
+  assertIs<GameProcessStatus.Unknown>(detector.status())
+  assertEquals(GameProcessStatus.Stopped, GameProcessDetector(target, inventory, GameProcessPlatform.LINUX, -1).status())
+  observed = emptyList(); assertEquals(GameProcessStatus.Stopped, detector.status())
+  observed = listOf(ObservedGameProcess(100, null, null, startToken = "start-one"))
+  assertEquals(GameProcessStatus.Stopped, detector.status())
+ }
+ @Test fun incompleteObservationCannotForgetAnAssociatedGame() {
+  var sample = ProcessInventorySnapshot(listOf(java().copy(startToken = "start-one")))
+  val detector = GameProcessDetector(target, ProcessInventory { sample }, GameProcessPlatform.LINUX, -1)
+  assertIs<GameProcessStatus.Running>(detector.status())
+  sample = ProcessInventorySnapshot(emptyList(), complete = false)
+  assertIs<GameProcessStatus.Unknown>(detector.status())
+  sample = ProcessInventorySnapshot(listOf(ObservedGameProcess(100, null, null, startToken = "start-one")))
+  assertIs<GameProcessStatus.Unknown>(detector.status())
  }
  @Test fun renamedJavaAndNativeAppWrapperPathsFailClosed() {
   assertIs<GameProcessStatus.Unknown>(status(ObservedGameProcess(7, "/opt/custom-runtime", listOf("-jar", jar.toString()))))
@@ -131,8 +192,8 @@ class GameProcessDetectorTest {
   assertIs<GameProcessStatus.Running>(scoped(java().copy(owner = "player")))
   assertIs<GameProcessStatus.Unknown>(scoped(java(args = null).copy(owner = "player")))
   assertIs<GameProcessStatus.Unknown>(scoped(java(args = null)))
-  assertIs<GameProcessStatus.Unknown>(scoped(ObservedGameProcess(3, null, null)))
-  assertIs<GameProcessStatus.Unknown>(scoped(ObservedGameProcess(3, null, null, owner = "root"), currentOwner = null))
+  assertEquals(GameProcessStatus.Stopped, scoped(ObservedGameProcess(3, null, null)))
+  assertEquals(GameProcessStatus.Stopped, scoped(ObservedGameProcess(3, null, null, owner = "root"), currentOwner = null))
   assertEquals(GameProcessStatus.Stopped, scoped(ObservedGameProcess(3, "/usr/bin/sleep", null)))
  }
  @Test fun windowsAccountIdentityComparisonIgnoresCase() {

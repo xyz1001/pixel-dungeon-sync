@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.SaveStabilityGuardTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-10-09T06:14:59.389Z" hostname="dd161cbb09b6" time="0.039">
+  <properties/>
+  <testcase name="stableContentUsesDefaultTwoSecondObservationAndDeterministicHashes()" classname="pdsync.SaveStabilityGuardTest" time="0.004"/>
+  <testcase name="mutationDuringFingerprintReadIsRejected()" classname="pdsync.SaveStabilityGuardTest" time="0.008"/>
+  <testcase name="metadataContextIsPreservedOnlyForActualSnapshot()" classname="pdsync.SaveStabilityGuardTest" time="0.003"/>
+  <testcase name="writeDuringQuiescenceIsRejectedWithoutSaveMutation()" classname="pdsync.SaveStabilityGuardTest" time="0.001"/>
+  <testcase name="stableCaptureRetainsExactFingerprintAndDelaysMetadataProviderUntilCapture()" classname="pdsync.SaveStabilityGuardTest" time="0.003"/>
+  <testcase name="metadataOnlyChangesAreRejectedToo()" classname="pdsync.SaveStabilityGuardTest" time="0.003"/>
+  <testcase name="mutationInsideActualCaptureIsRejected()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <testcase name="stoppedCallbackIsFreshAndGameRestartDuringQuietWindowIsRejected()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <testcase name="interruptPreservesThreadCancellation()" classname="pdsync.SaveStabilityGuardTest" time="0.003"/>
+  <testcase name="mutationAfterActualCaptureIsRejected()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <testcase name="excludedFilesDoNotCreateFalseDirtyChanges()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <testcase name="sameSizeWriteWithRestoredMtimeStillChangesFingerprint()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <testcase name="missingRootSymlinkAndOversizeFilesAreRejected()" classname="pdsync.SaveStabilityGuardTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

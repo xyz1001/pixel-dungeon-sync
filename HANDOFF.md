@@ -82,3 +82,9 @@ Windows 用户设备与 Apple Silicon Mac 尚未连接；Intel Mac 没有测试�
 生产云桌面原生UI验证双按钮、连接、暂停持久化、未知状态停止且无写入；一个当前账号常驻进程的可执行身份不可见，内核读取明确AccessDenied，生产上传/恢复正确阻止。这是可用性发布门槛，不能以测试注入绕过并宣称产品就绪。另用明确标记且只在testclasses存在的注入守卫验证原生界面业务流程：首次手动上传、文件变更自动上传、无勾选恢复、先备份、自动发布恢复提交、无自触发循环、暂停和手动上传。这个流程不证明生产进程检测闭环。用户真实会话只读探针待独立复验。
 
 协议依然追加式，不覆盖共享引用。新元数据可向后读，旧v7严格解码器不能读新字段，使用同一云端的客户端需协调升级。详情见 docs/AUTOMATIC_SYNC_V8.md、docs/AUTOMATIC_PROCESS_SAFETY.md、docs/SNAPSHOT_METADATA.md、docs/PROCESS_CHECK_HANDOFF.md 和 docs/automatic-v8-evidence/UI_VALIDATION.md。没有真实Cloudreve写入、用户凭据访问、停止旧实例或远端Git推送。
+
+## 普通权限游戏范围与生产流程复验（2026-10-09，v9）
+
+按用户明确的普通权限游戏假设调整检测：无游戏关联的受限进程不再全局阻塞；已知Java参数不可见、已关联游戏信息丢失和枚举失败仍停止。改名JAR通过有界静态manifest识别，其他可识别Java程序不阻塞。同一目标复用独立检测器以保留PID/启动身份关联。没有重试或绕过AccessDenied路径，不再要求用户下载探针。
+
+373 JVM、3 Python及8独立对抗测试通过。生产MainKt原生云Linux流程通过：手动上传、文件变化自动上传、真实普通权限官方游戏运行时拦截及退出后自动上传、无勾选备份恢复及恢复提交自动发布。此次没有注入Stopped；最终运行副本与构建JAR一致。首次恢复遇到暂时Unknown安全拒绝，明确重试后成功，失败记录保留。验证对象是合成存档和loopback，不代表本轮真实Cloudreve/游戏载入或Windows/macOS原生通过。详见 docs/AUTOMATIC_SYNC_V9.md 与 docs/automatic-v9-evidence/UI_VALIDATION.md。

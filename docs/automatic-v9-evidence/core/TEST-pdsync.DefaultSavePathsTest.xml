@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.DefaultSavePathsTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-10-09T06:14:54.292Z" hostname="dd161cbb09b6" time="0.013">
+  <properties/>
+  <testcase name="unixRequiresUsableHomeOnlyWhenNeeded()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="linuxUsesUserHomeWhenXdgIsAbsent()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="linuxPreservesLegalWhitespaceUnicodeAndBackslashes()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="windowsSupportsUncHomeWithUnicodeAndSpaces()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="windowsPreservesHomeDotSegmentsAndTrailingSeparator()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="macPreservesHomeTrailingSlash()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="linuxRejectsRelativeXdgInsteadOfUsingWorkingDirectory()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="windowsRejectsMissingRelativeRootRelativeAndMalformedHome()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="linuxHonorsAbsoluteXdgWithoutNeedingUserHome()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="windowsUsesJavaUserHomeRatherThanAppDataOrUserProfileEnvironment()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="perGamePolicyCanBeReplacedWithoutReadingHostProperties()" classname="pdsync.DefaultSavePathsTest" time="0.002"/>
+  <testcase name="macUsesCaseSensitiveTitleWithoutVendorDirectory()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="linuxPreservesTrailingSlashesAndDotSegments()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="linuxRejectsNulInXdg()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="osDetectionKeepsTheUpstreamCaseSensitiveContainsRules()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="linuxDoesNotUseHomeEnvironmentOrXdgConfigHome()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="windowsXpRequiresExactOsName()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <testcase name="linuxRejectsEmptyXdgInsteadOfUsingTheHomeFallbackOrFilesystemRoot()" classname="pdsync.DefaultSavePathsTest" time="0.0"/>
+  <testcase name="freeBsdUsesLaunchersExplicitLinuxOverride()" classname="pdsync.DefaultSavePathsTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

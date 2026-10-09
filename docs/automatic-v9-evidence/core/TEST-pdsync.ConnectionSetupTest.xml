@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.ConnectionSetupTest" tests="20" skipped="0" failures="0" errors="0" timestamp="2026-10-09T06:14:52.416Z" hostname="dd161cbb09b6" time="0.339">
+  <properties/>
+  <testcase name="connectionTestFollowsEveryDiscoveryPage()" classname="pdsync.ConnectionSetupTest" time="0.099"/>
+  <testcase name="everyDraftEditInvalidatesProofEvenWhenChangedBack()" classname="pdsync.ConnectionSetupTest" time="0.003"/>
+  <testcase name="cancelDuringTestCannotResurrectProofAndConcurrentWorkIsGuarded()" classname="pdsync.ConnectionSetupTest" time="0.003"/>
+  <testcase name="cancelAfterSuccessDropsDraftAndKeepsPriorFileExactly()" classname="pdsync.ConnectionSetupTest" time="0.001"/>
+  <testcase name="rememberedSecretFailureMayDowngradeFlagButCannotSilentlyEnableIt()" classname="pdsync.ConnectionSetupTest" time="0.002"/>
+  <testcase name="failedConfigWriteDoesNotConsumeTestOrLoseSessionPassword()" classname="pdsync.ConnectionSetupTest" time="0.002"/>
+  <testcase name="webDavFailureCodeRemainsAvailableToOrdinarySyncCallers()" classname="pdsync.ConnectionSetupTest" time="0.006"/>
+  <testcase name="absentConfigurationStartsBlankAndDoesNotPersistOrAutoConnect()" classname="pdsync.ConnectionSetupTest" time="0.001"/>
+  <testcase name="emptyRemoteRequiresFullListingAndApplyPersistsOnlySafeFields()" classname="pdsync.ConnectionSetupTest" time="0.061"/>
+  <testcase name="failedRetestClearsPreviousProof()" classname="pdsync.ConnectionSetupTest" time="0.001"/>
+  <testcase name="invalidInputOrCorruptRemoteNeverAuthorizesApply()" classname="pdsync.ConnectionSetupTest" time="0.007"/>
+  <testcase name="authFailureHasTypedStatusAndRetryDoesNotPersist()" classname="pdsync.ConnectionSetupTest" time="0.052"/>
+  <testcase name="populatedListingProvesDiscoveryWithoutUploadingOrReadingObjects()" classname="pdsync.ConnectionSetupTest" time="0.055"/>
+  <testcase name="identityEditDropsPreviousPasswordButProfileEditRetainsIt()" classname="pdsync.ConnectionSetupTest" time="0.001"/>
+  <testcase name="existingLegacyHeadBlocksSetupRatherThanApprovingMixedProtocol()" classname="pdsync.ConnectionSetupTest" time="0.008"/>
+  <testcase name="forbiddenAndRedirectsAreFailuresWithoutFollowingRedirect()" classname="pdsync.ConnectionSetupTest" time="0.01"/>
+  <testcase name="existingDifferentLegacyBackupIsNeverOverwrittenOrUsedToDiscardOriginal()" classname="pdsync.ConnectionSetupTest" time="0.003"/>
+  <testcase name="legacyRootIsIgnoredWithoutRewritingAndOriginalJsonIsBackedUpOnce()" classname="pdsync.ConnectionSetupTest" time="0.002"/>
+  <testcase name="networkFailureIsClearAndRetainsNoSuccessfulProof()" classname="pdsync.ConnectionSetupTest" time="0.005"/>
+  <testcase name="head404AloneDoesNotProveDiscoveryCapability()" classname="pdsync.ConnectionSetupTest" time="0.009"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,7 @@
+{
+  "remote_commits_while_game_running": 2,
+  "manual_upload_blocked": true,
+  "synthetic_change_waited_seconds_at_least": 30,
+  "guard": "production",
+  "game": "official4.0.2 ordinary GUI process"
+}

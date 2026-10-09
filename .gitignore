@@ -54,3 +54,5 @@ game[0-9]*/
 *.db
 
 !/docs/automatic-v8-evidence/*.log
+
+!/docs/automatic-v9-evidence/*.log

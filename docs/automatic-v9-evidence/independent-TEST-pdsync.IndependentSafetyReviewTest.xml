@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.IndependentSafetyReviewTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-09T06:13:59.358Z" hostname="dd161cbb09b6" time="0.56">
+  <properties/>
+  <testcase name="nativeOpaqueCandidateAndInvisibleJavaArgumentsFailClosed()" classname="pdsync.IndependentSafetyReviewTest" time="0.119"/>
+  <testcase name="offlineNewDeviceRetryPreservesCloudSiblingAndLaterLocalEdits()" classname="pdsync.IndependentSafetyReviewTest" time="0.401"/>
+  <testcase name="restartBetweenBackupAndMutationLeavesCurrentProgressUntouched()" classname="pdsync.IndependentSafetyReviewTest" time="0.015"/>
+  <testcase name="opaqueBackgroundIsIgnoredButGameHintsAndIncompleteInventoryStillBlock()" classname="pdsync.IndependentSafetyReviewTest" time="0.004"/>
+  <testcase name="selectedJarCopiedUnderArbitraryNameCannotBeReportedStopped()" classname="pdsync.IndependentSafetyReviewTest" time="0.012"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

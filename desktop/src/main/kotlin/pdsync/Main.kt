@@ -46,9 +46,20 @@ private suspend fun chooseGame(parent: java.awt.Component, initial: String): Str
 
 fun main() = runSyncApplication()
 
+/** Each application keeps only its selected target's process association; every check enumerates afresh. */
+private fun productionProcessCheck(): (TargetGame?) -> GameProcessStatus {
+ val lock = Any()
+ var selected: TargetGame? = null
+ var detector = GameProcessDetector(null)
+ return { target -> synchronized(lock) {
+  if (target != selected) { selected = target; detector = GameProcessDetector(target) }
+  detector.status()
+ } }
+}
+
 /** Production always uses fresh process detection. Dependency injection is only used by test code. */
 internal fun runSyncApplication(
- processStatus: (TargetGame?) -> GameProcessStatus = { GameProcessDetector(it).status() },
+ processStatus: (TargetGame?) -> GameProcessStatus = productionProcessCheck(),
  title: String = "像素地牢 · 存档同步"
 ) = application {
  var busy by remember { mutableStateOf(false) }
@@ -393,7 +404,7 @@ internal fun runSyncApplication(
       pending && !retryable -> "有待检查的中断操作，请在设置中处理。"
       conflict != null || remoteTips.size > 1 -> "多个分支均已保留。点击恢复，明确选择要继续的存档。"
       automatic.needsAttention -> "自动上传已停止重试。请查看下方原因，修正后点击上传。"
-      automatic.waitingForRetry -> "网络未完成，稍后自动重试同一份冻结快照。"
+      automatic.waitingForRetry -> "上次上传未完成，稍后自动重试；已有冻结快照会原样保留。"
       retryable -> "待上传快照已保存在本机，等待静默期后自动重试。"
       else -> "自动上传已开启：检测存档变化或游戏退出，稳定后上传。"
      }
@@ -498,8 +509,8 @@ internal fun runSyncApplication(
          Text("游戏检测与恢复校验", style = MaterialTheme.typography.subtitle1)
          Text(when { targetError != null -> "所选目标暂不可用：$targetError"; targetInfo == null -> "请选择官方游戏 JAR，才能核对游戏进程与恢复版本。"; else -> "Shattered ${targetInfo!!.displayVersion}  ·  ${processMessage(gameStatus)}" }, color = muted)
          OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("选择游戏 JAR…") }
-         Text("只读取，不启动游戏。检测当前账户的游戏进程；相关进程信息不可见时停止操作。其他账户、Steam Cloud 或其他程序仍可能写入，请避免同时同步；这不是全局互斥锁。", color = muted, style = MaterialTheme.typography.caption)
-         if (gameStatus is GameProcessStatus.Unknown) Text("游戏已退出仍无法检测时，请在普通桌面会话检查进程可见性或运行只读诊断。不要强行结束不认识的系统进程，也不要绕过权限限制。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         Text("按游戏以普通权限运行检测当前账户；无游戏线索的受限进程不拦截。已识别游戏状态不明时暂停操作。请避免 Steam Cloud 等同时写入。", color = muted, style = MaterialTheme.typography.caption)
+         if (gameStatus is GameProcessStatus.Unknown) Text("无法确认游戏状态，请关闭游戏后重试。检测失败时不会上传或恢复。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
          Text("默认存档位置", style = MaterialTheme.typography.subtitle1)
          SelectionContainer { Text(pathText, style = MaterialTheme.typography.caption) }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }

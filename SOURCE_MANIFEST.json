@@ -1,16 +1,16 @@
 {
   "files": {
     ".gitignore": {
-      "size": 749,
-      "sha256": "fd9d0f601aa47ee804f30eb0fae0b00e23bc56e15800b8096f6188f91ffb3a47"
+      "size": 785,
+      "sha256": "08b98461667410a10d096175717f1865b71129fe4150779163c69327bacc1111"
     },
     "HANDOFF.md": {
-      "size": 11343,
-      "sha256": "127f538245e4114f38e03ee86d57502f26cdc4e2e1f4b1dfea616f9be0b5c09c"
+      "size": 12442,
+      "sha256": "e7093d1d341c25fcedb1aff66ee6b955bd4627d16a6e2525f1bcaf12e0eefe77"
     },
     "README.md": {
-      "size": 13095,
-      "sha256": "dc9986af3aa2e451369bc1c282d466a4d91a9363b78c5d12408d18c8e87a3b95"
+      "size": 13111,
+      "sha256": "d408b3d844dc365fc78020bfeb6e92583e1616fb47e5a0c4160a739e262c0ea1"
     },
     "build.gradle.kts": {
       "size": 641,
@@ -57,8 +57,8 @@
       "sha256": "0910d3ab243377073b4e5170cf015b7f73112a17e6b4c179fe186a5a54c358a5"
     },
     "core/src/main/kotlin/pdsync/GameProcessDetector.kt": {
-      "size": 12273,
-      "sha256": "cce2d7107ed6923c87c76b943eb89c9ce4afaa49d6e31f39fde6cc855e4ed7e3"
+      "size": 18034,
+      "sha256": "4f224ea684a149b95eb97900e24bf9b0504f43946d51722ad3fc510fea9f6f59"
     },
     "core/src/main/kotlin/pdsync/LinuxProcessArguments.kt": {
       "size": 3113,
@@ -133,8 +133,8 @@
       "sha256": "44cfe929c15cb35e5967b0ed36b282e0edaf456effa9db4309906d14a9504067"
     },
     "core/src/test/kotlin/pdsync/GameProcessDetectorTest.kt": {
-      "size": 12291,
-      "sha256": "513a379f2922998cba3b39e0a26ec4a37ede0565916c84607313aca24deb6802"
+      "size": 16763,
+      "sha256": "d1c3d7eb05239470b845baaa9699160a11299f6b9225288cc90e1a9138364b4f"
     },
     "core/src/test/kotlin/pdsync/IsolatedDefaultPathTransfer.kt": {
       "size": 2823,
@@ -197,8 +197,8 @@
       "sha256": "58b602595a11cc1d7ba603f6b1f666d5afab313bff19fcc61608f9b315c4cdfd"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 49664,
-      "sha256": "4d50106cadb18e70cb5725ee07e7c0b4017b3c8c25af953443beedd1c95e9dcf"
+      "size": 49977,
+      "sha256": "917aec7b14f335b7d64a27c7a36e7f9b988f192e526c6ba91585aeb36f7e5efd"
     },
     "desktop/src/main/kotlin/pdsync/OperationEvents.kt": {
       "size": 6472,
@@ -229,12 +229,16 @@
       "sha256": "2b38cc7e8c0a8d238b1941c5b807ecb0057150791d3b6001f00e3014cccd66d8"
     },
     "docs/AUTOMATIC_PROCESS_SAFETY.md": {
-      "size": 8913,
-      "sha256": "7bc46c8c2e38ccff39773951582e8259a3faf99a769edac69966349eae59d623"
+      "size": 10978,
+      "sha256": "ce947cc88a75163c87b4b5e63fd0a0b19d3b4f024758fbe399402fe9d187c96d"
     },
     "docs/AUTOMATIC_SYNC_V8.md": {
-      "size": 4628,
-      "sha256": "58a9aecad761f0f5503c4c9f0440e1b2eea278d1ad4c0057023472efc7dd60d3"
+      "size": 4777,
+      "sha256": "4362032e0de6b342fec665e111d8a4dc77ddb15596cfa90fa5ceb5c089944228"
+    },
+    "docs/AUTOMATIC_SYNC_V9.md": {
+      "size": 3420,
+      "sha256": "e94e9a089ebd7266c97d4bbfeb3824c8845e4dc31e3b4759d758527a7a127348"
     },
     "docs/AUTO_VERSION_VALIDATION.md": {
       "size": 5910,
@@ -261,8 +265,8 @@
       "sha256": "f6404bcca0e36d544e7721a43dbde1cad7d882aecb25abb3202a9839aaf6064f"
     },
     "docs/PROCESS_CHECK_HANDOFF.md": {
-      "size": 2253,
-      "sha256": "2f5b1a61366f8569be28ee00b9acac24b5c2eede7ce89eb2d98a350b269c29cb"
+      "size": 2520,
+      "sha256": "70c445df2dc9b2aa85ce4c30484e43681541db1c3f01b4db0a0ca4d69bb21f1e"
     },
     "docs/RETRY_DIAGNOSTICS_VALIDATION.md": {
       "size": 5739,
@@ -313,8 +317,8 @@
       "sha256": "f0ff248eed41576905230eed9f0e4b8ec527dca82ca28879e280430521914e8d"
     },
     "docs/automatic-v8-evidence/UI_VALIDATION.md": {
-      "size": 5171,
-      "sha256": "e16de8f9d174cf54f6823e0044744c451971d1ef294f85f2b05891dbb77dd411"
+      "size": 5370,
+      "sha256": "aa11cf48486d86fb2e291cfed1555ae24b6ab2cc501fa290940bcc88338ab1fd"
     },
     "docs/automatic-v8-evidence/build-first.log": {
       "size": 2040,
@@ -439,6 +443,198 @@
     "docs/automatic-v8-evidence/ui-verification.json": {
       "size": 439,
       "sha256": "4b3a58a131b41fe1a6bb06c2c888f4187841e98ce5221dbce7a6abaef0db27bd"
+    },
+    "docs/automatic-v9-evidence/01-production-home.png": {
+      "size": 54349,
+      "sha256": "0853dbc36196a64f1ec03a77d1f7f8f8c9abcf51d6fe13dc5079290e222ca3c3"
+    },
+    "docs/automatic-v9-evidence/02-production-upload.png": {
+      "size": 70520,
+      "sha256": "57e6fa28693052238c55c9ffd20ff7dc36cacc56e5068ea6052f3ff0c9dd823f"
+    },
+    "docs/automatic-v9-evidence/03-production-running.png": {
+      "size": 79061,
+      "sha256": "0c0ff1e1c11508e2ea8b6a6f743043b729a000de7b08b9a927232d789c901147"
+    },
+    "docs/automatic-v9-evidence/04-production-blocked.png": {
+      "size": 72211,
+      "sha256": "e24abcf040979a55cd9ce0167faaca96e1fad31c63bf807d856714cc0caa20c4"
+    },
+    "docs/automatic-v9-evidence/05-official-game.png": {
+      "size": 213067,
+      "sha256": "3b10a19adda2de5e348f193f2dbef4549eaf1f2554de99a0fa23986b2b6b0106"
+    },
+    "docs/automatic-v9-evidence/06-production-exit-upload.png": {
+      "size": 89346,
+      "sha256": "5b259371842ac2b4e06aea24af0ee01dd64c578e412796fbb82a4dbcb22dce2d"
+    },
+    "docs/automatic-v9-evidence/07-production-restore-confirm.png": {
+      "size": 63523,
+      "sha256": "a2f952207f386405c7f6fe95739e832bc906ed708787649236dab1b1b9fb1af4"
+    },
+    "docs/automatic-v9-evidence/08-final-restore-confirm.png": {
+      "size": 63523,
+      "sha256": "a2f952207f386405c7f6fe95739e832bc906ed708787649236dab1b1b9fb1af4"
+    },
+    "docs/automatic-v9-evidence/09-final-restored.png": {
+      "size": 90071,
+      "sha256": "3dff2f234d98b18bbbcc74b55ba919d37268154dbb53433bf8b81990df5adf7a"
+    },
+    "docs/automatic-v9-evidence/10-final-settings.png": {
+      "size": 58162,
+      "sha256": "f0f0337c00a9f45650b8510bd569e8a14b63d39a3bf5a6af80efa82358bd2d54"
+    },
+    "docs/automatic-v9-evidence/11-final-paused.png": {
+      "size": 88111,
+      "sha256": "19df111bed4754be9253bc0ab7714a77ac47590b42b48a6c830b0c0c21792a9a"
+    },
+    "docs/automatic-v9-evidence/12-final-manual-paused.png": {
+      "size": 88719,
+      "sha256": "a269e73926c40d50c18420def4c6df4c02f72a75026e5cae3beb9f9cc4a1aed5"
+    },
+    "docs/automatic-v9-evidence/UI_VALIDATION.md": {
+      "size": 2926,
+      "sha256": "594fc85675f0a480ff38efe8594ef12a2933d7c2e0be383d907aa691e3054a4d"
+    },
+    "docs/automatic-v9-evidence/build.log": {
+      "size": 2108,
+      "sha256": "007b3d7466f72e2852a2f5bb7dfd270111a8817e3ca8da352ef7361de175addd"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.AppendOnlyWebDavTest.xml": {
+      "size": 2535,
+      "sha256": "a32874cb81489e89a4936a5c80ca43fd9b13bb9bb8ad1547a1bc3700ca146da2"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.AppendProfileSessionTest.xml": {
+      "size": 3483,
+      "sha256": "257b7b060fbca1b394e341a2804aa88c0f8cdd217c440d70e9875f037fb1a642"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.AppendRepositoryTest.xml": {
+      "size": 7404,
+      "sha256": "5cb5a06d8118163fc5db2e9139435c67731c8aa78bb8c4a16a5e03e8006f5c18"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.AutomaticUploadPersistenceTest.xml": {
+      "size": 907,
+      "sha256": "edbc77b02cd241aa9970a9be6b5a00099a7befc17765e8e00f5295b4413001cb"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.ConnectionProvisioningTest.xml": {
+      "size": 1579,
+      "sha256": "dde1616b5b77c066ffbd34b1aa9a08a4a3207d1020fff3870b00f15b24cdb239"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.ConnectionSetupTest.xml": {
+      "size": 2916,
+      "sha256": "fc26c0a834563417406c918c4f5507a748a9743521940e174922f534c5f2693d"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.CoreTest.xml": {
+      "size": 3584,
+      "sha256": "c4b413f4d121098a823fcf1263d4f425c4d152fdb60864e6c0ab3dd782c14fef"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.DefaultProfileLocationTest.xml": {
+      "size": 1131,
+      "sha256": "8704cd656ce02d7d30de0b137914a3c6266f905fe2c787ee39b56c26f9a2bdb5"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.DefaultSavePathsTest.xml": {
+      "size": 2613,
+      "sha256": "0af8a2b265f0b9803526898b29f381e79c9503e37e970147c84a8463fc0dbef9"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.GameProcessDetectorTest.xml": {
+      "size": 3754,
+      "sha256": "f94a43cd1fe73c2a19bd936a9730e7d52ba1b196add362da29f061ea40ce37ff"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.LegacyImportTest.xml": {
+      "size": 785,
+      "sha256": "8463d748fb2d057ab666bf86fc4533bac5beb45b38e13914471eec0cb9e49fbe"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.LinuxProcessArgumentsTest.xml": {
+      "size": 1280,
+      "sha256": "ae86bda88ac40f8a3066f0971412163981d5365277b8f6b9de9f4295589756b1"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.NamespaceCreationTest.xml": {
+      "size": 4451,
+      "sha256": "10f7a2310f00a6c67bf7fd1ed6effc4aef7b496f3a5ea5c7cafeb50541a81a22"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.ProfileSessionTest.xml": {
+      "size": 2449,
+      "sha256": "d40fe74bbb697740d1c64851122c9e43a13a1ad67e09a40acfd6340caa62e72a"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.SaveStabilityGuardTest.xml": {
+      "size": 1964,
+      "sha256": "e1258588e708ffffe4986365822cf9e961b1d285b809f428157f3366a90abeb5"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.SaveVersionsTest.xml": {
+      "size": 2324,
+      "sha256": "71e143b56b29b7aa22f86cd71500260136093a3dee0f336970b1286f18d94956"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.SecretStoreTest.xml": {
+      "size": 2786,
+      "sha256": "b6f73c0712efda50a1197479e3412816a4a41456a324076e39877536ac7dc70e"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.SnapshotMetadataTest.xml": {
+      "size": 2565,
+      "sha256": "0dbae47edd6a5f26ce217e3fe093253a78214473a802fa67ad5731d4796ba8d3"
+    },
+    "docs/automatic-v9-evidence/core/TEST-pdsync.VersionControllerTest.xml": {
+      "size": 1051,
+      "sha256": "cb53808b1a18322975d562d3cc4686d5134ad22ad2ecf3a72c30f84fbaf73b11"
+    },
+    "docs/automatic-v9-evidence/desktop/TEST-pdsync.AutomaticUploadTest.xml": {
+      "size": 1883,
+      "sha256": "d1157cfb17a10c51709dd7d2ec625481ad55d761ec3abd7084e1fbbd35c4969f"
+    },
+    "docs/automatic-v9-evidence/desktop/TEST-pdsync.ConnectionPageLifetimeTest.xml": {
+      "size": 1639,
+      "sha256": "83bcece18be89c5ed9bfd6c38e7afa449b6ea6c85a4cdd19b92f21ae3bb1d3e2"
+    },
+    "docs/automatic-v9-evidence/desktop/TEST-pdsync.OperationEventsTest.xml": {
+      "size": 1643,
+      "sha256": "29ffe2de70ce909a155bda78adb5c71993d702b7f551b4417a3264f10330e778"
+    },
+    "docs/automatic-v9-evidence/final-build.log": {
+      "size": 2186,
+      "sha256": "c9b19e21b03c52cfd8a705e0d069db4e1a654f24ba4c9c71a307f43ed7fa79b3"
+    },
+    "docs/automatic-v9-evidence/final-runtime-sha256.txt": {
+      "size": 239,
+      "sha256": "f8ec9133a28e8925110b9d4fac818b98ec8be22093b959edb1a3276d2d616544"
+    },
+    "docs/automatic-v9-evidence/independent-TEST-pdsync.IndependentAutomaticStateReviewTest.xml": {
+      "size": 775,
+      "sha256": "5af2489f938df88aedf01eedd531f9ee0234272142f9f00f3b1e9ef55723c8bb"
+    },
+    "docs/automatic-v9-evidence/independent-TEST-pdsync.IndependentSafetyReviewTest.xml": {
+      "size": 1045,
+      "sha256": "dbe513753183f17249e4a230e3686505fc584298033b856186551efe672ec110"
+    },
+    "docs/automatic-v9-evidence/independent-tests.log": {
+      "size": 1853,
+      "sha256": "0016e4f37b9c2fa02c12d5864b5f302bc870653cb9c623b59b65c3cadb8d7516"
+    },
+    "docs/automatic-v9-evidence/operation-events.log": {
+      "size": 8660,
+      "sha256": "f4fbcb22c7b61bf61d08f37561cd292e7a953befe23c82b02d85846c0dd7a634"
+    },
+    "docs/automatic-v9-evidence/prewording-runtime-sha256.txt": {
+      "size": 239,
+      "sha256": "a6e6c491fe61057af68c2c32317a29510e6346bbdabe0837f6de6f39792243ee"
+    },
+    "docs/automatic-v9-evidence/python-tests.log": {
+      "size": 1951,
+      "sha256": "57eba44e36fb12b2b516e7faf5d5abd1dd59c81ae7fafd8e32ff7c222e4febcb"
+    },
+    "docs/automatic-v9-evidence/running-check.json": {
+      "size": 200,
+      "sha256": "2d4d95a9e23bd99bd46784fa4bd2fc8c27605be517b6947a07344b5e794d9798"
+    },
+    "docs/automatic-v9-evidence/runtime-sha256.txt": {
+      "size": 239,
+      "sha256": "f8ec9133a28e8925110b9d4fac818b98ec8be22093b959edb1a3276d2d616544"
+    },
+    "docs/automatic-v9-evidence/test-counts.json": {
+      "size": 180,
+      "sha256": "21234e4e40819e9194a476c2cb3f0802673eab7f46da37313cee75c04e4310ac"
+    },
+    "docs/automatic-v9-evidence/ui-verification.json": {
+      "size": 1205,
+      "sha256": "4173492a55d4ee228cecfd4331913d645515013ef7591cb7ec04441a687aecd6"
     },
     "docs/cloud-evidence/append-only-build.log": {
       "size": 2117,
@@ -1203,9 +1399,9 @@
   ],
   "public_test_auth": "demo/demo fixtures only",
   "origin_archive_sha256": "a1c2ff347e2efd3b2f25fc9827402ce73c57b909b457de6af692e162b2101ebf",
-  "notes": "v8 automatic local upload, current-account fail-closed process and stable-backup guards, two-action home, preserved restore/branch safety, device and UTC provenance metadata. Full build/installDist and368 JVM tests (core336 desktop32),3 Python tests and7 independent adversarial tests passed. Production cloud GUI connection/two-button/pause/Unknown-no-write verified but blocked by unavailable executable identity; explicit test-only guard-injected native upload/automatic-change/backup-restore/restore-publication/pause/manual flow passed. Actual user-session process probe pending; no Windows/macOS native or production-ready claim. Old strict v7 clients require coordinated upgrade. No user-computer, real-cloud server or credential access in implementation. Source package excludes .git/.local/caches/builds/save fixtures/raw process inventories/secrets.",
+  "notes": "v9 narrows game-process detection to the explicitly requested ordinary-permission current-account scope. Unassociated opaque helper processes no longer block; identifiable/remembered game candidates, unreadable Java arguments and incomplete inventories still fail closed. Bounded static manifests identify renamed games and unrelated Java launchers. Full build/installDist and373 JVM tests (core341 desktop32),3 Python and8 independent fault tests passed. Real production Linux GUI flow (no injected guard) verified manual upload, local-change auto-upload, actual official-game running block and exit resume, backed-up restore and automatic restore publication, preserved provenance, no self loop, pause and manual upload. First restore transient Unknown safely refused; final-runtime explicit retry passed. Synthetic saves and isolated loopback only; no Windows/macOS native, real Cloudreve or arbitrary-process universal guarantee. Optional old v8 probe is not a prerequisite. No user-computer/server/credential changes or remote Git push. Archive excludes git/runtime/build/cache/save fixtures/raw process inventories/secrets.",
   "origin_source_commit": "1177a6babb4e85a7e80ce48f555bc1f59486bcd8",
   "original_git_history_included": false,
   "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73",
-  "previous_source_commit": "8fcd4f9720b52852b730dac9d091e135fa35fc14"
+  "previous_source_commit": "723e4603399bbf8914e0d401d071a85ae886ab6b"
 }
