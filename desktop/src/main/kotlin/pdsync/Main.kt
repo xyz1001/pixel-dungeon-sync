@@ -18,10 +18,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
 import java.nio.file.Path
-import javax.swing.JFileChooser
-import javax.swing.SwingUtilities
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 private val workspace = Path.of(System.getProperty("pdsync.workspace", ".")).toAbsolutePath().normalize()
 private typealias Action = OperationAction
@@ -32,18 +28,6 @@ private data class OperationResult(val message: String, val conflict: AppendConf
 private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
-
-private suspend fun chooseGame(parent: java.awt.Component, initial: String): String? = suspendCoroutine { continuation ->
- SwingUtilities.invokeLater {
-  try {
-   val chooser = JFileChooser().apply {
-    dialogTitle = "选择目标游戏 JAR（只读取，不运行）"; fileSelectionMode = JFileChooser.FILES_ONLY
-    if (initial.isNotBlank()) { val file = java.io.File(initial); currentDirectory = file.parentFile; if (file.isFile) selectedFile = file }
-   }
-   continuation.resume(if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null)
-  } catch (_: Exception) { continuation.resume(null) }
- }
-}
 
 fun main() = runSyncApplication()
 
@@ -173,7 +157,7 @@ internal fun runSyncApplication(
    scope.launch {
     var updated: AppConfig? = null
     try {
-     val chosen = chooseGame(window, saved.targetGame)
+     val chosen = NativeGameChooser.choose(window, saved.targetGame)
      if (chosen != null) {
       val checked = withContext(Dispatchers.IO) {
        val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
@@ -384,7 +368,7 @@ internal fun runSyncApplication(
    busy = true
    scope.launch {
     try {
-     val chosen = chooseGame(window, discoveredTarget?.path ?: setupDraft.targetGame)
+     val chosen = NativeGameChooser.choose(window, discoveredTarget?.path ?: setupDraft.targetGame)
      if (chosen != null) {
       val verified = withContext(Dispatchers.IO) {
        val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
