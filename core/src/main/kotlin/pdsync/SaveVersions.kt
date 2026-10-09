@@ -81,18 +81,22 @@ object ShatteredVersions {
  }
 
  /** Reads one bounded byte snapshot of a JAR, preventing hash/manifest reads from racing each other. */
- fun target(path: Path): TargetGame {
+ fun target(path: Path): TargetGame = target(path, MAX_JAR_BYTES, MAX_JAR_EXPANDED_BYTES)
+
+ /** Discovery uses smaller per-candidate limits; this never changes the checksum trust policy. */
+ internal fun target(path: Path, maxInputBytes: Int, maxExpandedBytes: Long): TargetGame {
+  require(maxInputBytes in 1..MAX_JAR_BYTES && maxExpandedBytes in 1..MAX_JAR_EXPANDED_BYTES)
   val checked = SafePaths.checked(path)
   require(Files.isRegularFile(checked, LinkOption.NOFOLLOW_LINKS)) { "Target game must be a regular JAR file" }
-  require(Files.size(checked) <= MAX_JAR_BYTES) { "Target JAR exceeds the 256 MiB limit" }
+  require(Files.size(checked) <= maxInputBytes) { "Target JAR exceeds the $maxInputBytes byte input limit" }
   val bytes = Files.newInputStream(checked, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use {
-   it.readNBytes(MAX_JAR_BYTES + 1).also { data ->
-    require(data.size <= MAX_JAR_BYTES) { "Target JAR exceeds the 256 MiB limit" }
+   it.readNBytes(maxInputBytes + 1).also { data ->
+    require(data.size <= maxInputBytes) { "Target JAR exceeds the $maxInputBytes byte input limit" }
    }
   }
   require(bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte() &&
    bytes[2] == 3.toByte() && bytes[3] == 4.toByte()) { "Target is not a JAR/ZIP archive" }
-  val centralEntries = jarEntries(bytes)
+  val centralEntries = jarEntries(bytes, maxExpandedBytes)
   var manifest: ByteArray? = null
   var launcher = false
   var expanded = 0L
@@ -115,7 +119,7 @@ object ShatteredVersions {
       val count = zip.read(buffer)
       if (count < 0) break
       expanded += count
-      require(expanded <= MAX_JAR_EXPANDED_BYTES) { "Target JAR exceeds the expanded size limit" }
+      require(expanded <= maxExpandedBytes) { "Target JAR exceeds the expanded size limit" }
       if (output != null) {
        require(output.size() + count <= MAX_JAR_MANIFEST_BYTES) { "Target manifest exceeds the 64 KiB limit" }
        output.write(buffer, 0, count)
@@ -171,7 +175,7 @@ object ShatteredVersions {
  }
 
  /** Inspect both ZIP directory and local headers; streamed ZIP readers alone ignore the directory. */
- private fun jarEntries(bytes: ByteArray): Set<String> {
+ private fun jarEntries(bytes: ByteArray, maxExpandedBytes: Long): Set<String> {
   fun short(offset: Int): Int {
    require(offset >= 0 && offset <= bytes.size - 2) { "Truncated target JAR" }
    return (bytes[offset].toInt() and 255) or ((bytes[offset + 1].toInt() and 255) shl 8)
@@ -213,7 +217,7 @@ object ShatteredVersions {
     dataStart + word(cursor + 20) <= start &&
     utf8(bytes.copyOfRange(offset + 30, offset + 30 + localNameSize)) == name) { "Target JAR has inconsistent local entry names or sizes" }
    expanded += word(cursor + 24)
-   require(expanded <= MAX_JAR_EXPANDED_BYTES) { "Target JAR exceeds the expanded size limit" }
+   require(expanded <= maxExpandedBytes) { "Target JAR exceeds the expanded size limit" }
    cursor = next.toInt()
   }
   require(cursor == end) { "Target JAR has unexpected ZIP directory data" }
