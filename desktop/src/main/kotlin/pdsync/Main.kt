@@ -149,7 +149,9 @@ internal fun runSyncApplication(
     if (appClosed) return
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
-    selected = history.firstOrNull()?.manifest?.id; remoteTips = emptySet(); conflictSelection = null; conflict = null
+    // A newest history entry can be an empty pre-restore backup. Start unselected;
+    // a sole verified remote tip (or the user's click) supplies the normal selection.
+    selected = null; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
     status = if (value == null) "默认存档位置已找到。连接云端后即可管理快照。" else "已开始观察存档。已有同步基线会自动补传离线变化；新档案可先点击上传，后续自动处理。"
    } catch (e: CancellationException) { throw e }
@@ -432,6 +434,7 @@ internal fun runSyncApplication(
        manager.confirmOnboardingReady(result, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { processStatus(target) is GameProcessStatus.Stopped }
       }
       remoteInspectionReady = true
+      selected = OnboardingGate.homeSelection(result.baselineId, result.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
       finishOnboarding(OnboardingProgress.COMPLETE, "本地与已关联云端分支一致，无需上传或恢复。")
      }
     } catch (e: CancellationException) { throw e }

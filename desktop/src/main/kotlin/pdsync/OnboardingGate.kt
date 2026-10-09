@@ -8,6 +8,9 @@ internal object OnboardingGate {
   progress == OnboardingProgress.LEGACY -> if (hasBaseline) OnboardingProgress.COMPLETE else OnboardingProgress.PENDING
   else -> progress
  }
+ /** A safety backup must not become the default selected restore target after successful setup. */
+ fun homeSelection(baselineId: String?, tipSnapshots: Map<String, String>): String? =
+  if (baselineId != null && tipSnapshots.keys == setOf(baselineId)) tipSnapshots[baselineId] else null
  fun allowsAutomatic(progress: OnboardingProgress?, wizardActive: Boolean, cloudVerified: Boolean): Boolean =
   progress == OnboardingProgress.COMPLETE && !wizardActive && cloudVerified
 }

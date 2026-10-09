@@ -37,4 +37,11 @@ class OnboardingGateTest {
   assertTrue(scheduler.shouldUpload(2601, true, true, true, false, false, false))
  }
 
+ @Test fun completedComparisonSelectsVerifiedTipRatherThanNewestSafetyBackup() {
+  assertEquals("restored-snapshot", OnboardingGate.homeSelection("verified-commit", mapOf("verified-commit" to "restored-snapshot")))
+  assertNull(OnboardingGate.homeSelection(null, mapOf("verified-commit" to "restored-snapshot")))
+  assertNull(OnboardingGate.homeSelection("other-commit", mapOf("verified-commit" to "restored-snapshot")))
+  assertNull(OnboardingGate.homeSelection("verified-commit", mapOf("verified-commit" to "restored-snapshot", "other" to "branch")))
+ }
+
 }
