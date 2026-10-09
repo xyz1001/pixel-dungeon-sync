@@ -1,0 +1,12 @@
+// Run from the repository root. These sources are deliberately outside the production/test source sets.
+allprojects {
+  if (name == 'core') {
+    afterEvaluate {
+      kotlin.sourceSets.getByName('test').kotlin.srcDir(rootProject.file('docs/onboarding-v10-evidence/independent/tests'))
+      tasks.named('test') {
+        reports.junitXml.outputLocation = rootProject.file('docs/onboarding-v10-evidence/independent/reproduced-results')
+        reports.html.outputLocation = rootProject.file('docs/onboarding-v10-evidence/independent/reproduced-report')
+      }
+    }
+  }
+}

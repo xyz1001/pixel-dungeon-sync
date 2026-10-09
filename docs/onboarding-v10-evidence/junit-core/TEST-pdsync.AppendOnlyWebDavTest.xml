@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.AppendOnlyWebDavTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-10-09T07:56:07.766Z" hostname="dd161cbb09b6" time="5.647">
+  <properties/>
+  <testcase name="relativeQueryLinkAndQuotedCommaWorkWithoutInventingPages()" classname="pdsync.AppendOnlyWebDavTest" time="1.568"/>
+  <testcase name="oversizedDeclaredAndChunkedResponsesAndUploadsFailExplicitly()" classname="pdsync.AppendOnlyWebDavTest" time="0.858"/>
+  <testcase name="unsafeCallerCursorRejectedBeforeNetworkAndQueryNotInErrors()" classname="pdsync.AppendOnlyWebDavTest" time="0.004"/>
+  <testcase name="malformedUnsafeOrNoncanonicalHrefsNeverBecomeFetchRequests()" classname="pdsync.AppendOnlyWebDavTest" time="0.782"/>
+  <testcase name="redirectsNeverFollowEvenWithRedirectEnabledClientAndErrorsDoNotExposeLocation()" classname="pdsync.AppendOnlyWebDavTest" time="0.095"/>
+  <testcase name="malformedPrefixedNamesCollectionsAndDuplicateEntriesFailClosed()" classname="pdsync.AppendOnlyWebDavTest" time="0.287"/>
+  <testcase name="paginationCannotChangeOriginFolderCredentialsOrFragments()" classname="pdsync.AppendOnlyWebDavTest" time="0.527"/>
+  <testcase name="noTrailingSlashBaseStillUsesExistingGameAndProfileCollection()" classname="pdsync.AppendOnlyWebDavTest" time="0.043"/>
+  <testcase name="invalidIdsCannotBecomePathsAndNonLoopbackHttpOrCredentialUrlsAreRejected()" classname="pdsync.AppendOnlyWebDavTest" time="0.082"/>
+  <testcase name="authenticationAndForbiddenAreNotTreatedAsMissingOnAnyRead()" classname="pdsync.AppendOnlyWebDavTest" time="0.084"/>
+  <testcase name="flatReadsAndWritesWorkWithoutEtagsOrConditionalSupportAndNeverWriteHead()" classname="pdsync.AppendOnlyWebDavTest" time="0.31"/>
+  <testcase name="listingHttpAndPerResourceErrorsAreNeverAnEmptyHistory()" classname="pdsync.AppendOnlyWebDavTest" time="0.388"/>
+  <testcase name="legacyDetectionDoesNotParseOrWriteOldHead()" classname="pdsync.AppendOnlyWebDavTest" time="0.039"/>
+  <testcase name="followsExplicitSameCollectionNextPageAndNeverCopiesCursorToObjectGet()" classname="pdsync.AppendOnlyWebDavTest" time="0.115"/>
+  <testcase name="xmlExternalEntitiesDtdAndDeepNestingRejectedWithoutExternalRequests()" classname="pdsync.AppendOnlyWebDavTest" time="0.309"/>
+  <testcase name="depthOneListingFiltersOrdinaryFilesAndObjectsAndSortsCanonicalCommitIds()" classname="pdsync.AppendOnlyWebDavTest" time="0.111"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

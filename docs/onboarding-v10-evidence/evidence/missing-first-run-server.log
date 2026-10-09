@@ -1,0 +1,21 @@
+Demo only: http://127.0.0.1:51540 credentials demo/demo
+127.0.0.1 - - [09/Oct/2026 01:03:14] code 401, message Unauthorized
+127.0.0.1 - - [09/Oct/2026 01:03:14] "PROPFIND / HTTP/1.1" 401 -
+127.0.0.1 - - [09/Oct/2026 01:04:32] "PROPFIND / HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:32] "PROPFIND /shattered/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:32] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:32] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:04:32] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:04:32] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:36] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:04:36] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:04:36] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:55] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:04:55] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:04:55] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:58] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:04:58] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:04:58] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:04:58] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:04:58] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:04:58] "PROPFIND /shattered/default/ HTTP/1.1" 207 -

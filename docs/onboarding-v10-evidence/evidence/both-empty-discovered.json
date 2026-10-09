@@ -1,0 +1,7 @@
+{
+  "case": "both-empty",
+  "label": "discovered",
+  "timestamp": "2026-10-09T08:23:04.782381+00:00",
+  "files": {},
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n"
+}

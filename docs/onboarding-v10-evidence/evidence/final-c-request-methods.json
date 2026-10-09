@@ -1,0 +1,10 @@
+{
+  "blocked": {
+    "GET": 4,
+    "PROPFIND": 5
+  },
+  "remote-b": {
+    "GET": 6,
+    "PROPFIND": 5
+  }
+}

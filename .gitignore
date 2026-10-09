@@ -56,3 +56,9 @@ game[0-9]*/
 !/docs/automatic-v8-evidence/*.log
 
 !/docs/automatic-v9-evidence/*.log
+
+!/docs/onboarding-v10-evidence/*.log
+!/docs/onboarding-v10-evidence/independent/*.log
+!/docs/installation-discovery-evidence/*.log
+
+!/docs/onboarding-v10-evidence/evidence/*.log

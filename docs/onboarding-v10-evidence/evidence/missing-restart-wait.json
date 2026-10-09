@@ -1,0 +1,31 @@
+{
+  "case": "missing",
+  "label": "restart-wait",
+  "timestamp": "2026-10-09T08:05:55.635999+00:00",
+  "files": {
+    "workspace/.local/config.json": {
+      "sha256": "278ccfca6b21432d871cd01ddd58aa9a80ee6ae9e65aa4891a6e5916b2660176",
+      "bytes": 219
+    },
+    "workspace/.local/manager/device.json": {
+      "sha256": "b17de5639df1945d34359849bca9247d4d3ddd6542e530936ba33b63cdf61688",
+      "bytes": 52
+    },
+    "workspace/.local/manager/device.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/locks/780ce71c4cd447c4d669903a883b611642670ec3c2465b4dba70cc5758f3781b.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-append-gameplay/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "COMPLETE"
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n"
+}

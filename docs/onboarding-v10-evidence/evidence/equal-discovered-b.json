@@ -1,0 +1,20 @@
+{
+  "case": "equal",
+  "label": "discovered-b",
+  "timestamp": "2026-10-09T08:18:21.580479+00:00",
+  "files": {
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/game.dat": {
+      "sha256": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256",
+      "bytes": 36
+    },
+    "remote/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "remote/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    }
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n"
+}

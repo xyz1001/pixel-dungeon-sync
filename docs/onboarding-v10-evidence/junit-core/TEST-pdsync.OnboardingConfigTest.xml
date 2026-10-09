@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.OnboardingConfigTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-09T07:56:46.443Z" hostname="dd161cbb09b6" time="0.038">
+  <properties/>
+  <testcase name="freshConnectionAlwaysStartsPendingWithAutomaticNamespace()" classname="pdsync.OnboardingConfigTest" time="0.001"/>
+  <testcase name="legacyConfigKeepsNamespaceAndResumesAsLegacy()" classname="pdsync.OnboardingConfigTest" time="0.002"/>
+  <testcase name="changedServiceIdentityInvalidatesCompletedDecision()" classname="pdsync.OnboardingConfigTest" time="0.0"/>
+  <testcase name="pendingAndDeferredRoundTripWithoutPasswordsOrManualRoots()" classname="pdsync.OnboardingConfigTest" time="0.035"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,30 @@
+{
+  "case": "equal",
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/equal/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "COMPLETE"
+  },
+  "local": {
+    "game1/game.dat": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256"
+  },
+  "remote_file_count": 2,
+  "commits": {
+    "323ee044-0c48-453d-a12c-f726b7d5b209": {
+      "parents": [],
+      "files": {
+        "game1/game.dat": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256"
+      }
+    }
+  },
+  "tips": [
+    "323ee044-0c48-453d-a12c-f726b7d5b209"
+  ],
+  "backups": [],
+  "baselines": [
+    "323ee044-0c48-453d-a12c-f726b7d5b209"
+  ],
+  "PUT_requests": 0
+}

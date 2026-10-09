@@ -1,0 +1,17 @@
+{
+  "case": "missing",
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-append-gameplay/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "PENDING"
+  },
+  "local": {},
+  "remote_file_count": 0,
+  "commits": {},
+  "tips": [],
+  "backups": [],
+  "baselines": [],
+  "PUT_requests": 0
+}

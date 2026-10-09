@@ -1,0 +1,14 @@
+{
+  "core": {
+    "tests": 391,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "desktop": {
+    "tests": 40,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

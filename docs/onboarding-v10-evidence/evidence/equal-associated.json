@@ -1,0 +1,71 @@
+{
+  "case": "equal",
+  "label": "associated",
+  "timestamp": "2026-10-09T08:19:56.237127+00:00",
+  "files": {
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/game.dat": {
+      "sha256": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256",
+      "bytes": 36
+    },
+    "workspace/.local/config.json": {
+      "sha256": "9fc3a8211e3ef79d24266c1fed3ca2292c246e9d1038718cb18fedd7c0e5a2be",
+      "bytes": 239
+    },
+    "workspace/.local/manager/device.json": {
+      "sha256": "d4eb17bc031fe561796c797903dcad0b182859dd3b8c22773cdbdb67ac014608",
+      "bytes": 52
+    },
+    "workspace/.local/manager/device.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/locks/bd759288b95234a0496924740006046f36e5c43dc9aa765893f8cca9a7bb4c9e.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/baseline-established.txt": {
+      "sha256": "90221e9a0f042282ead93d7b309afac460d82d0377d12ebeed2ff9b913ab700e",
+      "bytes": 11
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/baseline.txt": {
+      "sha256": "d09d08716a932427f3ec2c68879313b984789243449b7f0319268b58f8516d80",
+      "bytes": 36
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/known/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/observations/323ee044-0c48-453d-a12c-f726b7d5b209.txt": {
+      "sha256": "67bad342ec9e811122e8b7afa1d403f8c7f9bc5e6122b35802a0ad5ebaf0925a",
+      "bytes": 30
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/observed/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/history/607930e8-1430-478a-a887-dba54ae61c1c.entry.json": {
+      "sha256": "f15fb536b12e38daf5d74ad0cb5c827ff535746b85d2e7efdabc1e2d3df293e8",
+      "bytes": 1055
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/history/607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    },
+    "remote/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "remote/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    }
+  },
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/equal/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "COMPLETE"
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND / HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:37] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:39] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:19:39] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:19:39] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:19:39] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:39] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:44] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:47] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:19:47] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:19:47] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:19:47] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:47] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:19:48] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n"
+}

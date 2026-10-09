@@ -1,0 +1,19 @@
+{
+  "case": "local",
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/local/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "DEFERRED"
+  },
+  "local": {
+    "game1/game.dat": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256"
+  },
+  "remote_file_count": 0,
+  "commits": {},
+  "tips": [],
+  "backups": [],
+  "baselines": [],
+  "PUT_requests": 0
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.OnboardingGateTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-09T07:58:12.824Z" hostname="dd161cbb09b6" time="0.083">
+  <properties/>
+  <testcase name="firstSaveImmediatelyAfterEmptyDecisionIsNotMistakenForCleanStartup()" classname="pdsync.OnboardingGateTest" time="0.044"/>
+  <testcase name="completingDoesNotBypassRemoteInspectionOrReentry()" classname="pdsync.OnboardingGateTest" time="0.021"/>
+  <testcase name="completedEmptyDecisionRechecksAfterRestartUntilRealBaselineExists()" classname="pdsync.OnboardingGateTest" time="0.0"/>
+  <testcase name="newDeferredAndLegacyNeverReleaseAutomatic()" classname="pdsync.OnboardingGateTest" time="0.001"/>
+  <testcase name="legacyRequiresTrustedTargetAndVerifiedBaseline()" classname="pdsync.OnboardingGateTest" time="0.001"/>
+  <testcase name="postponedDecisionRemainsPostponedAcrossRestart()" classname="pdsync.OnboardingGateTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

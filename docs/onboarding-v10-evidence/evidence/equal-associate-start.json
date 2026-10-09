@@ -1,0 +1,63 @@
+{
+  "case": "equal",
+  "label": "associate-start",
+  "timestamp": "2026-10-09T08:19:33.074524+00:00",
+  "files": {
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/game.dat": {
+      "sha256": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256",
+      "bytes": 36
+    },
+    "workspace/.local/config.json": {
+      "sha256": "79e589835e4ef4a1394e8512f5bd61466a768d8c56eeb6c4d1fb3c473f1cb314",
+      "bytes": 238
+    },
+    "workspace/.local/manager/device.json": {
+      "sha256": "d4eb17bc031fe561796c797903dcad0b182859dd3b8c22773cdbdb67ac014608",
+      "bytes": 52
+    },
+    "workspace/.local/manager/device.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/locks/bd759288b95234a0496924740006046f36e5c43dc9aa765893f8cca9a7bb4c9e.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/known/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/observations/323ee044-0c48-453d-a12c-f726b7d5b209.txt": {
+      "sha256": "67bad342ec9e811122e8b7afa1d403f8c7f9bc5e6122b35802a0ad5ebaf0925a",
+      "bytes": 30
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/append-v2/observed/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/history/607930e8-1430-478a-a887-dba54ae61c1c.entry.json": {
+      "sha256": "f15fb536b12e38daf5d74ad0cb5c827ff535746b85d2e7efdabc1e2d3df293e8",
+      "bytes": 1055
+    },
+    "workspace/.local/manager/profiles/a05503ef8ae7e9672cc64a7fd7b27835b91971993bb079ca7750b525a680b883/history/607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    },
+    "remote/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "remote/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    }
+  },
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/equal/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "PENDING"
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND / HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:18:50] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:18:55] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n"
+}

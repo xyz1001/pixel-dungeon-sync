@@ -1,0 +1,17 @@
+{
+  "remote": {
+    "original_remote_objects_unchanged": true
+  },
+  "remote-b": {
+    "original_remote_objects_unchanged": true
+  },
+  "different-restore": {
+    "original_remote_objects_unchanged": true
+  },
+  "different-upload": {
+    "original_remote_objects_unchanged": true
+  },
+  "equal": {
+    "original_remote_objects_unchanged": true
+  }
+}

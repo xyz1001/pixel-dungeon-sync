@@ -1,0 +1,65 @@
+[
+  {
+    "case": "local",
+    "verified_objects": 1,
+    "verified_backups": 0,
+    "verified_baselines": [
+      "323ee044-0c48-453d-a12c-f726b7d5b209"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "remote",
+    "verified_objects": 1,
+    "verified_backups": 1,
+    "verified_baselines": [
+      "323ee044-0c48-453d-a12c-f726b7d5b209"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "different-restore",
+    "verified_objects": 3,
+    "verified_backups": 1,
+    "verified_baselines": [
+      "160a0f78-4f8f-4ab5-b15b-c1dbaa08410a"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "different-upload",
+    "verified_objects": 2,
+    "verified_backups": 0,
+    "verified_baselines": [
+      "35eec44a-d685-4e59-abb1-98af2a15ef80"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "equal",
+    "verified_objects": 1,
+    "verified_backups": 0,
+    "verified_baselines": [
+      "323ee044-0c48-453d-a12c-f726b7d5b209"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "both-empty",
+    "verified_objects": 1,
+    "verified_backups": 0,
+    "verified_baselines": [
+      "9d4e9323-b75f-483f-bb16-152f30853d96"
+    ],
+    "status": "pass"
+  },
+  {
+    "case": "remote-b",
+    "verified_objects": 1,
+    "verified_backups": 1,
+    "verified_baselines": [
+      "323ee044-0c48-453d-a12c-f726b7d5b209"
+    ],
+    "status": "pass"
+  }
+]

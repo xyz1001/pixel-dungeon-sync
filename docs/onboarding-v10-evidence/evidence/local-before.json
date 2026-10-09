@@ -1,0 +1,11 @@
+{
+  "case": "local",
+  "label": "before",
+  "timestamp": "2026-10-09T07:53:03.372157+00:00",
+  "files": {
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/game.dat": {
+      "sha256": "83fd241f751cae591a85c9cfd73d07296afc2f1a94d3a9c2ffd8121d1e21e256",
+      "bytes": 36
+    }
+  }
+}

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.InstalledGameDiscoveryTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-10-09T07:56:38.018Z" hostname="dd161cbb09b6" time="0.207">
+  <properties/>
+  <testcase name="scannerNeverRecursesBeyondExplicitSlotsOrReadsRuntimeJars()" classname="pdsync.InstalledGameDiscoveryTest" time="0.022"/>
+  <testcase name="oversizedAutomaticCandidateIsRejectedBeforeReading()" classname="pdsync.InstalledGameDiscoveryTest" time="0.007"/>
+  <testcase name="oneTrustedCandidateSuggestsItButTwoRequireExplicitChoice()" classname="pdsync.InstalledGameDiscoveryTest" time="0.004"/>
+  <testcase name="copiedManifestCannotBecomeTrustedAutomaticallyOrManually()" classname="pdsync.InstalledGameDiscoveryTest" time="0.014"/>
+  <testcase name="stricterTargetBudgetChecksDeclaredExpandedSizeBeforeDecompression()" classname="pdsync.InstalledGameDiscoveryTest" time="0.001"/>
+  <testcase name="candidateLimitAlsoBoundsAggregateInputAndExpandedWork()" classname="pdsync.InstalledGameDiscoveryTest" time="0.002"/>
+  <testcase name="entryLimitPreventsUnboundedDirectoryEnumeration()" classname="pdsync.InstalledGameDiscoveryTest" time="0.095"/>
+  <testcase name="defaultSaveRejectsFileAndSymlink()" classname="pdsync.InstalledGameDiscoveryTest" time="0.005"/>
+  <testcase name="rootAndSlotLimitsAreReportedAndTraversalSlotsAreRejected()" classname="pdsync.InstalledGameDiscoveryTest" time="0.007"/>
+  <testcase name="dotSegmentsCannotConcealSymbolicLinkAncestor()" classname="pdsync.InstalledGameDiscoveryTest" time="0.001"/>
+  <testcase name="unreadableDirectoryIsReportedAsIncompleteRatherThanNotFound()" classname="pdsync.InstalledGameDiscoveryTest" time="0.002"/>
+  <testcase name="staleConfiguredJarDoesNotSilentlyBecomeAnAutomaticDifferentTarget()" classname="pdsync.InstalledGameDiscoveryTest" time="0.002"/>
+  <testcase name="noHitsDoesNotCreateDirectoriesOrReadHostHome()" classname="pdsync.InstalledGameDiscoveryTest" time="0.001"/>
+  <testcase name="symlinkJarAndAncestorAreRejectedBeforeInspector()" classname="pdsync.InstalledGameDiscoveryTest" time="0.002"/>
+  <testcase name="defaultHintPolicyIsPureAndUsesOnlyExplicitContext()" classname="pdsync.InstalledGameDiscoveryTest" time="0.004"/>
+  <testcase name="malformedJarAndNativeLauncherDoNotExecuteOrBecomeTrusted()" classname="pdsync.InstalledGameDiscoveryTest" time="0.002"/>
+  <testcase name="defaultSaveIsDetectedIndependentlyOfGameJar()" classname="pdsync.InstalledGameDiscoveryTest" time="0.001"/>
+  <testcase name="configuredJarIsProbedFirstAndDeduplicatedButDoesNotHideAmbiguity()" classname="pdsync.InstalledGameDiscoveryTest" time="0.006"/>
+  <testcase name="invalidDefaultEnvironmentDoesNotFallBack()" classname="pdsync.InstalledGameDiscoveryTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

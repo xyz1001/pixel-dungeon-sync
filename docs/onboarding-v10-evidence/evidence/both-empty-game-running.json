@@ -1,0 +1,43 @@
+{
+  "case": "both-empty",
+  "label": "game-running",
+  "timestamp": "2026-10-09T08:26:07.522887+00:00",
+  "files": {
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/depth1.dat": {
+      "sha256": "ffd0f22eaa01da446e0c800ed8c879105ea50bda00e647a02a46b219161158a2",
+      "bytes": 1786
+    },
+    "data/.shatteredpixel/shattered-pixel-dungeon/game1/game.dat": {
+      "sha256": "427161c09213e9ab8e09a5c0d353fc8675b98260a4c0ab37e2a9246a571f0eeb",
+      "bytes": 3200
+    },
+    "data/.shatteredpixel/shattered-pixel-dungeon/settings.xml": {
+      "sha256": "35155734e485eafbb2c84d12a003a6dc3037871029751b23792a83cbeb39cf46",
+      "bytes": 399
+    },
+    "workspace/.local/config.json": {
+      "sha256": "6f0465ef0fcd209e6e29127dc6d9c1d585a705383f056f0595fced1bd8c7f4b9",
+      "bytes": 244
+    },
+    "workspace/.local/manager/device.json": {
+      "sha256": "167f7fcde1414f0db6f4c242756b76c8f4042d9d8bada44da208207dd09f003a",
+      "bytes": 52
+    },
+    "workspace/.local/manager/device.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/locks/1cc0091c9248381f8b402d5b30b871fde0bdf5802b52ffffcfe7f8eb772409b0.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/both-empty/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "COMPLETE"
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n127.0.0.1 - - [09/Oct/2026 01:23:45] \"PROPFIND / HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:23:45] \"PROPFIND /shattered/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:23:45] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:23:45] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:23:45] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:23:45] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:23:50] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:23:50] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:23:50] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:24:11] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:24:11] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:24:11] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:24:14] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:24:14] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:24:14] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:24:15] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:24:15] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:24:15] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:25:15] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:25:15] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:25:15] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n"
+}

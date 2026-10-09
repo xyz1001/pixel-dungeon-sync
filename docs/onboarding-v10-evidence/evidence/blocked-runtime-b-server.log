@@ -1,0 +1,19 @@
+Demo only: http://127.0.0.1:51540 credentials demo/demo
+127.0.0.1 - - [09/Oct/2026 01:21:08] "PROPFIND / HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:08] "PROPFIND /shattered/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:08] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:08] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:21:08] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:21:08] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:13] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:21:13] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:21:13] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:14] "GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1" 200 -
+127.0.0.1 - - [09/Oct/2026 01:21:14] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:21:14] "GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:21:52] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:21:52] "GET /shattered/default/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [09/Oct/2026 01:21:52] "PROPFIND /shattered/default/ HTTP/1.1" 207 -
+127.0.0.1 - - [09/Oct/2026 01:21:52] "GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1" 200 -
+127.0.0.1 - - [09/Oct/2026 01:21:52] code 404, message Not Found
+127.0.0.1 - - [09/Oct/2026 01:21:52] "GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1" 404 -

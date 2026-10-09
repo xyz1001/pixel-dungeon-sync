@@ -1,0 +1,59 @@
+{
+  "case": "remote-b",
+  "label": "c-before-restore",
+  "timestamp": "2026-10-09T08:33:23.210014+00:00",
+  "files": {
+    "workspace/.local/config.json": {
+      "sha256": "18afd5b596e48923352b4408cc52aa07b0d2381b00ed518896ecb5bc8b7b6157",
+      "bytes": 241
+    },
+    "workspace/.local/manager/device.json": {
+      "sha256": "cd663078da1e86ab61f0087667e3d20e549caddfba2b2b99a4df32e9a1678698",
+      "bytes": 52
+    },
+    "workspace/.local/manager/device.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/locks/a4e63dd51f3ff8cd176ef9176d5e3352bf8250b1be6f9d62bc162e3cbdc1f034.lock": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/ac484287cc056609bef371871c0a1b61a8e0cc5f114b27d8615bdb15b5d6db08/append-v2/known/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "workspace/.local/manager/profiles/ac484287cc056609bef371871c0a1b61a8e0cc5f114b27d8615bdb15b5d6db08/append-v2/observations/323ee044-0c48-453d-a12c-f726b7d5b209.txt": {
+      "sha256": "3705a04c101d81be40721921dcaad91e2c956e731b9c04e6da5458950c4258e1",
+      "bytes": 30
+    },
+    "workspace/.local/manager/profiles/ac484287cc056609bef371871c0a1b61a8e0cc5f114b27d8615bdb15b5d6db08/append-v2/observed/323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workspace/.local/manager/profiles/ac484287cc056609bef371871c0a1b61a8e0cc5f114b27d8615bdb15b5d6db08/history/607930e8-1430-478a-a887-dba54ae61c1c.entry.json": {
+      "sha256": "d81e573de0081b6695d9b846074c65c248c7d72c6cc837127d80eca8cbf53e95",
+      "bytes": 1055
+    },
+    "workspace/.local/manager/profiles/ac484287cc056609bef371871c0a1b61a8e0cc5f114b27d8615bdb15b5d6db08/history/607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    },
+    "remote/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json": {
+      "sha256": "83f627e91ef5b5de1af0ad2b7fd730a084caf0ad440f4afa12a911cdb76459cf",
+      "bytes": 1205
+    },
+    "remote/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip": {
+      "sha256": "cb5bda6fd609b1a002a4a83bcf2567b923ff96331f65f06063cd4abb5877f3b7",
+      "bytes": 178
+    }
+  },
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/remote-b/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "PENDING"
+  },
+  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n127.0.0.1 - - [09/Oct/2026 01:32:59] \"PROPFIND / HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:32:59] \"PROPFIND /shattered/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:32:59] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:32:59] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:32:59] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:32:59] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] code 404, message Not Found\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"GET /shattered/default/head.json HTTP/1.1\" 404 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"PROPFIND /shattered/default/ HTTP/1.1\" 207 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"GET /shattered/default/pdsync-v2-commit-323ee044-0c48-453d-a12c-f726b7d5b209.json HTTP/1.1\" 200 -\n127.0.0.1 - - [09/Oct/2026 01:33:03] \"GET /shattered/default/pdsync-v2-object-607930e8-1430-478a-a887-dba54ae61c1c.zip HTTP/1.1\" 200 -\n"
+}

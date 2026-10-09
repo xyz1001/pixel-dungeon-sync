@@ -1,0 +1,35 @@
+{
+  "case": "both-empty",
+  "config": {
+    "endpoint": "http://127.0.0.1:51540",
+    "profile": "default",
+    "targetGame": "/workspace/shared/pds-onboarding-v10/both-empty/home/Downloads/ShatteredPD-v4.0.2-Java.jar",
+    "username": "demo",
+    "onboardingProgress": "COMPLETE"
+  },
+  "local": {
+    "settings.xml": "15026660a4b0e6b408d947c375252dddda07170d2c6063659a57f66be3c514d7",
+    "journal.dat": "52e74abf69cddcede79cb9d481a9640348c50a7fd1c66aaf58fb47ec7fae1cdb",
+    "game1/depth1.dat": "8336cb858e0d5137d3114166eb838c7464882187ced5846f8549e0d7961362ee",
+    "game1/game.dat": "ce0524ac255f777dc8825c4cf0bb9bb86493da36bf01be36de3af1cdbe3649d7"
+  },
+  "remote_file_count": 2,
+  "commits": {
+    "9d4e9323-b75f-483f-bb16-152f30853d96": {
+      "parents": [],
+      "files": {
+        "game1/depth1.dat": "8336cb858e0d5137d3114166eb838c7464882187ced5846f8549e0d7961362ee",
+        "game1/game.dat": "ce0524ac255f777dc8825c4cf0bb9bb86493da36bf01be36de3af1cdbe3649d7",
+        "journal.dat": "52e74abf69cddcede79cb9d481a9640348c50a7fd1c66aaf58fb47ec7fae1cdb"
+      }
+    }
+  },
+  "tips": [
+    "9d4e9323-b75f-483f-bb16-152f30853d96"
+  ],
+  "backups": [],
+  "baselines": [
+    "9d4e9323-b75f-483f-bb16-152f30853d96"
+  ],
+  "PUT_requests": 2
+}
