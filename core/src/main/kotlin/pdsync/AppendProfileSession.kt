@@ -24,9 +24,9 @@ sealed interface AppendPushResult {
  */
 class AppendProfileSession(
  config: AppConfig, stateRoot: Path, adapter: GameAdapter = Shattered,
- versions: ProfileVersions = ShatteredProfileVersions
+ versions: ProfileVersions = ShatteredProfileVersions, captureQuietMillis: Long = 2000
 ) {
- private val local = ProfileSession(config, stateRoot, adapter, versions)
+ private val local = ProfileSession(config, stateRoot, adapter, versions, captureQuietMillis)
  val config get() = local.config
  val root get() = local.root
  val adapter get() = local.adapter
@@ -35,6 +35,18 @@ class AppendProfileSession(
  private val applyMarker = directory.resolve("append-v2/apply-required.txt")
 
  fun history() = local.history()
+ fun deviceIdentity() = local.deviceIdentity()
+ fun observedAt(commitId: String) = repository.observedAt(commitId)
+ fun baselineFiles(): Map<String, String>? = repository.baselineFiles()
+ /** Read-only observation, deliberately not a mutation-lock contender. Any racing/incomplete
+  * observation is discarded by the UI generation/busy check; mutation rechecks all gates under lock. */
+ fun observedFiles(): Map<String, String> = currentFiles()
+ fun retryablePending(): Boolean = !needsApply() && local.legacyPending() == null && repository.pending() != null
+ fun inspectConflict(store: AppendStore, stopped: () -> Boolean): AppendConflict? = local.locked {
+  local.guard(stopped)
+  val graph = discover(store)
+  if (graph.tips.size > 1) preserveConflict(graph, store, stopped) else null
+ }
  fun currentVersions() = local.currentVersions()
  fun targetInfo() = local.targetInfo()
  fun checkRestore(id: String) = local.checkRestore(id)
@@ -67,7 +79,7 @@ class AppendProfileSession(
   val branches = graph.tips.sorted().map { id ->
    val commit = graph.commits.getValue(id)
    val snapshot = repository.download(store, commit)
-   local.remember(snapshot, "冲突 · 已观察分支 ${id.take(8)}")
+   local.remember(snapshot, "冲突 · 已观察分支 ${id.take(8)}", repository.observedAt(id))
    AppendBranch(commit, snapshot)
   }
   // Record the real current files, not an older frozen upload. A subsequent choice must recheck.
@@ -81,18 +93,19 @@ class AppendProfileSession(
   repository.publish(store, plan)
   val graph = discover(store)
   require(plan.commit.id in graph.commits) { "刚发布的提交尚未完整可见；原操作保留，请重试" }
+  local.remember(snapshot(plan), "追加同步 · ${plan.commit.kind}", repository.observedAt(plan.commit.id))
   repository.setBaseline(plan.commit.id, graph)
   repository.clearPending()
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
-   else AppendPushResult.Success(plan.commit, currentFiles() != plan.commit.snapshot.files, graph.tips.singleOrNull() != plan.commit.id)
+   else AppendPushResult.Success(plan.commit, runCatching { currentFiles() != plan.commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != plan.commit.id)
  }
  fun push(store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
-  val graph = discover(store)
+  // Freeze stopped, stable local bytes and real parents BEFORE contacting the network. An offline
+  // first attempt is durable, and restarting can retry these exact bytes without startup recapture.
   val plan = repository.pending() ?: run {
    val baseline = repository.baseline()
-   require(baseline == null || baseline in graph.commits)
-   repository.prepare(local.capture(stopped, null), listOfNotNull(baseline))
+   repository.prepare(local.capture(stopped, null), listOfNotNull(baseline), operation = local.operationMetadata())
   }
   publish(plan, store, stopped)
  }
@@ -102,7 +115,7 @@ class AppendProfileSession(
   val graph = discover(store)
   graph.tips.sorted().map { id ->
    val commit = graph.commits.getValue(id)
-   AppendRemoteEntry(commit, local.remember(repository.download(store, commit), "云端已观察分支 ${id.take(8)}"))
+   AppendRemoteEntry(commit, local.remember(repository.download(store, commit), "云端已观察分支 ${id.take(8)}", repository.observedAt(id)))
   }
  }
 
@@ -122,7 +135,7 @@ class AppendProfileSession(
    require(graph.descendsFrom(commit.id, baseline)) { "所选分支不是当前基线的后续，需明确解决冲突" }
   }
   val chosen = repository.download(store, commit)
-  local.remember(chosen, "已校验云端恢复快照")
+  local.remember(chosen, "已校验云端恢复快照", repository.observedAt(commit.id))
   local.checkRestore(chosen.manifest.id)
   require(currentFiles() == before) { "验证期间本地存档发生变化，未恢复" }
   SafePaths.atomicWrite(applyMarker, "remote-restore".encodeToByteArray())
@@ -139,7 +152,7 @@ class AppendProfileSession(
   SafePaths.atomicWrite(applyMarker, kind.encodeToByteArray())
   var plan: UploadPlan? = null
   try {
-   plan = repository.prepare(source, parents, kind)
+   plan = repository.prepare(source, parents, kind, operation = local.operationMetadata())
    preserve(plan, reason)
    apply(plan)
    SafePaths.checked(applyMarker).deleteExisting()
@@ -175,7 +188,7 @@ class AppendProfileSession(
   val branch = conflict.branches.single { it.snapshot.manifest.id == chosenSnapshotId }
   require(branch.commit.id in graph.tips && graph.commits[branch.commit.id] == branch.commit) { "选择不属于已观察分支" }
   // Re-download exact immutable bytes and preserve all branches before preparing a resolution.
-  conflict.branches.forEach { local.remember(repository.download(store, it.commit), "冲突 · 原始分支") }
+  conflict.branches.forEach { local.remember(repository.download(store, it.commit), "冲突 · 原始分支", repository.observedAt(it.commit.id)) }
   val chosen = repository.download(store, branch.commit)
   if (currentFiles() != chosen.manifest.files) local.checkRestore(chosen.manifest.id)
   val plan = prepareAndApply(chosen, graph.tips.sorted(), "resolution", "冲突解决 · 明确选择 ${branch.commit.id.take(8)}") { plan ->

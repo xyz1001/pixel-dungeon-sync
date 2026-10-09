@@ -1,0 +1,30 @@
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND / HTTP/1.1" 207 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND /shattered/ HTTP/1.1" 207 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND /shattered/demo/ HTTP/1.1" 207 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 400, message Bad Request
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND / HTTP/1.1" 400 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 400, message Bad Request
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND /shattered/ HTTP/1.1" 400 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 400, message Bad Request
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND /shattered/other/ HTTP/1.1" 400 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 400, message Bad Request
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND /outside/ HTTP/1.1" 400 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 401, message Unauthorized
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PROPFIND / HTTP/1.1" 401 -
+.127.0.0.1 - - [08/Oct/2026 22:38:48] code 404, message Not Found
+127.0.0.1 - - [08/Oct/2026 22:38:48] "GET /shattered/demo/head.json HTTP/1.1" 404 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PUT /shattered/demo/head.json HTTP/1.1" 201 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] "GET /shattered/demo/head.json HTTP/1.1" 200 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] code 412, message Precondition Failed
+127.0.0.1 - - [08/Oct/2026 22:38:48] "PUT /shattered/demo/head.json HTTP/1.1" 412 -
+127.0.0.1 - - [08/Oct/2026 22:38:48] "GET /shattered/demo/head.json HTTP/1.1" 200 -
+.127.0.0.1 - - [08/Oct/2026 22:38:49] "PROPFIND /shattered/demo/ HTTP/1.1" 207 -
+127.0.0.1 - - [08/Oct/2026 22:38:49] code 401, message Unauthorized
+127.0.0.1 - - [08/Oct/2026 22:38:49] "PROPFIND /shattered/demo/ HTTP/1.1" 401 -
+127.0.0.1 - - [08/Oct/2026 22:38:49] code 400, message Bad Request
+127.0.0.1 - - [08/Oct/2026 22:38:49] "PROPFIND /shattered/demo/ HTTP/1.1" 400 -
+.
+----------------------------------------------------------------------
+Ran 3 tests in 1.553s
+
+OK

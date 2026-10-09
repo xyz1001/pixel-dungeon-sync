@@ -1,16 +1,16 @@
 {
   "files": {
     ".gitignore": {
-      "size": 713,
-      "sha256": "35f089bda89c064a54df17575c398656f624b794b8040640eac801207ddbef3f"
+      "size": 749,
+      "sha256": "fd9d0f601aa47ee804f30eb0fae0b00e23bc56e15800b8096f6188f91ffb3a47"
     },
     "HANDOFF.md": {
-      "size": 9337,
-      "sha256": "43273ee85e5dfdc073c425f5d06d00124864c587df5d9bbff0fa32908d739890"
+      "size": 11343,
+      "sha256": "127f538245e4114f38e03ee86d57502f26cdc4e2e1f4b1dfea616f9be0b5c09c"
     },
     "README.md": {
-      "size": 11588,
-      "sha256": "cdfbaa4d06981cd0f682a06799b7912ac281e581b34227325ae5a8d80dd00809"
+      "size": 13095,
+      "sha256": "dc9986af3aa2e451369bc1c282d466a4d91a9363b78c5d12408d18c8e87a3b95"
     },
     "build.gradle.kts": {
       "size": 641,
@@ -25,24 +25,24 @@
       "sha256": "5c87ef0f366dbae4f74f744f6d7e8dda4d552bee7665a43f518307a142ecef5a"
     },
     "core/src/main/kotlin/pdsync/AppendOnly.kt": {
-      "size": 14555,
-      "sha256": "ef0b9ecb0cc109bf659d295c6a7defee96d2739eaef340f93260823ec270db0f"
+      "size": 15864,
+      "sha256": "32083d7d7cc486e9e07b24974d825a470403e789a82890ce6cb8fde6009af05f"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
       "size": 23668,
       "sha256": "0f467501692c78fbededdba14dd1fd6126fa5f9d67fa8aa13ee735ce10807bda"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 11027,
-      "sha256": "78c45b9563754c2f59504808d78da347fe64243a2902f03e6d0f44bda7035768"
+      "size": 12332,
+      "sha256": "9986b5480e6a289a7f4486a2a8446e1df834b363258f5cf2b22eaa04452298e2"
     },
     "core/src/main/kotlin/pdsync/ConnectionSetup.kt": {
       "size": 8946,
       "sha256": "58a9b347f2cecf4386a906da1b9f99c16cf7cbf1f44880c7372d1e67b77ac614"
     },
     "core/src/main/kotlin/pdsync/Core.kt": {
-      "size": 9127,
-      "sha256": "896947ff0c29daa7971fa01ef79a1c65a97ef6879d9220804969bf6629a9423a"
+      "size": 9851,
+      "sha256": "ff2893fec35131f36f694065d8103af6f404632fac2f25393832cf06f71cadb4"
     },
     "core/src/main/kotlin/pdsync/DefaultProfileLocation.kt": {
       "size": 1292,
@@ -56,13 +56,29 @@
       "size": 2346,
       "sha256": "0910d3ab243377073b4e5170cf015b7f73112a17e6b4c179fe186a5a54c358a5"
     },
+    "core/src/main/kotlin/pdsync/GameProcessDetector.kt": {
+      "size": 12273,
+      "sha256": "cce2d7107ed6923c87c76b943eb89c9ce4afaa49d6e31f39fde6cc855e4ed7e3"
+    },
+    "core/src/main/kotlin/pdsync/LinuxProcessArguments.kt": {
+      "size": 3113,
+      "sha256": "c44492023366c9b753777479c6ac9e4a4ac406fdcca76e767eaba0cf7752644b"
+    },
     "core/src/main/kotlin/pdsync/PendingSnapshots.kt": {
       "size": 2636,
       "sha256": "753fd541663e1fe8360344ae01fd4931730c7d10aceca0a7ea7d83137d23e121"
     },
+    "core/src/main/kotlin/pdsync/ProcessCheck.kt": {
+      "size": 1232,
+      "sha256": "ad950f308f5cda9e2f30e6f5402fa0379809bafd60bc80e59ca4b26e4be55df9"
+    },
     "core/src/main/kotlin/pdsync/ProfileSession.kt": {
-      "size": 22475,
-      "sha256": "edbe1785b5e5bd4a384b5021679302de2187d4fa8eb52f742f872e6795cc35f0"
+      "size": 23957,
+      "sha256": "70eb64ce3bde158a22c3dd549fa5d8203e46103e305db7ada0fd4d4f5004bc79"
+    },
+    "core/src/main/kotlin/pdsync/SaveStabilityGuard.kt": {
+      "size": 5422,
+      "sha256": "b40ca1484c787011f1c54c90def94cf539a64d448de78d7b0001f2ba02391ea0"
     },
     "core/src/main/kotlin/pdsync/SaveVersions.kt": {
       "size": 16854,
@@ -71,6 +87,10 @@
     "core/src/main/kotlin/pdsync/SecretStore.kt": {
       "size": 18829,
       "sha256": "fb757c5eb887142673f3c896298e4a413e1da817648cd4b6e485b5138625f89c"
+    },
+    "core/src/main/kotlin/pdsync/SnapshotMetadata.kt": {
+      "size": 5860,
+      "sha256": "e4acaa75c2f362dad48c0cb4a92e7c42eda0adba8184e2da281e6de5b265d696"
     },
     "core/src/main/kotlin/pdsync/WebDav.kt": {
       "size": 4089,
@@ -81,12 +101,16 @@
       "sha256": "e807dd20ecd51eb9b85b6c3c1b735a5249be2f73396cf8b9b260642f9e84b0b7"
     },
     "core/src/test/kotlin/pdsync/AppendProfileSessionTest.kt": {
-      "size": 16994,
-      "sha256": "41ecb6e4e43aa1c38973dbdf1548966f45077ca439882bdd9681a84ec49f7832"
+      "size": 17065,
+      "sha256": "39ef93ed2ff75f9a2ed8039a4bd6c63807e3f9db4ce9f90de33dad0a6defd3cf"
     },
     "core/src/test/kotlin/pdsync/AppendRepositoryTest.kt": {
       "size": 43349,
       "sha256": "41723fc92e434613f01821700634b4aa183e694275f31d512fff14e86f805200"
+    },
+    "core/src/test/kotlin/pdsync/AutomaticUploadPersistenceTest.kt": {
+      "size": 3274,
+      "sha256": "e9ec829b3b3f9bf2b8134f584646265144ba869486901074336bd220b16d089a"
     },
     "core/src/test/kotlin/pdsync/ConnectionProvisioningTest.kt": {
       "size": 8643,
@@ -101,12 +125,16 @@
       "sha256": "b09d5372e5b37809957e5c8ae3f3ffbfcb42e89823d718cd24fdbe071f32571a"
     },
     "core/src/test/kotlin/pdsync/DefaultProfileLocationTest.kt": {
-      "size": 4333,
-      "sha256": "dfa967f018bd7e9d9847b89183b03c2c7271de9add2599c10f88e6d46edf9b85"
+      "size": 4381,
+      "sha256": "656cc55523c5d24e812de3451ea46a75fdec731114279cc5794a382d5a2093b5"
     },
     "core/src/test/kotlin/pdsync/DefaultSavePathsTest.kt": {
       "size": 5888,
       "sha256": "44cfe929c15cb35e5967b0ed36b282e0edaf456effa9db4309906d14a9504067"
+    },
+    "core/src/test/kotlin/pdsync/GameProcessDetectorTest.kt": {
+      "size": 12291,
+      "sha256": "513a379f2922998cba3b39e0a26ec4a37ede0565916c84607313aca24deb6802"
     },
     "core/src/test/kotlin/pdsync/IsolatedDefaultPathTransfer.kt": {
       "size": 2823,
@@ -117,16 +145,24 @@
       "sha256": "77e40410630b23081fe75536017652f19553ba3a1c0f2e72116b65fd3f63678d"
     },
     "core/src/test/kotlin/pdsync/LegacyImportTest.kt": {
-      "size": 3667,
-      "sha256": "ea9d95f9b8f288fa1af5b60fe16d07a7265ed39beb86414094b746be2493a929"
+      "size": 3811,
+      "sha256": "0302fed6b04c8268f40a98371b233fc6320ceb985a81669b3d6e9a13c66f0b5d"
+    },
+    "core/src/test/kotlin/pdsync/LinuxProcessArgumentsTest.kt": {
+      "size": 3445,
+      "sha256": "cc8a8e7ceff74a65bfa9054399c01c80970058d0972871260fc76cc838cca060"
     },
     "core/src/test/kotlin/pdsync/NamespaceCreationTest.kt": {
       "size": 19438,
       "sha256": "0b7a4bbc8ed9333c37236a706ee729d5986285fa2ce7c989dc67d2776f7da3cf"
     },
     "core/src/test/kotlin/pdsync/ProfileSessionTest.kt": {
-      "size": 11863,
-      "sha256": "bce8bcbea475982f325e75af91ea6bb23a46c48907d2eb3ac39c13977a6a6769"
+      "size": 11887,
+      "sha256": "42d29f2ec70f63ebe195a9d3f68102d37e729b90f0dd72c2c95c43a2a16e7510"
+    },
+    "core/src/test/kotlin/pdsync/SaveStabilityGuardTest.kt": {
+      "size": 6673,
+      "sha256": "60e52e60f662ad3cd6496a187c6be3837a4e21448174f717bb36ff875f6f44af"
     },
     "core/src/test/kotlin/pdsync/SaveVersionsTest.kt": {
       "size": 10261,
@@ -136,9 +172,13 @@
       "size": 14875,
       "sha256": "7d1b9fcddd49223a543f83ae63ed7471c99f51a62ddfc0c7236a4a93396ae641"
     },
+    "core/src/test/kotlin/pdsync/SnapshotMetadataTest.kt": {
+      "size": 19184,
+      "sha256": "4b0019fa9f72532becf417bd31ad46e67f69c45c2ee452651df13bf2c45c9fed"
+    },
     "core/src/test/kotlin/pdsync/VersionControllerTest.kt": {
-      "size": 4598,
-      "sha256": "5d63a508a3d53234894faecb2f5e0bebc901a676721f359be11eee168cc49c72"
+      "size": 4622,
+      "sha256": "86884154706fc9c22bcc1ce54a3be9705a61a6cdd17470f8de3acfac55850d4c"
     },
     "desktop/build.gradle.kts": {
       "size": 745,
@@ -148,21 +188,33 @@
       "size": 13992,
       "sha256": "c7492650718ba59a6a3e1b390538ad13107d30ee9eab68221f50ff1a0e7249c9"
     },
+    "desktop/src/main/kotlin/pdsync/AutomaticUpload.kt": {
+      "size": 3007,
+      "sha256": "e50be08d515069fe7d9f35a3dddad7e11577ffaf9448845b98bec8611d4bdbce"
+    },
     "desktop/src/main/kotlin/pdsync/ConnectionPageLifetime.kt": {
       "size": 1115,
       "sha256": "58b602595a11cc1d7ba603f6b1f666d5afab313bff19fcc61608f9b315c4cdfd"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 41274,
-      "sha256": "806799233c03d37c0daec3f3b68b9fe9dec0d189ce0c91686c433388e61a48c7"
+      "size": 49664,
+      "sha256": "4d50106cadb18e70cb5725ee07e7c0b4017b3c8c25af953443beedd1c95e9dcf"
     },
     "desktop/src/main/kotlin/pdsync/OperationEvents.kt": {
-      "size": 6445,
-      "sha256": "bd1c7c109b4738a099f080cc5e0ddb3020df70345a88c1660a7d2ef49688920b"
+      "size": 6472,
+      "sha256": "b0c316f73814df91fc72944e55c24cb329926d46b6200adce64ed1f733952cc9"
+    },
+    "desktop/src/test/kotlin/pdsync/AutomaticUploadTest.kt": {
+      "size": 3459,
+      "sha256": "89fdc37a0adc6b6738a57f403b3e70a3b7988c36da3554625de60a2ea65b19e3"
     },
     "desktop/src/test/kotlin/pdsync/ConnectionPageLifetimeTest.kt": {
       "size": 5024,
       "sha256": "1f3539a46223ba8dbdb8b05ddf82e78f670f65cfdd4ae11fcf29f5b47f32b5af"
+    },
+    "desktop/src/test/kotlin/pdsync/InjectedUiSmoke.kt": {
+      "size": 583,
+      "sha256": "5fc0861197fa2d5379fce1557de8b46da7f594c4b13343787931da1fd12bac8e"
     },
     "desktop/src/test/kotlin/pdsync/OperationEventsTest.kt": {
       "size": 11461,
@@ -175,6 +227,14 @@
     "docs/APPEND_ONLY_VALIDATION.md": {
       "size": 6377,
       "sha256": "2b38cc7e8c0a8d238b1941c5b807ecb0057150791d3b6001f00e3014cccd66d8"
+    },
+    "docs/AUTOMATIC_PROCESS_SAFETY.md": {
+      "size": 8913,
+      "sha256": "7bc46c8c2e38ccff39773951582e8259a3faf99a769edac69966349eae59d623"
+    },
+    "docs/AUTOMATIC_SYNC_V8.md": {
+      "size": 4628,
+      "sha256": "58a9aecad761f0f5503c4c9f0440e1b2eea278d1ad4c0057023472efc7dd60d3"
     },
     "docs/AUTO_VERSION_VALIDATION.md": {
       "size": 5910,
@@ -200,6 +260,10 @@
       "size": 2499,
       "sha256": "f6404bcca0e36d544e7721a43dbde1cad7d882aecb25abb3202a9839aaf6064f"
     },
+    "docs/PROCESS_CHECK_HANDOFF.md": {
+      "size": 2253,
+      "sha256": "2f5b1a61366f8569be28ee00b9acac24b5c2eede7ce89eb2d98a350b269c29cb"
+    },
     "docs/RETRY_DIAGNOSTICS_VALIDATION.md": {
       "size": 5739,
       "sha256": "68adeef61c6f280a5cab1ca45d55dc772a415aaa36ae9f9a710110137137d326"
@@ -212,9 +276,169 @@
       "size": 4114,
       "sha256": "0adb220ba6fb9cf6407bdcca9c734e3a8b62446ddb51188845d4feb074a14b06"
     },
+    "docs/SNAPSHOT_METADATA.md": {
+      "size": 3507,
+      "sha256": "a851f05bbdca1ffa16bb86c315b42a2f6464aafd29d290660053dcbc4998223a"
+    },
     "docs/VALIDATION.md": {
       "size": 4373,
       "sha256": "f92179068f4cd1a0c056aa4abcd7d9d952de28d51161ab23737362d515cd5f3a"
+    },
+    "docs/automatic-v8-evidence/01-home-unknown.png": {
+      "size": 56853,
+      "sha256": "92a022c1c12fd149b39b28ad3581d56e93aa3df0b312a5841283d9a806a95585"
+    },
+    "docs/automatic-v8-evidence/02-settings.png": {
+      "size": 62796,
+      "sha256": "cccbb1224551b2464625a7b9d1ba3d576dedad4bbfbb5ddabcff00bdea40dd89"
+    },
+    "docs/automatic-v8-evidence/03-paused.png": {
+      "size": 52774,
+      "sha256": "a0cb9eb0c4c10207f4f6dafdcf76f37e2b6fc7d89e4d92777c3c7fa5b957f2af"
+    },
+    "docs/automatic-v8-evidence/04-injected-automatic-upload.png": {
+      "size": 79900,
+      "sha256": "df1e7276d564b7d563ea7762c97ffbf56a62b44810d0781323861fa3862800b7"
+    },
+    "docs/automatic-v8-evidence/05-injected-restore-no-checkbox.png": {
+      "size": 57133,
+      "sha256": "26d7a17be0b2a795bb441cee0d3de34a2f1e134d479309ff2cf294a7722bdb65"
+    },
+    "docs/automatic-v8-evidence/07-final-injected-home.png": {
+      "size": 89274,
+      "sha256": "ba033fef426c59d306f829b445d597986753ec26832be75901be8b56a57c16c5"
+    },
+    "docs/automatic-v8-evidence/08-final-injected-confirmation.png": {
+      "size": 63977,
+      "sha256": "f0ff248eed41576905230eed9f0e4b8ec527dca82ca28879e280430521914e8d"
+    },
+    "docs/automatic-v8-evidence/UI_VALIDATION.md": {
+      "size": 5171,
+      "sha256": "e16de8f9d174cf54f6823e0044744c451971d1ef294f85f2b05891dbb77dd411"
+    },
+    "docs/automatic-v8-evidence/build-first.log": {
+      "size": 2040,
+      "sha256": "b75f0a3bfcec2be1dbf0e4b4c123bc78f54c0c30b6463a9f6fb88bc3134c5417"
+    },
+    "docs/automatic-v8-evidence/build.log": {
+      "size": 2086,
+      "sha256": "28fc83c8d0292eb85eb29a8a517fd2c1cdb9ffbabd444ef3f026750271015fcd"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.AppendOnlyWebDavTest.xml": {
+      "size": 2532,
+      "sha256": "6196cf689cb8ca75dae65a2cd3f708166ff8c51aa1283b5a3b55e1d95043aa62"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.AppendProfileSessionTest.xml": {
+      "size": 3484,
+      "sha256": "d351d647686dc7f11d0788bc99f42ee1d6ec07df707e4a50f39d4cc5771a419a"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.AppendRepositoryTest.xml": {
+      "size": 7409,
+      "sha256": "6706a17e49af59eb641583efb8eac775a98b3437bb7d86ad96e19f8b57f97085"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.AutomaticUploadPersistenceTest.xml": {
+      "size": 906,
+      "sha256": "968cb786e9292af91474c30af193837be3c674699e5fb514c8af49b00eec00b9"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.ConnectionProvisioningTest.xml": {
+      "size": 1580,
+      "sha256": "9931f7ea9a576c781eac60decf279cbd5bcf638142920cb71ade9b67fd43cb7b"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.ConnectionSetupTest.xml": {
+      "size": 2916,
+      "sha256": "6e93c5c430cf51a0863dcbd40df15e7fc9e4d470182d3af0ba1a41cf2bed99d6"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.CoreTest.xml": {
+      "size": 3577,
+      "sha256": "b94e3ec1205f4719b2e22777e0b86e4473af2e9aca8cbd0234869a123a0e301d"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.DefaultProfileLocationTest.xml": {
+      "size": 1130,
+      "sha256": "bcaf066cbe311587f5a81454de05b04dde390100bc324b5b2b86293970c1f24f"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.DefaultSavePathsTest.xml": {
+      "size": 2611,
+      "sha256": "5b53c1555b1e3cad3618bca4de9dea12a845e7632f1233af57de3dee6b819c42"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.GameProcessDetectorTest.xml": {
+      "size": 3046,
+      "sha256": "46c723c49f19f991cf938030d7e131acd88e55a931a09b237f104d3f9d2965c1"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.LegacyImportTest.xml": {
+      "size": 784,
+      "sha256": "978a909158ee3f81b792ba06f0099d35dc0b6757fbbd6abb55907353e7c182d3"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.LinuxProcessArgumentsTest.xml": {
+      "size": 1281,
+      "sha256": "5b98f54eb20252ddfd358f09636a596ba953b8c1fa1313ccc3afed9c5932a2e8"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.NamespaceCreationTest.xml": {
+      "size": 4448,
+      "sha256": "8ba25ae84d72017fc97382ed55847485e75ee2acbd7c12c68f36df193e060695"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.ProfileSessionTest.xml": {
+      "size": 2451,
+      "sha256": "3c43dc9c02d77f303a838b445a84c8500e41a92d67c5f85b7caab6176f7c3e4f"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.SaveStabilityGuardTest.xml": {
+      "size": 1964,
+      "sha256": "ecf563e2de0e2a7321e9cc677b03ab0deeb6beb579a09950c12f358d4d6fc8c0"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.SaveVersionsTest.xml": {
+      "size": 2330,
+      "sha256": "4b7ff3a59786b4012e6e72cc0a952893a5184a3009ff9a7247276f2ccd3b7a19"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.SecretStoreTest.xml": {
+      "size": 2788,
+      "sha256": "3c0fa6c3533b4690807e27f847e2f122ef12a85d292ba6952b40382aee36e6be"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.SnapshotMetadataTest.xml": {
+      "size": 2565,
+      "sha256": "db44a3e1d2f7af38a397ab16c2f348a69322ec0cd664310949cc26f7dc358f4c"
+    },
+    "docs/automatic-v8-evidence/core/TEST-pdsync.VersionControllerTest.xml": {
+      "size": 1052,
+      "sha256": "4c157f4ee1b203a555a088cf1b0df2f7e713bc5004da4d6b5e28228d53fe1791"
+    },
+    "docs/automatic-v8-evidence/desktop/TEST-pdsync.AutomaticUploadTest.xml": {
+      "size": 1879,
+      "sha256": "ec132c126971f0a88f9cbdc987d85b30378eb15e68d719d4f376b1ff13837772"
+    },
+    "docs/automatic-v8-evidence/desktop/TEST-pdsync.ConnectionPageLifetimeTest.xml": {
+      "size": 1639,
+      "sha256": "1ed8843d2bea23b2209dbaedcdc93f71c76fbdac63c480647ea2ccab7e7d44c4"
+    },
+    "docs/automatic-v8-evidence/desktop/TEST-pdsync.OperationEventsTest.xml": {
+      "size": 1643,
+      "sha256": "8bea7487eb084c89a8b253892b4a511781a267129758490714edb2003cabf58c"
+    },
+    "docs/automatic-v8-evidence/final-ui-runtime-sha256.txt": {
+      "size": 257,
+      "sha256": "62ef6d20bb8695cb691ae9b52076e72886ab60610adc96cc2f211b1575a2b341"
+    },
+    "docs/automatic-v8-evidence/independent-tests.log": {
+      "size": 1875,
+      "sha256": "07db7fb85a3bdda42ce0ecb0d7074c8df0bbc7fc5eed912683bcccbba575dc2b"
+    },
+    "docs/automatic-v8-evidence/injected-ui-operations.log": {
+      "size": 5362,
+      "sha256": "a6ceceaa7640c486523f2b2371e19ad6269bbae1466e8e0439a560509dbd19dd"
+    },
+    "docs/automatic-v8-evidence/python-tests.log": {
+      "size": 1951,
+      "sha256": "ba0976b4893ad0d4eef937f1b2969d70fc81acba7a3fd83e10c15163bc281b01"
+    },
+    "docs/automatic-v8-evidence/test-counts.json": {
+      "size": 180,
+      "sha256": "fa62e172dc735cc9b88b87b63158a29a2a602098c547bc3fb037c1c62731922f"
+    },
+    "docs/automatic-v8-evidence/ui-runtime-sha256.txt": {
+      "size": 239,
+      "sha256": "2883f1bb409da73c62395d5ee9dd2509e8c289869d96cd8636bd868ff34e083f"
+    },
+    "docs/automatic-v8-evidence/ui-verification.json": {
+      "size": 439,
+      "sha256": "4b3a58a131b41fe1a6bb06c2c888f4187841e98ce5221dbce7a6abaef0db27bd"
     },
     "docs/cloud-evidence/append-only-build.log": {
       "size": 2117,
@@ -948,6 +1172,14 @@
       "size": 229,
       "sha256": "c997def5ed51d937111ddf7cfa1c9d5e92a0ec23fc2775b4f8ccfbd1ba4374aa"
     },
+    "tools/ProcessVisibilityCheck.java": {
+      "size": 3488,
+      "sha256": "9cc575fbfcca822b4735ad2cab503250475f523a7e052c816fb0cef19378487d"
+    },
+    "tools/build_process_probe.py": {
+      "size": 1919,
+      "sha256": "c3805000ead02c94b4c4e71f3b304e6ab767a8bb0b8ee423a6bee252290da02a"
+    },
     "tools/test_webdav_demo.py": {
       "size": 6550,
       "sha256": "c079cc2f8047136dd20f75ba0f0129d46623a414610b9fc92ba9d802a249847a"
@@ -971,9 +1203,9 @@
   ],
   "public_test_auth": "demo/demo fixtures only",
   "origin_archive_sha256": "a1c2ff347e2efd3b2f25fc9827402ce73c57b909b457de6af692e162b2101ebf",
-  "notes": "v7 diagnostic-only pending retry investigation. Unmodified v6 native isolated A3/B5 history restore then actual pending upload confirmation succeeded; local reported silent return remains unreproduced. Added closed-schema bounded local action events and explicit cancel feedback. No core/protocol/dependency changes. Full build, 295 JVM tests (core275 + desktop20), 3 Python tests passed. v7 native restore, pending retry cancellation, controlled HTTP503 failure and exact frozen-plan successful retry verified with stage logs and unchanged saves. No user-computer, real server or credential access in this cloud task. Existing cross-platform, power-loss and lifecycle limitations remain; not a claimed root-cause fix. Source patch against 945be6d checked on a clean base.",
+  "notes": "v8 automatic local upload, current-account fail-closed process and stable-backup guards, two-action home, preserved restore/branch safety, device and UTC provenance metadata. Full build/installDist and368 JVM tests (core336 desktop32),3 Python tests and7 independent adversarial tests passed. Production cloud GUI connection/two-button/pause/Unknown-no-write verified but blocked by unavailable executable identity; explicit test-only guard-injected native upload/automatic-change/backup-restore/restore-publication/pause/manual flow passed. Actual user-session process probe pending; no Windows/macOS native or production-ready claim. Old strict v7 clients require coordinated upgrade. No user-computer, real-cloud server or credential access in implementation. Source package excludes .git/.local/caches/builds/save fixtures/raw process inventories/secrets.",
   "origin_source_commit": "1177a6babb4e85a7e80ce48f555bc1f59486bcd8",
   "original_git_history_included": false,
   "recovery_baseline_commit": "365c81c4ceb6d068e2f92b60453def09c61eeb73",
-  "previous_source_commit": "945be6df8ae137e31c5af1d04970956ec868a5a8"
+  "previous_source_commit": "8fcd4f9720b52852b730dac9d091e135fa35fc14"
 }

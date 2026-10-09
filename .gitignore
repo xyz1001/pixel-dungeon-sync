@@ -52,3 +52,5 @@ game[0-9]*/
 *.sqlite
 *.sqlite3
 *.db
+
+!/docs/automatic-v8-evidence/*.log

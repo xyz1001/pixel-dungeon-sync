@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.SnapshotMetadataTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-10-09T05:30:29.738Z" hostname="dd161cbb09b6" time="0.217">
+  <properties/>
+  <testcase name="profileCreationAndPreRestoreBackupCarryCurrentDeviceButChosenHistoryKeepsOrigin()" classname="pdsync.SnapshotMetadataTest" time="0.023"/>
+  <testcase name="newReaderPreservesOldUnknownProvenanceAndOldBytes()" classname="pdsync.SnapshotMetadataTest" time="0.013"/>
+  <testcase name="retriesAndObservationsNeverRewriteImmutableMetadata()" classname="pdsync.SnapshotMetadataTest" time="0.011"/>
+  <testcase name="labelsAreUnicodeSafeBoundedAndFreeOfControlsAndDirectionalFormatting()" classname="pdsync.SnapshotMetadataTest" time="0.003"/>
+  <testcase name="malformedProvenanceCannotBecomeVerifiedHistoryOrRemoteCommit()" classname="pdsync.SnapshotMetadataTest" time="0.009"/>
+  <testcase name="baselineFilesReadsOnlyEstablishedValidatedLocalState()" classname="pdsync.SnapshotMetadataTest" time="0.007"/>
+  <testcase name="profileRestoreWiresFinalBackupFingerprintCheckBeforeAnyReplacement()" classname="pdsync.SnapshotMetadataTest" time="0.013"/>
+  <testcase name="appendHistoryRestorePublishesOriginalProvenanceAndCurrentRestoringActor()" classname="pdsync.SnapshotMetadataTest" time="0.042"/>
+  <testcase name="metadataOnlyWriteAfterStableBackupCancelsBeforeReplacementAndNeverRollsBack()" classname="pdsync.SnapshotMetadataTest" time="0.005"/>
+  <testcase name="restoreAndResolutionPreserveSourceProvenanceWhileRecordingNewActorAndTime()" classname="pdsync.SnapshotMetadataTest" time="0.006"/>
+  <testcase name="corruptIdentityIsNotSilentlyReplacedOnRestart()" classname="pdsync.SnapshotMetadataTest" time="0.001"/>
+  <testcase name="captureAndFileModificationTimesAreDistinctAndRawSaveBytesDoNotChange()" classname="pdsync.SnapshotMetadataTest" time="0.003"/>
+  <testcase name="appendResolutionChoosingAnotherDeviceKeepsItsSnapshotOriginAndCurrentActor()" classname="pdsync.SnapshotMetadataTest" time="0.056"/>
+  <testcase name="concurrentProvidersCreateOnlyOnePersistedIdentity()" classname="pdsync.SnapshotMetadataTest" time="0.015"/>
+  <testcase name="identitySurvivesRestartAndRenameButDifferentWorkspacesRemainDistinct()" classname="pdsync.SnapshotMetadataTest" time="0.002"/>
+  <testcase name="historyObservationCanBeAddedLocallyWithoutChangingSavedAtOrProvenance()" classname="pdsync.SnapshotMetadataTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

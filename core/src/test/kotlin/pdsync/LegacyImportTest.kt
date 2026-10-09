@@ -23,7 +23,7 @@ class LegacyImportTest {
  @Test fun importsHistoryBackupMetadataAndPendingWithoutChangingIdentity() {
   val save = root(); val state = Files.createTempDirectory("legacy-state")
   val old = legacy(save, state, pending = true)
-  val manager = ProfileSession(AppConfig(save.toString()), state)
+  val manager = ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
   assertEquals(old.manifest, manager.history().single().manifest)
   assertEquals("2026-10-01T00:00:00Z", manager.history().single().savedAt)
   assertTrue(manager.hasPending()); assertContentEquals(old.zip, manager.loadSnapshot(old.manifest.id).zip)
@@ -34,21 +34,21 @@ class LegacyImportTest {
    override fun publish(manifest: Manifest, expected: RemoteHead?) = error("Already published")
   }
   assertTrue(manager.push(store) { true } is PushResult.Success)
-  val restarted = ProfileSession(AppConfig(save.toString()), state)
+  val restarted = ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
   assertFalse(restarted.hasPending()); assertEquals(1, restarted.history().size)
   assertEquals(2, Files.list(state.resolve("profiles")).use { it.count() }.toInt())
  }
  @Test fun neverImportsOtherRootsOrEndpoints() {
   val state = Files.createTempDirectory("legacy-state"); val other = root(); legacy(other, state)
-  val selected = root(); assertTrue(ProfileSession(AppConfig(selected.toString()), state).history().isEmpty())
-  assertTrue(ProfileSession(AppConfig(other.toString(), "http://127.0.0.1:9999"), state).history().isEmpty())
+  val selected = root(); assertTrue(ProfileSession(AppConfig(selected.toString()), state, captureQuietMillis = 0).history().isEmpty())
+  assertTrue(ProfileSession(AppConfig(other.toString(), "http://127.0.0.1:9999"), state, captureQuietMillis = 0).history().isEmpty())
  }
  @Test fun conflictingPendingOrHeadsAreNotChosen() {
   for (pending in listOf(true, false)) {
    val save = root(); val state = Files.createTempDirectory("legacy-state")
    legacy(save, state, "4.0.1", pending, !pending)
    legacy(save, state, "4.0.2", pending, !pending)
-   assertFails { ProfileSession(AppConfig(save.toString()), state) }
+   assertFails { ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0) }
    assertEquals(2, Files.list(state.resolve("profiles")).use { it.count() }.toInt())
   }
  }
@@ -56,7 +56,7 @@ class LegacyImportTest {
   val save = root(); val state = Files.createTempDirectory("legacy-state"); val old = legacy(save, state)
   val zip = Files.walk(state).use { paths -> paths.filter { it.fileName.toString() == "${old.manifest.id}.zip" }.findFirst().get() }
   zip.writeText("broken")
-  assertFails { ProfileSession(AppConfig(save.toString()), state) }
+  assertFails { ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0) }
   assertEquals("broken", zip.readText())
  }
 }

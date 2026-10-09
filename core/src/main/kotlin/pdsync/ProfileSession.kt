@@ -60,7 +60,7 @@ private fun validateRawEndpoint(endpoint: String) {
 @Serializable data class AppConfig(
  val saveRoot: String = "", val endpoint: String = "http://127.0.0.1:8765",
  val profile: String = "demo", val version: String? = null, val targetGame: String = "",
- val username: String = "", val rememberPassword: Boolean = false
+ val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false
 ) {
  fun validated(): AppConfig {
   require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "档案名只允许 1–64 位字母、数字、下划线或连字符" }
@@ -76,7 +76,7 @@ private fun validateRawEndpoint(endpoint: String) {
 class ConfigFile(private val path: Path) {
  @Serializable private data class Persisted(
   val endpoint: String, val profile: String, val targetGame: String = "",
-  val username: String = "", val rememberPassword: Boolean = false
+  val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false
  )
  fun exists(): Boolean = SafePaths.checked(path).exists()
  fun load(): AppConfig? = if (exists())
@@ -84,7 +84,7 @@ class ConfigFile(private val path: Path) {
    .copy(saveRoot = "").validated() else null
  fun save(config: AppConfig) {
   val safe = config.validated()
-  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword)).encodeToByteArray()
+  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused)).encodeToByteArray()
   require(bytes.size <= 16 * 1024) { "配置过大，未保存" }
   preserveLegacy()
   SafePaths.atomicWrite(path, bytes)
@@ -106,7 +106,8 @@ class ConfigFile(private val path: Path) {
  }
 }
 
-@Serializable data class HistoryEntry(val manifest: Manifest, val savedAt: String, val reason: String)
+/** savedAt is local history receipt; remoteObservedAt is this device's first verified cloud observation. */
+@Serializable data class HistoryEntry(val manifest: Manifest, val savedAt: String, val reason: String, val remoteObservedAt: String? = null)
 data class PreservedConflict(val local: Snapshot, val remote: Snapshot, val head: RemoteHead)
 sealed interface PushResult {
  data class Success(val manifest: Manifest): PushResult
@@ -140,11 +141,13 @@ object ShatteredProfileVersions : ProfileVersions {
 /** Each scope binds a physical save directory, adapter, remote endpoint, profile, and version. */
 class ProfileSession(
  config: AppConfig, private val stateRoot: Path, val adapter: GameAdapter = Shattered,
- private val versions: ProfileVersions = ShatteredProfileVersions
+ private val versions: ProfileVersions = ShatteredProfileVersions,
+ private val captureQuietMillis: Long = 2_000
 ) {
  val config = config.validated()
  val root = SafePaths.directory(Path.of(this.config.saveRoot))
  private val state = SafePaths.checked(stateRoot)
+ private val metadata = DeviceMetadata(state)
  private val scopeKey = hash(listOf("auto-version-v2", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
  val directory: Path = state.resolve("profiles").resolve(scopeKey)
  private val historyRoot = directory.resolve("history")
@@ -235,23 +238,27 @@ class ProfileSession(
   candidates.forEach { SafePaths.atomicWrite(directory.resolve("imported-${it.key}.txt"), "copied-and-verified".encodeToByteArray()) }
  }
 
- internal fun guard(stopped: () -> Boolean) { require(stopped()) { "请确认游戏已完全退出，Steam Cloud 等其他同步已暂停" } }
+ fun deviceIdentity(): DeviceIdentity = metadata.currentDevice()
+ internal fun operationMetadata(): CommitOperationMetadata = metadata.operation()
+ internal fun guard(stopped: () -> Boolean) { if (!stopped()) throw SaveNotStableException("游戏正在运行或进程状态未知，请等待游戏退出") }
  private fun checkedManifest(manifest: Manifest) {
   require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
   require(manifest.game == adapter.id && manifest.profile == config.profile) { "快照游戏或档案不匹配" }
+  manifest.metadata?.validated(manifest.files.keys)
  }
  internal fun capture(stopped: () -> Boolean, parent: String? = head()): Snapshot {
   guard(stopped); validateRoot()
-  val snapshot = versions.annotate(Snapshots.capture(root, adapter, config.profile, "自动识别", parent))
+  val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
   require(snapshot.manifest.files.isNotEmpty()) { "空目录只能用于恢复，不能创建或上传空快照" }
   guard(stopped)
-  require(Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files == snapshot.manifest.files) { "采集期间存档发生变化；已停止操作，请退出游戏及其他同步后重试" }
+  if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException("采集期间存档发生变化；已停止操作，等待文件稳定后重试")
   return snapshot
  }
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
   SafePaths.boundedRead(headPath, 128).decodeToString().trim().also { require(it.matches(Regex("[0-9a-fA-F-]{36}"))) } else null
  private fun setHead(id: String) = SafePaths.atomicWrite(headPath, id.encodeToByteArray())
- internal fun remember(snapshot: Snapshot, reason: String): HistoryEntry {
+ internal fun remember(snapshot: Snapshot, reason: String, remoteObservedAt: String? = null): HistoryEntry {
+  remoteObservedAt?.let(::requireUtcTimestamp)
   checkedManifest(snapshot.manifest); Snapshots.verify(snapshot, adapter)
   snapshot.manifest.saveVersions?.let { evidence ->
    require(versions.annotate(snapshot).manifest.saveVersions == evidence) { "快照的版本元数据与实际内容不一致" }
@@ -261,9 +268,12 @@ class ProfileSession(
   if (SafePaths.checked(entryPath).exists()) {
    val old = loadSnapshot(id)
    require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { "同名历史快照内容不一致" }
-   return json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
+   val existing = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
+   existing.remoteObservedAt?.let(::requireUtcTimestamp)
+   if (existing.remoteObservedAt != null || remoteObservedAt == null) return existing
+   return existing.copy(remoteObservedAt = remoteObservedAt).also { SafePaths.atomicWrite(entryPath, json.encodeToString(it).encodeToByteArray()) }
   }
-  val entry = HistoryEntry(snapshot.manifest, Instant.now().toString(), reason)
+  val entry = HistoryEntry(snapshot.manifest, Instant.now().toString(), reason, remoteObservedAt)
   SafePaths.atomicWrite(historyRoot.resolve("$id.zip"), snapshot.zip)
   SafePaths.atomicWrite(entryPath, json.encodeToString(entry).encodeToByteArray())
   return entry
@@ -273,6 +283,7 @@ class ProfileSession(
   Files.list(historyRoot).use { paths -> paths.filter { it.fileName.toString().endsWith(".entry.json") }.toList().map { path ->
    val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(path, MAX_MANIFEST_BYTES).decodeToString())
    checkedManifest(entry.manifest)
+   entry.remoteObservedAt?.let(::requireUtcTimestamp)
    require(path.fileName.toString() == "${entry.manifest.id}.entry.json")
    entry
   }.sortedByDescending { it.savedAt } }
@@ -350,10 +361,17 @@ class ProfileSession(
  internal fun restore(snapshot: Snapshot, stopped: () -> Boolean): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
   var entry: HistoryEntry? = null
+  val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+  var backupFingerprint: SaveFingerprint? = null
   val backupPath = Snapshots.restore(snapshot, root, backupRoot, adapter, "自动识别", stopped,
    onBackupReady = { backup, _ -> entry = remember(backup, "恢复前自动备份") },
    validateCompatibility = { candidate, _ -> versions.checkRestore(candidate, config.targetGame) },
-   captureBackup = { current -> versions.annotate(Snapshots.capture(current, adapter, config.profile, "自动识别", null)) })
+   captureBackup = { current ->
+    require(current == root)
+    val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
+    backupFingerprint = captured.fingerprint
+    versions.annotate(captured.snapshot)
+   }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) })
   return RestoreResult(snapshot.manifest, requireNotNull(entry), backupPath)
  }
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = locked {

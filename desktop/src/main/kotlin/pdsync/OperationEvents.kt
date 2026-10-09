@@ -134,7 +134,7 @@ private fun classifiedFailure(failure: Throwable): OperationFailure = when (fail
  is SocketException, is SocketTimeoutException, is UnknownHostException, is SSLException -> OperationFailure.NETWORK
  is FileSystemException, is FileNotFoundException -> OperationFailure.STORAGE
  is SecurityException -> OperationFailure.AUTHORIZATION
- is IllegalArgumentException, is RemoteIntegrityException, is UnsettledRemoteException,
+ is SaveNotStableException, is IllegalArgumentException, is RemoteIntegrityException, is UnsettledRemoteException,
  is LegacyProtocolException -> OperationFailure.VALIDATION
  else -> OperationFailure.OTHER
 }

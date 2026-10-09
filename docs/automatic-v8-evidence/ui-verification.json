@@ -1,0 +1,12 @@
+{
+  "fixture": "isolated synthetic saves and public loopback demo account",
+  "process_guard": "injected test-only; production UI blocked on unavailable executable identity",
+  "remote_commit_count": 4,
+  "remote_object_count": 4,
+  "backup_zip_count": 1,
+  "restore_preserved_source_metadata": true,
+  "restore_new_operation_time": true,
+  "no_active_upload_plan": true,
+  "pause_persisted": true,
+  "production_fixture_unchanged": true
+}

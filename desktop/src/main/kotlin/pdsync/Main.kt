@@ -26,9 +26,9 @@ import kotlin.coroutines.suspendCoroutine
 private val workspace = Path.of(System.getProperty("pdsync.workspace", ".")).toAbsolutePath().normalize()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
-private enum class Page { HOME, CONNECTION, CONFLICT, CONFIRM }
-private data class OperationResult(val message: String, val conflict: AppendConflict? = null)
-private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?)
+private enum class Page { HOME, SETTINGS, CONNECTION, CONFLICT, CONFIRM }
+private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null)
+private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
 
@@ -44,12 +44,18 @@ private suspend fun chooseGame(parent: java.awt.Component, initial: String): Str
  }
 }
 
-fun main() = application {
+fun main() = runSyncApplication()
+
+/** Production always uses fresh process detection. Dependency injection is only used by test code. */
+internal fun runSyncApplication(
+ processStatus: (TargetGame?) -> GameProcessStatus = { GameProcessDetector(it).status() },
+ title: String = "像素地牢 · 存档同步"
+) = application {
  var busy by remember { mutableStateOf(false) }
  var closeBlocked by remember { mutableStateOf(false) }
  var connectingAtStartup by remember { mutableStateOf(true) }
  var appClosed by remember { mutableStateOf(false) }
- Window(onCloseRequest = { if (busy || connectingAtStartup) closeBlocked = true else { appClosed = true; exitApplication() } }, title = "像素地牢 · 存档同步", state = rememberWindowState(width = 1120.dp, height = 800.dp)) {
+ Window(onCloseRequest = { if (busy || connectingAtStartup) closeBlocked = true else { appClosed = true; exitApplication() } }, title = title, state = rememberWindowState(width = 1120.dp, height = 800.dp)) {
   LaunchedEffect(Unit) { window.minimumSize = java.awt.Dimension(760, 640) }
   DisposableEffect(Unit) { onDispose { appClosed = true } }
   if (System.getenv("PDSYNC_SMOKE") == "1") LaunchedEffect(Unit) {
@@ -84,6 +90,12 @@ fun main() = application {
   var conflictRestoreIssue by remember { mutableStateOf<String?>("尚未校验") }
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
   var status by remember { mutableStateOf("正在检查默认存档位置…") }
+  var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown("请在设置中选择官方游戏 JAR")) }
+  var automaticStatus by remember { mutableStateOf("正在建立本地观察基线…") }
+  var automatic by remember { mutableStateOf(AutomaticUpload()) }
+  var remoteReadAt by remember { mutableStateOf(0L) }
+  var device by remember { mutableStateOf<DeviceIdentity?>(null) }
+  var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
   val secretStore = remember { SystemSecretStore.create() }
   val selection = history.firstOrNull { it.manifest.id == selected }
@@ -108,14 +120,15 @@ fun main() = application {
      if (value == null) null else {
       val manager = location.open(value, workspace.resolve(".local/manager"))
       val target = runCatching { manager.targetInfo() }
-      LoadedProfile(manager, manager.history(), manager.hasPending(), manager.currentVersions(), target.getOrNull(), target.exceptionOrNull()?.message)
+      LoadedProfile(manager, manager.history(), manager.hasPending(), manager.currentVersions(), target.getOrNull(), target.exceptionOrNull()?.message, manager.deviceIdentity(), manager.baselineFiles())
      }
     }
     if (appClosed) return
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
     selected = history.firstOrNull()?.manifest?.id; remoteTips = emptySet(); conflictSelection = null; conflict = null
-    status = if (value == null) "默认存档位置已找到。连接云端后即可管理快照。" else "存档与历史已刷新。操作前请退出游戏并暂停其他同步。"
+    device = data?.device; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
+    status = if (value == null) "默认存档位置已找到。连接云端后即可管理快照。" else "已开始观察存档。已有同步基线会自动补传离线变化；新档案可先点击上传，后续自动处理。"
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
     if (appClosed) return
@@ -161,7 +174,7 @@ fun main() = application {
    status = if (trace.action == Action.PUSH && pending) "已取消上传，待上传快照仍保留。" else "已取消本次操作。"
    confirm = null; confirmationNotice = null; navigate(Page.HOME)
   }
-  fun execute(trace: OperationTrace) {
+  fun execute(trace: OperationTrace, isAutomatic: Boolean = false) {
    val action = trace.action
    trace.record(OperationEvent.CONFIRMATION_SUBMITTED)
    val rejected = when {
@@ -184,6 +197,7 @@ fun main() = application {
    val manager = requireNotNull(session)
    val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
    busy = true; confirm = null; confirmationNotice = null; navigate(Page.HOME)
+   if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
     Action.PUSH -> "正在保留快照并校验云端…"
@@ -196,7 +210,17 @@ fun main() = application {
     try {
      val result = withContext(Dispatchers.IO) {
       trace.record(OperationEvent.WORK_STARTED)
-      val stopped = { true }
+      val target = manager.targetInfo()
+      val stopped = {
+       val fresh = processStatus(target)
+       if (fresh !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(fresh))
+       fresh == GameProcessStatus.Stopped
+      }
+      if (action != Action.ARCHIVE) {
+       val state = processStatus(target)
+       if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
+       SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
+      }
       fun store() = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
        is AppendPushResult.Success -> OperationResult("追加提交已回读校验。" + (if (result.localDirty) "当前本地还有未上传变化；下一次同步会另建提交。" else "所选进度已成为本机同步基线。") + (if (result.remoteAhead) "另有已观察后续分支，可读取查看。" else ""))
@@ -205,30 +229,42 @@ fun main() = application {
       val completed = when (action) {
        Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult("本地快照已保存，可随时从历史中恢复。") }
        Action.PUSH -> pushed(manager.push(store(), stopped))
-       Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。") }
-       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。新的恢复提交已冻结，点击重试待上传快照即可发布。") }
-       Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped))
+       Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。", appliedFiles = it.restored.files) }
+       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。恢复提交已冻结，将自动上传；暂停时可点击上传。", appliedFiles = it.restored.files) }
+       Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped)).copy(appliedFiles = divergence.branches.single { it.snapshot.manifest.id == branchChoice }.snapshot.manifest.files)
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
       trace.record(OperationEvent.WORK_SUCCEEDED)
       completed
      }
-     status = result.message; conflict = result.conflict; conflictSelection = null
+     status = result.message; conflict = result.conflict; conflictSelection = null; remoteReadAt = 0L
+     val now = monotonicMillis()
+     if (action == Action.PUSH) {
+      val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
+      if (baseline != null) automatic.succeeded(baseline) else automatic.failed(now, false)
+     } else if (result.appliedFiles != null) automatic.applied(result.appliedFiles, now)
+     else if (action == Action.ARCHIVE) {
+      val files = withContext(Dispatchers.IO) { runCatching { manager.observedFiles() }.getOrNull() }
+      if (files != null) automatic.applied(files, now) else automatic.retryAllowed()
+     }
+     if (result.conflict != null) automaticStatus = "存在多个存档分支，自动上传已暂停，点击恢复选择。"
      if (result.conflict != null) navigate(Page.CONFLICT)
     } catch (e: CancellationException) {
      terminalFailure = OperationFailure.CANCELED
+     if (action == Action.PUSH) automatic.failed(monotonicMillis(), false)
      trace.record(OperationEvent.OPERATION_CANCELED, failure = terminalFailure)
      status = "本次操作已中断，已保存的历史与备份保留。请核对待上传状态后重试。"
      throw e
     } catch (e: Exception) {
      terminalFailure = operationFailure(e)
+     if (action == Action.PUSH) automatic.failed(monotonicMillis(), terminalFailure == OperationFailure.NETWORK || e is SaveNotStableException)
      trace.record(OperationEvent.WORK_FAILED, failure = terminalFailure)
      status = "操作未完成：${e.message}。已保存的历史与备份保留。"; authenticationFailed(e)
     }
     finally {
      try {
       trace.record(OperationEvent.HISTORY_REFRESH_STARTED)
-      val data = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), manager.currentVersions()) }
+      val data = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) }
       history = data.first; pending = data.second; saveInfo = data.third
       if (selected == null) selected = history.firstOrNull()?.manifest?.id
       trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
@@ -250,14 +286,51 @@ fun main() = application {
   fun readRemote() {
    if (busy || connectingAtStartup || appClosed || !connected) return
    val manager = session ?: return; val account = config?.username ?: ""; val secret = password
-   busy = true; status = "正在读取并校验云端快照…"
+   busy = true; remoteReadAt = monotonicMillis(); status = "正在读取并校验云端快照…"
    scope.launch {
     try {
      val entries = withContext(Dispatchers.IO) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) }
-     remoteTips = entries.map { it.entry.manifest.id }.toSet(); if (entries.size == 1) selected = entries.single().entry.manifest.id
+     remoteTips = entries.map { it.entry.manifest.id }.toSet()
+     remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
+     if (selected == null && entries.size == 1) selected = entries.single().entry.manifest.id
      history = withContext(Dispatchers.IO) { manager.history() }
      status = if (entries.isEmpty()) "此次未观察到云端提交。可先同步当前存档。" else "已观察到 ${entries.size} 个云端分支，均已加入历史，本地未改动。普通恢复只允许单一分支及干净本地基线。已有本地进度可先同步，再明确选择；空目录可先从历史选定快照恢复，之后同步解决分支。"
     } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
+    finally { busy = false }
+   }
+  }
+  fun openRestore() {
+   if (busy || connectingAtStartup || appClosed) return
+   if (conflict != null) { navigate(Page.CONFLICT); return }
+   if (remoteTips.size > 1) {
+    val manager = session ?: return
+    busy = true
+    scope.launch {
+     try {
+      val found = withContext(Dispatchers.IO) {
+       val target = manager.targetInfo()
+       val stopped = { processStatus(target) is GameProcessStatus.Stopped }
+       require(stopped()) { processMessage(processStatus(target)) }
+       SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
+       manager.inspectConflict(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, config?.username ?: "", password), stopped)
+      }
+      conflict = found; conflictSelection = null
+      if (found != null) navigate(Page.CONFLICT) else status = "云端分支已变化，请等待刷新后重新选择。"
+     } catch (e: Exception) { status = "暂不能选择恢复：${e.message}"; authenticationFailed(e) }
+     finally { busy = false }
+    }
+   } else requestConfirmation(if (selected in remoteTips) Action.REMOTE_TIP else Action.RESTORE)
+  }
+  fun setAutomaticPaused(paused: Boolean) {
+   if (busy || connectingAtStartup) return
+   val value = config ?: return
+   busy = true
+   scope.launch {
+    try {
+     val next = value.copy(autoUploadPaused = paused)
+     withContext(Dispatchers.IO) { configFile.save(next) }
+     config = next; automatic.retryAllowed()
+    } catch (e: Exception) { status = "设置未保存：${e.message}" }
     finally { busy = false }
    }
   }
@@ -296,6 +369,44 @@ fun main() = application {
    catch (_: Exception) { requestUnlock("自动连接未完成，请检查连接信息后重试。") }
    finally { connectingAtStartup = false }
   }
+  LaunchedEffect(session, connected) {
+   while (isActive && !appClosed) {
+    delay(1000)
+    if (busy || connectingAtStartup || page != Page.HOME) continue
+    val manager = session ?: continue
+    try {
+     val target = targetInfo
+     val observation = withContext(Dispatchers.IO) {
+      val state = processStatus(target)
+      state to manager.observedFiles()
+     }
+     if (busy || connectingAtStartup || page != Page.HOME || session !== manager) continue
+     val state = observation.first; val files = observation.second; val now = monotonicMillis()
+     gameStatus = state
+     automatic.observe(files, state is GameProcessStatus.Running, state is GameProcessStatus.Stopped, now)
+     val retryable = withContext(Dispatchers.IO) { manager.retryablePending() }
+     if (busy || connectingAtStartup || page != Page.HOME || session !== manager || appClosed) continue
+     automaticStatus = when {
+      config?.autoUploadPaused == true -> "自动上传已暂停；仍可手动上传。"
+      !connected -> "等待登录，已有快照与待上传操作保留。"
+      state !is GameProcessStatus.Stopped -> processMessage(state)
+      pending && !retryable -> "有待检查的中断操作，请在设置中处理。"
+      conflict != null || remoteTips.size > 1 -> "多个分支均已保留。点击恢复，明确选择要继续的存档。"
+      automatic.needsAttention -> "自动上传已停止重试。请查看下方原因，修正后点击上传。"
+      automatic.waitingForRetry -> "网络未完成，稍后自动重试同一份冻结快照。"
+      retryable -> "待上传快照已保存在本机，等待静默期后自动重试。"
+      else -> "自动上传已开启：检测存档变化或游戏退出，稳定后上传。"
+     }
+     if (automatic.shouldUpload(now, config?.autoUploadPaused != true, connected, state is GameProcessStatus.Stopped, retryable, conflict != null || remoteTips.size > 1, busy)) {
+      val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
+      if (busy || connectingAtStartup || page != Page.HOME || session !== manager || !connected || appClosed) continue
+      if (!retryable && files == baseline) automatic.succeeded(files)
+      else execute(operationEvents.begin(Action.PUSH), isAutomatic = true)
+     } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
+    } catch (e: CancellationException) { throw e }
+    catch (_: Exception) { automaticStatus = "存档正在变化或暂不可读，继续等待；没有采集或覆盖存档。" }
+   }
+  }
   LaunchedEffect(session, selected, busy) {
    restoreIssue = "正在校验实际版本…"
    val manager = session; val id = selected
@@ -322,86 +433,79 @@ fun main() = application {
          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
           Column(Modifier.weight(1f)) {
            Text("像素地牢", style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
-           Text("存档同步  /  SHATTERED", color = muted, style = MaterialTheme.typography.caption)
+           Text("存档自动同步  /  SHATTERED", color = muted, style = MaterialTheme.typography.caption)
           }
-          Text(if (connected) "● 云端已连接" else "○ 云端未连接", color = if (connected) green else muted, style = MaterialTheme.typography.body2)
-          Spacer(Modifier.width(18.dp))
-          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("设置") }
+          Text(if (connected) "● 云端已连接" else "○ 等待登录", color = if (connected) green else muted, style = MaterialTheme.typography.body2)
+          Spacer(Modifier.width(20.dp))
+          Text("设置", Modifier.clickable(enabled = !busy && !connectingAtStartup) { navigate(Page.SETTINGS) }.padding(8.dp), color = green)
          }
-         Surface(color = Color(0xFFFFECCD)) {
-          Text("实验版本 · 操作前退出游戏、暂停 Steam Cloud 及其他同步。尚无可靠进程检测或断电保护，请另留一份备份。", Modifier.padding(12.dp), style = MaterialTheme.typography.caption, color = Color(0xFF75572C))
-         }
-         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-          Column(Modifier.width(340.dp).verticalScroll(homeScroll), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-           Card(elevation = 0.dp) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-             Text("当前存档", style = MaterialTheme.typography.h6)
-             Text(if (session != null) saveInfo?.summary() ?: "版本未知" else if (locationIssue != null) "暂未找到可用存档" else "等待连接设置", color = if (locationIssue != null) Color(0xFF986337) else green)
-             Text("默认位置 · 由游戏与系统决定", color = muted, style = MaterialTheme.typography.caption)
-             SelectionContainer { Text(pathText, style = MaterialTheme.typography.caption) }
-             locationIssue?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.body2) }
-             if (session != null) Text("${saveInfo?.runs?.size ?: 0} 个进行中的局 · 全局记录一同保存", style = MaterialTheme.typography.body2)
-             Text(when { targetError != null -> "目标游戏暂不可用，请重新选择 JAR。"; targetInfo == null -> "尚未选择目标游戏。备份与上传可用；恢复前需选择 JAR。"; else -> "恢复目标：Shattered ${targetInfo!!.displayVersion}" }, color = muted, style = MaterialTheme.typography.caption)
-             OutlinedButton(enabled = config != null && !busy && !connectingAtStartup, onClick = { selectTargetGame() }) { Text(if (config?.targetGame.isNullOrBlank()) "选择目标游戏 JAR…" else "更换目标游戏 JAR…") }
-             Text("只读取游戏版本，不运行 JAR。", color = muted, style = MaterialTheme.typography.caption)
-             TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }, contentPadding = PaddingValues(0.dp)) { Text("重新检查存档") }
-            }
-           }
-           Card(elevation = 0.dp) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-             Text("同步与备份", style = MaterialTheme.typography.h6)
-             Button(enabled = !busy && !connectingAtStartup && (!connected || session != null), onClick = { if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK) else requestConfirmation(Action.PUSH) }, modifier = Modifier.fillMaxWidth()) {
-              Text(if (!connected) "连接云端" else if (pending) "重试待上传快照" else "同步当前存档")
-             }
-             OutlinedButton(enabled = session != null && !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.CAPTURE) }, modifier = Modifier.fillMaxWidth()) { Text("创建本地快照") }
-             TextButton(enabled = session != null && connected && !busy && !connectingAtStartup, onClick = { readRemote() }, modifier = Modifier.fillMaxWidth()) { Text("查看云端已观察分支") }
-             if (pending) {
-              Text("待上传的是上次冻结的快照。重试会继续原内容。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-              TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("归档待上传，稍后重新采集") }
-             }
-             if (conflict != null) OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { navigate(Page.CONFLICT) }) { Text("查看存档冲突") }
-            }
-           }
-           Text("同步包含所有 gameN 局目录，以及排行榜、徽章和日志。设备设置不参与。", Modifier.padding(horizontal = 4.dp), color = muted, style = MaterialTheme.typography.caption)
+         Surface(color = Color(0xFFE3EFE6)) {
+          Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+           Text(automaticStatus, color = green, style = MaterialTheme.typography.body2)
+           Text("设备：${device?.displayLabel() ?: "正在读取"}  ·  ${saveInfo?.summary() ?: "尚未识别本地存档"}", color = muted, style = MaterialTheme.typography.caption)
+           Text("设备名与时间随快照上传；原始游戏存档不改写。", color = muted, style = MaterialTheme.typography.caption)
           }
-          Card(Modifier.weight(1f).fillMaxHeight(), elevation = 0.dp) {
-           Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-             Text("历史快照", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
-             Text("${history.size} 份", color = muted, style = MaterialTheme.typography.body2)
-            }
-            Text("本地保存的同步版本与恢复前备份", color = muted, style = MaterialTheme.typography.caption)
-            if (history.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Text("还没有快照", color = muted, style = MaterialTheme.typography.subtitle1)
-              Text(if (session == null) "完成连接设置并检查默认存档位置" else "创建一份本地快照，或读取云端存档", color = muted, style = MaterialTheme.typography.caption)
-             }
-            } else LazyColumn(Modifier.weight(1f), state = historyScroll, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-             items(history, key = { it.manifest.id }) { entry ->
-              val m = entry.manifest
-              Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color(0xFFF7F8F5)) {
-               Column(Modifier.fillMaxWidth().clickable(enabled = !busy && !connectingAtStartup) { selected = m.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (entry.reason == "待上传快照") "同步快照" else entry.reason, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.body2)
-                Text("${entry.savedAt.substringBefore('.').replace('T', ' ')} UTC", color = muted, style = MaterialTheme.typography.caption)
-                Text("${m.saveVersions?.summary() ?: "恢复前自动校验"}  ·  ${m.files.size} 个文件  ·  ${m.id.take(8)}", color = muted, style = MaterialTheme.typography.caption)
-               }
+         }
+         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          Button(enabled = !busy && !connectingAtStartup && (!connected || session != null), onClick = {
+           if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
+           else execute(operationEvents.begin(Action.PUSH))
+          }, modifier = Modifier.weight(1f)) { Text("上传") }
+          OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && !pending && (selected !in remoteTips || connected) &&
+           (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null), onClick = { openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
+         }
+         if (locationIssue != null) Text(locationIssue!!, color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) Text("恢复暂不可用：$restoreIssue", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         if (pending) Text("待上传操作已冻结，重试仍使用原内容。恢复暂不可用。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         Card(Modifier.weight(1f).fillMaxWidth(), elevation = 0.dp) {
+          Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+           Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("选择要恢复的存档", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
+            Text("${history.size} 份", color = muted, style = MaterialTheme.typography.body2)
+           }
+           Text("自动读取云端分支，保留本机历史及恢复前备份。点击一项，再点击恢复。", color = muted, style = MaterialTheme.typography.caption)
+           if (history.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text("还没有快照。可点击上传，或等待云端读取完成。", color = muted)
+           } else LazyColumn(Modifier.weight(1f), state = historyScroll, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(history, key = { it.manifest.id }) { entry ->
+             val m = entry.manifest
+             Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color(0xFFF7F8F5)) {
+              Column(Modifier.fillMaxWidth().clickable(enabled = !busy && !connectingAtStartup) { selected = m.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+               Text(m.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知", fontWeight = FontWeight.Medium)
+               Text(snapshotTimes(m, entry.savedAt, remoteObserved[m.id] ?: entry.remoteObservedAt), color = muted, style = MaterialTheme.typography.caption)
+               Text("${if (m.id in remoteTips) "云端分支 · " else ""}${if (entry.remoteObservedAt != null) entry.reason.replace("待追加发布", "已上传").replace("待上传快照", "同步快照") else entry.reason}  ·  ${m.files.size} 个文件  ·  ${m.id.take(8)}", color = muted, style = MaterialTheme.typography.caption)
               }
              }
-            }
-            if (selection != null) {
-             Divider()
-             Text("恢复将替换整个档案；系统会先保存当前进度。", style = MaterialTheme.typography.caption, color = muted)
-             Button(enabled = session != null && !busy && !connectingAtStartup && !pending && restoreIssue == null, onClick = { requestConfirmation(Action.RESTORE) }) { Text("备份后恢复所选快照") }
-             if (selected in remoteTips && remoteTips.size == 1) TextButton(enabled = !busy && !connectingAtStartup && connected && !pending && restoreIssue == null, onClick = { requestConfirmation(Action.REMOTE_TIP) }) { Text("恢复此分支并设为同步基线") }
-             if (restoreIssue != null) Text("恢复暂不可用：$restoreIssue", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-             if (pending) Text("请先处理或归档待上传快照。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
             }
            }
           }
          }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
          connectionNotice?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
-         Text(status, Modifier.fillMaxWidth(), style = MaterialTheme.typography.body2, color = muted)
+         Text(status, Modifier.fillMaxWidth().heightIn(max = 76.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.body2, color = muted)
+        }
+       }
+       Page.SETTINGS -> GuidedPage(
+        title = "设置", subtitle = "自动上传在同步器打开且云端已登录时工作。",
+        footer = { TextButton(enabled = !busy && !connectingAtStartup, onClick = { navigate(Page.HOME) }) { Text("返回存档") } }
+       ) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+          Column(Modifier.weight(1f)) { Text("自动上传"); Text("关闭后保留手动上传与所有待上传快照。", color = muted, style = MaterialTheme.typography.caption) }
+          Switch(checked = config?.autoUploadPaused != true, enabled = config != null && !busy, onCheckedChange = { setAutomaticPaused(!it) })
+         }
+         Divider()
+         Text("游戏检测与恢复校验", style = MaterialTheme.typography.subtitle1)
+         Text(when { targetError != null -> "所选目标暂不可用：$targetError"; targetInfo == null -> "请选择官方游戏 JAR，才能核对游戏进程与恢复版本。"; else -> "Shattered ${targetInfo!!.displayVersion}  ·  ${processMessage(gameStatus)}" }, color = muted)
+         OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("选择游戏 JAR…") }
+         Text("只读取，不启动游戏。检测当前账户的游戏进程；相关进程信息不可见时停止操作。其他账户、Steam Cloud 或其他程序仍可能写入，请避免同时同步；这不是全局互斥锁。", color = muted, style = MaterialTheme.typography.caption)
+         if (gameStatus is GameProcessStatus.Unknown) Text("游戏已退出仍无法检测时，请在普通桌面会话检查进程可见性或运行只读诊断。不要强行结束不认识的系统进程，也不要绕过权限限制。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         Text("默认存档位置", style = MaterialTheme.typography.subtitle1)
+         SelectionContainer { Text(pathText, style = MaterialTheme.typography.caption) }
+         TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
+         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
+         if (pending) TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("检查并归档中断的待上传操作") }
+         Text("实验版本：请另留备份。断电事务、其他写入程序及跨平台原生运行仍有验证限制。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
         }
        }
        Page.CONNECTION -> key(pageGeneration) {
@@ -424,7 +528,7 @@ fun main() = application {
          onConfirm = { requestConfirmation(Action.RESOLVE) })
        }
        Page.CONFIRM -> confirm?.let { trace ->
-        ConfirmationPage(trace.action, session?.root?.toString(), pending, conflictSelection, busy || connectingAtStartup, confirmationNotice,
+        ConfirmationPage(trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else selection?.manifest, busy || connectingAtStartup, confirmationNotice,
          onBack = { cancelConfirmation(trace) },
          onConfirm = { execute(trace) })
        }
@@ -590,6 +694,8 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
      Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { onSelect(m.id) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       RadioButton(selected = selected == m.id, onClick = { onSelect(m.id) }, enabled = !busy)
       Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+       Text(m.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知")
+       Text(snapshotTimes(m, null, null), color = muted, style = MaterialTheme.typography.caption)
        Text("分支 ${branch.commit.id.take(8)} · ${m.files.size} 个文件")
        if (m.files == value.observedLocalFiles) Text("与当前本地进度一致", color = green, style = MaterialTheme.typography.caption)
        if (branch.commit.id == value.publishedLocalCommit) Text("本机最近发布的分支", color = muted, style = MaterialTheme.typography.caption)
@@ -605,9 +711,7 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
 }
 
 @Composable
-private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
- var stopped by remember(action) { mutableStateOf(false) }
- var paused by remember(action) { mutableStateOf(false) }
+private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
  val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP)
  GuidedPage(
   title = if (restoring) "备份并恢复整个档案" else if (action == Action.ARCHIVE) "归档待上传快照" else "操作前确认",
@@ -617,7 +721,7 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     TextButton(enabled = !busy, onClick = onBack) { Text("取消，返回主页") }
     Spacer(Modifier.weight(1f))
-    Button(enabled = !busy && (action == Action.ARCHIVE || stopped && paused), onClick = onConfirm) { Text(if (restoring) "备份并恢复" else "确认继续") }
+    Button(enabled = !busy, onClick = onConfirm) { Text(if (restoring) "备份并恢复" else "确认继续") }
    }
   }
  ) {
@@ -625,13 +729,33 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
    Text("默认目录：$root", color = muted, style = MaterialTheme.typography.caption)
    if (action == Action.ARCHIVE) Text("只移除待上传标记，历史保留，不删除云端内容。若此前恢复中断，请先核对当前档案与备份；归档也会解除中断恢复保护，下次同步将重新采集当前档案。")
    else {
+    if (restoring && snapshot != null) {
+     Text("所选存档：${snapshot.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知"}  ·  ${snapshot.id.take(8)}", fontWeight = FontWeight.Medium)
+     Text(snapshotTimes(snapshot, null, null), color = muted, style = MaterialTheme.typography.caption)
+    }
     if (restoring) Text("先生成可恢复备份，再替换所有局与全局记录。快照中没有的局将移除。旧档可能在游戏加载时升级；原档备份保留。")
     if (action == Action.PUSH && pending) Text("将重试已冻结的快照，可能不同于当前目录的最新内容。")
     if (action == Action.RESOLVE) Text("将采用所选分支 ${branch?.take(8)}，并追加多父提交。全部原始快照继续保留。")
-    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(stopped, { stopped = it }, enabled = !busy); Text("我已完全退出游戏") }
-    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(paused, { paused = it }, enabled = !busy); Text("Steam Cloud 及其他程序不会同时写入") }
-    Text("这是人工确认。未知兼容性与降级将被阻止，断电及并发写入仍有风险。", color = muted, style = MaterialTheme.typography.caption)
+    Text("将自动检测游戏是否退出，并等待存档稳定。检测未知、版本不兼容或检测到文件变化时会停止，不需要勾选。", color = muted, style = MaterialTheme.typography.body2)
+    Text("请避免 Steam Cloud 或其他程序同时写入。进程检测无法锁住其他写入者，断电及并发写入仍有风险。", color = muted, style = MaterialTheme.typography.caption)
    }
   }
  }
 }
+
+private fun monotonicMillis() = System.nanoTime() / 1_000_000
+private fun processMessage(status: GameProcessStatus): String = when (status) {
+ is GameProcessStatus.Stopped -> "当前账户未检测到游戏，等待存档稳定。"
+ is GameProcessStatus.Running -> "检测到游戏正在运行，退出后自动上传。"
+ is GameProcessStatus.Unknown -> if (status.reason.startsWith("无法确认游戏已退出")) status.reason else "无法确认游戏已退出：${status.reason}"
+}
+private fun DeviceIdentity.displayLabel() = "$label · ${id.take(8)}"
+private fun localTime(value: String): String = runCatching {
+ java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(value))
+}.getOrElse { "时间未知" }
+private fun snapshotTimes(manifest: Manifest, savedAt: String?, observedAt: String?): String = buildList {
+ manifest.metadata?.capturedAt?.let { add("采集 ${localTime(it)}") } ?: add("原始采集时间未知")
+ manifest.metadata?.latestFileModifiedAt?.let { add("存档修改 ${localTime(it)}") }
+ if (observedAt != null) add("本机云端核验 ${localTime(observedAt)}")
+ else savedAt?.let { add("本机入库 ${localTime(it)}") }
+}.joinToString("  ·  ")

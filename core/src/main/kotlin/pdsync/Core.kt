@@ -8,7 +8,7 @@ import java.util.UUID
 import java.util.zip.*
 import kotlin.io.path.*
 
-@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null)
+@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null)
 val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
 fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 interface GameAdapter {
@@ -36,10 +36,12 @@ private fun safePath(name: String): Boolean = name.length <= 1024 && name.split(
  !Regex("""(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?""").matches(part)
 }
 object Snapshots {
- fun capture(root: Path, adapter: GameAdapter, profile: String, version: String, parent: String?): Snapshot {
+ fun capture(root: Path, adapter: GameAdapter, profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null): Snapshot {
   require(profile.matches(Regex("[a-zA-Z0-9_-]+")))
   SafePaths.checked(root)
   require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { "Save root must be a real directory, not a symbolic link or file" }
+  captureContext?.let { it.device.validated(); requireUtcTimestamp(it.capturedAt) }
+  val modifiedAt = sortedMapOf<String, String>()
   val files = sortedMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
   Files.walk(root).use { stream -> stream.forEach { p ->
    val name = root.relativize(p).toString().replace('\\','/')
@@ -52,6 +54,7 @@ object Snapshots {
      val bytes = Files.newInputStream(p).use { it.readNBytes(remaining + 1) }
      total += bytes.size; require(total <= MAX_SNAPSHOT_BYTES)
      files[name] = bytes
+     if (captureContext != null) modifiedAt[name] = Files.getLastModifiedTime(p, LinkOption.NOFOLLOW_LINKS).toInstant().toString()
     } else {
      require(Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) { "Save entry disappeared or is not a regular file/directory" }
     }
@@ -61,11 +64,13 @@ object Snapshots {
   val output = java.io.ByteArrayOutputStream()
   ZipOutputStream(output).use { z -> files.forEach { (name, bytes) -> z.putNextEntry(ZipEntry(name)); z.write(bytes); z.closeEntry() } }
   val zip = output.toByteArray(); require(zip.size <= MAX_SNAPSHOT_BYTES)
-  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) }), zip)
+  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) },
+   metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(files.keys) }), zip)
  }
  fun verify(snapshot: Snapshot, adapter: GameAdapter): Map<String, ByteArray> {
   require(snapshot.zip.size <= MAX_SNAPSHOT_BYTES && snapshot.manifest.files.size <= MAX_SNAPSHOT_FILES)
   require(snapshot.manifest.schema == 1 && snapshot.manifest.game == adapter.id)
+  snapshot.manifest.metadata?.validated(snapshot.manifest.files.keys)
   require(hash(snapshot.zip) == snapshot.manifest.sha256) { "Archive checksum mismatch" }
   val files = mutableMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
   ZipInputStream(snapshot.zip.inputStream()).use { zip -> while(true) {
@@ -83,7 +88,8 @@ object Snapshots {
  }
  fun restore(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {}, onBackupReady: (Snapshot, Path) -> Unit = { _, _ -> },
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
-  captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) }) : Path {
+  captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
+  beforeReplacement: () -> Unit = {}) : Path {
   require(guard()) { "Game-running status must be confirmed stopped" }
   SafePaths.directory(root); SafePaths.checked(backupRoot)
   validateCompatibility(snapshot, version)
@@ -106,6 +112,8 @@ object Snapshots {
   // No restore mutation has occurred yet. A restarted game must not trigger rollback.
   require(guard()) { "Game-running status changed before restore" }
   require(capture(root,adapter,snapshot.manifest.profile,version,null).manifest.files == backup.manifest.files) { "Save files changed after backup; restore cancelled without rollback" }
+  // Final metadata/process check stays outside rollback: no target mutation has happened yet.
+  beforeReplacement()
   try {
    replace(emptyMap()); beforeWrite(); replace(files,true)
    require(capture(root, adapter, snapshot.manifest.profile, version, null).manifest.files == snapshot.manifest.files) { "Restored files failed verification" }

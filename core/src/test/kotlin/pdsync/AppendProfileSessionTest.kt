@@ -35,7 +35,7 @@ class AppendProfileSessionTest {
   override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) { "incompatible" } }
  }
  private fun session(root: Path = root(), state: Path = temp.resolve("state-${next++}"), profile: String = "demo", version: String = "v1") =
-  AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), state, versions = versions(version))
+  AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), state, versions = versions(version), captureQuietMillis = 0)
  private fun content(session: AppendProfileSession) = session.root.resolve("game1/game.dat").readText()
  private fun edit(session: AppendProfileSession, value: String) = session.root.resolve("game1/game.dat").writeText(value)
  private fun published(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit
@@ -211,7 +211,7 @@ class AppendProfileSessionTest {
  @Test fun vanishedRemoteBaselineStopsPublicationAndNeverSilentlyStartsNewHistory() {
   val store = Memory(); val local = session(); val first = published(local, store)
   store.commits.remove(first.id); edit(local, "next")
-  assertFails { local.push(store) { true } }; assertEquals(0, store.commits.size); assertFalse(local.hasPending())
+  assertFails { local.push(store) { true } }; assertEquals(0, store.commits.size); assertTrue(local.hasPending())
  }
 
  @Test fun readRemoteReturnsEveryObservedTipWithoutWritesOrChangingLocalBaseline() {
@@ -225,7 +225,7 @@ class AppendProfileSessionTest {
   val store = Memory(); val local = session(); store.legacy = true
   assertFailsWith<LegacyProtocolException> { local.push(store) { true } }; assertTrue(store.commits.isEmpty())
   store.legacy = false
-  val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions())
+  val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions(), captureQuietMillis = 0)
   val oldStore = object: Store {
    override fun head(): RemoteHead? = null
    override fun upload(snapshot: Snapshot) { error("offline") }
@@ -251,7 +251,7 @@ class AppendProfileSessionTest {
  @Test fun adapterIdentitySeparatesVariantsWithIdenticalLocalFiles() {
   val root = root(); val state = temp.resolve("variants"); val shattered = session(root, state)
   val variant = object: GameAdapter by Shattered { override val id = "variant" }
-  val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions())
+  val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions(), captureQuietMillis = 0)
   assertNotEquals(shattered.directory, other.directory)
   val store = Memory(); published(shattered, store)
   assertNull(other.baseline()); assertTrue(other.history().isEmpty())

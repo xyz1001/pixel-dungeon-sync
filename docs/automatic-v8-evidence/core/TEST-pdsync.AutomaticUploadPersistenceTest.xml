@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pdsync.AutomaticUploadPersistenceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-09T05:30:22.547Z" hostname="dd161cbb09b6" time="0.031">
+  <properties/>
+  <testcase name="unknown or running process creates neither snapshot nor pending plan()" classname="pdsync.AutomaticUploadPersistenceTest" time="0.003"/>
+  <testcase name="first discovery failure persists exact snapshot and restart retries it()" classname="pdsync.AutomaticUploadPersistenceTest" time="0.011"/>
+  <testcase name="pause preference round trips without secrets()" classname="pdsync.AutomaticUploadPersistenceTest" time="0.01"/>
+  <testcase name="interrupted restore marker excludes background retry()" classname="pdsync.AutomaticUploadPersistenceTest" time="0.006"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

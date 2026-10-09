@@ -32,7 +32,7 @@ class ProfileSessionTest {
    override fun annotate(snapshot: Snapshot) = snapshot.copy(manifest = snapshot.manifest.copy(version = version))
    override fun target(path: String): TargetGame? = null
    override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) }
-  })
+  }, captureQuietMillis = 0)
  private fun divergent(): Triple<ProfileSession, Memory, PreservedConflict> {
   val store = Memory(); session(root("remote")).push(store) { true }
   val local = session(root("local"))

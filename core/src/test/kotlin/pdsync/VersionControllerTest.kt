@@ -23,7 +23,7 @@ class VersionControllerTest {
   it.resolve("settings.xml").writeText("local-settings")
  }
  private fun session(root: Path, selectedPolicy: ProfileVersions = policy, manual: String? = null) = ProfileSession(
-  AppConfig(root.toString(), version = manual), Files.createTempDirectory("version-state"), Shattered, selectedPolicy)
+  AppConfig(root.toString(), version = manual), Files.createTempDirectory("version-state"), Shattered, selectedPolicy, captureQuietMillis = 0)
  @Test fun manualLabelCannotOverrideActualWriter() {
   val manager = session(root(923), ShatteredProfileVersions, "4.0.2")
   val entry = manager.createSnapshot { true }

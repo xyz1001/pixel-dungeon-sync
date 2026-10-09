@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.nio.file.Path
+import java.time.Clock
 import java.util.UUID
 import kotlin.io.path.*
 
@@ -29,7 +30,8 @@ const val MAX_REMOTE_SCAN_BYTES = 256L * 1024 * 1024
  val parents: List<String>,
  val snapshot: Manifest,
  val objectBytes: Int,
- val kind: String = "snapshot"
+ val kind: String = "snapshot",
+ val operation: CommitOperationMetadata? = null
 )
 
 /** Frozen exact publication bytes. Retry never recaptures a ZIP or rewrites ancestry. */
@@ -49,9 +51,10 @@ data class CommitGraph(val commits: Map<String, AppendCommit>, val pending: Map<
 }
 
 /** Caller serializes all access using the profile's OS FileChannel lock. */
-class AppendRepository(private val directory: Path, private val adapter: GameAdapter, private val profile: String) {
+class AppendRepository(private val directory: Path, private val adapter: GameAdapter, private val profile: String, private val clock: Clock = Clock.systemUTC()) {
  private val knownRoot = directory.resolve("known")
  private val observedRoot = directory.resolve("observed")
+ private val observationRoot = directory.resolve("observations")
  private val pendingRoot = directory.resolve("uploads")
  private val marker = directory.resolve("active-plan.txt")
  private val baselinePath = directory.resolve("baseline.txt")
@@ -60,12 +63,14 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  private fun checkCommit(commit: AppendCommit, expected: String = commit.id) {
   require(commit.schema == 2 && validCommitId(commit.id) && commit.id == expected) { "Invalid commit identity" }
   require(commit.parents.size <= MAX_COMMIT_PARENTS && commit.parents.distinct().size == commit.parents.size && commit.parents.all { validCommitId(it) && it != commit.id }) { "Invalid commit parents" }
+  commit.operation?.validated()
   require(commit.kind in setOf("snapshot", "resolution", "restore", "legacy-import"))
   require(commit.kind == "resolution" || commit.parents.size <= 1) { "Ordinary commits cannot absorb branches" }
   require(commit.kind != "resolution" || commit.parents.size >= 2) { "Resolution must name multiple parents" }
   require(commit.kind != "legacy-import" || commit.parents.isEmpty())
   val snapshot = commit.snapshot
   require(snapshot.schema == 1 && snapshot.game == adapter.id && snapshot.profile == profile && snapshot.parent == null)
+  snapshot.metadata?.validated(snapshot.files.keys)
   require(validCommitId(snapshot.id) && snapshot.id != commit.id && snapshot.sha256.matches(Regex("[0-9a-f]{64}")))
   require(snapshot.files.isNotEmpty() && snapshot.files.size <= MAX_SNAPSHOT_FILES && snapshot.files.values.all { it.matches(Regex("[0-9a-f]{64}")) })
   require(commit.objectBytes in 1..MAX_SNAPSHOT_BYTES)
@@ -87,6 +92,16 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   val path = observedRoot.resolve("$id.json")
   if (!SafePaths.checked(path).exists()) SafePaths.atomicWrite(path, byteArrayOf())
  }
+ /** First successful verification observed by this installation, never a server receipt time. */
+ fun observedAt(id: String): String? {
+  require(validCommitId(id))
+  val path = observationRoot.resolve("$id.txt")
+  if (!SafePaths.checked(path).exists()) return null
+  return SafePaths.boundedRead(path, 64).decodeToString(throwOnInvalidSequence = true).also(::requireUtcTimestamp)
+ }
+ private fun observeVerified(id: String) {
+  if (observedAt(id) == null) SafePaths.atomicWrite(observationRoot.resolve("$id.txt"), clock.instant().toString().encodeToByteArray())
+ }
  private fun known(id: String): ByteArray? = knownRoot.resolve("$id.json").let { if (SafePaths.checked(it).exists()) SafePaths.boundedRead(it, MAX_MANIFEST_BYTES) else null }
  private fun remember(id: String, bytes: ByteArray) {
   val old = known(id)
@@ -98,6 +113,12 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
    check(!SafePaths.checked(baselineMarker).exists()) { "同步基线丢失；未将已有历史当成新档案" }; return null
   }
   return SafePaths.boundedRead(baselinePath, 128).decodeToString().also { require(validCommitId(it)) }
+ }
+ /** Only a previously established, validated local baseline; never infer one from the remote tips. */
+ fun baselineFiles(): Map<String, String>? {
+  val id = baseline() ?: return null
+  val bytes = checkNotNull(known(id)) { "同步基线元数据丢失；未视为新档案" }
+  return decode(bytes, id).snapshot.files
  }
  fun setBaseline(id: String, graph: CommitGraph) {
   graph.requireSettled(); val verified = requireNotNull(graph.commits[id]) { "Cannot baseline an incomplete commit" }
@@ -142,6 +163,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
    require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { "Remote scan byte budget exceeded; no partial discovery accepted" }
    try { require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter) }
    catch (_: Exception) { pending[id] = "invalid object"; continue }
+   observeVerified(id)
    candidates[id] = commit
   }
   // Iterative closure avoids recursive-stack attacks. Cycles and incomplete ancestors stay pending.
@@ -160,7 +182,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(decode(bytes, commit.id) == commit); remember(commit.id, bytes)
   val zip = store.readObject(commit.snapshot.id) ?: throw UnsettledRemoteException("快照暂不可见，请重试")
   require(zip.size == commit.objectBytes)
-  return Snapshot(commit.snapshot, zip).also { Snapshots.verify(it, adapter) }
+  return Snapshot(commit.snapshot, zip).also { Snapshots.verify(it, adapter); observeVerified(commit.id) }
  }
 
  fun pending(): UploadPlan? {
@@ -172,12 +194,12 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter)
   return UploadPlan(commit, bytes, zip)
  }
- fun prepare(snapshot: Snapshot, parents: List<String>, kind: String = "snapshot"): UploadPlan {
+ fun prepare(snapshot: Snapshot, parents: List<String>, kind: String = "snapshot", operation: CommitOperationMetadata? = null): UploadPlan {
   require(pending() == null) { "Retry or explicitly archive the pending operation first" }
   Snapshots.verify(snapshot, adapter)
   // A new publication always uses new independent object and commit IDs, including restore/resolution.
   val frozen = snapshot.copy(manifest = snapshot.manifest.copy(id = UUID.randomUUID().toString(), parent = null))
-  val commit = AppendCommit(id = UUID.randomUUID().toString(), parents = parents.sorted(), snapshot = frozen.manifest, objectBytes = frozen.zip.size, kind = kind)
+  val commit = AppendCommit(id = UUID.randomUUID().toString(), parents = parents.sorted(), snapshot = frozen.manifest, objectBytes = frozen.zip.size, kind = kind, operation = operation)
   checkCommit(commit)
   val bytes = json.encodeToString(commit).encodeToByteArray(); require(bytes.size <= MAX_MANIFEST_BYTES)
   SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.zip"), frozen.zip)
@@ -209,6 +231,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   putVerified({ store.readObject(plan.commit.snapshot.id) }, { store.writeObject(plan.commit.snapshot.id, plan.zip) }, plan.zip)
   putVerified({ store.readCommit(plan.commit.id) }, { store.writeCommit(plan.commit.id, plan.manifestBytes) }, plan.manifestBytes)
   remember(plan.commit.id, plan.manifestBytes)
+  observeVerified(plan.commit.id)
   return plan.commit
  }
  /** Caller records its safe baseline first; clearing never deletes immutable data. */
