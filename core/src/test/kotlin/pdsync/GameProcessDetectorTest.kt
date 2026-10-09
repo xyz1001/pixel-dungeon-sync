@@ -21,7 +21,7 @@ class GameProcessDetectorTest {
  private fun java(pid: Long = 100, args: List<String>? = listOf("-jar", jar.toString()), cwd: String? = null,
   alive: Boolean = true) = ObservedGameProcess(pid, "/usr/bin/java", args, cwd, alive)
  private fun status(vararg processes: ObservedGameProcess): GameProcessStatus = GameProcessDetector(target,
-  ProcessInventory { ProcessInventorySnapshot(processes.toList()) }, GameProcessPlatform.LINUX, -1).status()
+  ProcessInventory { ProcessInventorySnapshot(processes.toList()) }, GameProcessPlatform.current(), -1).status()
  private fun jarWithMain(name: String, main: String): Path = root.resolve(name).also { file ->
   val manifest = JarManifest().apply {
    mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"; mainAttributes[Attributes.Name.MAIN_CLASS] = main
@@ -103,11 +103,14 @@ class GameProcessDetectorTest {
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(target, empty, GameProcessPlatform.UNSUPPORTED).status())
  }
  @Test fun windowsJavawPathsAreCaseInsensitiveAndResolveDotSegments() {
-  val windowsTarget = target.copy(path = "C:\\Users\\Player\\Games\\SPD.jar")
+  val nativeWindows = GameProcessPlatform.current() == GameProcessPlatform.WINDOWS
+  val base = if (nativeWindows) root.toString() else "C:\\Users\\Player\\Games"
+  if (nativeWindows) root.resolve("SPD.jar").writeText("fixture, never executed")
+  val windowsTarget = target.copy(path = "$base\\SPD.jar")
   val processes = listOf(ObservedGameProcess(10, "C:\\Java\\bin\\JAVAW.EXE",
-   listOf("-jar", "c:/users/PLAYER/games/child/../spd.JAR")))
+   listOf("-jar", base.replace('\\', '/').uppercase(java.util.Locale.ROOT) + "/child/../spd.JAR")))
   assertIs<GameProcessStatus.Running>(GameProcessDetector(windowsTarget, ProcessInventory { ProcessInventorySnapshot(processes) }, GameProcessPlatform.WINDOWS, -1).status())
-  assertEquals("c:/users/player/games/spd.jar", resolveGameProcessPath(".\\SPD.jar", "C:\\Users\\Player\\Games", GameProcessPlatform.WINDOWS))
+  assertEquals(base.replace('\\', '/').lowercase(java.util.Locale.ROOT) + "/spd.jar", resolveGameProcessPath(".\\SPD.jar", base, GameProcessPlatform.WINDOWS))
   assertNull(resolveGameProcessPath("C:SPD.jar", null, GameProcessPlatform.WINDOWS))
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(windowsTarget, ProcessInventory {
    ProcessInventorySnapshot(listOf(ObservedGameProcess(11, "C:\\Games\\ShatteredPD.exe", null)))
@@ -197,7 +200,7 @@ class GameProcessDetectorTest {
   assertEquals(GameProcessStatus.Stopped, scoped(ObservedGameProcess(3, "/usr/bin/sleep", null)))
  }
  @Test fun windowsAccountIdentityComparisonIgnoresCase() {
-  val windows = target.copy(path = "C:/Games/SPD.jar")
+  val windows = if (GameProcessPlatform.current() == GameProcessPlatform.WINDOWS) target else target.copy(path = "C:/Games/SPD.jar")
   val detector = GameProcessDetector(windows, ProcessInventory {
    ProcessInventorySnapshot(listOf(ObservedGameProcess(4, "C:/Java/java.exe", null, owner = "DOMAIN\\Player")), currentOwner = "domain\\player")
   }, GameProcessPlatform.WINDOWS, -1)
