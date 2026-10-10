@@ -64,6 +64,9 @@ class OnboardingComparisonTest {
  @Test fun completingEmptyOrLinkedStateRevalidatesBeforeEnablingAnything() {
   val store = Memory(); val local = session(null); val empty = compare(local, store)
   local.confirmOnboardingReady(empty, store) { true }
+  assertEquals(0, store.writes)
+  assertNull(local.baseline()); assertFalse(local.hasPending())
+  assertTrue(local.root.listDirectoryEntries().isEmpty())
   val appearing = session(null); val beforeAppearance = compare(appearing, store)
   appearing.root.resolve("game1").createDirectory(); appearing.root.resolve("game1/game.dat").writeText("new-save")
   assertFails { appearing.confirmOnboardingReady(beforeAppearance, store) { true } }

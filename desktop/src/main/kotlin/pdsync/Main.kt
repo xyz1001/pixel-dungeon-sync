@@ -454,7 +454,9 @@ internal fun runSyncApplication(
    }
   }
   fun postponeOnboarding(emptyDecision: Boolean = false) {
-   if (busy || connectingAtStartup || config == null) return
+   val pageActive = !appClosed && page == Page.COMPARISON && onboardingActive
+   if (!EmptySetupCompletion.canNavigate(pageActive, busy || connectingAtStartup) || config == null) return
+   if (emptyDecision && !EmptySetupCompletion.canFinish(comparison?.kind, comparison?.blocker, pageActive, busy || connectingAtStartup, config != null)) return
    busy = true
    scope.launch {
     try {
@@ -645,12 +647,22 @@ internal fun runSyncApplication(
         }
        }
        Page.COMPARISON -> GuidedPage(
-        title = "3 / 3  选择存档", subtitle = "",
+        title = if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) "3 / 3" else "3 / 3  选择存档", subtitle = "",
         footer = {
          comparisonNotice?.let { CompactFeedback(it, "操作未完成，请重试。") }
          comparison?.blocker?.let { CompactFeedback(it, "暂不能继续，请检查存档或连接后重试。") }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
-         if (setupConfirm != null) {
+         if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) {
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+           TextButton(enabled = EmptySetupCompletion.canNavigate(onboardingActive, busy || connectingAtStartup), onClick = {
+            if (EmptySetupCompletion.canNavigate(page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup)) {
+             setupDraft = config ?: setupDraft; settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION)
+            }
+           }) { Text("上一步") }
+           Spacer(Modifier.weight(1f))
+           Button(enabled = EmptySetupCompletion.canFinish(comparison?.kind, comparison?.blocker, onboardingActive, busy || connectingAtStartup, config != null), onClick = { postponeOnboarding(emptyDecision = true) }) { Text("完成") }
+          }
+         } else if (setupConfirm != null) {
           Text(if (setupConfirm == SetupAction.RESTORE) NoviceCopy.restoreWarning else "使用云端记录，不改动本机存档。", color = Color(0xFF986337))
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
            TextButton(enabled = !busy, onClick = { setupConfirm = null; comparisonNotice = "已取消选择，双方存档未改变。" }) { Text("取消") }
@@ -665,8 +677,7 @@ internal fun runSyncApplication(
            TextButton(enabled = !busy, onClick = { postponeOnboarding() }) { Text("稍后处理") }
           }
           comparison?.let { value ->
-           if (value.kind == OnboardingKind.BOTH_EMPTY) Button(enabled = !busy, onClick = { postponeOnboarding(emptyDecision = true) }, modifier = Modifier.fillMaxWidth()) { Text("进入主页") }
-           else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (value.localFiles.isNotEmpty() || value.retryablePending) Button(enabled = !busy && (value.kind != OnboardingKind.BLOCKED || value.retryablePending), onClick = { performOnboarding(SetupAction.UPLOAD) }, modifier = Modifier.weight(1f)) { Text(if (value.retryablePending) "重试上传" else if (value.remoteEntries.isEmpty()) "上传本机存档" else "上传本机，保留两份") }
             if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { setupConfirm = SetupAction.ADOPT }, modifier = Modifier.weight(1f)) { Text("确认使用") }
             else if (value.remoteEntries.isNotEmpty()) OutlinedButton(enabled = !busy && comparisonSelection != null && value.kind != OnboardingKind.BLOCKED, onClick = { setupConfirm = SetupAction.RESTORE }, modifier = Modifier.weight(1f)) { Text("恢复所选云端存档") }
@@ -675,7 +686,9 @@ internal fun runSyncApplication(
          }
         }
        ) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) {
+         Text(if (comparisonNotice == null) EmptySetupCompletion.message else "配置尚未完成", fontWeight = FontWeight.Medium)
+        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
          Text(NoviceCopy.comparison(comparison?.kind, busy), fontWeight = FontWeight.Medium)
          comparison?.let { value ->
           Surface(color = Color(0xFFE3EFE6)) {
