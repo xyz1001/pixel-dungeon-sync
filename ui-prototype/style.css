@@ -15,4 +15,4 @@ dialog{width:min(440px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflo
 
 .history-cell{height:132px}.cloud-node{background:#eff7f0;border-color:#72a384}.history-lines .edge-upload{stroke:#3c8a57}.history-lines .edge-restore{stroke:#4f83bd;stroke-dasharray:6 3}.history-lines .edge-inherit{stroke:#a5b2a8}.history-lines marker path{fill:#6c8473;stroke:none}
 
-.history-lines .edge-cloud{stroke:#9aaa9f}.history-lines .edge-synced{stroke:#326650}.history-lines .edge-unsynced{stroke:#9a8053;stroke-dasharray:6 4}.history-node.unsynced-node{border-style:dashed}.empty-local{padding:22px;color:var(--muted);font-size:14px}
+.history-lines .edge-cloud{stroke:#9aaa9f}.history-lines .edge-synced{stroke:#326650}.history-lines .edge-unsynced{stroke:#9a8053;stroke-dasharray:6 4}.history-node.unsynced-node{border-style:dashed;border-color:#b58b22;background:#fff3c4;color:#655018}.history-node.unsynced-node.current-node{border-left-color:#b58b22}.empty-local{padding:22px;color:var(--muted);font-size:14px}

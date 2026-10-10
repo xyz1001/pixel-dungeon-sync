@@ -202,7 +202,7 @@ test('empty local restores selected old cloud without confirmation; unknown sour
  s={...s,history:s.history.map(n=>n.id==='save-2'?{...n,deviceName:''}:n)};s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(deviceLabel(selectedTarget(s),s.currentDeviceId),'未知设备');
 });
 test('explicit upload appends a published snapshot without rewriting history',()=>{
- let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,12);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
+ let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,13);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
 });
 
 test('cloud copies are distinct from device originals and connected by upload edges',()=>{
@@ -263,10 +263,23 @@ test('current local has three states and old restored content matches its cloud 
  let s=act(createState('history'),'selectSnapshot',{id:'save-2'});s=settle(act(act(s,'askRestore'),'restore'));assert.equal(localState(s),'synced');assert.equal(matchingCloud(s).id,'save-2');assert.equal(visibleHistory(s).filter(n=>n.storage==='device').length,1);assert.ok(displayEdges(s).some(e=>e.parent==='save-2'&&e.child===s.localSnapshot.id&&e.kind==='synced'));
 });
 test('unsynced baseline is real; new local and empty local invent no cloud edge',()=>{
- const s=createState('history');assert.ok(displayEdges(s).some(e=>e.parent==='save-2'&&e.child==='local-initial'&&e.kind==='unsynced'));
+ const s=createState('history');assert.ok(displayEdges(s).some(e=>e.parent==='local-baseline'&&e.child==='local-initial'&&e.kind==='unsynced'));
  assert.equal(displayEdges(connected('local')).length,0);assert.equal(displayEdges(connected('empty')).length,0);
  const uploaded=settle(act(s,'upload'));assert.equal(localState(uploaded),'synced');assert.ok(displayEdges(uploaded).some(e=>e.parent===latestCloud(uploaded).id&&e.kind==='synced'));
 });
 test('cloud branches use explicit cloud parents, not time adjacency',()=>{
  const edges=displayEdges(createState('history')).filter(e=>e.kind==='cloud');assert.deepEqual(edges.filter(e=>e.parent==='save-1').map(e=>e.child),['save-2','save-3']);assert.equal(edges.some(e=>e.parent==='save-3'&&e.child==='save-4'),false);
+});
+
+test('local history has exactly zero, one or baseline plus yellow current nodes',()=>{
+ const locals=s=>visibleHistory(s).filter(n=>n.storage==='device');
+ assert.equal(locals(connected('empty')).length,0);
+ assert.equal(locals(connected('local')).length,1);
+ let s=createState('history');assert.deepEqual(locals(s).map(n=>n.id),['local-baseline','local-initial']);
+ assert.ok(displayEdges(s).some(e=>e.parent==='save-2'&&e.child==='local-baseline'&&e.kind==='synced'));
+ assert.ok(displayEdges(s).some(e=>e.parent==='local-baseline'&&e.child==='local-initial'&&e.kind==='unsynced'));
+ s=settle(act(s,'upload'));assert.equal(locals(s).length,1);assert.equal(localState(s),'synced');
+ for(const id of ['save-3','save-2']){s=act(s,'selectSnapshot',{id});s=settle(act(act(s,'askRestore'),'restore'));assert.equal(locals(s).length,1);assert.ok(displayEdges(s).some(e=>e.parent===id&&e.child===s.localSnapshot.id&&e.kind==='synced'));}
+ const baseline=s.localSnapshot;const current={...baseline,id:'new-local',contentId:'new-content',parentIds:[baseline.id]};s={...s,localSnapshot:current,history:[...s.history,current]};
+ assert.deepEqual(locals(s).map(n=>n.id),[baseline.id,current.id]);assert.ok(displayEdges(s).some(e=>e.parent===baseline.id&&e.child===current.id));
 });

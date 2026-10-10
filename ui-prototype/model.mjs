@@ -42,7 +42,14 @@ export function createState(scene = 'empty', gameId = 'shattered') {
   state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', storage:'device', ownerDeviceId:'demo-current', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['device-save-2'] : [], available: true, publishedOrder: null};
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
-  if (state.localSnapshot) state.history.push({...state.localSnapshot});
+  if (state.localSnapshot) {
+    if(cloud && state.localSnapshot.contentId!==state.cloudSnapshot.contentId){
+      const source=state.history.find(n=>n.id==='save-2');
+      const baseline={...source,id:'local-baseline',storage:'device',ownerDeviceId:state.currentDeviceId,publishedOrder:null,parentIds:[source.id]};
+      state.history.push(baseline);state.localSnapshot.parentIds=[baseline.id];
+    }
+    state.history.push({...state.localSnapshot});
+  }
   state.devices = [{deviceId:'demo-current',deviceName:'Windows-PC'}, {deviceId:'demo-remote',deviceName:state.cloudSnapshot?.deviceName || 'MacBook'}, {deviceId:'demo-tablet',deviceName:'Pixel Tablet'}];
   if (scene === 'history') Object.assign(state, {page:'home',completed:true,connected:true,connectionStatus:'success',testedRevision:0,local:true,readStatus:'found',preview:saveFixture(scene)});
   return state;
@@ -76,7 +83,8 @@ export function targetMatchesLocal(s) {
 }
 // Visibility is based on where the copy lives, never on its content's source device.
 export function visibleHistory(s) {
-  return s.history.filter(n=>n.storage==='cloud' || (s.local === true && n.storage==='device' && n.id===s.localSnapshot?.id));
+  const baseline=localState(s)==='unsynced'?localBaselineNode(s):null;
+  return s.history.filter(n=>n.storage==='cloud' || (s.local === true && n.storage==='device' && (n.id===s.localSnapshot?.id || n.id===baseline?.id)));
 }
 export function matchingCloud(s) {
   return s.local===true && s.readStatus==='found' ? s.history.filter(n=>n.storage==='cloud'&&n.available&&n.contentId===s.localSnapshot?.contentId)
@@ -96,11 +104,26 @@ export function localBaseline(s) {
   };
   return (s.localSnapshot?.parentIds||[]).map(find).find(Boolean)||null;
 }
+export function localBaselineNode(s) {
+  const cloud=localBaseline(s);if(!cloud)return null;
+  const visited=new Set();
+  const find=id=>{
+    if(visited.has(id))return null;visited.add(id);
+    const n=s.history.find(n=>n.id===id);if(!n||n.storage==='cloud')return null;
+    if(n.ownerDeviceId===s.currentDeviceId&&n.contentId===cloud.contentId)return n;
+    return (n.parentIds||[]).map(find).find(Boolean)||null;
+  };
+  return (s.localSnapshot?.parentIds||[]).map(find).find(Boolean)||null;
+}
 export function displayEdges(s) {
   const nodes=visibleHistory(s),ids=new Set(nodes.map(n=>n.id));
   const edges=nodes.filter(n=>n.storage==='cloud').flatMap(n=>(n.cloudParentIds||[]).filter(id=>ids.has(id)).map(id=>({parent:id,child:n.id,kind:'cloud'})));
-  const status=localState(s),base=status==='synced'?matchingCloud(s):status==='unsynced'?localBaseline(s):null;
-  if(base&&ids.has(base.id)&&ids.has(s.localSnapshot.id))edges.push({parent:base.id,child:s.localSnapshot.id,kind:status});
+  const add=(parent,child,kind)=>{if(ids.has(parent)&&ids.has(child))edges.push({parent,child,kind});};
+  if(localState(s)==='synced')add(matchingCloud(s)?.id,s.localSnapshot.id,'synced');
+  if(localState(s)==='unsynced'){
+    const baseline=localBaselineNode(s);
+    if(baseline){add(localBaseline(s)?.id,baseline.id,'synced');add(baseline.id,s.localSnapshot.id,'unsynced');}
+  }
   return edges;
 }
 export function historyColumnId(node) {
