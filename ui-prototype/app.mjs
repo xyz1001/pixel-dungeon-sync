@@ -20,8 +20,17 @@ function render() {
   if (state.page === 'game') {
     app.innerHTML = header('选择游戏', '1 / 4') + `<section class="content"><div class="game-card">${gameIcon()}<div class="grow"><strong>${gameLabel(state).name}</strong><p class="small">${gameLabel(state).version}</p>${gameDetails()}</div><span class="pill">已找到</span></div>${button('模拟选择游戏…', 'chooseGame', false, 'secondary')}${notice()}</section>` + footer('', button('下一步', 'next', !state.selectedGame));
   } else if (state.page === 'read') {
-    const copy = {unread: '尚未读取存档', loading: '正在读取本地存档…', found: '已找到本地存档', empty: '本地暂无存档', failed: '读取失败，请重试。'}[state.readStatus];
-    app.innerHTML = header('读取本地存档', '2 / 4') + `<section class="content"><p class="${state.readStatus === 'failed' ? 'error' : 'status'}" role="status">${state.readStatus === 'loading' ? '<span class="spinner" aria-hidden="true"></span>' : ''}${copy}</p>${state.readStatus === 'loading' ? '<p class="hint">正在检查游戏默认位置（模拟）</p>' : ''}</section>` + footer(back(), state.readStatus === 'failed' ? button('重试', 'retryRead') : button('下一步', 'next', !['found', 'empty'].includes(state.readStatus)));
+    app.innerHTML = header('设置存档路径', '2 / 4') + `<section class="content"><label class="field">存档路径<input id="save-path" type="text" spellcheck="false" autocomplete="off"></label>${button('选择文件夹', 'chooseFolder', state.busy, 'secondary')}<p class="hint">路径与文件夹选择仅作模拟。</p>${state.folderOpen ? `<div class="folder-picker"><p>模拟选择：D:\\Game Saves\\${state.gameId}</p>${button('取消', 'cancelFolder', false, 'text-button')}${button('使用此文件夹', 'useFolder')}</div>` : ''}<p id="path-status" role="status" class="${state.readStatus === 'failed' ? 'error' : 'hint'}">${state.readStatus === 'loading' ? '正在检查存档…' : state.readStatus === 'failed' ? '读取失败，请修改路径或重试。' : ''}</p></section>` + footer(back(), button(state.busy ? '检查中…' : state.readStatus === 'failed' ? '重试' : '下一步', 'next', state.busy || state.folderOpen || !state.savePath.trim()));
+    const pathInput = document.querySelector('#save-path');
+    pathInput.value = state.savePath;
+    pathInput.addEventListener('input', () => {
+      state = reduce(state, {type: 'editPath', value: pathInput.value});
+      app.setAttribute('aria-busy', 'false');
+      const next = app.querySelector('[data-action="next"]'); next.disabled = state.folderOpen || !state.savePath.trim(); next.textContent = '下一步';
+      app.querySelector('[data-action="chooseFolder"]').disabled = false;
+      gameSelect.disabled = false;
+      const status = document.querySelector('#path-status'); status.textContent = ''; status.className = 'hint';
+    });
   } else if (state.page === 'connect') {
     app.innerHTML = header(state.completed ? '连接设置' : '连接云端', state.completed ? '' : '3 / 4') + `<section class="content"><form id="connection-form" class="form" autocomplete="off"><label class="field">WebDAV 地址<input id="endpoint" type="url" value="https://example.invalid/dav" ${state.busy ? 'disabled' : ''}></label><label class="field">用户名<input id="username" value="demo-player" ${state.busy ? 'disabled' : ''}></label><label class="field">密码<input id="password" type="password" placeholder="任意示例密码" autocomplete="off" ${state.busy ? 'disabled' : ''}></label><p class="hint">仅用示例数据，请勿输入真实密码。</p></form>${notice()}</section>` + footer(back(), `<button form="connection-form" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? '<span class="spinner" aria-hidden="true"></span>连接中…' : '连接'}</button>`);
     document.querySelector('#connection-form').addEventListener('submit', event => {

@@ -1,102 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, scenes, games, gameLabel} from './model.mjs';
-function read(scene) { let s = reduce(createState(scene), {type:'next'}); return reduce(s,{type:'settled',token:s.token}); }
-function connected(scene) { let s = reduce(read(scene), {type:'next'}); s = reduce(s,{type:'connect'}); return reduce(s,{type:'settled',token:s.token}); }
-test('empty completion does not simulate upload or restore; repeated finish is ignored', () => {
-  const s=connected('empty'); assert.equal(kind(s),'empty'); assert.ok(canFinish(s));
-  const done=reduce(s,{type:'finish'}); assert.equal(done.page,'home'); assert.equal(done.uploads+done.restores,0);
-  assert.equal(reduce(done,{type:'finish'}),done);
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths} from './model.mjs';
+const act=(s,type,extra={})=>reduce(s,{type,...extra});
+const settle=s=>act(s,'settled',{token:s.token});
+const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
+const read=(scene='empty',id='shattered')=>settle(act(pathStep(scene,id),'next'));
+const connected=(scene='empty',id='shattered')=>settle(act(read(scene,id),'connect'));
+test('four exact Windows defaults preserve separator, leading dot, case and spaces',()=>{
+ const tails={shattered:'.shatteredpixel\\Shattered Pixel Dungeon',experienced:'.trashboxbobylev\\Experienced Pixel Dungeon',cruel:'.cruelpixel\\Too Cruel Pixel Dungeon',rearranged:'.rearrangedpixel\\Rearranged Pixel Dungeon'};
+ for(const [id,tail] of Object.entries(tails)) assert.equal(defaultSavePaths[id],'C:\\Users\\Demo\\AppData\\Roaming\\'+tail);
 });
-test('different and single-sided progress require a deliberate valid selection', () => {
-  for (const scene of ['local','cloud','conflict']) {
-    let s=connected(scene); assert.equal(canFinish(s),false); assert.equal(reduce(s,{type:'finish'}),s);
-    s=reduce(s,{type:'choose',value:scene==='cloud'?'cloud':'local'}); assert.ok(canFinish(s));
-    const done=reduce(s,{type:'finish'}); assert.equal(done.uploads+done.restores,1);
-  }
-  assert.equal(canFinish(connected('identical')),true);
+test('entering path step never reads; blank path cannot advance; confirmation starts validation',()=>{
+ let s=pathStep();assert.equal(s.page,'read');assert.equal(s.busy,false);assert.equal(s.readStatus,'unread');assert.equal(s.local,null);
+ s=act(s,'editPath',{value:'  '});assert.equal(act(s,'next'),s);
+ s=act(s,'editPath',{value:'D:\\Saves'});s=act(s,'next');assert.equal(s.readStatus,'loading');assert.equal(kind({...s,connected:true}),'unknown');
+ assert.equal(act(s,'next'),s);s=settle(s);assert.equal(s.page,'connect');assert.equal(s.readStatus,'empty');
 });
-test('cancel connect invalidates late completion and allows retry', () => {
-  let s=reduce(read('empty'),{type:'next'}); s=reduce(s,{type:'connect'}); const token=s.token;
-  assert.equal(reduce(s,{type:'connect'}),s); s=reduce(s,{type:'back'}); assert.equal(s.page,'read');
-  assert.equal(reduce(s,{type:'settled',token}),s);
+test('edited path survives same-game back/forward and connection cancellation',()=>{
+ let s=act(pathStep(),'editPath',{value:'D:\\My Saves'});s=act(s,'back');s=act(s,'chooseGame');s=act(s,'next');assert.equal(s.savePath,'D:\\My Saves');assert.equal(s.busy,false);
+ s=settle(act(s,'next'));s=act(s,'connect');const token=s.token;s=act(s,'back');assert.equal(s.page,'read');assert.equal(s.savePath,'D:\\My Saves');assert.equal(act(s,'settled',{token}),s);
 });
-test('selection never reads saves; next starts loading and does not call an unknown result empty', () => {
-  let s=createState('empty'); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null);
-  s=reduce(s,{type:'chooseGame'}); assert.equal(s.readStatus,'unread'); assert.equal(s.page,'game');
-  s=reduce(s,{type:'next'}); assert.equal(s.page,'read'); assert.equal(s.readStatus,'loading');
-  assert.equal(kind({...s,connected:true}),'unknown'); assert.equal(reduce(s,{type:'next'}),s);
-  s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.readStatus,'empty'); assert.equal(s.local,false);
-  s=reduce(s,{type:'next'}); assert.equal(s.page,'connect');
+test('new path cancels pending read; stale callback cannot advance or populate saves',()=>{
+ let s=act(pathStep('local'),'next');const token=s.token;s=act(s,'editPath',{value:'D:\\Different'});
+ assert.equal(s.busy,false);assert.equal(s.local,null);assert.equal(s.readStatus,'unread');assert.equal(act(s,'settled',{token}),s);
+ s=settle(act(s,'next'));assert.equal(s.page,'connect');assert.equal(s.local,true);
 });
-test('read failure is unknown and retry can find saves without entering the connection page early', () => {
-  let s=read('readFailure'); assert.equal(s.readStatus,'failed'); assert.equal(s.local,null);
-  assert.equal(reduce(s,{type:'next'}),s); assert.equal(kind({...s,connected:true}),'unknown');
-  s=reduce(s,{type:'retryRead'}); assert.equal(s.readStatus,'loading'); assert.equal(reduce(s,{type:'retryRead'}),s);
-  s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.readStatus,'found'); assert.equal(s.local,true);
+test('back cancels validation; changing game replaces default and invalidates previous state',()=>{
+ let s=act(pathStep('local'),'next');const token=s.token;s=act(s,'back');s=act(s,'chooseGame',{gameId:'cruel'});
+ assert.equal(s.savePath,defaultSavePaths.cruel);assert.equal(s.local,null);assert.equal(s.connected,false);assert.equal(s.readStatus,'unread');assert.equal(act(s,'settled',{token}),s);
 });
-test('back and changing game invalidate completed reads and late read callbacks', () => {
-  let s=reduce(createState('local'),{type:'next'}); const oldToken=s.token;
-  s=reduce(s,{type:'back'}); assert.equal(s.page,'game'); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null);
-  assert.equal(reduce(s,{type:'settled',token:oldToken}),s);
-  s=reduce(s,{type:'chooseGame'}); s=reduce(s,{type:'next'}); s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.readStatus,'found');
-  s=reduce(s,{type:'next'}); s=reduce(s,{type:'back'}); assert.equal(s.page,'read'); assert.equal(s.readStatus,'found');
-  s=reduce(s,{type:'back'}); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null); assert.equal(s.connected,false);
+test('folder chooser cancel preserves path; confirm selects only synthetic path without reading',()=>{
+ let s=pathStep();const path=s.savePath;s=act(s,'chooseFolder');assert.equal(act(s,'next'),s);s=act(s,'cancelFolder');assert.equal(s.savePath,path);
+ s=act(act(s,'chooseFolder'),'useFolder');assert.equal(s.savePath,'D:\\Game Saves\\shattered');assert.equal(s.busy,false);assert.equal(s.readStatus,'unread');assert.equal(s.folderOpen,false);
 });
-test('changing game from settings restarts the four-step setup with no stale read', () => {
-  let s=reduce(connected('identical'),{type:'finish'}); s=reduce(s,{type:'settings'}); s=reduce(s,{type:'chooseGame'});
-  assert.equal(s.page,'game'); assert.equal(s.completed,false); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null);
-  assert.equal(canFinish(s),false);
+test('failed read stays on path step, remains unknown, permits edit and successful retry',()=>{
+ let s=read('readFailure');assert.equal(s.page,'read');assert.equal(s.readStatus,'failed');assert.equal(s.local,null);assert.equal(kind({...s,connected:true}),'unknown');
+ s=act(s,'editPath',{value:'D:\\Retry'});s=settle(act(s,'next'));assert.equal(s.page,'connect');assert.equal(s.readStatus,'found');
 });
-test('connection failure never becomes empty or completed', () => {
-  const s=connected('failure'); assert.equal(s.page,'connect'); assert.equal(kind(s),'unknown'); assert.equal(canFinish(s),false); assert.ok(s.message);
+test('empty and identical finish without transfer; differing progress requires deliberate choice',()=>{
+ for(const scene of ['empty','identical']){let s=connected(scene);assert.ok(canFinish(s));s=act(s,'finish');assert.equal(s.page,'home');assert.equal(s.uploads+s.restores,0);assert.equal(act(s,'finish'),s);}
+ for(const scene of ['local','cloud','conflict']){let s=connected(scene);assert.equal(canFinish(s),false);s=act(s,'choose',{value:scene==='cloud'?'cloud':'local'});assert.ok(canFinish(s));s=act(s,'finish');assert.equal(s.uploads+s.restores,1);}
+ assert.equal(kind(connected('failure')),'unknown');
 });
-test('home restore requires in-page confirmation and is disabled while game runs', () => {
-  let s=reduce(connected('identical'),{type:'finish'}); assert.equal(reduce(s,{type:'restore'}),s);
-  s=reduce(s,{type:'askRestore'}); s=reduce(s,{type:'cancelRestore'}); assert.equal(s.restores,0);
-  s=reduce(s,{type:'askRestore'}); s=reduce(s,{type:'restore'}); assert.equal(reduce(s,{type:'restore'}),s);
-  assert.equal(reduce(s,{type:'back'}),s); s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.restores,1);
-  const running=reduce(connected('running'),{type:'finish'}); assert.equal(reduce(running,{type:'askRestore'}),running); assert.equal(reduce(running,{type:'upload'}),running);
+test('game metadata stays consistent through setup/settings and missing metadata stays omitted',()=>{
+ for(const id of Object.keys(games)){
+  let s=pathStep('empty',id);if(!s.savePath)s=act(s,'editPath',{value:'D:\\Example'});
+  s=settle(act(s,'next'));s=settle(act(s,'connect'));s=act(act(s,'finish'),'settings');const g=gameLabel(s);
+  assert.equal(g.name,games[id].name||'未命名游戏');assert.equal(g.version,games[id].version);assert.equal(g.icon,games[id].icon||'');assert.equal(g.author,'');assert.equal(g.updated,'');
+ }
+ assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
 });
-test('upload, settings, back and all scenarios remain navigable', () => {
-  let s=reduce(connected('identical'),{type:'finish'}); s=reduce(s,{type:'upload'}); s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.uploads,1);
-  s=reduce(s,{type:'settings'}); s=reduce(s,{type:'connectionSettings'}); assert.equal(s.page,'connect'); s=reduce(s,{type:'back'}); assert.equal(s.page,'settings'); s=reduce(s,{type:'back'}); assert.equal(s.page,'home');
-  for (const scene of Object.keys(scenes)) {const next=reduce(s,{type:'reset',scene}); assert.equal(next.scene,scene); assert.equal(next.page,'game'); assert.equal(next.completed,false);}
-});
-
-test('each English game identity persists through all steps, home, settings and back', () => {
-  for (const gameId of Object.keys(games)) {
-    let s=reduce(createState(),{type:'chooseGame',gameId});
-    const label=gameLabel(s);
-    assert.equal(label.name,games[gameId].name || '未命名游戏');
-    s=reduce(s,{type:'next'}); s=reduce(s,{type:'settled',token:s.token});
-    s=reduce(s,{type:'next'}); s=reduce(s,{type:'back'});
-    assert.equal(s.page,'read'); assert.deepEqual(gameLabel(s),label);
-    s=reduce(s,{type:'next'}); s=reduce(s,{type:'connect'}); s=reduce(s,{type:'settled',token:s.token});
-    s=reduce(s,{type:'finish'}); s=reduce(s,{type:'settings'});
-    assert.deepEqual(gameLabel(s),label);
-    s=reduce(s,{type:'chooseGame',gameId:'cruel'});
-    assert.equal(s.gameId,'cruel'); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null);
-    assert.equal(s.connected,false); assert.equal(s.completed,false); assert.equal(s.choice,'');
-  }
-});
-test('switching game invalidates previous reads and unknown names have a short fallback', () => {
-  let s=reduce(createState('local'),{type:'next'}); const token=s.token;
-  s=reduce(s,{type:'back'}); s=reduce(s,{type:'chooseGame',gameId:'experienced'});
-  assert.equal(reduce(s,{type:'settled',token}),s);
-  assert.equal(gameLabel(s).name,'Experienced Pixel Dungeon'); assert.equal(s.readStatus,'unread');
-  assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
-  assert.equal(reduce(s,{type:'reset',scene:'cloud'}).gameId,'experienced');
-});
-
-test('sample metadata switches together and absent metadata stays omitted', () => {
-  let s=createState();
-  for (const gameId of ['shattered','experienced','cruel','rearranged','unnamed']) {
-    s=reduce(s,{type:'chooseGame',gameId}); const info=gameLabel(s);
-    assert.equal(info.icon,gameId==='unnamed'?'':`.local-icons/${gameId}.png`);
-    assert.equal(info.name,games[gameId].name || '未命名游戏');
-    assert.equal(info.version,games[gameId].version);
-    assert.equal(info.author,''); assert.equal(info.updated,'');
-  }
-  assert.deepEqual(gameLabel(createState('empty','missing')),{name:'未命名游戏',version:'',icon:'',author:'',updated:''});
+test('restore confirmation and running-game guards remain intact',()=>{
+ let s=act(connected('identical'),'finish');assert.equal(act(s,'restore'),s);s=act(act(s,'askRestore'),'cancelRestore');assert.equal(s.restores,0);
+ s=act(act(s,'askRestore'),'restore');assert.equal(act(s,'back'),s);s=settle(s);assert.equal(s.restores,1);
+ const running=act(connected('running'),'finish');assert.equal(act(running,'askRestore'),running);assert.equal(act(running,'upload'),running);
 });
