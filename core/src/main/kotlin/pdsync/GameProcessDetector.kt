@@ -123,7 +123,7 @@ class GameProcessDetector(
 
  @Synchronized fun status(): GameProcessStatus {
   if (platform == GameProcessPlatform.UNSUPPORTED) return GameProcessStatus.Unknown("当前系统不支持自动进程检查")
-  if (target == null || !target.trusted) return GameProcessStatus.Unknown("请先选择已验证的官方游戏 JAR")
+  if (target == null || !target.trusted) return GameProcessStatus.Unknown("请先选择可识别版本的 Shattered 游戏 JAR")
   val targetPath = resolvePath(target.path, null, platform)
    ?: return GameProcessStatus.Unknown("无法确认所选游戏 JAR 的路径")
   val observations = try { listOf(inventory.snapshot(), inventory.snapshot()) }

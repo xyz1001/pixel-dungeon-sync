@@ -31,6 +31,7 @@ data class TargetGame(
  val displayVersion: String,
  val versionCode: Int,
  val sha256: String,
+ /** Legacy field name: identified game metadata, NOT publisher/checksum authentication. */
  val trusted: Boolean,
  val minimumSaveVersion: Int?,
  val reason: String
@@ -44,7 +45,9 @@ object ShatteredVersions {
  private const val MAX_JAR_EXPANDED_BYTES = 512L * 1024 * 1024
  private const val MAX_JAR_ENTRIES = 50_000
  private const val MAX_JAR_MANIFEST_BYTES = 64 * 1024
- private const val KNOWN_SHA256 = "bcefd52a9c14f69c69d3ccc08a212cdd3830b2dc60d78d80895cd803fa1ec602"
+ // Compatibility policies, not a selection allowlist. Other identified versions can be selected.
+ // 3.3.8 GamesInProgress.check rejects <802; 4.0.2 rejects <850.
+ private val supportedReleases = mapOf("3.3.8" to (896 to 802), "4.0.2" to (922 to 850))
  private const val MAIN_CLASS = "com.shatteredpixel.shatteredpixeldungeon.desktop.DesktopLauncher"
  private val gameData = Regex("(game[0-9]+)/game\\.dat")
  private val slotPath = Regex("(game[0-9]+)(?:/.*)?")
@@ -83,7 +86,7 @@ object ShatteredVersions {
  /** Reads one bounded byte snapshot of a JAR, preventing hash/manifest reads from racing each other. */
  fun target(path: Path): TargetGame = target(path, MAX_JAR_BYTES, MAX_JAR_EXPANDED_BYTES)
 
- /** Discovery uses smaller per-candidate limits; this never changes the checksum trust policy. */
+ /** Discovery uses smaller per-candidate limits; no release checksum is required. */
  internal fun target(path: Path, maxInputBytes: Int, maxExpandedBytes: Long): TargetGame {
   require(maxInputBytes in 1..MAX_JAR_BYTES && maxExpandedBytes in 1..MAX_JAR_EXPANDED_BYTES)
   val checked = SafePaths.checked(path)
@@ -134,36 +137,39 @@ object ShatteredVersions {
    throw IllegalArgumentException("Target JAR is malformed or unreadable", e)
   }
   require(entries == centralEntries) { "Target JAR has inconsistent local and central entries" }
-  val attributes = manifestAttributes(manifest ?: throw IllegalArgumentException("Target JAR has no manifest"))
+  val attributes = manifestAttributes(manifest ?: throw IllegalArgumentException("JAR 缺少游戏清单，无法读取游戏标识和版本。"))
   require(attributes["specification-title"] == "Shattered Pixel Dungeon" &&
    attributes["implementation-title"] == "com.shatteredpixel.shatteredpixeldungeon" &&
-   attributes["main-class"] == MAIN_CLASS && launcher) { "Target JAR is not an identifiable Shattered Pixel Dungeon desktop game" }
+   attributes["main-class"] == MAIN_CLASS && launcher) { "无法识别为 Shattered Pixel Dungeon 桌面游戏：游戏标识或启动类缺失、不一致。" }
   val display = attributes["specification-version"]
   require(!display.isNullOrBlank() && display.length <= 128 && display.none { it.isISOControl() }) {
-   "Target manifest has no valid release version"
+   "游戏清单缺少有效的发行版本。"
   }
   val code = positiveInteger(attributes["implementation-version"] ?: "")
-   ?: throw IllegalArgumentException("Target manifest has no valid integer build version")
+   ?: throw IllegalArgumentException("游戏清单缺少有效的整数内部版本。")
+  val supported = supportedReleases[display]
+  require(supported == null || supported.first == code) {
+   "游戏版本信息不一致：$display 的已知内部版本为 ${supported?.first}，清单却声明 $code；无法确认此改版的版本。"
+  }
+  val minimum = supported?.second
+  // Retain a content fingerprint only to detect replacement after selection, never as an allowlist.
   val digest = hash(bytes)
-  // v4.0.2 GamesInProgress rejects writers below 850. The upper bound is our
-  // conservative anti-downgrade policy, not a claim about the upstream loader.
-  val trusted = digest == KNOWN_SHA256 && display == "4.0.2" && code == 922
-  return TargetGame(checked.toString(), display, code, digest, trusted, if (trusted) 850 else null,
-   if (trusted) "Verified official Shattered Pixel Dungeon 4.0.2 JAR; supported save writers: 850–922"
-   else "Unrecognized JAR checksum; its identity and save compatibility are not trusted")
+  return TargetGame(checked.toString(), display, code, digest, true, minimum,
+   if (minimum != null) "已识别 Shattered $display（内部版本 $code）；恢复版本范围 $minimum–$code。"
+   else "已识别 Shattered $display（内部版本 $code），可以选择；该版本的恢复兼容范围尚未确认，暂不支持恢复。")
  }
 
  fun requireCompatible(info: SaveVersions, target: TargetGame) {
-  require(target.trusted) { "Restore blocked: ${target.reason}" }
+  require(target.trusted) { "无法恢复：尚未识别目标游戏。${target.reason}" }
   val minimum = target.minimumSaveVersion
-  require(minimum != null && minimum > 0 && minimum <= target.versionCode) { "Restore blocked: target compatibility is unknown" }
+  require(minimum != null && minimum > 0 && minimum <= target.versionCode) { "无法恢复：目标游戏的存档兼容范围尚未确认。" }
   require(info.unknownReason == null && info.runs.isNotEmpty()) {
-   "Restore blocked: ${info.unknownReason ?: "no live run has a detectable save version"}"
+   "无法恢复：没有可确认写入版本的进行中存档。${info.unknownReason.orEmpty()}"
   }
   val incompatible = info.runs.filterValues { it !in minimum..target.versionCode }
   require(incompatible.isEmpty()) {
-   "Restore blocked: ${incompatible.entries.joinToString { "${it.key}: ${it.value}" }}; " +
-    "target ${target.displayVersion} accepts save writers $minimum–${target.versionCode} (newer writers are blocked to prevent downgrades)"
+   "无法恢复：${incompatible.entries.joinToString { "${it.key}: ${it.value}" }}；" +
+    "目标 ${target.displayVersion} 支持的存档写入版本为 $minimum–${target.versionCode}，不允许将新版存档降级覆盖。"
   }
  }
 

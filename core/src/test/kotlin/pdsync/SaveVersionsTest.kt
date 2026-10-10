@@ -117,11 +117,67 @@ class SaveVersionsTest {
   assertFailsWith<IllegalArgumentException> { ShatteredVersions.requireCompatible(detect("""{"version":922}"""), target.copy(minimumSaveVersion = null)) }
  }
 
- @Test fun manifestMetadataAloneCannotImpersonateOfficialJar() {
+ @Test fun consistentMetadataIsSelectableWithoutAChecksumAllowlist() {
   val found = ShatteredVersions.target(jar())
   assertEquals("4.0.2", found.displayVersion); assertEquals(922, found.versionCode)
-  assertFalse(found.trusted); assertNull(found.minimumSaveVersion); assertEquals(64, found.sha256.length)
-  assertFailsWith<IllegalArgumentException> { ShatteredVersions.requireCompatible(detect("""{"version":922}"""), found) }
+  assertTrue(found.trusted); assertEquals(850, found.minimumSaveVersion)
+  ShatteredVersions.requireCompatible(detect("""{"version":922}"""), found)
+  val changed = ShatteredVersions.target(jar(entries = mapOf(launcher to byteArrayOf(1), "extra-resource" to byteArrayOf(2))))
+  assertNotEquals(found.sha256, changed.sha256) // Fingerprint changes, selection does not.
+  assertTrue(changed.trusted); assertEquals(found.minimumSaveVersion, changed.minimumSaveVersion)
+ }
+
+ @Test fun user338ManifestIsIdentifiedAndRestorationChecksItsOwnRange() {
+  val found = ShatteredVersions.target(jar(manifest().replace("4.0.2", "3.3.8").replace("922", "896")))
+  assertTrue(found.trusted); assertEquals("3.3.8", found.displayVersion)
+  assertEquals(896, found.versionCode); assertEquals(802, found.minimumSaveVersion)
+  ShatteredVersions.requireCompatible(SaveVersions(mapOf("game1" to 802, "game2" to 896)), found)
+  for (version in listOf(801, 897, 922)) {
+   assertFailsWith<IllegalArgumentException> { ShatteredVersions.requireCompatible(SaveVersions(mapOf("game1" to version)), found) }
+  }
+ }
+
+ @Test fun unknownReleaseIsSelectableButDoesNotAcquireGuessedCompatibility() {
+  val found = ShatteredVersions.target(jar(manifest().replace("4.0.2", "5.0-custom").replace("922", "1000")))
+  assertTrue(found.trusted); assertNull(found.minimumSaveVersion)
+  assertContains(found.reason, "暂不支持恢复")
+  assertFailsWith<IllegalArgumentException> { ShatteredVersions.requireCompatible(SaveVersions(mapOf("game1" to 1000)), found) }
+ }
+
+ @Test fun contradictoryReleaseAndBuildAreRejectedWithAnExplanation() {
+  for (text in listOf(manifest().replace("4.0.2", "3.3.8"), manifest().replace("922", "896"))) {
+   assertContains(assertFailsWith<IllegalArgumentException> { ShatteredVersions.target(jar(text)) }.message.orEmpty(), "版本信息不一致")
+  }
+ }
+
+ @Test fun missingVersionMetadataIsNotInferredFromTheFilename() {
+  for (text in listOf(manifest().replace("Specification-Version: 4.0.2\r\n", ""),
+   manifest().replace("Implementation-Version: 922\r\n", ""))) {
+   val named = temp.resolve("Shattered-4.0.2-official.jar")
+   Files.move(jar(text), named, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+   assertFailsWith<IllegalArgumentException> { ShatteredVersions.target(named) }
+  }
+  val named = temp.resolve("desktop-4.0.2.jar")
+  Files.move(jar(manifest().replace("4.0.2", "3.3.8").replace("922", "896")), named)
+  assertEquals("3.3.8", ShatteredVersions.target(named).displayVersion)
+ }
+
+ @Test fun targetInspectionNeverInitializesOrRunsLauncherClasses() {
+  val marker = temp.resolve("must-not-execute")
+  val source = temp.resolve("DesktopLauncher.java")
+  val quotedPath = marker.toString().replace("\\", "\\\\")
+  Files.writeString(source, """
+   package com.shatteredpixel.shatteredpixeldungeon.desktop;
+   public class DesktopLauncher {
+    static { try { java.nio.file.Files.writeString(java.nio.file.Path.of("$quotedPath"), "executed"); }
+      catch (Exception e) { throw new RuntimeException(e); } }
+    public static void main(String[] args) { throw new AssertionError("must not run"); }
+   }
+  """.trimIndent())
+  val compiler = assertNotNull(javax.tools.ToolProvider.getSystemJavaCompiler())
+  assertEquals(0, compiler.run(null, null, null, "-d", temp.toString(), source.toString()))
+  val found = ShatteredVersions.target(jar(entries = mapOf(launcher to Files.readAllBytes(temp.resolve(launcher)))))
+  assertTrue(found.trusted); assertFalse(Files.exists(marker))
  }
 
  @Test fun rejectsWrongIdentityMissingLauncherAndInvalidBuildCode() {

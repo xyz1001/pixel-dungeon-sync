@@ -374,7 +374,7 @@ internal fun runSyncApplication(
        val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
        require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
       }
-      require(verified.trusted) { "尚不能信任所选游戏版本：${verified.reason}" }
+      require(verified.trusted) { "无法识别所选游戏版本：${verified.reason}" }
       discoveredTarget = verified; discoveryNotice = "已选择 Shattered ${verified.displayVersion}，仅静态校验，未运行。"
      }
     } catch (e: Exception) { discoveryNotice = "未更改游戏选择：${e.message}" }
@@ -710,7 +710,7 @@ internal fun runSyncApplication(
            }
           }
          }
-         Text("时间只供判断，不会自动选最新。恢复会继续检查可信游戏版本、游戏退出状态、存档静默和备份。", color = muted, style = MaterialTheme.typography.caption)
+         Text("时间只供判断，不会自动选最新。恢复会继续检查游戏版本兼容性、游戏退出状态、存档静默和备份。", color = muted, style = MaterialTheme.typography.caption)
         }
        }
        Page.HOME -> {

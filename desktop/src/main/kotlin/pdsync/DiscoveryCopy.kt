@@ -3,14 +3,15 @@ package pdsync
 /** Presentation only: finding an installation or directory does not verify save contents. */
 internal object DiscoveryCopy {
  fun game(result: InstallationDiscoveryResult?, selected: TargetGame?): String = when {
-  selected?.trusted == true -> "已确认可信游戏，仅静态校验，未运行游戏。" +
-   if (result?.incomplete == true) "安装位置扫描未完成，但当前选择已单独通过可信校验。" else "可继续连接云端。"
+  selected?.trusted == true -> "已识别游戏，仅静态读取版本，未运行游戏。" +
+   (if (result?.incomplete == true) "安装位置扫描未完成，但当前选择已单独识别。" else "可继续连接云端。") +
+   if (selected.minimumSaveVersion == null) "该版本的恢复兼容范围尚未确认，暂不支持恢复。" else "恢复时会另行核对存档版本。"
   result == null -> "尚未完成游戏检查，请等待扫描结果或手动选择游戏 JAR。"
-  result.incomplete -> "安装位置扫描未完成，不能自动确认游戏；请从候选中明确选择，或手动选择官方游戏 JAR。"
-  result.trustedTargets.size > 1 -> "找到多个可信游戏，请从候选中明确选择要使用的一份。"
-  result.trustedTargets.size == 1 -> "找到可信游戏候选，请确认要使用的游戏。"
-  result.candidates.isNotEmpty() -> "发现游戏候选，但未通过可信版本校验；请手动选择已核实的官方 4.0.2 JAR。"
-  else -> "在已检查的位置未找到可信游戏，请手动选择已核实的官方 4.0.2 JAR。"
+  result.incomplete -> "安装位置扫描未完成，不能自动确认游戏；请从候选中明确选择，或手动选择 Shattered 游戏 JAR。"
+  result.trustedTargets.size > 1 -> "找到多个游戏，请从候选中明确选择要使用的一份。"
+  result.trustedTargets.size == 1 -> "找到游戏候选，请确认要使用的游戏。"
+  result.candidates.isNotEmpty() -> "发现候选文件，但无法识别游戏或版本；请手动选择 Shattered 游戏 JAR，并查看具体原因。"
+  else -> "在已检查的位置未找到游戏，请手动选择 Shattered 游戏 JAR。"
  }
 
  fun directory(save: DefaultSaveDiscovery?): String = when {

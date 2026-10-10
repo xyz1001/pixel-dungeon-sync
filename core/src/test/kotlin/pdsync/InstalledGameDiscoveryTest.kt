@@ -83,13 +83,14 @@ class InstalledGameDiscoveryTest {
   assertEquals(1, result.trustedTargets.size)
  }
 
- @Test fun copiedManifestCannotBecomeTrustedAutomaticallyOrManually() {
+ @Test fun identifiableMetadataNeedsNoReleaseChecksumForDiscoveryOrSelection() {
   val fake = fakeJar(temp.resolve("game/ShatteredPD-v4.0.2-Java.jar"))
   val scanner = ShatteredInstallationDiscovery(context(), listOf(root(fake.parent)))
   val result = scanner.discover()
   assertEquals(922, result.candidates.single().target?.versionCode)
-  assertFalse(result.candidates.single().trusted); assertTrue(result.trustedTargets.isEmpty())
-  assertFalse(scanner.validateJar(fake).trusted)
+  assertTrue(result.candidates.single().trusted); assertEquals(1, result.trustedTargets.size)
+  assertTrue(scanner.validateJar(fake).trusted)
+  assertEquals(922, result.suggestedTarget?.versionCode)
  }
 
  @Test fun malformedJarAndNativeLauncherDoNotExecuteOrBecomeTrusted() {

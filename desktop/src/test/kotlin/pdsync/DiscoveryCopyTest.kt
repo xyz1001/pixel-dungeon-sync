@@ -13,7 +13,7 @@ class DiscoveryCopyTest {
  @Test fun trustedSelectionNeverShowsMissingOrSelectionInstructions() {
   for (scan in listOf(null, result(), result(1), result(2), result(1, incomplete = true))) {
    val message = DiscoveryCopy.game(scan, target)
-   assertContains(message, "已确认可信游戏")
+   assertContains(message, "已识别游戏")
    assertFalse(message.contains("未找到"))
    assertFalse(message.contains("请手动选择"))
   }
@@ -29,9 +29,9 @@ class DiscoveryCopyTest {
  }
  @Test fun completedScanDistinguishesMissingMultipleAndUntrustedCandidates() {
   assertContains(DiscoveryCopy.game(result(), null), "在已检查的位置未找到")
-  assertContains(DiscoveryCopy.game(result(2), null), "多个可信游戏")
-  assertContains(DiscoveryCopy.game(result(1), null), "找到可信游戏候选")
-  assertContains(DiscoveryCopy.game(result(1, trusted = false), target.copy(trusted = false)), "未通过可信版本校验")
+  assertContains(DiscoveryCopy.game(result(2), null), "多个游戏")
+  assertContains(DiscoveryCopy.game(result(1), null), "找到游戏候选")
+  assertContains(DiscoveryCopy.game(result(1, trusted = false), target.copy(trusted = false)), "无法识别游戏或版本")
   assertContains(DiscoveryCopy.game(null, null), "尚未完成游戏检查")
  }
  @Test fun existingDirectoryDoesNotClaimSaveContentsWereFound() {
@@ -53,5 +53,11 @@ class DiscoveryCopyTest {
   val message = DiscoveryCopy.directory(null)
   assertContains(message, "检查尚未完成")
   assertFalse(message.contains("未找到"))
+ }
+ @Test fun identifiedUnknownCompatibilityDoesNotClaimRestoreSupportOrOfficialAuthentication() {
+  val message = DiscoveryCopy.game(result(1), target.copy(minimumSaveVersion = null))
+  assertContains(message, "已识别游戏")
+  assertContains(message, "暂不支持恢复")
+  assertFalse(message.contains("官方")); assertFalse(message.contains("可信"))
  }
 }

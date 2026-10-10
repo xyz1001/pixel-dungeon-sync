@@ -4,9 +4,9 @@ import java.nio.file.Path
 
 /** Read-only diagnostic entry point: no saves, credentials, cloud access, launches or process changes. */
 fun main(args: Array<String>) {
- require(args.size == 1) { "Usage: pdsync.ProcessCheckKt <official-game.jar>" }
+ require(args.size == 1) { "Usage: pdsync.ProcessCheckKt <game.jar>" }
  val target = ShatteredVersions.target(Path.of(args.single()))
- println("Trusted official target: ${target.trusted}")
+ println("Identified game target: ${target.trusted}")
  val inventory = JvmProcessInventory().snapshot()
  val status = GameProcessDetector(target).status()
  println("Current-account visible process status: ${status::class.simpleName}")
