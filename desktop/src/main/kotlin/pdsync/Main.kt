@@ -137,7 +137,7 @@ internal fun runSyncApplication(
     // a sole verified remote tip (or the user's click) supplies the normal selection.
     selected = null; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
-    status = if (value == null) "默认目录已就绪；存档内容尚待第 3 步核验与比较。" else "已开始观察存档。已有同步基线会自动补传离线变化；新档案可先点击上传，后续自动处理。"
+    status = if (value == null) "存档内容待检查。" else "正在检查存档变化。"
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
     if (appClosed) return
@@ -307,7 +307,7 @@ internal fun runSyncApplication(
      remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
      if (selected == null && entries.size == 1) selected = entries.single().entry.manifest.id
      history = withContext(Dispatchers.IO) { manager.history() }
-     status = if (entries.isEmpty()) "此次未观察到云端提交。可先同步当前存档。" else "已观察到 ${entries.size} 个云端分支，均已加入历史，本地未改动。普通恢复只允许单一分支及干净本地基线。已有本地进度可先同步，再明确选择；空目录可先从历史选定快照恢复，之后同步解决分支。"
+     status = if (entries.isEmpty()) "此次未发现云端记录。" else "已读取云端记录。"
     } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
     finally { busy = false }
    }
@@ -375,7 +375,7 @@ internal fun runSyncApplication(
        require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
       }
       require(verified.trusted) { "无法识别所选游戏版本：${verified.reason}" }
-      discoveredTarget = verified; discoveryNotice = "已选择 Shattered ${verified.displayVersion}，仅静态校验，未运行。"
+      discoveredTarget = verified; discoveryNotice = null
      }
     } catch (e: Exception) { discoveryNotice = "未更改游戏选择：${e.message}" }
     finally { busy = false }
@@ -556,7 +556,7 @@ internal fun runSyncApplication(
     if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE) continue
     val manager = session ?: continue
     if (connected && !remoteInspectionReady) {
-     automaticStatus = "完整云端核验尚未完成，自动上传暂停。"
+     automaticStatus = "云端检查未完成，自动上传暂停。"
      if (remoteReadAt == 0L || monotonicMillis() - remoteReadAt >= 60000) readRemote()
      continue
     }
@@ -574,14 +574,14 @@ internal fun runSyncApplication(
      if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || appClosed) continue
      automaticStatus = when {
       config?.autoUploadPaused == true -> "自动上传已暂停；仍可手动上传。"
-      !connected -> "等待登录，已有快照与待上传操作保留。"
+      !connected -> "请先连接云端。"
       state !is GameProcessStatus.Stopped -> processMessage(state)
       pending && !retryable -> "有待检查的中断操作，请在设置中处理。"
-      conflict != null || remoteTips.size > 1 -> "多个分支均已保留。点击恢复，明确选择要继续的存档。"
-      automatic.needsAttention -> "自动上传已停止重试。请查看下方原因，修正后点击上传。"
-      automatic.waitingForRetry -> "上次上传未完成，稍后自动重试；已有冻结快照会原样保留。"
-      retryable -> "待上传快照已保存在本机，等待静默期后自动重试。"
-      else -> "自动上传已开启：检测存档变化或游戏退出，稳定后上传。"
+      conflict != null || remoteTips.size > 1 -> "云端有多份进度，请点击恢复后选择。"
+      automatic.needsAttention -> "自动上传暂停，请处理下方问题后重试。"
+      automatic.waitingForRetry -> "上次上传未完成，稍后重试。"
+      retryable -> "等待存档稳定后重试上传。"
+      else -> "自动上传已开启。"
      }
      if (automatic.shouldUpload(now, config?.autoUploadPaused != true && OnboardingGate.allowsAutomatic(config?.onboardingProgress, onboardingActive, remoteInspectionReady), connected, state is GameProcessStatus.Stopped, retryable, conflict != null || remoteTips.size > 1, busy)) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
@@ -590,7 +590,7 @@ internal fun runSyncApplication(
       else execute(operationEvents.begin(Action.PUSH), isAutomatic = true)
      } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
     } catch (e: CancellationException) { throw e }
-    catch (_: Exception) { automaticStatus = "存档正在变化或暂不可读，继续等待；没有采集或覆盖存档。" }
+    catch (_: Exception) { automaticStatus = "存档正在变化或暂不可读，自动上传等待中。" }
    }
   }
   LaunchedEffect(session, selected, busy) {
@@ -615,9 +615,9 @@ internal fun runSyncApplication(
      Box(Modifier.weight(1f).fillMaxWidth()) {
       when (page) {
        Page.DISCOVERY -> GuidedPage(
-        title = "1 / 3  确认游戏与存档位置", subtitle = "这里只检查目标位置和游戏安装；存档内容将在第 3 步核验，不运行游戏。",
+        title = "1 / 3  选择游戏", subtitle = "",
         footer = {
-         discoveryNotice?.let { Text(it, color = muted, style = MaterialTheme.typography.body2) }
+         discoveryNotice?.let { CompactFeedback(it, "检查未完成，请重新选择游戏或重试。") }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           TextButton(enabled = !busy && !connectingAtStartup, onClick = { rescanDiscovery() }) { Text("重新扫描") }
@@ -627,35 +627,36 @@ internal fun runSyncApplication(
         }
        ) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-         Text("默认存档目标位置", fontWeight = FontWeight.Medium)
-         SelectionContainer { Text(pathText, color = muted, style = MaterialTheme.typography.body2) }
-         Text(DiscoveryCopy.directory(discovery?.defaultSave), color = muted)
-         Divider()
-         Text("目标游戏", fontWeight = FontWeight.Medium)
-         discoveredTarget?.let { Text("Shattered ${it.displayVersion} · 内部版本 ${it.versionCode}", color = green); SelectionContainer { Text(it.path, style = MaterialTheme.typography.caption) } }
+         discoveredTarget?.let { Text("Shattered Pixel Dungeon ${it.displayVersion}", fontWeight = FontWeight.Medium) }
+         DiscoveryCopy.game(discovery, discoveredTarget).takeIf { it.isNotEmpty() }?.let { Text(it, color = muted) }
          discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true && it.isNotEmpty() }?.forEach { game ->
-          Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { discoveredTarget = game; discoveryNotice = "已选择此游戏。" }, verticalAlignment = Alignment.CenterVertically) {
+          Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { discoveredTarget = game; discoveryNotice = null }, verticalAlignment = Alignment.CenterVertically) {
            RadioButton(selected = discoveredTarget?.path == game.path, onClick = { discoveredTarget = game }, enabled = !busy)
-           Column { Text("Shattered ${game.displayVersion}"); Text(game.path, color = muted, style = MaterialTheme.typography.caption) }
+           Column { Text("Shattered ${game.displayVersion}"); Details { SelectionContainer { Text(game.path) } } }
           }
          }
-         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text("手动选择游戏 JAR…") }
-         Text(DiscoveryCopy.game(discovery, discoveredTarget), color = muted, style = MaterialTheme.typography.caption)
-         discovery?.diagnostics?.forEach { Text(it, color = muted, style = MaterialTheme.typography.caption) }
+         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text(if (discoveredTarget == null) "选择游戏…" else "更换游戏…") }
+         Text(DiscoveryCopy.directory(discovery?.defaultSave), color = muted)
+         Details {
+          Text("存档位置：$pathText")
+          discoveredTarget?.let { Text("游戏文件：${it.path}") }
+          discovery?.defaultSave?.reason?.let { Text(it) }
+          discovery?.diagnostics?.forEach { Text(it) }
+         }
         }
        }
        Page.COMPARISON -> GuidedPage(
-        title = "3 / 3  选择要继续的存档", subtitle = "先核验完整云端提交与祖先，再比较内容。此步骤完成前自动上传暂停。",
+        title = "3 / 3  选择存档", subtitle = "",
         footer = {
-         comparisonNotice?.let { Text(it, Modifier.heightIn(max = 72.dp).verticalScroll(rememberScrollState()), color = muted, style = MaterialTheme.typography.body2) }
-         comparison?.blocker?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.body2) }
+         comparisonNotice?.let { CompactFeedback(it, "操作未完成，请重试。") }
+         comparison?.blocker?.let { CompactFeedback(it, "暂不能继续，请检查存档或连接后重试。") }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
          if (setupConfirm != null) {
-          Text(if (setupConfirm == SetupAction.RESTORE) "确认后会先保留本机进度并生成备份，再恢复所选整份存档。没有的局会移除，原始分支保留。" else "只关联这份已核验的云端提交，不改写存档内容，也不上传新根提交。", color = muted)
+          Text(if (setupConfirm == SetupAction.RESTORE) NoviceCopy.restoreWarning else "使用云端记录，不改动本机存档。", color = Color(0xFF986337))
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
            TextButton(enabled = !busy, onClick = { setupConfirm = null; comparisonNotice = "已取消选择，双方存档未改变。" }) { Text("取消") }
            Spacer(Modifier.weight(1f))
-           Button(enabled = !busy, onClick = { setupConfirm?.let { performOnboarding(it) } }) { Text(if (setupConfirm == SetupAction.RESTORE) "保留并恢复所选存档" else "确认采用云端关联") }
+           Button(enabled = !busy, onClick = { setupConfirm?.let { performOnboarding(it) } }) { Text(if (setupConfirm == SetupAction.RESTORE) "备份并恢复" else "确认继续") }
           }
          } else {
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -665,10 +666,10 @@ internal fun runSyncApplication(
            TextButton(enabled = !busy, onClick = { postponeOnboarding() }) { Text("稍后处理") }
           }
           comparison?.let { value ->
-           if (value.kind == OnboardingKind.BOTH_EMPTY) Button(enabled = !busy, onClick = { postponeOnboarding(emptyDecision = true) }, modifier = Modifier.fillMaxWidth()) { Text("进入主页，稍后创建存档") }
+           if (value.kind == OnboardingKind.BOTH_EMPTY) Button(enabled = !busy, onClick = { postponeOnboarding(emptyDecision = true) }, modifier = Modifier.fillMaxWidth()) { Text("进入主页") }
            else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (value.localFiles.isNotEmpty() || value.retryablePending) Button(enabled = !busy && (value.kind != OnboardingKind.BLOCKED || value.retryablePending), onClick = { performOnboarding(SetupAction.UPLOAD) }, modifier = Modifier.weight(1f)) { Text(if (value.retryablePending) "重试已冻结的上传" else if (value.remoteEntries.isEmpty()) "上传本机存档" else "上传本机，保留云端分支") }
-            if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { setupConfirm = SetupAction.ADOPT }, modifier = Modifier.weight(1f)) { Text("采用云端关联") }
+            if (value.localFiles.isNotEmpty() || value.retryablePending) Button(enabled = !busy && (value.kind != OnboardingKind.BLOCKED || value.retryablePending), onClick = { performOnboarding(SetupAction.UPLOAD) }, modifier = Modifier.weight(1f)) { Text(if (value.retryablePending) "重试上传" else if (value.remoteEntries.isEmpty()) "上传本机存档" else "上传本机，保留两份") }
+            if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { setupConfirm = SetupAction.ADOPT }, modifier = Modifier.weight(1f)) { Text("确认使用") }
             else if (value.remoteEntries.isNotEmpty()) OutlinedButton(enabled = !busy && comparisonSelection != null && value.kind != OnboardingKind.BLOCKED, onClick = { setupConfirm = SetupAction.RESTORE }, modifier = Modifier.weight(1f)) { Text("恢复所选云端存档") }
            }
           }
@@ -676,23 +677,12 @@ internal fun runSyncApplication(
         }
        ) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-         Text(when (comparison?.kind) {
-          null -> if (busy) "正在核验云端与本地…" else "尚未完成比较，请重试。"
-          OnboardingKind.BOTH_EMPTY -> "双方暂无存档。保持同步器开启，去游戏里创建进度并退出后会自动上传；首次上传前重启同步器会重新比较。"
-          OnboardingKind.LOCAL_ONLY -> "仅本机有存档。确认上传后，才会启用后续自动上传。"
-          OnboardingKind.REMOTE_ONLY -> "仅云端有存档。选择下方快照并恢复到本机。"
-          OnboardingKind.IDENTICAL -> "存档内容相同，但同步关联还需确认。不会仅凭相同内容猜测提交历史。"
-          OnboardingKind.DIFFERENT -> "本机与云端内容不同。上传会保留双方分支；恢复也会先保留本机进度。"
-          OnboardingKind.BRANCHED -> "发现多个云端分支，请查看设备、时间和版本，明确选择完整进度。"
-          OnboardingKind.BLOCKED -> "暂不能判断同步方向。未将异常或不完整的云端当作空存档。"
-         }, fontWeight = FontWeight.Medium)
+         Text(NoviceCopy.comparison(comparison?.kind, busy), fontWeight = FontWeight.Medium)
          comparison?.let { value ->
           Surface(color = Color(0xFFE3EFE6)) {
            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("本机 · ${device?.displayLabel() ?: "设备未知"}")
-            Text("${OnboardingGate.localFileCountLabel(value.kind, value.localFiles.size, value.retryablePending)} · ${saveInfo?.summary() ?: "无可识别存档"}", color = muted, style = MaterialTheme.typography.caption)
+            Text("本机 · ${device?.label ?: "设备未知"}")
             value.localLatestModifiedAt?.let { Text("存档修改 ${localTime(it)}", color = muted, style = MaterialTheme.typography.caption) }
-            comparisonCheckedAt?.let { Text("本次核验 ${localTime(it)}", color = muted, style = MaterialTheme.typography.caption) }
            }
           }
           value.remoteEntries.forEach { remote ->
@@ -701,16 +691,18 @@ internal fun runSyncApplication(
             Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { comparisonSelection = m.id }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
              RadioButton(selected = comparisonSelection == m.id, onClick = { comparisonSelection = m.id }, enabled = !busy)
              Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text("云端 · ${m.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知"}")
-              Text(snapshotTimes(m, null, remote.entry.remoteObservedAt), color = muted, style = MaterialTheme.typography.caption)
-              Text("${m.files.size} 个文件 · ${m.saveVersions?.summary() ?: m.version}", style = MaterialTheme.typography.caption)
-              Text("分支 ${remote.commit.id.take(8)} · ${if (m.files == value.localFiles) "与本机内容相同" else "与本机内容不同"}", color = muted, style = MaterialTheme.typography.caption)
+              Text("云端 · ${m.metadata?.device?.label ?: "设备未知"}")
+              Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
              }
             }
            }
           }
+          Details {
+           Text("本机：${OnboardingGate.localFileCountLabel(value.kind, value.localFiles.size, value.retryablePending)}")
+           saveInfo?.let { Text(it.summary()) }
+           value.remoteEntries.forEach { remote -> Text("${remote.entry.manifest.metadata?.device?.label ?: "云端"}：${remote.entry.manifest.files.size} 个文件 · ${remote.entry.manifest.saveVersions?.summary() ?: remote.entry.manifest.version}") }
+          }
          }
-         Text("时间只供判断，不会自动选最新。恢复会继续检查游戏版本兼容性、游戏退出状态、存档静默和备份。", color = muted, style = MaterialTheme.typography.caption)
         }
        }
        Page.HOME -> {
@@ -726,9 +718,8 @@ internal fun runSyncApplication(
          }
          Surface(color = Color(0xFFE3EFE6)) {
           Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-           Text(if (config?.onboardingProgress == OnboardingProgress.COMPLETE) automaticStatus else "首次存档选择尚未完成，自动上传暂停。点击上传或恢复继续检查。", color = green, style = MaterialTheme.typography.body2)
-           Text("设备：${device?.displayLabel() ?: "正在读取"}  ·  ${saveInfo?.summary() ?: "尚未识别本地存档"}", color = muted, style = MaterialTheme.typography.caption)
-           Text("设备名与时间随快照上传；原始游戏存档不改写。", color = muted, style = MaterialTheme.typography.caption)
+           Text(if (config?.onboardingProgress == OnboardingProgress.COMPLETE) automaticStatus else "自动上传暂停，请先选择上传或恢复。", color = green, style = MaterialTheme.typography.body2)
+           Text("本机：${device?.label ?: "正在读取"}", color = muted, style = MaterialTheme.typography.caption)
           }
          }
          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -740,26 +731,24 @@ internal fun runSyncApplication(
           OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && (config?.onboardingProgress != OnboardingProgress.COMPLETE || !pending && (selected !in remoteTips || connected) &&
            (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null)), onClick = { if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
          }
-         if (locationIssue != null) Text(locationIssue!!, color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-         if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) Text("恢复暂不可用：$restoreIssue", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-         if (pending) Text("待上传操作已冻结，重试仍使用原内容。恢复暂不可用。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
+         locationIssue?.let { CompactFeedback(it, "无法读取存档，请在设置中重新检查。") }
+         if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) CompactFeedback(restoreIssue!!, "暂不能恢复，请重新检查所选存档。")
+         if (pending) Text("上次上传尚未完成，请先重试上传。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
          Card(Modifier.weight(1f).fillMaxWidth(), elevation = 0.dp) {
           Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("选择要恢复的存档", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
             Text("${history.size} 份", color = muted, style = MaterialTheme.typography.body2)
            }
-           Text("自动读取云端分支，保留本机历史及恢复前备份。点击一项，再点击恢复。", color = muted, style = MaterialTheme.typography.caption)
            if (history.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text("还没有快照。可点击上传，或等待云端读取完成。", color = muted)
+            Text("尚无可选记录，请上传或等待读取。", color = muted)
            } else LazyColumn(Modifier.weight(1f), state = historyScroll, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(history, key = { it.manifest.id }) { entry ->
              val m = entry.manifest
              Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color(0xFFF7F8F5)) {
               Column(Modifier.fillMaxWidth().clickable(enabled = !busy && !connectingAtStartup) { selected = m.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-               Text(m.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知", fontWeight = FontWeight.Medium)
-               Text(snapshotTimes(m, entry.savedAt, remoteObserved[m.id] ?: entry.remoteObservedAt), color = muted, style = MaterialTheme.typography.caption)
-               Text("${if (m.id in remoteTips) "云端分支 · " else ""}${if (entry.remoteObservedAt != null) entry.reason.replace("待追加发布", "已上传").replace("待上传快照", "同步快照") else entry.reason}  ·  ${m.files.size} 个文件  ·  ${m.id.take(8)}", color = muted, style = MaterialTheme.typography.caption)
+               Text(m.metadata?.device?.label ?: "设备未知", fontWeight = FontWeight.Medium)
+               Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
               }
              }
             }
@@ -767,32 +756,28 @@ internal fun runSyncApplication(
           }
          }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
-         connectionNotice?.let { Text(it, color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
-         Text(status, Modifier.fillMaxWidth().heightIn(max = 76.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.body2, color = muted)
+         connectionNotice?.let { CompactFeedback(it, "连接需要处理，请打开设置。") }
+         CompactFeedback(status, "请查看操作结果。")
         }
        }
        Page.SETTINGS -> GuidedPage(
-        title = "设置", subtitle = "自动上传在同步器打开且云端已登录时工作。",
+        title = "设置", subtitle = "",
         footer = { TextButton(enabled = !busy && !connectingAtStartup, onClick = { navigate(Page.HOME) }) { Text("返回存档") } }
        ) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-          Column(Modifier.weight(1f)) { Text("自动上传"); Text("关闭后保留手动上传与所有待上传快照。", color = muted, style = MaterialTheme.typography.caption) }
+          Text("自动上传", Modifier.weight(1f))
           Switch(checked = config?.autoUploadPaused != true, enabled = config != null && !busy, onCheckedChange = { setAutomaticPaused(!it) })
          }
          Divider()
-         Text("游戏检测与恢复校验", style = MaterialTheme.typography.subtitle1)
-         Text(when { targetError != null -> "所选目标暂不可用：$targetError"; targetInfo == null -> "请选择官方游戏 JAR，才能核对游戏进程与恢复版本。"; else -> "Shattered ${targetInfo!!.displayVersion}  ·  ${processMessage(gameStatus)}" }, color = muted)
-         OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("选择游戏 JAR…") }
-         Text("按游戏以普通权限运行检测当前账户；无游戏线索的受限进程不拦截。已识别游戏状态不明时暂停操作。请避免 Steam Cloud 等同时写入。", color = muted, style = MaterialTheme.typography.caption)
-         if (gameStatus is GameProcessStatus.Unknown) Text("无法确认游戏状态，请关闭游戏后重试。检测失败时不会上传或恢复。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-         Text("默认存档位置", style = MaterialTheme.typography.subtitle1)
-         SelectionContainer { Text(pathText, style = MaterialTheme.typography.caption) }
+         Text(targetInfo?.let { "Shattered ${it.displayVersion}" } ?: "尚未选择游戏")
+         targetError?.let { CompactFeedback(it, "游戏文件不可用，请重新选择。") }
+         OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("更换游戏…") }
+         Details { Text("存档位置：$pathText"); Text(processMessage(gameStatus)) }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery() }) { Text("重新检查三步引导") }
          if (pending) TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("检查并归档中断的待上传操作") }
-         Text("实验版本：请另留备份。断电事务、其他写入程序及跨平台原生运行仍有验证限制。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
         }
        }
        Page.CONNECTION -> key(pageGeneration) {
@@ -836,7 +821,7 @@ private fun GuidedPage(title: String, subtitle: String, footer: @Composable Colu
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
    Text("像素地牢  /  存档同步", color = muted, style = MaterialTheme.typography.caption)
    Text(title, style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
-   Text(subtitle, color = muted, style = MaterialTheme.typography.body2)
+   if (subtitle.isNotBlank()) Text(subtitle, color = muted, style = MaterialTheme.typography.body2)
   }
   Divider()
   Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -845,6 +830,22 @@ private fun GuidedPage(title: String, subtitle: String, footer: @Composable Colu
   Divider()
   Column(Modifier.widthIn(max = 680.dp).fillMaxWidth().align(Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp), content = footer)
  }
+}
+
+@Composable
+private fun Details(label: String = "详情", resetKey: Any? = Unit, content: @Composable ColumnScope.() -> Unit) {
+ var state by remember(resetKey) { mutableStateOf(DetailsState()) }
+ Column {
+  TextButton(onClick = { state = state.toggle() }) { Text(if (state.expanded) "收起$label" else label) }
+  if (state.expanded) Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
+ }
+}
+
+@Composable
+private fun CompactFeedback(raw: String, fallback: String) {
+ val summary = NoviceCopy.feedback(raw, fallback)
+ if (summary.isNotBlank()) Text(summary, color = muted, style = MaterialTheme.typography.body2)
+ if (summary != raw) Details("问题详情", raw) { SelectionContainer { Text(raw, style = MaterialTheme.typography.caption) } }
 }
 
 @Composable
@@ -881,7 +882,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
  fun connect() {
   if (busy || inFlight || closed) return
   val ticket = lifetime.begin() ?: return
-  inFlight = true; onBusy(true); failed = false; message = "正在验证连接并准备应用目录…"
+  inFlight = true; onBusy(true); failed = false; message = null
   val submitted = ConnectionDraft(draft, secret)
   scope.launch {
    var applied: AppliedConnection? = null
@@ -932,20 +933,13 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
  }
  GuidedPage(
   title = if (onboarding) "2 / 3  连接云端" else if (mode == SettingsMode.UNLOCK) "欢迎回来，连接云端" else if (initial == null) "让存档跟着你" else "连接设置",
-  subtitle = if (onboarding) "配置 WebDAV。连接成功后比较云端与本机存档，再选择上传或恢复。" else "输入 WebDAV 地址、用户名和密码。",
+  subtitle = "",
   footer = {
    // Feedback and the single submit action remain visible independently of form scrolling.
-   message?.let {
-    val feedbackScroll = rememberScrollState()
-    LaunchedEffect(it) { feedbackScroll.scrollTo(0) }
-    Box(Modifier.fillMaxWidth().heightIn(max = 80.dp)) {
-     Text(it, Modifier.fillMaxWidth().verticalScroll(feedbackScroll).padding(end = 12.dp), color = if (failed) Color(0xFFAD4634) else muted, style = MaterialTheme.typography.body2)
-     Box(Modifier.matchParentSize()) { VerticalScrollbar(rememberScrollbarAdapter(feedbackScroll), Modifier.align(Alignment.CenterEnd).fillMaxHeight()) }
-    }
-   }
+   message?.let { CompactFeedback(it, "连接未完成，请检查填写内容后重试。") }
    if (controlsBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-    TextButton(enabled = !controlsBusy, onClick = { cancel() }) { Text(if (onboarding) "返回游戏检查" else "取消，返回主页") }
+    TextButton(enabled = !controlsBusy, onClick = { cancel() }) { Text("返回") }
     Spacer(Modifier.weight(1f))
     Button(enabled = !controlsBusy, onClick = { connect() }) { Text(if (inFlight) "正在连接…" else "连接") }
    }
@@ -955,8 +949,6 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("WebDAV 地址") }, placeholder = { Text("https://example.com/dav") }, singleLine = true)
    OutlinedTextField(draft.username, { edit(draft.copy(username = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("用户名") }, singleLine = true)
    OutlinedTextField(secret, { edit(password = it) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-   Text(if (draft.rememberPassword) "沿用此连接的系统安全密码存储。" else "密码仅用于本次会话，不保存到磁盘。", color = muted, style = MaterialTheme.typography.caption)
-   Text("无需手动建目录。连接会按需创建应用空文件夹；取消不会删除已创建的文件夹。", color = muted, style = MaterialTheme.typography.caption)
   }
  }
 }
@@ -965,7 +957,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
 private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit) {
  GuidedPage(
   title = "选择要继续的存档",
-  subtitle = "${value.branches.size} 个进度分支均已保留。请明确选择一份完整快照。",
+  subtitle = "云端有多份进度，请选择一份。",
   footer = {
    restoreIssue?.let { Text("选择后校验：$it", color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -976,25 +968,20 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
   }
  ) {
   Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-   Text("会创建引用本次全部分支的新解决提交；未观察到的后来分支仍会显示冲突，不按时间自动选胜者。", color = muted, style = MaterialTheme.typography.body2)
    value.branches.forEach { branch ->
     val m = branch.snapshot.manifest
     Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color.White, shape = MaterialTheme.shapes.small) {
      Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { onSelect(m.id) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       RadioButton(selected = selected == m.id, onClick = { onSelect(m.id) }, enabled = !busy)
       Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-       Text(m.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知")
-       Text(snapshotTimes(m, null, null), color = muted, style = MaterialTheme.typography.caption)
-       Text("分支 ${branch.commit.id.take(8)} · ${m.files.size} 个文件")
+       Text(m.metadata?.device?.label ?: "设备未知")
+       Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
        if (m.files == value.observedLocalFiles) Text("与当前本地进度一致", color = green, style = MaterialTheme.typography.caption)
-       if (branch.commit.id == value.publishedLocalCommit) Text("本机最近发布的分支", color = muted, style = MaterialTheme.typography.caption)
-       if (m.files != value.observedLocalFiles && branch.commit.id != value.publishedLocalCommit) Text("其他已观察分支 · 内容校验 ${m.sha256.take(12)}", color = muted, style = MaterialTheme.typography.caption)
-       Text(m.saveVersions?.summary() ?: m.version, style = MaterialTheme.typography.caption)
+       Details { Text("${m.files.size} 个文件 · ${m.saveVersions?.summary() ?: m.version}") }
       }
      }
     }
    }
-   Text("需要替换当前档案时会先备份，再恢复所选快照。所有原始分支保留，不合并二进制。", color = muted, style = MaterialTheme.typography.body2)
   }
  }
 }
@@ -1003,8 +990,8 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
 private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
  val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP)
  GuidedPage(
-  title = if (restoring) "备份并恢复整个档案" else if (action == Action.ARCHIVE) "归档待上传快照" else "操作前确认",
-  subtitle = "请核对操作范围。取消会返回主页，当前存档不会改变。",
+  title = if (restoring) "恢复存档" else if (action == Action.ARCHIVE) "结束待上传操作" else "操作前确认",
+  subtitle = "",
   footer = {
    notice?.let { Text(it, color = Color(0xFFAD4634), style = MaterialTheme.typography.body2) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1015,18 +1002,16 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
   }
  ) {
   Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-   Text("默认目录：$root", color = muted, style = MaterialTheme.typography.caption)
    if (action == Action.ARCHIVE) Text("只移除待上传标记，历史保留，不删除云端内容。若此前恢复中断，请先核对当前档案与备份；归档也会解除中断恢复保护，下次同步将重新采集当前档案。")
    else {
     if (restoring && snapshot != null) {
-     Text("所选存档：${snapshot.metadata?.device?.displayLabel() ?: "旧快照 · 设备未知"}  ·  ${snapshot.id.take(8)}", fontWeight = FontWeight.Medium)
-     Text(snapshotTimes(snapshot, null, null), color = muted, style = MaterialTheme.typography.caption)
+     Text("所选存档：${snapshot.metadata?.device?.label ?: "设备未知"}", fontWeight = FontWeight.Medium)
+     Text(snapshotBriefTime(snapshot), color = muted, style = MaterialTheme.typography.caption)
     }
-    if (restoring) Text("先生成可恢复备份，再替换所有局与全局记录。快照中没有的局将移除。旧档可能在游戏加载时升级；原档备份保留。")
-    if (action == Action.PUSH && pending) Text("将重试已冻结的快照，可能不同于当前目录的最新内容。")
-    if (action == Action.RESOLVE) Text("将采用所选分支 ${branch?.take(8)}，并追加多父提交。全部原始快照继续保留。")
-    Text("将自动检测游戏是否退出，并等待存档稳定。检测未知、版本不兼容或检测到文件变化时会停止，不需要勾选。", color = muted, style = MaterialTheme.typography.body2)
-    Text("请避免 Steam Cloud 或其他程序同时写入。进程检测无法锁住其他写入者，断电及并发写入仍有风险。", color = muted, style = MaterialTheme.typography.caption)
+    if (restoring) Text(NoviceCopy.restoreWarning, color = Color(0xFF986337))
+    if (action == Action.PUSH && pending) Text("将重试上次保存的内容，可能不是当前最新进度。")
+    if (restoring) Text("请退出游戏，并暂停其他存档同步。", color = muted)
+    Details { Text("存档目录：$root") }
    }
   }
  }
@@ -1042,9 +1027,6 @@ private fun DeviceIdentity.displayLabel() = "$label · ${id.take(8)}"
 private fun localTime(value: String): String = runCatching {
  java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(value))
 }.getOrElse { "时间未知" }
-private fun snapshotTimes(manifest: Manifest, savedAt: String?, observedAt: String?): String = buildList {
- manifest.metadata?.capturedAt?.let { add("采集 ${localTime(it)}") } ?: add("原始采集时间未知")
- manifest.metadata?.latestFileModifiedAt?.let { add("存档修改 ${localTime(it)}") }
- if (observedAt != null) add("本机云端核验 ${localTime(observedAt)}")
- else savedAt?.let { add("本机入库 ${localTime(it)}") }
-}.joinToString("  ·  ")
+private fun snapshotBriefTime(manifest: Manifest): String =
+ manifest.metadata?.latestFileModifiedAt?.let { "存档修改 ${localTime(it)}" }
+  ?: manifest.metadata?.capturedAt?.let { "保存时间 ${localTime(it)}" } ?: "时间未知"
