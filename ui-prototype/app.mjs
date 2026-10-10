@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName} from './model.mjs';
 let state = createState('history');
 let pathTimer;
 const app = document.querySelector('#app');
@@ -8,8 +8,9 @@ const gameSummary = () => { const g = gameLabel(state); return `${g.name}${g.ver
 const gameIcon = () => `<div class="game-icon" aria-hidden="true"><span>◆</span>${gameLabel(state).icon ? `<img src="${gameLabel(state).icon}" alt="" width="58" height="58">` : ''}</div>`;
 const gameDetails = () => { const g = gameLabel(state); return [g.author ? `作者：${g.author}` : '', g.updated ? `更新：${g.updated}` : ''].filter(Boolean).map(text => `<p class="small">${text}</p>`).join(''); };
 const pathStatus = () => `${saveStatus(state)}${state.preview?.slots.length ? `<ul class="slot-times">${state.preview.slots.map(slot => `<li>存档 ${slot.slot}<time>${slot.modified}</time></li>`).join('')}</ul><span class="hint">示例存档修改时间</span>` : ''}`;
-const sourceName = snapshot => deviceLabel(snapshot, state.currentDeviceId).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const restoreWarning = () => `将用来自 ${sourceName(selectedTarget(state))}（${selectedTarget(state)?.time || '时间未知'}）的云端进度替换本机存档及游戏记录，不保留本机备份。`;
+const escapeText = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const sourceName = snapshot => escapeText(deviceLabel(snapshot, state.currentDeviceId));
+const restoreWarning = () => `将用来自 ${sourceName(selectedTarget(state))} 的“${escapeText(snapshotName(selectedTarget(state)))}”（${selectedTarget(state)?.time || '时间未知'}）替换本机存档及游戏记录，不保留本机备份。`;
 const button = (label, action, disabled = false, cls = '') => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}${state.page !== 'game' ? `<p class="game-summary small">${gameSummary()}</p>` : ''}</div>${extra}</header>`;
 const footer = (left, right) => `<footer class="footer">${left}<div class="right">${right}</div></footer>`;
@@ -23,23 +24,33 @@ function historyView() {
   const devices=[{deviceId:'cloud-column',deviceName:'云端存档'},{deviceId:state.currentDeviceId,deviceName:'本机'}];
   const lane=historyColumnId;
   if(!rows.length)rows.push([]);
-  const width=devices.length*220, height=rows.length*132;
-  const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.findIndex(row=>row.some(n=>n.id===node.id))*132+66};};
-  const edges=displayEdges(state).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const kind=edge.kind;return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
+  const width=devices.length*220, height=rows.length*270;
+  const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.findIndex(row=>row.some(n=>n.id===node.id))*270+76};};
+  const edges=displayEdges(state).map((edge,index)=>{
+    const a=point(edge.parent),b=point(edge.child);
+    let path;
+    if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;path=`M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}`;}
+    else {
+      // Route ancestry beside cards so skipped rows never look like false parents.
+      const side=edge.kind==='cloud'?-1:1,rail=edge.kind==='cloud'?4+index*3:width-7;
+      a.x+=side*96;b.x+=side*96;path=`M ${a.x} ${a.y} H ${rail} V ${b.y} H ${b.x}`;
+    }
+    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" marker-end="url(#history-arrow)" d="${path}"/>`;
+  }).join('');
   const cells=rows.map((row,rowIndex)=>devices.map(d=>{
     const n=row.find(n=>lane(n)===d.deviceId);
     if(!n)return rowIndex===0&&d.deviceId===state.currentDeviceId&&localState(state)==='empty'?'<div class="history-cell"><div class="empty-local">无存档</div></div>':'<div class="history-cell"></div>';
     const isCloud=n.storage==='cloud';
     const unsynced=!isCloud&&n.id===state.localSnapshot?.id&&localState(state)==='unsynced';
     const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(unsynced?'未同步云端':'已同步云端');
-    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button></div>`;
+    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><strong class="snapshot-name">${escapeText(snapshotName(n))}</strong><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button>${state.renameId===n.id?`<form class="rename-form" data-rename-id="${n.id}"><input aria-label="存档名称" maxlength="80" placeholder="留空使用默认名，最多40字"><div><button type="submit">保存</button><button type="button" data-action="cancelRename">取消</button></div></form>`:`<button class="rename-button" data-rename-id="${n.id}" ${state.busy?'disabled':''}>命名</button>`}</div>`;
   }).join('')).join('');
   return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs><marker id="history-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
 }
 function targetView() {
   const target=selectedTarget(state);
   const unavailable=target && (target.storage !== 'cloud' || !target.available || !Number.isFinite(target.publishedOrder));
-  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">请选择“云端存档”列中可用的存档恢复；设备上的存档需先上传。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
+  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">请选择“云端存档”列中可用的存档恢复；设备上的存档需先上传。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
 }
 function render() {
   app.setAttribute('aria-busy', String(state.busy));
@@ -101,6 +112,14 @@ function render() {
     canvas.querySelector('.device-columns').style.gridTemplateColumns=`repeat(${columns},220px)`;
     canvas.querySelector('.history-grid').style.gridTemplateColumns=`repeat(${columns},220px)`;
   }
+  app.querySelectorAll('.rename-button').forEach(element=>element.addEventListener('click',()=>send({type:'beginRename',id:element.dataset.renameId})));
+  const renameForm=app.querySelector('.rename-form');
+  if(renameForm){
+    const input=renameForm.querySelector('input');input.value=state.history.find(n=>n.id===state.renameId)?.displayName||'';
+    renameForm.addEventListener('submit',event=>{event.preventDefault();send({type:'rename',id:renameForm.dataset.renameId,value:input.value});});
+    input.addEventListener('keydown',event=>{if((event.key==='Escape'||event.key==='Esc'||event.code==='Escape'||event.keyCode===27)){event.preventDefault();send({type:'cancelRename'});}});
+    input.focus();
+  }
   app.querySelectorAll('[data-snapshot-id]').forEach(element=>element.addEventListener('click',()=>send({type:'selectSnapshot',id:element.dataset.snapshotId})));
   app.querySelectorAll('.game-icon img').forEach(img => {
     const fallback = () => img.remove();
@@ -127,6 +146,7 @@ function send(action) {
   if (previous.page === 'connect' && state.page === 'connect') updateConnectionControls(); else render();
   if (app.querySelector('.history-scroll')) app.querySelector('.history-scroll').scrollLeft=scrollLeft;
   if (action.type === 'selectSnapshot') app.querySelector(`[data-snapshot-id="${action.id}"]`)?.focus({preventScroll:true});
+  if (['rename','cancelRename'].includes(action.type)) app.querySelector(`.rename-button[data-rename-id="${previous.renameId}"]`)?.focus({preventScroll:true});
   if (action.type === 'clearSelection') app.querySelector('[data-action="askRestore"]')?.focus();
   if (previous.restoreConfirm && !state.restoreConfirm && action.type === 'cancelRestore') app.querySelector(`[data-action="${state.page === 'compare' ? 'finish' : 'askRestore'}"]`)?.focus();
   if (state.busy && (!previous.busy || state.token !== previous.token)) {

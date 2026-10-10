@@ -38,7 +38,7 @@ export function createState(scene = 'empty', gameId = 'shattered') {
   const cloud = ['history', 'cloud', 'longDevice', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
   const state = {scene, gameId, currentDeviceId: 'demo-current', localSnapshot: fixtureLocal ? {deviceId: 'demo-current', deviceName: 'Windows-PC', contentId: 'demo-local-v1'} : null, cloudSnapshot: cloud ? {contentId: ['identical', 'running'].includes(scene) ? 'demo-local-v1' : 'demo-cloud-v2', deviceId: 'demo-remote', deviceName: scene === 'longDevice' ? 'MacBook-Example-Very-Long-Device-Name-用于窄屏展示的虚构设备名称' : 'MacBook'} : null, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud,
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
-    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null};
+    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null, renameId: null};
   state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', storage:'device', ownerDeviceId:'demo-current', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['device-save-2'] : [], available: true, publishedOrder: null};
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
@@ -82,6 +82,9 @@ export function targetMatchesLocal(s) {
     && target?.storage === 'cloud' && Boolean(target?.available) && Number.isFinite(target.publishedOrder) && s.localSnapshot.contentId === target.contentId;
 }
 // Visibility is based on where the copy lives, never on its content's source device.
+export function snapshotName(node) {
+  return node?.displayName || (node?.storage==='cloud'?'云端存档':'本机存档');
+}
 export function visibleHistory(s) {
   const baseline=localState(s)==='unsynced'?localBaselineNode(s):null;
   return s.history.filter(n=>n.storage==='cloud' || (s.local === true && n.storage==='device' && (n.id===s.localSnapshot?.id || n.id===baseline?.id)));
@@ -194,7 +197,7 @@ function restoreTarget(s) {
   return JSON.stringify([s.page, s.choice, s.gameId, s.savePath, s.configRevision, s.readStatus, s.local, s.cloud, s.localSnapshot, s.cloudSnapshot, s.selectedSnapshotId, selectedTarget(s)]);
 }
 function beginRestore(s) {
-  return {...s, pendingRestore: {...selectedTarget(s)}, busy: true, pending: 'restore', restoreConfirm: false, token: s.token + 1, message: ''};
+  return {...s, pendingRestore: {...selectedTarget(s)}, renameId:null, busy: true, pending: 'restore', restoreConfirm: false, token: s.token + 1, message: ''};
 }
 function requestRestore(s) {
   if (!canRestore(s)) return s;
@@ -225,7 +228,15 @@ export function reduce(s, action) {
   if (s.pending === 'read' && action.type === 'next') return {...s, continueAfterRead: true};
   if (s.busy && action.type !== 'settled') return s;
   switch (action.type) {
-    case 'selectSnapshot': return s.page === 'home' && s.history.some(n=>n.id===action.id) ? {...s,selectedSnapshotId:action.id,restoreConfirm:false,message:''} : s;
+    case 'beginRename': return s.page==='home'&&visibleHistory(s).some(n=>n.id===action.id)?{...s,renameId:action.id}:s;
+    case 'cancelRename': return {...s,renameId:null};
+    case 'rename': {
+      if(s.page!=='home'||s.renameId!==action.id||!visibleHistory(s).some(n=>n.id===action.id))return s;
+      const displayName=Array.from(String(action.value||'').trim()).slice(0,40).join('');
+      const update=n=>n?.id===action.id?{...n,displayName}:n;
+      return {...s,history:s.history.map(update),localSnapshot:update(s.localSnapshot),cloudSnapshot:update(s.cloudSnapshot),renameId:null};
+    }
+    case 'selectSnapshot': return s.page === 'home' && s.history.some(n=>n.id===action.id) ? {...s,selectedSnapshotId:action.id,renameId:null,restoreConfirm:false,message:''} : s;
     case 'clearSelection': return {...s,selectedSnapshotId:null,restoreConfirm:false,message:''};
     case 'chooseGame': return {...s, connectionStatus: 'untested', testedRevision: null, gameId: action.gameId || s.gameId, savePath: action.gameId && action.gameId !== s.gameId ? defaultSavePaths[action.gameId] || '' : s.savePath, folderOpen: false, page: 'game', selectedGame: true, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, connected: false, completed: false, choice: '', token: s.token + 1, message: ''};
     case 'next': return s.page === 'connect' ? (s.connectionStatus === 'success' && s.testedRevision === s.configRevision && s.connected ? {...s, page: s.completed ? 'settings' : 'compare', choice: '', message: ''} : s) : s.page === 'game' && s.selectedGame ? startRead({...s, page: 'read', message: ''})
@@ -261,7 +272,7 @@ export function reduce(s, action) {
     case 'settings': return s.page === 'home' ? {...s, page: 'settings', message: ''} : s;
     case 'connectionSettings': return s.page === 'settings' ? {...s, page: 'connect', connectionStatus: 'untested', testedRevision: null, connected: false, message: ''} : s;
     case 'upload': return s.page === 'home' && s.local && s.connected && !isSynced(s) && s.scene !== 'running'
-      ? {...s, busy: true, pending: 'upload', token: s.token + 1, message: ''} : s;
+      ? {...s, busy: true, pending: 'upload', renameId:null, token: s.token + 1, message: ''} : s;
     case 'askRestore': return s.page === 'home' ? requestRestore(s) : s;
     case 'cancelRestore': return {...s, restoreConfirm: false};
     case 'restore': {

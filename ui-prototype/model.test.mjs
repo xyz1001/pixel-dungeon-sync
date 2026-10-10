@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud, snapshotName} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -269,6 +269,18 @@ test('unsynced baseline is real; new local and empty local invent no cloud edge'
 });
 test('cloud branches use explicit cloud parents, not time adjacency',()=>{
  const edges=displayEdges(createState('history')).filter(e=>e.kind==='cloud');assert.deepEqual(edges.filter(e=>e.parent==='save-1').map(e=>e.child),['save-2','save-3']);assert.equal(edges.some(e=>e.parent==='save-3'&&e.child==='save-4'),false);
+});
+
+test('rename changes display metadata only, supports cancel, duplicate names and plain special text',()=>{
+ let s=createState('history');const original=s.history.find(n=>n.id==='save-2');s=act(s,'beginRename',{id:'save-2'});s=act(s,'cancelRename');assert.deepEqual(s.history.find(n=>n.id==='save-2'),original);
+ for(const id of ['save-2','local-initial']){s=act(s,'beginRename',{id});s=act(s,'rename',{id,value:' <img src=x onerror=alert(1)> & "冒险" '});assert.equal(snapshotName(s.history.find(n=>n.id===id)),'<img src=x onerror=alert(1)> & "冒险"');}
+ const renamed=s.history.find(n=>n.id==='save-2');const {displayName,...content}=renamed;assert.deepEqual(content,original);assert.equal(localState(s),'unsynced');assert.equal(latestCloud(s).id,'save-4');
+ s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(selectedTarget(s).id,'save-2');
+ s=act(s,'beginRename',{id:'save-2'});s=act(s,'rename',{id:'save-2',value:'  '});assert.equal(snapshotName(s.history.find(n=>n.id==='save-2')),'云端存档');
+ s=act(s,'beginRename',{id:'save-2'});s=act(s,'rename',{id:'save-2',value:'名'.repeat(60)});assert.equal(Array.from(snapshotName(s.history.find(n=>n.id==='save-2'))).length,40);
+});
+test('rename a matching snapshot does not change synced status or ancestry',()=>{
+ let s=settle(act(createState('history'),'upload'));const edges=displayEdges(s);const cloud=latestCloud(s);s=act(s,'beginRename',{id:cloud.id});s=act(s,'rename',{id:cloud.id,value:'昨天的探索'});assert.equal(localState(s),'synced');assert.deepEqual(displayEdges(s),edges);assert.equal(latestCloud(s).contentId,cloud.contentId);assert.equal(latestCloud(s).time,cloud.time);
 });
 
 test('local history has exactly zero, one or baseline plus yellow current nodes',()=>{
