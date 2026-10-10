@@ -201,6 +201,49 @@ class AppendProfileSession(
  fun resolve(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   resolveLocked(conflict, chosenSnapshotId, store, stopped)
  }
+ /** Preview and apply both repeat validation. Preview never changes game bytes or publishes data. */
+ fun previewMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult = local.locked {
+  buildMerge(conflict,store,stopped)
+ }
+ private fun buildMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult {
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null) { "请先处理待上传操作" }
+  val graph=discover(store)
+  require(graph.tips==conflict.observedTips && graph.tips.size>=2) { "冲突分支已变化，请重新检查" }
+  require(currentFiles()==conflict.observedLocalFiles) { "本机内容已变化，请重新检查" }
+  val baseline=repository.baseline() ?: throw RunMergeException("缺少共同基线，不能推断单局身份")
+  val children=graph.tips+baseline
+  val common=graph.commits.keys.filter { ancestor -> children.all { graph.descendsFrom(it,ancestor) } }
+  val nearest=common.filter { candidate -> common.none { it!=candidate&&graph.descendsFrom(it,candidate) } }
+  if(nearest.size!=1)throw RunMergeException("没有唯一可验证的共同祖先")
+  val base=repository.download(store,graph.commits.getValue(nearest.single()))
+  val current=local.capture(stopped,null)
+  require(current.manifest.files==conflict.observedLocalFiles) { "采集期间内容发生变化，未合并" }
+  val branches=graph.tips.sorted().map { id ->
+   val commit=graph.commits.getValue(id)
+   val downloaded=repository.download(store,commit)
+   if(id==baseline && downloaded.manifest.files==current.manifest.files)current else downloaded
+  }.toMutableList()
+  if(branches.none { it===current })branches.add(0,current) else { branches.remove(current);branches.add(0,current) }
+  val operation=local.operationMetadata()
+  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException("尚未选择已验证游戏"),SnapshotCaptureContext(operation.device,operation.preparedAt))
+ }
+ fun merge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+  val result=buildMerge(conflict,store,stopped)
+  // Capacity/identity/global/version checks have all completed before an apply marker or writes.
+  local.remember(result.snapshot,"逐局合并 · 已完成预检")
+  local.checkRestore(result.snapshot.manifest.id)
+  val latest=discover(store)
+  if(latest.tips!=conflict.observedTips)return@locked AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
+  require(currentFiles()==conflict.observedLocalFiles) { "预检后本机内容发生变化，未合并" }
+  val plan=prepareAndApply(result.snapshot,latest.tips.sorted(),"resolution","逐局合并 · ${result.slots} 个槽位") { plan ->
+   require(currentFiles()==conflict.observedLocalFiles) { "合并前本机内容发生变化，未覆盖" }
+   local.restore(snapshot(plan),stopped)
+  }
+  // A network failure after verified local apply leaves this exact plan pending for retry.
+  // It is not advertised as an atomic transaction across the local disk and WebDAV.
+  publish(plan,store,stopped)
+ }
  private fun resolveLocked(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
   require(repository.pending() == null) { "请先重试或明确归档待上传操作" }

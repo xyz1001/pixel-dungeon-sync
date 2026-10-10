@@ -36,6 +36,22 @@ internal fun safePath(name: String): Boolean = name.length <= 1024 && name.split
  !Regex("""(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?""").matches(part)
 }
 object Snapshots {
+ /** Assemble a planned complete file set; run the same archive and metadata validation as downloads. */
+ fun fromFiles(files: Map<String,ByteArray>,adapter: GameAdapter,profile: String,version: String,
+  directoryMetadata: DirectorySnapshotMetadata? = null, metadata: SnapshotMetadata? = null): Snapshot {
+  require(files.size<=MAX_SNAPSHOT_FILES && files.values.sumOf { it.size.toLong() }<=MAX_SNAPSHOT_BYTES)
+  val output=java.io.ByteArrayOutputStream()
+  ZipOutputStream(output).use { zip -> files.toSortedMap().forEach { (name,bytes) ->
+   require(safePath(name)&&adapter.includes(name)&&!isDirectoryMetadata(name))
+   zip.putNextEntry(ZipEntry(name));zip.write(bytes);zip.closeEntry()
+  } }
+  val archive=output.toByteArray()
+  val snapshot=Snapshot(Manifest(game=adapter.id,profile=profile,version=version,id=UUID.randomUUID().toString(),parent=null,
+   sha256=hash(archive),files=files.mapValues { hash(it.value) },metadata=metadata,directoryMetadata=directoryMetadata,
+   saveVersions=if(adapter.id==Shattered.id)ShatteredVersions.detect(files) else null),archive)
+  verify(snapshot,adapter)
+  return snapshot
+ }
  fun capture(root: Path, adapter: GameAdapter, profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null): Snapshot {
   require(profile.matches(Regex("[a-zA-Z0-9_-]+")))
   SafePaths.checked(root)
