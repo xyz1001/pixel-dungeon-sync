@@ -58,7 +58,7 @@ function drawHistoryLines() {
 function targetView() {
   const target=selectedTarget(state);
   const localTarget=target && target.storage !== 'cloud';
-  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${localTarget ? '<p class="error">本机存档不能作为云端恢复来源，请选择云端存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
+  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${localTarget ? '<p class="error">本机存档不能作为云端恢复来源，请选择云端存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}</div>`;
 }
 function render() {
   historyObserver?.disconnect();
@@ -160,7 +160,6 @@ function send(action) {
   if (app.querySelector('.history-scroll')) app.querySelector('.history-scroll').scrollLeft=scrollLeft;
   if (action.type === 'selectSnapshot') app.querySelector(`[data-snapshot-id="${action.id}"]`)?.focus({preventScroll:true});
   if (['rename','cancelRename'].includes(action.type)) app.querySelector(`.rename-button[data-rename-id="${previous.renameId}"]`)?.focus({preventScroll:true});
-  if (action.type === 'clearSelection') app.querySelector('[data-action="askRestore"]')?.focus();
   if (previous.restoreConfirm && !state.restoreConfirm && action.type === 'cancelRestore') app.querySelector(`[data-action="${state.page === 'compare' ? 'finish' : 'askRestore'}"]`)?.focus();
   if (state.busy && (!previous.busy || state.token !== previous.token)) {
     const token = state.token;
