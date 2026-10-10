@@ -62,8 +62,7 @@ function historyFixture(latest) {
     make('save-1','demo-current','Windows-PC','2026/10/07 08:00',1,[],'demo-root'),
     make('save-2','demo-remote',latest.deviceName,'2026/10/08 09:00',2,['save-1'],'demo-older'),
     make('save-3','demo-tablet','Pixel Tablet','2026/10/08 11:00',3,['save-1'],'demo-branch'),
-    make('save-4',latest.deviceId,latest.deviceName,'2026/10/09 09:00',4,['save-2'],latest.contentId),
-    make('save-5','demo-tablet','Pixel Tablet','2026/10/09 09:30',5,['save-3'],'demo-unavailable',{available:false})
+    make('save-4',latest.deviceId,latest.deviceName,'2026/10/09 09:00',4,['save-2'],latest.contentId)
   ].flatMap(n=>[
     {...n,id:`device-${n.id}`,storage:'device',ownerDeviceId:n.deviceId,publishedOrder:null,available:true,parentIds:n.parentIds.map(id=>`device-${id}`)},
     {...n,storage:'cloud',cloudParentIds:[...n.parentIds],parentIds:[`device-${n.id}`]}

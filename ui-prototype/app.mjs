@@ -30,7 +30,7 @@ function historyView() {
     if(!n)return rowIndex===0&&d.deviceId===state.currentDeviceId&&localState(state)==='empty'?'<div class="history-cell"><div class="empty-local">无存档</div></div>':'<div class="history-cell"></div>';
     const isCloud=n.storage==='cloud';
     const unsynced=!isCloud&&n.id===state.localSnapshot?.id&&localState(state)==='unsynced';
-    const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(unsynced?'未同步云端':'已同步云端');
+    const status=isCloud?(latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(unsynced?'未同步云端':'已同步云端');
     return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><strong class="snapshot-name">${escapeText(snapshotName(n))}</strong><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button>${state.renameId===n.id?`<form class="rename-form" data-rename-id="${n.id}"><input aria-label="存档名称" maxlength="80" placeholder="留空使用默认名，最多40字"><div><button type="submit">保存</button><button type="button" data-action="cancelRename">取消</button></div></form>`:`<button class="rename-button" data-rename-id="${n.id}" ${state.busy?'disabled':''}>命名</button>`}</div>`;
   }).join('')).join('');
   return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-layout"><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" aria-hidden="true"></svg><div class="history-grid">${cells}</div></div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
@@ -57,8 +57,8 @@ function drawHistoryLines() {
 }
 function targetView() {
   const target=selectedTarget(state);
-  const unavailable=target && (target.storage !== 'cloud' || !target.available || !Number.isFinite(target.publishedOrder));
-  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新可用云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? `<p class="error">${target.storage==='cloud'?'此云端存档内容不可用，无法恢复。请选择其他可用的云端存档。':'本机存档不能作为云端恢复来源，请选择云端存档。'}</p>` : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新可用云端','clearSelection',state.busy,'text-button') : ''}</div>`;
+  const localTarget=target && target.storage !== 'cloud';
+  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${localTarget ? '<p class="error">本机存档不能作为云端恢复来源，请选择云端存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
 }
 function render() {
   historyObserver?.disconnect();

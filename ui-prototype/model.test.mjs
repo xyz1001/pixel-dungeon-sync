@@ -183,8 +183,8 @@ test('only real parent references produce edges, including cross-device branchin
  for(const edge of edges){const child=s.history.find(n=>n.id===edge.child);assert.ok(child.parentIds.includes(edge.parent));assert.ok(s.history.some(n=>n.id===edge.parent));}
  assert.equal(historyEdges({...s,history:[{id:'orphan',parentIds:['missing']}]}).length,0);
 });
-test('unavailable and local-only nodes never silently fall back to latest',()=>{
- for(const id of ['save-5','local-initial']){let s=act(createState('history'),'selectSnapshot',{id});assert.equal(selectedTarget(s).id,id);assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);}
+test('local-only nodes never silently fall back to latest',()=>{
+ for(const id of ['local-initial']){let s=act(createState('history'),'selectSnapshot',{id});assert.equal(selectedTarget(s).id,id);assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);}
 });
 test('old restore changes local pointer only, leaves immutable history and latest intact',()=>{
  let s=act(createState('history'),'selectSnapshot',{id:'save-2'});const history=JSON.stringify(s.history);s=act(s,'askRestore');s=act(s,'restore');assert.equal(s.pendingRestore.id,'save-2');assert.equal(act(s,'askRestore'),s);
@@ -202,11 +202,11 @@ test('empty local restores selected old cloud without confirmation; unknown sour
  s={...s,history:s.history.map(n=>n.id==='save-2'?{...n,deviceName:''}:n)};s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(deviceLabel(selectedTarget(s),s.currentDeviceId),'未知设备');
 });
 test('explicit upload appends a published snapshot without rewriting history',()=>{
- let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,13);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
+ let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,11);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
 });
 
 test('cloud copies are distinct from device originals and connected by upload edges',()=>{
- const s=createState('history');const cloud=s.history.filter(n=>n.storage==='cloud');assert.equal(cloud.length,5);
+ const s=createState('history');const cloud=s.history.filter(n=>n.storage==='cloud');assert.equal(cloud.length,4);
  for(const n of cloud){const original=s.history.find(d=>d.id===n.parentIds[0]);assert.equal(original.storage,'device');assert.equal(original.contentId,n.contentId);assert.equal(original.deviceId,n.deviceId);assert.equal(original.publishedOrder,null);}
  const original=s.history.find(n=>n.id==='device-save-4');const selected=act(s,'selectSnapshot',{id:original.id});assert.equal(canRestore(selected),false);
 });
@@ -254,7 +254,7 @@ test('upload and another-device restore retain visible transfer edges and sorted
  view={...s,history:visibleHistory(s)};assert.ok(view.history.some(n=>n.id===s.localSnapshot.id));assert.ok(historyEdges(view).some(e=>e.parent==='save-3'&&e.child===s.localSnapshot.id));
  assert.equal(historyColumnId(s.localSnapshot),s.currentDeviceId);assert.equal(selectedTarget(s).id,'save-3');
  const times=historyRows(view).map(r=>r[0].time);assert.deepEqual(times,[...times].sort().reverse());
- assert.equal(view.history.filter(n=>n.storage==='cloud').length,6);
+ assert.equal(view.history.filter(n=>n.storage==='cloud').length,5);
 });
 
 test('current local has three states and old restored content matches its cloud copy',()=>{
@@ -322,5 +322,12 @@ test('renamed latest and uploaded cloud copies retain identity and safety checks
  s=createState('history');s=settle(act(s,'upload'));const uploaded=latestCloud(s);s=act(s,'selectSnapshot',{id:uploaded.id});assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);
  s=act(s,'selectSnapshot',{id:'save-2'});s=settle(act(act(s,'askRestore'),'restore'));s=act(s,'selectSnapshot',{id:uploaded.id});assert.equal(canRestore(s),true);
  s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.contentId,uploaded.contentId);assert.deepEqual(s.localSnapshot.parentIds,[uploaded.id]);
- const bad=act(createState('history'),'selectSnapshot',{id:'save-5'});assert.equal(selectedTarget(bad).available,false);assert.equal(canRestore(bad),false);assert.equal(act(bad,'askRestore'),bad);
+});
+
+test('every visible cloud sample is restorable and the top cloud is the default target',()=>{
+ const initial=createState('history'),clouds=historyRows({history:visibleHistory(initial).filter(n=>n.storage==='cloud')}).flat();
+ assert.equal(clouds[0].id,selectedTarget(initial).id);
+ for(const target of clouds){let s=act(initial,'selectSnapshot',{id:target.id});assert.equal(canRestore(s),true);s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.contentId,target.contentId);}
+ const top=clouds[0];let direct=settle(act(act(initial,'askRestore'),'restore'));
+ let selected=act(initial,'selectSnapshot',{id:top.id});selected=settle(act(act(selected,'askRestore'),'restore'));assert.equal(direct.localSnapshot.contentId,selected.localSnapshot.contentId);
 });
