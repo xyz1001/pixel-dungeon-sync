@@ -99,12 +99,13 @@ class SaveStabilityGuard(
    override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
     if (dir == root) return FileVisitResult.CONTINUE
     val name = root.relativize(dir).toString().replace('\\', '/')
-    if (!adapter.includes(name)) return FileVisitResult.SKIP_SUBTREE
+    if (!adapter.includes(name) || isDirectoryMetadata(name)) return FileVisitResult.SKIP_SUBTREE
     record(dir)
     return FileVisitResult.CONTINUE
    }
    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-    if (adapter.includes(root.relativize(file).toString().replace('\\', '/'))) record(file)
+    val name=root.relativize(file).toString().replace('\\', '/')
+    if (adapter.includes(name) && !isDirectoryMetadata(name)) record(file)
     return FileVisitResult.CONTINUE
    }
   })

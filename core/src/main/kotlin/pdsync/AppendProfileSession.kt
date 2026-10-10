@@ -37,6 +37,20 @@ class AppendProfileSession(
 
  fun history() = local.history()
  fun deviceIdentity() = local.deviceIdentity()
+ fun directoryStatus(): SidecarRead = local.locked { local.directoryMetadata.read() }
+ fun renameCurrent(name: String, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
+  local.guard(stopped)
+  val captured=local.capture(stopped,null)
+  local.directoryMetadata.rename(name,captured.manifest.files)
+ }
+ fun confirmRunIdentity(slot: String, expectedFiles: Map<String,String>, sameRun: Boolean, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
+  local.guard(stopped)
+  val captured=local.capture(stopped,null)
+  require(captured.manifest.files==expectedFiles) { "确认期间内容发生变化，请重新检查" }
+  local.directoryMetadata.confirmRun(slot,expectedFiles,sameRun)
+ }
+ private fun markDirectorySynced(commit: AppendCommit) = local.directoryMetadata.markSynced(commit.snapshot.files,
+  DirectorySyncBaseline(hash(directory.toString().encodeToByteArray()),commit.id,contentSha256(commit.snapshot.files)))
  fun observedAt(commitId: String) = repository.observedAt(commitId)
  fun baselineFiles(): Map<String, String>? = repository.baselineFiles()
  /** Read-only observation, deliberately not a mutation-lock contender. Any racing/incomplete
@@ -96,6 +110,7 @@ class AppendProfileSession(
   require(plan.commit.id in graph.commits) { "刚发布的提交尚未完整可见；原操作保留，请重试" }
   local.remember(snapshot(plan), "追加同步 · ${plan.commit.kind}", repository.observedAt(plan.commit.id))
   repository.setBaseline(plan.commit.id, graph)
+  markDirectorySynced(plan.commit)
   repository.clearPending()
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
    else AppendPushResult.Success(plan.commit, runCatching { currentFiles() != plan.commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != plan.commit.id)
@@ -146,6 +161,7 @@ class AppendProfileSession(
   // Keep the restart gate on any uncertain apply or baseline-write failure, even after rollback.
   val restored = local.restore(chosen, stopped)
   repository.setBaseline(commit.id, graph)
+  markDirectorySynced(commit)
   SafePaths.checked(applyMarker).deleteExisting()
   return restored
  }
@@ -304,7 +320,9 @@ class AppendProfileSession(
   // No game bytes are written or loaded. Restore-only target/version checks would incorrectly
   // reject equal global-record-only saves; future restores still use the unchanged version gate.
   graph = revalidateComparison(comparison, store, stopped)
+  local.directoryMetadata.adopt(commit.snapshot.directoryMetadata,commit.snapshot.files)
   repository.setBaseline(commit.id, graph)
+  markDirectorySynced(commit)
   commit
  }
 

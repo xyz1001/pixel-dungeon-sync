@@ -8,7 +8,7 @@ import java.util.UUID
 import java.util.zip.*
 import kotlin.io.path.*
 
-@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null)
+@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null, val directoryMetadata: DirectorySnapshotMetadata? = null)
 val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
 fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 interface GameAdapter {
@@ -31,7 +31,7 @@ data class Snapshot(val manifest: Manifest, val zip: ByteArray)
 const val MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 const val MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 const val MAX_SNAPSHOT_FILES = 4096
-private fun safePath(name: String): Boolean = name.length <= 1024 && name.split('/').all { part ->
+internal fun safePath(name: String): Boolean = name.length <= 1024 && name.split('/').all { part ->
  part.matches(Regex("[A-Za-z0-9_.-]+")) && part !in setOf(".", "..") && !part.endsWith('.') &&
  !Regex("""(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?""").matches(part)
 }
@@ -45,7 +45,7 @@ object Snapshots {
   val files = sortedMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
   Files.walk(root).use { stream -> stream.forEach { p ->
    val name = root.relativize(p).toString().replace('\\','/')
-   if (adapter.includes(name)) {
+   if (adapter.includes(name) && !isDirectoryMetadata(name)) {
     require(!Files.isSymbolicLink(p)) { "Symbolic links are forbidden" }
     if (Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)) {
      require(safePath(name) && portableNames.add(name.lowercase(java.util.Locale.ROOT))) { "Unsafe or aliased save path" }
@@ -71,11 +71,12 @@ object Snapshots {
   require(snapshot.zip.size <= MAX_SNAPSHOT_BYTES && snapshot.manifest.files.size <= MAX_SNAPSHOT_FILES)
   require(snapshot.manifest.schema == 1 && snapshot.manifest.game == adapter.id)
   snapshot.manifest.metadata?.validated(snapshot.manifest.files.keys)
+  snapshot.manifest.directoryMetadata?.validated(snapshot.manifest.files)
   require(hash(snapshot.zip) == snapshot.manifest.sha256) { "Archive checksum mismatch" }
   val files = mutableMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
   ZipInputStream(snapshot.zip.inputStream()).use { zip -> while(true) {
    val entry = zip.nextEntry ?: break; val name = entry.name
-   require(!entry.isDirectory && !name.startsWith('/') && !name.contains('\\') && name.split('/').none { it == ".." || it.isEmpty() } && !name.contains(':') && adapter.includes(name)) { "Unsafe archive path" }
+   require(!entry.isDirectory && !name.startsWith('/') && !name.contains('\\') && name.split('/').none { it == ".." || it.isEmpty() } && !name.contains(':') && adapter.includes(name) && !isDirectoryMetadata(name)) { "Unsafe archive path" }
    require(safePath(name) && portableNames.add(name.lowercase(java.util.Locale.ROOT))) { "Unsafe or aliased archive path" }
    require(name !in files && files.size < MAX_SNAPSHOT_FILES)
    val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
@@ -89,7 +90,7 @@ object Snapshots {
  fun restore(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {}, onBackupReady: (Snapshot, Path) -> Unit = { _, _ -> },
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
   captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
-  beforeReplacement: () -> Unit = {}) : Path {
+  beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) : Path {
   require(guard()) { "Game-running status must be confirmed stopped" }
   SafePaths.directory(root); SafePaths.checked(backupRoot)
   validateCompatibility(snapshot, version)
@@ -105,7 +106,7 @@ object Snapshots {
   backupRoot.createDirectories(); val backupPath = backupRoot.resolve("${backup.manifest.id}.zip")
   backupPath.writeBytes(backup.zip); backupRoot.resolve("${backup.manifest.id}.json").writeText(json.encodeToString(backup.manifest))
   fun replace(data: Map<String,ByteArray>, notify: Boolean = false) {
-   Files.walk(root).use { s -> s.sorted(Comparator.reverseOrder()).forEach { p -> if(p != root && adapter.includes(root.relativize(p).toString().replace('\\','/'))) { require(!Files.isSymbolicLink(p)); Files.delete(p) } } }
+   Files.walk(root).use { s -> s.sorted(Comparator.reverseOrder()).forEach { p -> val name=root.relativize(p).toString().replace('\\','/'); if(p != root && adapter.includes(name) && !isDirectoryMetadata(name)) { require(!Files.isSymbolicLink(p)); Files.delete(p) } } }
    data.forEach { (name,bytes) -> val p = root.resolve(name); p.parent.createDirectories(); p.writeBytes(bytes); if(notify) afterFileWrite(name) }
   }
   onBackupReady(backup, backupPath)
@@ -117,6 +118,7 @@ object Snapshots {
   try {
    replace(emptyMap()); beforeWrite(); replace(files,true)
    require(capture(root, adapter, snapshot.manifest.profile, version, null).manifest.files == snapshot.manifest.files) { "Restored files failed verification" }
+   afterRestore()
   } catch(e: Exception) {
    try { replace(verify(backup,adapter)) } catch(rollback: Exception) { val failed = IllegalStateException("Restore and rollback failed; backup retained at $backupPath",e); failed.addSuppressed(rollback); throw failed }
    throw e

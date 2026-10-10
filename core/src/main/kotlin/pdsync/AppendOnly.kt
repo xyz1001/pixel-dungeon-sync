@@ -71,6 +71,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   val snapshot = commit.snapshot
   require(snapshot.schema == 1 && snapshot.game == adapter.id && snapshot.profile == profile && snapshot.parent == null)
   snapshot.metadata?.validated(snapshot.files.keys)
+  snapshot.directoryMetadata?.validated(snapshot.files)
   require(validCommitId(snapshot.id) && snapshot.id != commit.id && snapshot.sha256.matches(Regex("[0-9a-f]{64}")))
   require(snapshot.files.isNotEmpty() && snapshot.files.size <= MAX_SNAPSHOT_FILES && snapshot.files.values.all { it.matches(Regex("[0-9a-f]{64}")) })
   require(commit.objectBytes in 1..MAX_SNAPSHOT_BYTES)
@@ -239,7 +240,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
 }
 
 /** Serialization rejects unknown/type-invalid fields; this pass also rejects duplicate keys/deep JSON. */
-private fun requireUniqueJsonKeys(text: String) {
+internal fun requireUniqueJsonKeys(text: String) {
  val scopes = ArrayDeque<MutableSet<String>?>(); var position = 0
  while (position < text.length) {
   when (text[position]) {

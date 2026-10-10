@@ -155,6 +155,7 @@ class ProfileSession(
  val root = SafePaths.directory(Path.of(this.config.saveRoot))
  private val state = SafePaths.checked(stateRoot)
  private val metadata = DeviceMetadata(state)
+ internal val directoryMetadata = DirectoryMetadataStore(root)
  private val scopeKey = hash(listOf("auto-version-v2", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
  val directory: Path = state.resolve("profiles").resolve(scopeKey)
  private val historyRoot = directory.resolve("history")
@@ -173,7 +174,7 @@ class ProfileSession(
   require(Files.isReadable(root) && Files.isWritable(root)) { "目录需要读写权限" }
   Files.walk(root).use { paths -> paths.forEach { require(!Files.isSymbolicLink(it)) { "存档目录不能含符号链接" } } }
   return Snapshots.capture(root, adapter, config.profile, "自动识别", null).manifest.files.size.also {
-   require(it > 0 || Files.list(root).use { entries -> entries.findAny().isEmpty }) { "未发现 gameN/game.dat 或 rankings / badges / journal；请选择档案根目录（或全空的恢复目标目录）" }
+   require(it > 0 || Files.list(root).use { entries -> entries.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { "未发现 gameN/game.dat 或 rankings / badges / journal；请选择档案根目录（或全空的恢复目标目录）" }
   }
  }
  internal fun <T> locked(action: () -> T): T {
@@ -252,6 +253,7 @@ class ProfileSession(
   require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
   require(manifest.game == adapter.id && manifest.profile == config.profile) { "快照游戏或档案不匹配" }
   manifest.metadata?.validated(manifest.files.keys)
+  manifest.directoryMetadata?.validated(manifest.files)
  }
  internal fun capture(stopped: () -> Boolean, parent: String? = head()): Snapshot {
   guard(stopped); validateRoot()
@@ -259,7 +261,7 @@ class ProfileSession(
   require(snapshot.manifest.files.isNotEmpty()) { "空目录只能用于恢复，不能创建或上传空快照" }
   guard(stopped)
   if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException("采集期间存档发生变化；已停止操作，等待文件稳定后重试")
-  return snapshot
+  return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists())))
  }
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
   SafePaths.boundedRead(headPath, 128).decodeToString().trim().also { require(it.matches(Regex("[0-9a-fA-F-]{36}"))) } else null
@@ -377,8 +379,9 @@ class ProfileSession(
     require(current == root)
     val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
     backupFingerprint = captured.fingerprint
-    versions.annotate(captured.snapshot)
-   }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) })
+    versions.annotate(captured.snapshot).let { it.copy(manifest=it.manifest.copy(directoryMetadata=directoryMetadata.observe(it.manifest.files,initialImport=!historyRoot.exists()))) }
+   }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) },
+   afterRestore = { directoryMetadata.adopt(snapshot.manifest.directoryMetadata,snapshot.manifest.files) })
   return RestoreResult(snapshot.manifest, requireNotNull(entry), backupPath)
  }
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = locked {
