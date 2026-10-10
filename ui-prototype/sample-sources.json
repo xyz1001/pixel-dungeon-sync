@@ -1,0 +1,102 @@
+[
+  {
+    "id": "shattered",
+    "entry": "icons/icon_128.png",
+    "bytes": 3377,
+    "dimensions": [
+      128,
+      128
+    ],
+    "sha256": "eeb3a5230003704752bc24beb91aa0a3a269f57bb61f4445ffc8751674d00879",
+    "version": "3.3.8",
+    "nameSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Title"
+    },
+    "versionSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Version"
+    },
+    "iconUsage": "DesktopLauncher.class -> Lwjgl3ApplicationConfiguration.setWindowIcon",
+    "author": null,
+    "updated": null,
+    "metadataNote": "No reliable author, publication/update or build date fields in main manifest. Vendor/package names and ZIP timestamps not used.",
+    "license": "No LICENSE/COPYING/NOTICE entry in sample JAR; icon redistribution permission and required attribution unverified offline. Local preview only; PNG excluded from Git.",
+    "sourceJar": "desktop-3.3.8.jar"
+  },
+  {
+    "id": "experienced",
+    "entry": "icons/icon_128.png",
+    "bytes": 1326,
+    "dimensions": [
+      128,
+      128
+    ],
+    "sha256": "214e17b9b22f93d01d685e795f5cc4e6b9d103dba1400ab3dd8c18193b4aa8cb",
+    "version": "ExpPD-2.19.0",
+    "nameSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Title"
+    },
+    "versionSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Version"
+    },
+    "iconUsage": "DesktopLauncher.class -> Lwjgl3ApplicationConfiguration.setWindowIcon",
+    "author": null,
+    "updated": null,
+    "metadataNote": "No reliable author, publication/update or build date fields in main manifest. Vendor/package names and ZIP timestamps not used.",
+    "license": "No LICENSE/COPYING/NOTICE entry in sample JAR; icon redistribution permission and required attribution unverified offline. Local preview only; PNG excluded from Git.",
+    "sourceJar": "desktop-ExpPD-2.19.0.jar"
+  },
+  {
+    "id": "cruel",
+    "entry": "icons/icon_128.png",
+    "bytes": 7771,
+    "dimensions": [
+      128,
+      128
+    ],
+    "sha256": "42849a51a460d3953033f6da1d730361f1d2e4d1f11315c08fd9718e870e660e",
+    "version": "1.0.4",
+    "nameSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Title"
+    },
+    "versionSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Version"
+    },
+    "iconUsage": "DesktopLauncher.class -> Lwjgl3ApplicationConfiguration.setWindowIcon",
+    "author": null,
+    "updated": null,
+    "metadataNote": "No reliable author, publication/update or build date fields in main manifest. Vendor/package names and ZIP timestamps not used.",
+    "license": "No LICENSE/COPYING/NOTICE entry in sample JAR; icon redistribution permission and required attribution unverified offline. Local preview only; PNG excluded from Git.",
+    "sourceJar": "TCPD.1.0.4.jar"
+  },
+  {
+    "id": "rearranged",
+    "entry": "icons/icon_128.png",
+    "bytes": 904,
+    "dimensions": [
+      128,
+      128
+    ],
+    "sha256": "b2b35bd43c0b54c8673c56bf0d0fd631e69074f9419ef4f978cfe1d9871d9aef",
+    "version": "3.2.0_based_3.40.0_FINAL",
+    "nameSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Title"
+    },
+    "versionSource": {
+      "entry": "META-INF/MANIFEST.MF",
+      "key": "Specification-Version"
+    },
+    "iconUsage": "DesktopLauncher.class -> Lwjgl3ApplicationConfiguration.setWindowIcon",
+    "author": null,
+    "updated": null,
+    "metadataNote": "No reliable author, publication/update or build date fields in main manifest. Vendor/package names and ZIP timestamps not used.",
+    "license": "No LICENSE/COPYING/NOTICE entry in sample JAR; icon redistribution permission and required attribution unverified offline. Local preview only; PNG excluded from Git.",
+    "sourceJar": "v3.40.0-desktop.jar"
+  }
+]

@@ -1,14 +1,14 @@
 // Fixed fixtures only: names mirror observed Specification-Title values, not compatibility claims.
 export const games = {
-  shattered: {name: 'Shattered Pixel Dungeon', version: '3.3.8'},
-  experienced: {name: 'Experienced Pixel Dungeon', version: 'ExpPD-2.19.0'},
-  cruel: {name: 'Too Cruel Pixel Dungeon', version: '1.0.4'},
-  rearranged: {name: 'Rearranged Pixel Dungeon', version: '3.2.0_based_3.40.0_FINAL'},
+  shattered: {icon: '.local-icons/shattered.png', name: 'Shattered Pixel Dungeon', version: '3.3.8'},
+  experienced: {icon: '.local-icons/experienced.png', name: 'Experienced Pixel Dungeon', version: 'ExpPD-2.19.0'},
+  cruel: {icon: '.local-icons/cruel.png', name: 'Too Cruel Pixel Dungeon', version: '1.0.4'},
+  rearranged: {icon: '.local-icons/rearranged.png', name: 'Rearranged Pixel Dungeon', version: '3.2.0_based_3.40.0_FINAL'},
   unnamed: {name: '', version: ''}
 };
 export function gameLabel(s) {
   const game = games[s.gameId];
-  return {name: game?.name || '未命名游戏', version: game?.version || ''};
+  return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
   empty: '双方为空', local: '只有本机存档', cloud: '只有云端存档', conflict: '双方进度不同',

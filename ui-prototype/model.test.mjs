@@ -88,3 +88,15 @@ test('switching game invalidates previous reads and unknown names have a short f
   assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
   assert.equal(reduce(s,{type:'reset',scene:'cloud'}).gameId,'experienced');
 });
+
+test('sample metadata switches together and absent metadata stays omitted', () => {
+  let s=createState();
+  for (const gameId of ['shattered','experienced','cruel','rearranged','unnamed']) {
+    s=reduce(s,{type:'chooseGame',gameId}); const info=gameLabel(s);
+    assert.equal(info.icon,gameId==='unnamed'?'':`.local-icons/${gameId}.png`);
+    assert.equal(info.name,games[gameId].name || '未命名游戏');
+    assert.equal(info.version,games[gameId].version);
+    assert.equal(info.author,''); assert.equal(info.updated,'');
+  }
+  assert.deepEqual(gameLabel(createState('empty','missing')),{name:'未命名游戏',version:'',icon:'',author:'',updated:''});
+});

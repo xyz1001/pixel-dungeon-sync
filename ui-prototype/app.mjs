@@ -4,6 +4,8 @@ const app = document.querySelector('#app');
 const sceneSelect = document.querySelector('#scene');
 const gameSelect = document.querySelector('#game-sample');
 const gameSummary = () => { const g = gameLabel(state); return `${g.name}${g.version ? ` · ${g.version}` : ''}`; };
+const gameIcon = () => `<div class="game-icon" aria-hidden="true"><span>◆</span>${gameLabel(state).icon ? `<img src="${gameLabel(state).icon}" alt="" width="58" height="58">` : ''}</div>`;
+const gameDetails = () => { const g = gameLabel(state); return [g.author ? `作者：${g.author}` : '', g.updated ? `更新：${g.updated}` : ''].filter(Boolean).map(text => `<p class="small">${text}</p>`).join(''); };
 const restoreWarning = '会先备份，再替换本机进度。云端没有的本机进度会移除。';
 const button = (label, action, disabled = false, cls = '') => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}${state.page !== 'game' ? `<p class="game-summary small">${gameSummary()}</p>` : ''}</div>${extra}</header>`;
@@ -16,7 +18,7 @@ function render() {
   gameSelect.value = state.gameId;
   gameSelect.disabled = state.busy;
   if (state.page === 'game') {
-    app.innerHTML = header('选择游戏', '1 / 4') + `<section class="content"><div class="game-card"><div class="game-icon" aria-hidden="true">◆</div><div class="grow"><strong>${gameLabel(state).name}</strong><p class="small">${gameLabel(state).version}</p></div><span class="pill">已找到</span></div>${button('模拟选择游戏…', 'chooseGame', false, 'secondary')}${notice()}</section>` + footer('', button('下一步', 'next', !state.selectedGame));
+    app.innerHTML = header('选择游戏', '1 / 4') + `<section class="content"><div class="game-card">${gameIcon()}<div class="grow"><strong>${gameLabel(state).name}</strong><p class="small">${gameLabel(state).version}</p>${gameDetails()}</div><span class="pill">已找到</span></div>${button('模拟选择游戏…', 'chooseGame', false, 'secondary')}${notice()}</section>` + footer('', button('下一步', 'next', !state.selectedGame));
   } else if (state.page === 'read') {
     const copy = {unread: '尚未读取存档', loading: '正在读取本地存档…', found: '已找到本地存档', empty: '本地暂无存档', failed: '读取失败，请重试。'}[state.readStatus];
     app.innerHTML = header('读取本地存档', '2 / 4') + `<section class="content"><p class="${state.readStatus === 'failed' ? 'error' : 'status'}" role="status">${state.readStatus === 'loading' ? '<span class="spinner" aria-hidden="true"></span>' : ''}${copy}</p>${state.readStatus === 'loading' ? '<p class="hint">正在检查游戏默认位置（模拟）</p>' : ''}</section>` + footer(back(), state.readStatus === 'failed' ? button('重试', 'retryRead') : button('下一步', 'next', !['found', 'empty'].includes(state.readStatus)));
@@ -40,6 +42,11 @@ function render() {
   } else {
     app.innerHTML = header('设置') + `<section class="content"><div class="settings-row"><div><strong>游戏</strong><p class="small">${gameSummary()}</p></div>${button('模拟更换', 'chooseGame', false, 'text-button')}</div><div class="settings-row"><div><strong>云端连接</strong><p class="small">示例账号</p></div>${button('修改', 'connectionSettings', false, 'text-button')}</div>${notice()}</section>` + footer(button('返回', 'back', false, 'text-button'), '');
   }
+  app.querySelectorAll('.game-icon img').forEach(img => {
+    const fallback = () => img.remove();
+    img.addEventListener('error', fallback, {once: true});
+    if (img.complete && img.naturalWidth === 0) fallback();
+  });
   app.querySelectorAll('[data-action]').forEach(element => element.addEventListener('click', () => send({type: element.dataset.action})));
   app.querySelectorAll('input[name="progress"]').forEach(element => element.addEventListener('change', () => send({type: 'choose', value: element.value})));
 }
