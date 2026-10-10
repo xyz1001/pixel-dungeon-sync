@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -235,4 +235,24 @@ test('upload and restore keep displayed save time and selection while timeline r
  const rows=historyRows(s);const times=rows.map(r=>r[0].time);assert.deepEqual(times,[...times].sort().reverse());
  assert.ok(rows.findIndex(r=>r.some(n=>n.id===s.localSnapshot.id))>0);
  for(const edge of historyEdges(s)){assert.ok(rows.some(r=>r.some(n=>n.id===edge.parent)));assert.ok(rows.some(r=>r.some(n=>n.id===edge.child)));}
+});
+
+test('two-column visibility retains every cloud source and only current-device local copies',()=>{
+ const s=createState('history'),visible=visibleHistory(s);
+ assert.deepEqual(visible.filter(n=>n.storage==='cloud'),s.history.filter(n=>n.storage==='cloud'));
+ assert.ok(visible.some(n=>n.storage==='cloud'&&n.deviceName==='MacBook'));assert.ok(visible.some(n=>n.storage==='cloud'&&n.deviceName==='Pixel Tablet'));
+ assert.ok(visible.filter(n=>n.storage==='device').every(n=>n.ownerDeviceId===s.currentDeviceId));
+ assert.equal(visible.some(n=>n.id==='device-save-2'),false);
+ const view={...s,history:visible};const rows=historyRows(view);assert.ok(rows.every(r=>r.length>0));
+ assert.deepEqual(new Set(rows.flat().map(historyColumnId)),new Set(['cloud-column','demo-current']));
+ for(const e of historyEdges(view)){assert.ok(visible.some(n=>n.id===e.parent));assert.ok(visible.some(n=>n.id===e.child));}
+});
+test('upload and another-device restore retain visible transfer edges and sorted rows',()=>{
+ let s=settle(act(createState('history'),'upload'));let view={...s,history:visibleHistory(s)};const upload=latestCloud(s);
+ assert.ok(historyEdges(view).some(e=>e.parent==='local-initial'&&e.child===upload.id));
+ s=act(s,'selectSnapshot',{id:'save-3'});s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.deviceName,'Pixel Tablet');
+ view={...s,history:visibleHistory(s)};assert.ok(view.history.some(n=>n.id===s.localSnapshot.id));assert.ok(historyEdges(view).some(e=>e.parent==='save-3'&&e.child===s.localSnapshot.id));
+ assert.equal(historyColumnId(s.localSnapshot),s.currentDeviceId);assert.equal(selectedTarget(s).id,'save-3');
+ const times=historyRows(view).map(r=>r[0].time);assert.deepEqual(times,[...times].sort().reverse());
+ assert.equal(view.history.filter(n=>n.storage==='cloud').length,6);
 });

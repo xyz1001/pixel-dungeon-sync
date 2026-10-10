@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory} from './model.mjs';
 let state = createState('history');
 let pathTimer;
 const app = document.querySelector('#app');
@@ -17,15 +17,14 @@ const back = () => button('上一步', 'back', state.busy && !['connect', 'read'
 const notice = () => state.message ? `<p class="${state.scene === 'failure' ? 'error' : 'notice'}" role="status">${state.message}</p>` : '';
 const choice = (value, title, description) => `<label class="choice"><input type="radio" name="progress" value="${value}" ${state.choice === value ? 'checked' : ''}><span><strong>${title}</strong><time>${description}</time></span></label>`;
 function historyView() {
-  const rows=historyRows(state);
+  const visibleState={...state,history:visibleHistory(state)};
+  const rows=historyRows(visibleState);
   const nodes=rows.flat();
-  const devices=[...state.devices];
-  for (const n of nodes) if (!devices.some(d=>d.deviceId===n.deviceId)) devices.push({deviceId:n.deviceId,deviceName:n.deviceName});
-  devices.splice(0,0,{deviceId:'cloud-column',deviceName:'云端存档'});
+  const devices=[{deviceId:'cloud-column',deviceName:'云端存档'},{deviceId:state.currentDeviceId,deviceName:'本机'}];
   const lane=historyColumnId;
   const width=devices.length*220, height=rows.length*132;
   const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.findIndex(row=>row.some(n=>n.id===node.id))*132+66};};
-  const edges=historyEdges(state).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const child=nodes.find(n=>n.id===edge.child);const kind=child.storage==='cloud'?'upload':child.restored?'restore':'inherit';return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
+  const edges=historyEdges(visibleState).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const child=nodes.find(n=>n.id===edge.child);const kind=child.storage==='cloud'?'upload':child.restored?'restore':'inherit';return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
   const cells=rows.map(row=>devices.map(d=>{
     const n=row.find(n=>lane(n)===d.deviceId);
     if(!n)return '<div class="history-cell"></div>';

@@ -74,6 +74,10 @@ export function targetMatchesLocal(s) {
   return s.connected && s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)
     && target?.storage === 'cloud' && Boolean(target?.available) && Number.isFinite(target.publishedOrder) && s.localSnapshot.contentId === target.contentId;
 }
+// Visibility is based on where the copy lives, never on its content's source device.
+export function visibleHistory(s) {
+  return s.history.filter(n=>n.storage==='cloud' || (n.storage==='device' && (n.ownerDeviceId||n.deviceId)===s.currentDeviceId));
+}
 export function historyColumnId(node) {
   return node.storage === 'cloud' ? 'cloud-column' : node.ownerDeviceId || node.deviceId;
 }
