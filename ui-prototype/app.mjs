@@ -58,7 +58,7 @@ function drawHistoryLines() {
 function targetView() {
   const target=selectedTarget(state);
   const unavailable=target && (target.storage !== 'cloud' || !target.available || !Number.isFinite(target.publishedOrder));
-  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">请选择“云端存档”列中可用的存档恢复；设备上的存档需先上传。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
+  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新可用云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? `<p class="error">${target.storage==='cloud'?'此云端存档内容不可用，无法恢复。请选择其他可用的云端存档。':'本机存档不能作为云端恢复来源，请选择云端存档。'}</p>` : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新可用云端','clearSelection',state.busy,'text-button') : ''}</div>`;
 }
 function render() {
   historyObserver?.disconnect();

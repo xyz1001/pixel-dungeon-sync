@@ -306,3 +306,21 @@ test('transfer arrows follow explicit upload and restore provenance, including o
  assert.ok(displayEdges(s).some(e=>e.parent===baseline.id&&e.child==='changed'&&e.kind==='unsynced'));
  const fixture=createState('history');assert.ok(displayEdges(fixture).some(e=>e.parent==='save-1'&&e.child==='save-3'&&e.kind==='cloud'));
 });
+
+test('default, explicit latest and old restores retain exact target through confirmation',()=>{
+ for(const id of [null,'save-4','save-2']){
+  let s=createState('history');if(id)s=act(s,'selectSnapshot',{id});const target=selectedTarget(s);
+  s=act(s,'askRestore');assert.ok(s.restoreConfirm);const history=JSON.stringify(s.history);
+  let cancelled=act(s,'cancelRestore');assert.equal(cancelled.restores,0);assert.equal(JSON.stringify(cancelled.history),history);
+  s=act(cancelled,'askRestore');s=act(s,'restore');assert.equal(s.pendingRestore.id,target.id);assert.equal(act(s,'restore'),s);
+  s=settle(s);assert.equal(s.localSnapshot.contentId,target.contentId);assert.deepEqual(s.localSnapshot.parentIds,[target.id]);assert.equal(s.restores,1);assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);
+ }
+});
+test('renamed latest and uploaded cloud copies retain identity and safety checks',()=>{
+ let s=createState('history');s=act(s,'beginRename',{id:'save-4'});s=act(s,'rename',{id:'save-4',value:'命名后的最新存档'});s=act(s,'selectSnapshot',{id:'save-4'});
+ assert.equal(canRestore(s),true);s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.contentId,'demo-cloud-v2');
+ s=createState('history');s=settle(act(s,'upload'));const uploaded=latestCloud(s);s=act(s,'selectSnapshot',{id:uploaded.id});assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);
+ s=act(s,'selectSnapshot',{id:'save-2'});s=settle(act(act(s,'askRestore'),'restore'));s=act(s,'selectSnapshot',{id:uploaded.id});assert.equal(canRestore(s),true);
+ s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.contentId,uploaded.contentId);assert.deepEqual(s.localSnapshot.parentIds,[uploaded.id]);
+ const bad=act(createState('history'),'selectSnapshot',{id:'save-5'});assert.equal(selectedTarget(bad).available,false);assert.equal(canRestore(bad),false);assert.equal(act(bad,'askRestore'),bad);
+});
