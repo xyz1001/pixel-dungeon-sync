@@ -17,7 +17,7 @@ export function gameLabel(s) {
   return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
-  empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', conflict: '双方进度不同',
+  empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', longDevice: '云端设备长名称', conflict: '双方进度不同',
   identical: '双方进度相同', failure: '连接失败', connecting: '连接中', running: '游戏运行中',
   reading: '读取中', readFailure: '读取失败（重试可恢复）'
 };
@@ -35,10 +35,15 @@ export function saveStatus(s) {
 }
 export function createState(scene = 'empty', gameId = 'shattered') {
   const fixtureLocal = saveFixture(scene).records;
-  const cloud = ['cloud', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
-  return {scene, gameId, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
+  const cloud = ['cloud', 'longDevice', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
+  return {scene, gameId, currentDeviceId: 'demo-current', localSnapshot: fixtureLocal ? {deviceId: 'demo-current', deviceName: 'Windows-PC'} : null, cloudSnapshot: cloud ? {deviceId: 'demo-remote', deviceName: scene === 'longDevice' ? 'MacBook-Example-Very-Long-Device-Name-用于窄屏展示的虚构设备名称' : 'MacBook'} : null, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
     completed: false, returnPage: 'home', uploads: 0, restores: 0};
+}
+// Device identity belongs to the snapshot source, independently of storage location.
+export function deviceLabel(snapshot, currentDeviceId) {
+  if (snapshot?.deviceId && snapshot.deviceId === currentDeviceId) return '本机';
+  return snapshot?.deviceName?.trim() || '未知设备';
 }
 export function kind(s) {
   if (!s.connected || !['found', 'empty'].includes(s.readStatus)) return 'unknown';
@@ -91,8 +96,8 @@ export function reduce(s, action) {
       if (s.pending === 'connect') return s.scene === 'failure'
         ? {...s, busy: false, pending: '', connected: false, connectionStatus: 'failed', testedRevision: null, message: ''}
         : {...s, busy: false, pending: '', connected: true, connectionStatus: 'success', testedRevision: s.configRevision, choice: '', message: ''};
-      if (s.pending === 'upload') return {...s, busy: false, pending: '', cloud: true, same: true, uploads: s.uploads + 1, message: '模拟上传完成。'};
-      if (s.pending === 'restore') return {...s, busy: false, pending: '', local: true, same: true, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
+      if (s.pending === 'upload') return {...s, busy: false, pending: '', cloud: true, cloudSnapshot: s.localSnapshot ? {...s.localSnapshot} : null, same: true, uploads: s.uploads + 1, message: '模拟上传完成。'};
+      if (s.pending === 'restore') return {...s, busy: false, pending: '', local: true, localSnapshot: s.cloudSnapshot ? {...s.cloudSnapshot} : null, same: true, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
       return s;
     }
     case 'choose': return s.page === 'compare' && ((action.value === 'local' && s.local) || (action.value === 'cloud' && s.cloud))
@@ -101,6 +106,7 @@ export function reduce(s, action) {
       if (!canFinish(s)) return s;
       const k = kind(s), upload = !['empty', 'identical'].includes(k) && s.choice === 'local', restore = !['empty', 'identical'].includes(k) && s.choice === 'cloud';
       return {...s, page: 'home', completed: true, local: s.local || restore, cloud: s.cloud || upload,
+        localSnapshot: restore ? (s.cloudSnapshot ? {...s.cloudSnapshot} : null) : s.localSnapshot, cloudSnapshot: upload ? (s.localSnapshot ? {...s.localSnapshot} : null) : s.cloudSnapshot,
         same: s.local || s.cloud, uploads: s.uploads + Number(upload), restores: s.restores + Number(restore), message: ''};
     }
     case 'settings': return s.page === 'home' ? {...s, page: 'settings', message: ''} : s;

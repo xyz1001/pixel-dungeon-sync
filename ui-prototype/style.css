@@ -6,3 +6,5 @@
 .game-icon{position:relative;flex-shrink:0}.game-icon img{position:absolute;inset:0;object-fit:contain;background:#eef3e8;border-radius:10px;image-rendering:pixelated}
 
 .slot-times{list-style:none;padding:0;margin:8px 0;max-width:360px}.slot-times li{display:flex;justify-content:space-between;gap:12px;margin:5px 0}.slot-times time{white-space:nowrap}.folder-picker p{overflow-wrap:anywhere}
+
+.choice>span,.save-card>div{min-width:0;overflow-wrap:anywhere}.save-card>.muted{flex-shrink:0}

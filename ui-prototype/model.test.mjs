@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -121,4 +121,19 @@ test('unknown, loading, failed and absent previews never qualify as empty',()=>{
  assert.equal(localIsEmpty({...connected('cloud'),preview:null}),false);
  let s=act(connected('cloud'),'back');assert.equal(s.restores,0);assert.equal(s.connected,false);
  s=act(settle(act(s,'connect')),'next');assert.equal(s.restores,0);assert.equal(s.choice,'');
+});
+
+test('source device labels use identity, preserve remote names, and never invent missing names',()=>{
+ assert.equal(deviceLabel({deviceId:'current',deviceName:'Windows-PC'},'current'),'本机');
+ assert.equal(deviceLabel({deviceId:'remote',deviceName:'MacBook'},'current'),'MacBook');
+ assert.equal(deviceLabel({deviceId:'other',deviceName:'Windows-PC'},'current'),'Windows-PC');
+ for(const snapshot of [null,{}, {deviceId:'remote',deviceName:'  '}]) assert.equal(deviceLabel(snapshot,'current'),'未知设备');
+ const s=createState('longDevice');assert.ok(deviceLabel(s.cloudSnapshot,s.currentDeviceId).length>40);
+});
+test('selection and restore keep snapshot source identity on both setup and home',()=>{
+ let s=connected('cloud');const remote={...s.cloudSnapshot};s=act(s,'choose',{value:'cloud'});assert.deepEqual(s.cloudSnapshot,remote);
+ s=act(s,'finish');assert.deepEqual(s.localSnapshot,remote);assert.deepEqual(s.cloudSnapshot,remote);assert.equal(deviceLabel(s.localSnapshot,s.currentDeviceId),'MacBook');
+ let home={...connected('conflict'),page:'home'};home=settle(act(act(home,'askRestore'),'restore'));assert.deepEqual(home.localSnapshot,remote);
+ home=settle(act(home,'upload'));assert.deepEqual(home.cloudSnapshot,remote);
+ let local=act(act(connected('local'),'choose',{value:'local'}),'finish');assert.equal(deviceLabel(local.cloudSnapshot,local.currentDeviceId),'本机');
 });
