@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud, snapshotName} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud, snapshotName, localUnchangedSinceSync} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -330,4 +330,24 @@ test('every visible cloud sample is restorable and the top cloud is the default 
  for(const target of clouds){let s=act(initial,'selectSnapshot',{id:target.id});assert.equal(canRestore(s),true);s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.localSnapshot.contentId,target.contentId);}
  const top=clouds[0];let direct=settle(act(act(initial,'askRestore'),'restore'));
  let selected=act(initial,'selectSnapshot',{id:top.id});selected=settle(act(act(selected,'askRestore'),'restore'));assert.equal(direct.localSnapshot.contentId,selected.localSnapshot.contentId);
+});
+
+test('remote update restores directly only with verified unchanged local baseline',()=>{
+ let s=createState('remoteUpdate');assert.equal(localUnchangedSinceSync(s),true);assert.equal(matchingCloud(s).id,'save-2');assert.equal(latestCloud(s).id,'save-4');
+ s=act(s,'beginRename',{id:'local-initial'});s=act(s,'rename',{id:'local-initial',value:'名字不改变内容'});assert.equal(localUnchangedSinceSync(s),true);
+ s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);assert.equal(s.pending,'restore');assert.equal(act(s,'askRestore'),s);s=settle(s);assert.equal(s.localSnapshot.contentId,latestCloud(s).contentId);assert.equal(canRestore(s),false);assert.equal(localUnchangedSinceSync(s),true);
+ for(const patch of [{syncedBaseline:null,history:createState('remoteUpdate').history.filter(n=>n.contentId!=='demo-older')},{syncedBaseline:{cloudId:'missing',contentId:'demo-older'},history:createState('remoteUpdate').history.filter(n=>n.contentId!=='demo-older')},{localSnapshot:{...createState('remoteUpdate').localSnapshot,contentId:'changed-records'}}]){
+  const modified={...createState('remoteUpdate'),...patch};assert.equal(localUnchangedSinceSync(modified),false);assert.ok(act(modified,'askRestore').restoreConfirm);
+ }
+ const records={...createState('remoteUpdate'),preview:{records:true,slots:[],playCount:22,fileCount:3}};assert.equal(localUnchangedSinceSync(records),true);assert.equal(act(records,'askRestore').restoreConfirm,false);
+ assert.ok(act(createState('history'),'askRestore').restoreConfirm);
+ assert.equal(act({...connected('cloud'),page:'home'},'askRestore').restoreConfirm,false);
+});
+
+test('confirm only possible loss: historical content proof permits rollback and uploads append',()=>{
+ let s=settle(act(createState('history'),'upload'));const cloudCount=s.history.filter(n=>n.storage==='cloud').length;assert.equal(s.restoreConfirm,false);
+ s={...s,syncedBaseline:null};s=act(s,'selectSnapshot',{id:'save-2'});s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);assert.equal(s.pending,'restore');s=settle(s);assert.equal(s.history.filter(n=>n.storage==='cloud').length,cloudCount);
+ s={...s,syncedBaseline:null};s=act(s,'selectSnapshot',{id:'save-4'});assert.equal(matchingCloud(s).id,'save-2');s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);assert.equal(s.pending,'restore');
+ const initial=createState('history'),before=JSON.stringify(initial.history.filter(n=>n.storage==='cloud'));let upload=act(initial,'upload');assert.equal(upload.restoreConfirm,false);upload=settle(upload);assert.equal(JSON.stringify(upload.history.filter(n=>n.storage==='cloud').slice(0,-1)),before);
+ const noProof={...createState('remoteUpdate'),syncedBaseline:null,history:createState('remoteUpdate').history.filter(n=>n.contentId!=='demo-older')};assert.ok(act(noProof,'askRestore').restoreConfirm);
 });

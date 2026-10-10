@@ -17,13 +17,13 @@ export function gameLabel(s) {
   return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
-  history: '多设备存档历史', empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', longDevice: '云端设备长名称', conflict: '双方进度不同',
+  history: '多设备存档历史', remoteUpdate: '远端更新，本机无改动', empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', longDevice: '云端设备长名称', conflict: '双方进度不同',
   identical: '双方进度相同', failure: '连接失败', connecting: '连接中', running: '游戏运行中',
   reading: '读取中', readFailure: '读取失败（重试可恢复）'
 };
 // Fixed local modification times, not scan timestamps. Slot count is independent of file count.
 export function saveFixture(scene) {
-  const slots = ['history', 'local', 'conflict', 'identical', 'running', 'readFailure'].includes(scene)
+  const slots = ['history', 'remoteUpdate', 'local', 'conflict', 'identical', 'running', 'readFailure'].includes(scene)
     ? [{slot: 1, modified: '2026/10/08 21:15'}, {slot: 3, modified: '2026/10/09 09:30'}] : [];
   return {playCount: slots.length ? 28 : ['recordsOnly', 'recordsConflict'].includes(scene) ? 12 : 0, slots, records: slots.length > 0 || ['recordsOnly', 'recordsConflict'].includes(scene), fileCount: slots.length ? 17 : ['recordsOnly', 'recordsConflict'].includes(scene) ? 3 : 0};
 }
@@ -35,10 +35,10 @@ export function saveStatus(s) {
 }
 export function createState(scene = 'empty', gameId = 'shattered') {
   const fixtureLocal = saveFixture(scene).records;
-  const cloud = ['history', 'cloud', 'longDevice', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
+  const cloud = ['history', 'remoteUpdate', 'cloud', 'longDevice', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
   const state = {scene, gameId, currentDeviceId: 'demo-current', localSnapshot: fixtureLocal ? {deviceId: 'demo-current', deviceName: 'Windows-PC', contentId: 'demo-local-v1'} : null, cloudSnapshot: cloud ? {contentId: ['identical', 'running'].includes(scene) ? 'demo-local-v1' : 'demo-cloud-v2', deviceId: 'demo-remote', deviceName: scene === 'longDevice' ? 'MacBook-Example-Very-Long-Device-Name-用于窄屏展示的虚构设备名称' : 'MacBook'} : null, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud,
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
-    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null, renameId: null};
+    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null, renameId: null, syncedBaseline: null};
   state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', storage:'device', ownerDeviceId:'demo-current', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['device-save-2'] : [], available: true, publishedOrder: null};
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
@@ -52,7 +52,13 @@ export function createState(scene = 'empty', gameId = 'shattered') {
     state.history.push({...state.localSnapshot});
   }
   state.devices = [{deviceId:'demo-current',deviceName:'Windows-PC'}, {deviceId:'demo-remote',deviceName:state.cloudSnapshot?.deviceName || 'MacBook'}, {deviceId:'demo-tablet',deviceName:'Pixel Tablet'}];
-  if (scene === 'history') Object.assign(state, {page:'home',completed:true,connected:true,connectionStatus:'success',testedRevision:0,local:true,readStatus:'found',preview:saveFixture(scene)});
+  if(scene==='remoteUpdate'){
+    const cloudBase=state.history.find(n=>n.id==='save-2');
+    state.localSnapshot={...cloudBase,id:'local-initial',storage:'device',ownerDeviceId:state.currentDeviceId,publishedOrder:null,parentIds:[cloudBase.id]};
+    state.history=state.history.filter(n=>n.id!=='local-initial'&&n.id!=='local-baseline');state.history.push(state.localSnapshot);
+    state.syncedBaseline={cloudId:cloudBase.id,contentId:cloudBase.contentId};
+  }
+  if (['history','remoteUpdate'].includes(scene)) Object.assign(state, {page:'home',completed:true,connected:true,connectionStatus:'success',testedRevision:0,local:true,readStatus:'found',preview:saveFixture(scene)});
   return state;
 }
 // Synthetic immutable snapshots. Published order is independent of save time and local edits.
@@ -166,13 +172,13 @@ function publishLocal(s) {
   const publishedOrder=Math.max(0,...s.history.map(n=>n.publishedOrder||0))+1;
   const snapshot={...s.localSnapshot,storage:'cloud',id:`upload-${s.uploads+1}-${nextOrder}`,order:nextOrder,publishedOrder,
     cloudParentIds:localBaseline(s)?[localBaseline(s).id]:[],parentIds:s.localSnapshot?.id ? [s.localSnapshot.id] : [],available:true};
-  return {...s,history:[...s.history,snapshot],cloud:true,cloudSnapshot:snapshot,uploads:s.uploads+1};
+  return {...s,syncedBaseline:{cloudId:snapshot.id,contentId:snapshot.contentId},history:[...s.history,snapshot],cloud:true,cloudSnapshot:snapshot,uploads:s.uploads+1};
 }
 function receiveCloud(s) {
   const order=Math.max(0,...s.history.map(n=>n.order))+1;
   const local={...s.pendingRestore,id:`restore-${s.restores+1}-${order}`,storage:'device',ownerDeviceId:s.currentDeviceId,
     publishedOrder:null,parentIds:[s.pendingRestore.id],order,restored:true};
-  return {...s,localSnapshot:local,history:[...s.history,local]};
+  return {...s,syncedBaseline:{cloudId:s.pendingRestore.id,contentId:s.pendingRestore.contentId},localSnapshot:local,history:[...s.history,local]};
 }
 // Device identity belongs to the snapshot source, independently of storage location.
 export function deviceLabel(snapshot, currentDeviceId) {
@@ -199,14 +205,21 @@ export function canRestore(s) {
     && (localIsEmpty(s) || (s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)));
 }
 function restoreTarget(s) {
-  return JSON.stringify([s.page, s.choice, s.gameId, s.savePath, s.configRevision, s.readStatus, s.local, s.cloud, s.localSnapshot, s.cloudSnapshot, s.selectedSnapshotId, selectedTarget(s)]);
+  return JSON.stringify([s.page, s.choice, s.gameId, s.savePath, s.configRevision, s.readStatus, s.local, s.cloud, s.localSnapshot, s.cloudSnapshot, s.selectedSnapshotId, selectedTarget(s), s.syncedBaseline]);
 }
 function beginRestore(s) {
   return {...s, pendingRestore: {...selectedTarget(s)}, renameId:null, busy: true, pending: 'restore', restoreConfirm: false, token: s.token + 1, message: ''};
 }
+// contentId stands in for the recomputed full game-content hash in this mock.
+export function localUnchangedSinceSync(s) {
+  const baseline=s.syncedBaseline;
+  return s.readStatus==='found'&&s.local===true&&Boolean(baseline?.contentId)
+    &&s.localSnapshot?.contentId===baseline.contentId
+    &&s.history.some(n=>n.id===baseline.cloudId&&n.storage==='cloud'&&n.available&&n.contentId===baseline.contentId);
+}
 function requestRestore(s) {
   if (!canRestore(s)) return s;
-  return localIsEmpty(s) ? beginRestore(s) : {...s, token: s.token + 1,
+  return localIsEmpty(s)||localUnchangedSinceSync(s)||Boolean(matchingCloud(s)) ? beginRestore(s) : {...s, token: s.token + 1,
     restoreConfirm: {target: restoreTarget(s), token: s.token + 1}, message: ''};
 }
 export function canFinish(s) {
