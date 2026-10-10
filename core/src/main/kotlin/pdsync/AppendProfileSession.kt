@@ -2,6 +2,8 @@ package pdsync
 
 import java.nio.file.Path
 import kotlin.io.path.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 
 /** Every branch is an explicitly identified snapshot; no time-based winner exists. */
 data class AppendBranch(val commit: AppendCommit, val snapshot: Snapshot)
@@ -36,6 +38,37 @@ class AppendProfileSession(
  private val comparisonOwner = Any()
 
  fun history() = local.history()
+ private val aliasesPath get()=directory.resolve("display-names.json")
+ private fun aliases(): Map<String,String> {
+  if(!SafePaths.checked(aliasesPath).exists())return emptyMap()
+  val text=SafePaths.boundedRead(aliasesPath,MAX_MANIFEST_BYTES).decodeToString();requireUniqueJsonKeys(text)
+  return json.decodeFromString<Map<String,String>>(text).also { values -> require(values.size<=MAX_COMMITS);values.forEach { (id,name)->require(validCommitId(id)&&name==sanitizeSnapshotName(name)) } }
+ }
+ fun renameHistory(snapshotId:String,name:String) = local.locked {
+  require(repository.cachedGraph().commits.values.any { it.snapshot.id==snapshotId }) { "历史记录不存在" }
+  SafePaths.atomicWrite(aliasesPath,json.encodeToString(aliases()+(snapshotId to sanitizeSnapshotName(name))).encodeToByteArray())
+ }
+ fun syncHistory(): SyncHistory = local.locked {
+  val graph=repository.cachedGraph();val files=currentFiles()
+  val baseline=repository.baseline()
+  val transfer=directory.resolve("baseline-transfer.txt")
+  val direction=if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString().split(' ').takeIf { it.size==2&&it[0]==baseline&&it[1] in setOf("upload","restore") }?.get(1) else null
+  SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),runCatching { SaveSummary.read(root) }.getOrNull(),aliases(),direction)
+ }
+ /** User-selected historical cloud content is downloaded only on an explicit restore action. */
+ fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult = local.locked {
+  local.guard(stopped);noLegacyPending();appliedOnly();require(repository.pending()==null){"请先处理待上传操作"}
+  val graph=discover(store);val chosen=graph.commits.values.single { it.snapshot.id==snapshotId }
+  val before=currentFiles()
+  require(expectedBefore==null || before==expectedBefore) { "确认后本机存档已变化，请重新比较" }
+  require(allowUniqueReplacement || before.isEmpty() || graph.commits.values.any { it.snapshot.files==before }) { "本机有独有进度，请明确选择覆盖或合并" }
+  val snapshot=repository.download(store,chosen);local.remember(snapshot,"选择云端历史",repository.observedAt(chosen.id));local.checkRestore(snapshotId)
+  var restored:RestoreResult?=null
+  prepareAndApply(snapshot,listOfNotNull(repository.baseline()),"restore","恢复云端历史 · 待上传") { plan ->
+   restored=local.restore(this.snapshot(plan),stopped,before)
+  }
+  requireNotNull(restored)
+ }
  fun deviceIdentity() = local.deviceIdentity()
  fun directoryStatus(): SidecarRead = local.locked { local.directoryMetadata.read() }
  fun inspectDirectory(stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
@@ -52,8 +85,10 @@ class AppendProfileSession(
   require(captured.manifest.files==expectedFiles) { "确认期间内容发生变化，请重新检查" }
   local.directoryMetadata.confirmRun(slot,expectedFiles,sameRun)
  }
- private fun markDirectorySynced(commit: AppendCommit) = local.directoryMetadata.markSynced(commit.snapshot.files,
-  DirectorySyncBaseline(hash(directory.toString().encodeToByteArray()),commit.id,contentSha256(commit.snapshot.files)))
+ private fun markDirectorySynced(commit: AppendCommit,direction:String="restore") {
+  local.directoryMetadata.markSynced(commit.snapshot.files,DirectorySyncBaseline(hash(directory.toString().encodeToByteArray()),commit.id,contentSha256(commit.snapshot.files)))
+  SafePaths.atomicWrite(directory.resolve("baseline-transfer.txt"),(commit.id+" "+direction).encodeToByteArray())
+ }
  fun observedAt(commitId: String) = repository.observedAt(commitId)
  fun baselineFiles(): Map<String, String>? = repository.baselineFiles()
  /** Read-only observation, deliberately not a mutation-lock contender. Any racing/incomplete
@@ -113,7 +148,7 @@ class AppendProfileSession(
   require(plan.commit.id in graph.commits) { "刚发布的提交尚未完整可见；原操作保留，请重试" }
   local.remember(snapshot(plan), "追加同步 · ${plan.commit.kind}", repository.observedAt(plan.commit.id))
   repository.setBaseline(plan.commit.id, graph)
-  markDirectorySynced(plan.commit)
+  markDirectorySynced(plan.commit,"upload")
   repository.clearPending()
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
    else AppendPushResult.Success(plan.commit, runCatching { currentFiles() != plan.commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != plan.commit.id)
@@ -162,7 +197,7 @@ class AppendProfileSession(
   require(currentFiles() == before) { "验证期间本地存档发生变化，未恢复" }
   SafePaths.atomicWrite(applyMarker, "remote-restore".encodeToByteArray())
   // Keep the restart gate on any uncertain apply or baseline-write failure, even after rollback.
-  val restored = local.restore(chosen, stopped)
+  val restored = local.restore(chosen, stopped,before)
   repository.setBaseline(commit.id, graph)
   markDirectorySynced(commit)
   SafePaths.checked(applyMarker).deleteExisting()
@@ -208,11 +243,25 @@ class AppendProfileSession(
  fun previewMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult = local.locked {
   buildMerge(conflict,store,stopped)
  }
+ /** Preflight before publishing a unique local branch; then retain both sources in the merge DAG. */
+ fun mergeCurrent(store:AppendStore,stopped:()->Boolean):AppendPushResult = local.locked {
+  val graph=discover(store);require(graph.tips.isNotEmpty()) { "没有可合并的云端分支" }
+  val observed=AppendConflict(graph.tips,emptyList(),currentFiles())
+  val preview=buildMerge(observed,store,stopped)
+  local.checkRestore(preview.snapshot)
+  val captured=local.capture(stopped,null)
+  require(captured.manifest.files==observed.observedLocalFiles) { "预检后本机内容变化，请重新比较" }
+  val localPlan=repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
+  when(val uploaded=publish(localPlan,store,stopped)) {
+   is AppendPushResult.Success -> uploaded
+   is AppendPushResult.Diverged -> mergeLocked(uploaded.conflict,store,stopped)
+  }
+ }
  private fun buildMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult {
   local.guard(stopped);noLegacyPending();appliedOnly()
   require(repository.pending()==null) { "请先处理待上传操作" }
   val graph=discover(store)
-  require(graph.tips==conflict.observedTips && graph.tips.size>=2) { "冲突分支已变化，请重新检查" }
+  require(graph.tips==conflict.observedTips && graph.tips.isNotEmpty()) { "冲突分支已变化，请重新检查" }
   require(currentFiles()==conflict.observedLocalFiles) { "本机内容已变化，请重新检查" }
   val baseline=repository.baseline() ?: throw RunMergeException("缺少共同基线，不能推断单局身份")
   val children=graph.tips+baseline
@@ -225,27 +274,32 @@ class AppendProfileSession(
   val branches=graph.tips.sorted().map { id ->
    val commit=graph.commits.getValue(id)
    val downloaded=repository.download(store,commit)
-   if(id==baseline && downloaded.manifest.files==current.manifest.files)current else downloaded
+   // Current local work continues this baseline tip; it is not a parallel branch of that tip.
+   if(id==baseline)current else downloaded
   }.toMutableList()
   if(branches.none { it===current })branches.add(0,current) else { branches.remove(current);branches.add(0,current) }
   val operation=local.operationMetadata()
   return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException("尚未选择已验证游戏"),SnapshotCaptureContext(operation.device,operation.preparedAt))
  }
  fun merge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+  mergeLocked(conflict,store,stopped)
+ }
+ private fun mergeLocked(conflict:AppendConflict,store:AppendStore,stopped:()->Boolean):AppendPushResult {
+  require(conflict.observedTips.size>=2) { "冲突分支已变化，请重新检查" }
   val result=buildMerge(conflict,store,stopped)
   // Capacity/identity/global/version checks have all completed before an apply marker or writes.
   local.remember(result.snapshot,"逐局合并 · 已完成预检")
   local.checkRestore(result.snapshot.manifest.id)
   val latest=discover(store)
-  if(latest.tips!=conflict.observedTips)return@locked AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
+  if(latest.tips!=conflict.observedTips)return AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
   require(currentFiles()==conflict.observedLocalFiles) { "预检后本机内容发生变化，未合并" }
   val plan=prepareAndApply(result.snapshot,latest.tips.sorted(),"resolution","逐局合并 · ${result.slots} 个槽位") { plan ->
    require(currentFiles()==conflict.observedLocalFiles) { "合并前本机内容发生变化，未覆盖" }
-   local.restore(snapshot(plan),stopped)
+   local.restore(snapshot(plan),stopped,conflict.observedLocalFiles)
   }
   // A network failure after verified local apply leaves this exact plan pending for retry.
   // It is not advertised as an atomic transaction across the local disk and WebDAV.
-  publish(plan,store,stopped)
+  return publish(plan,store,stopped)
  }
  private fun resolveLocked(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
@@ -262,7 +316,7 @@ class AppendProfileSession(
   if (currentFiles() != chosen.manifest.files) local.checkRestore(chosen.manifest.id)
   val plan = prepareAndApply(chosen, graph.tips.sorted(), "resolution", "冲突解决 · 明确选择 ${branch.commit.id.take(8)}") { plan ->
    require(currentFiles() == conflict.observedLocalFiles) { "验证期间本地进度已变化，未覆盖" }
-   if (currentFiles() != chosen.manifest.files) local.restore(snapshot(plan), stopped)
+   if (currentFiles() != chosen.manifest.files) local.restore(snapshot(plan), stopped,conflict.observedLocalFiles)
   }
   // Apply precedes publication. Failed network work can only retry this exact chosen snapshot.
   // Changes after this point remain dirty relative to the published baseline.

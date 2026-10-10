@@ -121,6 +121,13 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   val bytes = checkNotNull(known(id)) { "同步基线元数据丢失；未视为新档案" }
   return decode(bytes, id).snapshot.files
  }
+ /** Offline presentation cache: only object-verified commits with complete cached ancestry. */
+ fun cachedGraph(): CommitGraph {
+  val candidates=idsIn(knownRoot).filter { observedAt(it)!=null }.associateWith { decode(requireNotNull(known(it)),it) }
+  val complete=linkedMapOf<String,AppendCommit>()
+  do { val additions=candidates.filter { (id,c)->id !in complete && c.parents.all { it in complete } };complete.putAll(additions) } while(additions.isNotEmpty())
+  return CommitGraph(complete,emptyMap())
+ }
  fun setBaseline(id: String, graph: CommitGraph) {
   graph.requireSettled(); val verified = requireNotNull(graph.commits[id]) { "Cannot baseline an incomplete commit" }
   val bytes = requireNotNull(known(id)); require(decode(bytes, id) == verified)

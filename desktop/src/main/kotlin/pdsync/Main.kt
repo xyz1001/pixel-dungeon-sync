@@ -23,7 +23,7 @@ private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
 private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
-private enum class SetupAction { UPLOAD, RESTORE, ADOPT }
+private enum class SetupAction { UPLOAD, RESTORE, ADOPT, MERGE }
 private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null)
 private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
 private val green = Color(0xFF326650)
@@ -88,7 +88,11 @@ internal fun runSyncApplication(
   var targetInfo by remember { mutableStateOf<TargetGame?>(null) }
   var targetError by remember { mutableStateOf<String?>(null) }
   var history by remember { mutableStateOf(emptyList<HistoryEntry>()) }
+  var graphHistory by remember { mutableStateOf<SyncHistory?>(null) }
+  var renameSnapshot by remember { mutableStateOf<String?>(null) }
+  var historyName by remember { mutableStateOf("") }
   var selected by remember { mutableStateOf<String?>(null) }
+  var selectedByUser by remember { mutableStateOf(false) }
   var remoteTips by remember { mutableStateOf(emptySet<String>()) }
   var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
@@ -97,6 +101,7 @@ internal fun runSyncApplication(
   var directoryName by remember { mutableStateOf("") }
   var directoryNotice by remember { mutableStateOf<String?>(null) }
   var confirm by remember { mutableStateOf<OperationTrace?>(null) }
+  var confirmationFiles by remember { mutableStateOf<Map<String,String>?>(null) }
   val operationEvents = remember { OperationEvents(workspace.resolve(".local/operation-events.log")) }
   var confirmationNotice by remember { mutableStateOf<String?>(null) }
   var restoreIssue by remember { mutableStateOf<String?>("请选择快照") }
@@ -110,7 +115,7 @@ internal fun runSyncApplication(
   var device by remember { mutableStateOf<DeviceIdentity?>(null) }
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
-  val selection = history.firstOrNull { it.manifest.id == selected }
+  val selection = history.firstOrNull { it.manifest.id == selected } ?: graphHistory?.graph?.commits?.values?.firstOrNull { it.snapshot.id==selected }?.let { HistoryEntry(it.snapshot,"","云端历史") }
   val homeScroll = rememberScrollState()
   val historyScroll = rememberLazyListState()
 
@@ -130,6 +135,7 @@ internal fun runSyncApplication(
   }
   fun requestConfirmation(action: Action) {
    if (busy || connectingAtStartup || appClosed) return
+   confirmationFiles=graphHistory?.currentFiles
    confirm = operationEvents.begin(action); confirmationNotice = null; navigate(Page.CONFIRM)
   }
   suspend fun refreshProfile(value: AppConfig?) {
@@ -144,10 +150,11 @@ internal fun runSyncApplication(
     }
     if (appClosed) return
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
+    graphHistory=withContext(Dispatchers.IO){data?.session?.syncHistory()}
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
     // A newest history entry can be an empty pre-restore backup. Start unselected;
     // a sole verified remote tip (or the user's click) supplies the normal selection.
-    selected = null; remoteTips = emptySet(); conflictSelection = null; conflict = null
+    selected = graphHistory?.defaultSnapshot;selectedByUser=false; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
     status = if (value == null) "存档内容待检查。" else "正在检查存档变化。"
    } catch (e: CancellationException) { throw e }
@@ -221,6 +228,8 @@ internal fun runSyncApplication(
    }
    val manager = requireNotNull(session)
    val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
+   val allowUniqueReplacement=confirm===trace
+   val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
    busy = true; confirm = null; confirmationNotice = null; navigate(Page.HOME)
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
@@ -257,16 +266,21 @@ internal fun runSyncApplication(
        Action.PUSH -> pushed(manager.push(store(), stopped))
        Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。", appliedFiles = it.restored.files) }
        Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。恢复提交已冻结，将自动上传；暂停时可点击上传。", appliedFiles = it.restored.files) }
+       Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult("所选云端历史已恢复，原始历史保留。恢复结果待上传。",appliedFiles=it.restored.files)}
        Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped)).copy(appliedFiles = divergence.branches.single { it.snapshot.manifest.id == branchChoice }.snapshot.manifest.files)
        Action.MERGE -> pushed(manager.merge(requireNotNull(divergence),store(),stopped)).let { result ->
         if(result.conflict==null) result.copy(appliedFiles=manager.observedFiles()) else result
        }
+       Action.MERGE_CURRENT -> pushed(manager.mergeCurrent(store(),stopped)).let {result->if(result.conflict==null)result.copy(appliedFiles=manager.observedFiles()) else result}
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
       trace.record(OperationEvent.WORK_SUCCEEDED)
       completed
      }
-     status = result.message; conflict = result.conflict; conflictSelection = null; remoteReadAt = 0L
+     status = result.message; conflict = result.conflict
+     conflictSelection=if(action==Action.PUSH)result.conflict?.let {value->value.branches.firstOrNull {it.snapshot.manifest.files==value.observedLocalFiles}?.snapshot?.manifest?.id} else null
+     remoteReadAt = 0L
+     if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE,Action.MERGE,Action.MERGE_CURRENT)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
      if (action == Action.PUSH) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
@@ -298,7 +312,8 @@ internal fun runSyncApplication(
       trace.record(OperationEvent.HISTORY_REFRESH_STARTED)
       val data = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) }
       history = data.first; pending = data.second; saveInfo = data.third
-      if (selected == null) selected = history.firstOrNull()?.manifest?.id
+      graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
+      if (selected == null) selected = graphHistory?.defaultSnapshot
       trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
      } catch (e: CancellationException) {
       if (terminalFailure == null) terminalFailure = OperationFailure.CANCELED
@@ -327,6 +342,7 @@ internal fun runSyncApplication(
       if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
      }
      directoryEditor=metadata;directoryName=metadata.displayName
+     graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
      directoryNotice=if(change==null)null else "已保存。点击上传可同步名称和已确认身份。"
     } catch(e:Exception) { directoryNotice=e.message;status="无法更新存档信息：${e.message}" }
     finally { busy=false }
@@ -343,6 +359,8 @@ internal fun runSyncApplication(
      remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
      if (selected == null && entries.size == 1) selected = entries.single().entry.manifest.id
      history = withContext(Dispatchers.IO) { manager.history() }
+     graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
+     if(!selectedByUser)selected=graphHistory?.defaultSnapshot
      status = if (entries.isEmpty()) "此次未发现云端记录。" else "已读取云端记录。"
     } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
     finally { busy = false }
@@ -350,8 +368,8 @@ internal fun runSyncApplication(
   }
   fun openRestore() {
    if (busy || connectingAtStartup || appClosed) return
-   if (conflict != null) { navigate(Page.CONFLICT); return }
-   if (remoteTips.size > 1) {
+   if (conflict != null && (selected==null || conflict!!.branches.any {it.snapshot.manifest.id==selected})) { navigate(Page.CONFLICT); return }
+   if (remoteTips.size > 1 && (selected==null || selected in remoteTips)) {
     val manager = session ?: return
     busy = true
     scope.launch {
@@ -368,7 +386,12 @@ internal fun runSyncApplication(
      } catch (e: Exception) { status = "暂不能选择恢复：${e.message}"; authenticationFailed(e) }
      finally { busy = false }
     }
-   } else if(selected in remoteTips) execute(operationEvents.begin(Action.REMOTE_TIP))
+   } else if(graphHistory?.graph?.commits?.values?.any {it.snapshot.id==selected}==true) {
+    if(graphHistory?.currentProtected==true) {
+     if(selected in remoteTips && (graphHistory?.clean==true || graphHistory?.currentFiles?.isEmpty()==true))execute(operationEvents.begin(Action.REMOTE_TIP))
+     else execute(operationEvents.begin(Action.CLOUD_HISTORY))
+    } else requestConfirmation(Action.CLOUD_HISTORY)
+   }
    else requestConfirmation(Action.RESTORE)
   }
   fun setAutomaticPaused(paused: Boolean) {
@@ -474,7 +497,6 @@ internal fun runSyncApplication(
      withContext(Dispatchers.IO) { setupSelection.save(target.path) }
      if (config != null) { withContext(Dispatchers.IO) { configFile.save(next) }; config = next }
      setupDraft = next; onboardingActive = true; proceed = true
-     if (!connected && config?.password != null) reconnectSaved(next)
     } catch (e: Exception) { discoveryNotice = "尚不能继续：${e.message}" }
     finally { busy = false }
     if (proceed) {
@@ -552,6 +574,7 @@ internal fun runSyncApplication(
        SetupAction.UPLOAD -> manager.onboardingUpload(observed, store, stopped)
        SetupAction.RESTORE -> manager.onboardingRestore(observed, requireNotNull(chosen), store, stopped)
        SetupAction.ADOPT -> manager.adoptOnboardingRemote(observed, store, stopped)
+       SetupAction.MERGE -> manager.mergeCurrent(store,stopped)
       }
      }
      comparisonNotice = "操作已完成，正在重新比较。"
@@ -628,6 +651,7 @@ internal fun runSyncApplication(
      }
      if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager) continue
      val state = observation.first; val files = observation.second; val now = monotonicMillis()
+     if(graphHistory?.currentFiles!=files)graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
      gameStatus = state
      automatic.observe(files, state is GameProcessStatus.Running, state is GameProcessStatus.Stopped, now)
      val retryable = withContext(Dispatchers.IO) { manager.retryablePending() }
@@ -656,7 +680,10 @@ internal fun runSyncApplication(
   LaunchedEffect(session, selected, busy) {
    restoreIssue = "正在校验实际版本…"
    val manager = session; val id = selected
-   if (manager != null && id != null && !busy) restoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkRestore(id) }.exceptionOrNull()?.message }
+   if (manager != null && id != null && !busy) restoreIssue = withContext(Dispatchers.IO) {
+    val cloud=graphHistory?.graph?.commits?.values?.firstOrNull {it.snapshot.id==id}
+    runCatching { if(cloud==null)manager.checkRestore(id) else cloud.snapshot.saveVersions?.let {ShatteredVersions.requireCompatible(it,requireNotNull(targetInfo){"请选择游戏"})} }.exceptionOrNull()?.message
+   }
   }
   LaunchedEffect(session, conflict, conflictSelection, busy) {
    conflictRestoreIssue = "正在校验实际版本…"
@@ -664,6 +691,10 @@ internal fun runSyncApplication(
    if (manager != null && value != null && id != null && !busy) conflictRestoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkResolution(id) }.exceptionOrNull()?.message }
   }
   MaterialTheme(colors = lightColors(primary = green, secondary = Color(0xFF8A6B42)), shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
+   renameSnapshot?.let { id -> AlertDialog(onDismissRequest={if(!busy)renameSnapshot=null},title={Text("历史存档名称")},text={Column {
+    OutlinedTextField(historyName,{historyName=it},enabled=!busy,singleLine=true,label={Text("本机显示名称")})
+    Text("保存在此设备，不改写已发布的历史。",style=MaterialTheme.typography.caption)
+   }},confirmButton={TextButton(enabled=!busy,onClick={busy=true;scope.launch {try{withContext(Dispatchers.IO){session!!.renameHistory(id,historyName)};graphHistory=withContext(Dispatchers.IO){session!!.syncHistory()};renameSnapshot=null}catch(e:Exception){status=e.message.orEmpty()}finally{busy=false}}}){Text("保存")}},dismissButton={TextButton(enabled=!busy,onClick={renameSnapshot=null}){Text("取消")}}) }
    directoryEditor?.let { metadata ->
     AlertDialog(onDismissRequest={ if(!busy)directoryEditor=null }, title={ Text("存档名称与单局身份") },
      text={ Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -710,7 +741,7 @@ internal fun runSyncApplication(
          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           TextButton(enabled = !busy && !connectingAtStartup, onClick = { rescanDiscovery() }) { Text("重新扫描") }
           Spacer(Modifier.weight(1f))
-          Button(enabled = !busy && !connectingAtStartup && discoveredTarget?.trusted == true && pathResult.isSuccess, onClick = { continueDiscovery() }) { Text("继续") }
+          Button(enabled = !busy && !connectingAtStartup && discoveredTarget?.trusted == true, onClick = { continueDiscovery() }) { Text("下一步") }
          }
         }
        ) {
@@ -775,7 +806,8 @@ internal fun runSyncApplication(
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
            TextButton(enabled = !busy, onClick = { setupConfirm = null; comparisonNotice = "已取消选择，双方存档未改变。" }) { Text("取消") }
            Spacer(Modifier.weight(1f))
-           Button(enabled = !busy, onClick = { setupConfirm?.let { performOnboarding(it) } }) { Text(if (setupConfirm == SetupAction.RESTORE) "备份并恢复" else "确认继续") }
+           Button(enabled = !busy, onClick = { setupConfirm?.let { performOnboarding(it) } }) { Text(if (setupConfirm == SetupAction.RESTORE) "覆盖本机" else "确认继续") }
+           if(setupConfirm==SetupAction.RESTORE)OutlinedButton(enabled=!busy,onClick={performOnboarding(SetupAction.MERGE)}){Text("合并")}
           }
          } else {
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -787,8 +819,8 @@ internal fun runSyncApplication(
           comparison?.let { value ->
            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (value.localFiles.isNotEmpty() || value.retryablePending) Button(enabled = !busy && (value.kind != OnboardingKind.BLOCKED || value.retryablePending), onClick = { performOnboarding(SetupAction.UPLOAD) }, modifier = Modifier.weight(1f)) { Text(if (value.retryablePending) "重试上传" else if (value.remoteEntries.isEmpty()) "上传本机存档" else "上传本机，保留两份") }
-            if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { setupConfirm = SetupAction.ADOPT }, modifier = Modifier.weight(1f)) { Text("确认使用") }
-            else if (value.remoteEntries.isNotEmpty()) OutlinedButton(enabled = !busy && comparisonSelection != null && value.kind != OnboardingKind.BLOCKED, onClick = { setupConfirm = SetupAction.RESTORE }, modifier = Modifier.weight(1f)) { Text("恢复所选云端存档") }
+            if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { performOnboarding(SetupAction.ADOPT) }, modifier = Modifier.weight(1f)) { Text("完成") }
+            else if (value.remoteEntries.isNotEmpty()) OutlinedButton(enabled = !busy && comparisonSelection != null && value.kind != OnboardingKind.BLOCKED, onClick = { if(value.localFiles.isEmpty() || graphHistory?.currentProtected==true)performOnboarding(SetupAction.RESTORE) else setupConfirm = SetupAction.RESTORE }, modifier = Modifier.weight(1f)) { Text("恢复所选云端存档") }
            }
           }
          }
@@ -843,12 +875,12 @@ internal fun runSyncApplication(
           }
          }
          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          Button(enabled = !busy && !connectingAtStartup && (!connected || session != null), onClick = {
+          Button(enabled = !busy && !connectingAtStartup && (!connected || session != null && (pending || graphHistory?.currentFiles?.isNotEmpty()==true)), onClick = {
            if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
            else if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding()
            else execute(operationEvents.begin(Action.PUSH))
           }, modifier = Modifier.weight(1f)) { Text("上传") }
-          OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && (config?.onboardingProgress != OnboardingProgress.COMPLETE || !pending && (selected !in remoteTips || connected) &&
+          OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && connected && (config?.onboardingProgress != OnboardingProgress.COMPLETE || !pending &&
            (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null)), onClick = { if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
          }
          locationIssue?.let { CompactFeedback(it, "无法读取存档，请在设置中重新检查。") }
@@ -858,22 +890,13 @@ internal fun runSyncApplication(
          Card(Modifier.weight(1f).fillMaxWidth(), elevation = 0.dp) {
           Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("选择要恢复的存档", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
-            Text("${history.size} 份", color = muted, style = MaterialTheme.typography.body2)
+            Text("完整档案历史", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
+            Text("${graphHistory?.cloud?.size ?: 0} 份云端记录", color = muted, style = MaterialTheme.typography.body2)
            }
-           if (history.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text("尚无可选记录，请上传或等待读取。", color = muted)
-           } else LazyColumn(Modifier.weight(1f), state = historyScroll, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(history, key = { it.manifest.id }) { entry ->
-             val m = entry.manifest
-             Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color(0xFFF7F8F5)) {
-              Column(Modifier.fillMaxWidth().clickable(enabled = !busy && !connectingAtStartup) { selected = m.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-               Text(m.directoryMetadata?.displayName?.takeIf { it.isNotBlank() } ?: m.metadata?.device?.label ?: "设备未知", fontWeight = FontWeight.Medium)
-               Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
-              }
-             }
-            }
-           }
+           Text(if(selected==null)"默认恢复最新云端存档" else "恢复目标：${selection?.manifest?.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: selected!!.take(8)}",style=MaterialTheme.typography.caption,color=muted)
+           HistoryChart(graphHistory,selected,busy||connectingAtStartup,onSelect={selected=it;selectedByUser=true},onRename={id ->
+            if(id==null)editDirectory() else {renameSnapshot=id;historyName=graphHistory?.aliases?.get(id).orEmpty()}
+           })
           }
          }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -927,7 +950,8 @@ internal fun runSyncApplication(
        Page.CONFIRM -> confirm?.let { trace ->
         ConfirmationPage(trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else selection?.manifest, busy || connectingAtStartup, confirmationNotice,
          onBack = { cancelConfirmation(trace) },
-         onConfirm = { execute(trace) })
+         onConfirm = { execute(trace) },
+         onMerge = if(trace.action==Action.CLOUD_HISTORY)({execute(operationEvents.begin(Action.MERGE_CURRENT))}) else null)
        }
       }
      }
@@ -1008,6 +1032,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
  fun connect(apply: Boolean = false) {
   if (busy || inFlight || closed) return
   if(apply && !connectionVerified)return
+  if(!apply)connectionVerified=false
   val ticket = lifetime.begin() ?: return
   inFlight = true; onBusy(true); failed = false; message = null
   val submitted = ConnectionDraft(draft, secret)
@@ -1108,8 +1133,8 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
 }
 
 @Composable
-private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
- val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP)
+private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit,onMerge:(()->Unit)?=null) {
+ val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP,Action.CLOUD_HISTORY)
  GuidedPage(
   title = if (restoring) "恢复存档" else if (action == Action.ARCHIVE) "结束待上传操作" else "操作前确认",
   subtitle = "",
@@ -1118,7 +1143,8 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     TextButton(enabled = !busy, onClick = onBack) { Text("取消，返回主页") }
     Spacer(Modifier.weight(1f))
-    Button(enabled = !busy, onClick = onConfirm) { Text(if (restoring) "备份并恢复" else "确认继续") }
+    Button(enabled = !busy, onClick = onConfirm) { Text(if (restoring) "覆盖本机" else "确认继续") }
+    onMerge?.let { merge -> Spacer(Modifier.width(8.dp));OutlinedButton(enabled=!busy,onClick=merge){Text("合并当前分支")} }
    }
   }
  ) {
@@ -1130,6 +1156,7 @@ private fun ConfirmationPage(action: Action, root: String?, pending: Boolean, br
      Text(snapshotBriefTime(snapshot), color = muted, style = MaterialTheme.typography.caption)
     }
     if (restoring) Text(NoviceCopy.restoreWarning, color = Color(0xFF986337))
+    if(onMerge!=null)Text("覆盖使用所选快照；合并保留本机与云端当前各分支进度。",style=MaterialTheme.typography.body2)
     if (action == Action.PUSH && pending) Text("将重试上次保存的内容，可能不是当前最新进度。")
     if (restoring) Text("请退出游戏，并暂停其他存档同步。", color = muted)
     Details { Text("存档目录：$root") }

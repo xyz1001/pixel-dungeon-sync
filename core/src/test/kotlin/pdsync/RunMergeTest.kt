@@ -73,7 +73,7 @@ class RunMergeTest {
   val policy=object:ProfileVersions {
    override fun annotate(snapshot:Snapshot)=snapshot.copy(manifest=snapshot.manifest.copy(saveVersions=ShatteredVersions.detect(Snapshots.verify(snapshot,Shattered))))
    override fun target(path:String)=target
-   override fun checkRestore(snapshot:Snapshot,targetPath:String){ShatteredVersions.detect(Snapshots.verify(snapshot,Shattered))}
+   override fun checkRestore(snapshot:Snapshot,targetPath:String){ShatteredVersions.requireCompatible(ShatteredVersions.detect(Snapshots.verify(snapshot,Shattered)),target)}
   }
   val remote=object:AppendStore {
    val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>();var fail=false
@@ -97,5 +97,14 @@ class RunMergeTest {
   val mergedFiles=b.observedFiles();assertEquals(preview.snapshot.manifest.files,mergedFiles)
   remote.fail=false;val result=assertIs<AppendPushResult.Success>(b.push(remote){true});assertEquals(mergedFiles,result.commit.snapshot.files);assertEquals(conflict.observedTips,result.commit.parents.toSet());assertFalse(b.hasPending())
   assertEquals("remote A1",bRoot.resolve("game1/depth1.dat").readText());assertEquals("local B1",bRoot.resolve("game2/depth1.dat").readText())
+  aRoot.resolve("game1/depth1.dat").writeText("remote A2");a.confirmRunIdentity("game1",a.observedFiles(),true){true};a.push(remote){true}
+  bRoot.resolve("game2/depth1.dat").writeText("local B2");b.confirmRunIdentity("game2",b.observedFiles(),true){true}
+  assertEquals(2,b.previewMerge(b.inspectConflict(remote){true}!!,remote){true}.slots)
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(remote){true})
+  assertEquals("remote A2",bRoot.resolve("game1/depth1.dat").readText());assertEquals("local B2",bRoot.resolve("game2/depth1.dat").readText())
+  bRoot.resolve("game1/game.dat").writeBytes(byteArrayOf());bRoot.resolve("game2/game.dat").writeBytes(byteArrayOf())
+  val beforeCount=remote.commits.size;val beforeFiles=b.observedFiles()
+  assertFails {b.mergeCurrent(remote){true}}
+  assertEquals(beforeCount,remote.commits.size);assertEquals(beforeFiles,b.observedFiles());assertFalse(b.hasPending())
  }
 }

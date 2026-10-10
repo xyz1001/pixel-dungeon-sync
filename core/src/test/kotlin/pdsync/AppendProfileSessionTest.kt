@@ -41,6 +41,30 @@ class AppendProfileSessionTest {
  private fun published(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit
  private fun graph(session: AppendProfileSession, store: Memory) = AppendRepository(session.directory.resolve("append-v2"), Shattered, "demo").discover(store)
 
+ @Test fun cloudHistorySelectionIsLosslessOnlyWhenCurrentHasVerifiedCloudCopy() {
+  val store=Memory();val a=session();val first=published(a,store)
+  edit(a,"second");val second=published(a,store)
+  val history=a.syncHistory();assertEquals(2,history.cloud.size);assertEquals(1,history.localNodeCount)
+  assertEquals("upload",history.baselineDirection);assertEquals(second.snapshot.id,history.defaultSnapshot)
+  a.renameHistory(first.snapshot.id,"早期进度");assertEquals("早期进度",a.syncHistory().aliases[first.snapshot.id])
+  edit(a,"unique")
+  assertFails { a.restoreCloudHistory(first.snapshot.id,store,false){true} }
+  assertEquals("unique",content(a));assertFalse(a.hasPending())
+  val confirmed=a.observedFiles();edit(a,"changed-after-confirmation")
+  assertFails {a.restoreCloudHistory(first.snapshot.id,store,true,confirmed){true}}
+  assertEquals("changed-after-confirmation",content(a));assertFalse(a.hasPending())
+  a.restoreCloudHistory(first.snapshot.id,store,true){true}
+  assertEquals("alive",content(a));assertTrue(a.hasPending())
+  val restored=published(a,store);assertEquals(listOf(second.id),restored.parents)
+  assertEquals(3,a.syncHistory().cloud.size)
+ }
+
+ @Test fun historicalRestoreDoesNotNeedReplacementPermissionForProtectedContent() {
+  val store=Memory();val a=session();val first=published(a,store);edit(a,"second");published(a,store)
+  a.restoreCloudHistory(first.snapshot.id,store,false){true}
+  assertEquals("alive",content(a));assertTrue(a.hasPending())
+ }
+
  @Test fun ordinaryPublicationParentsOnlyItsRealBaselineAndKeepsSiblingBranches() {
   val store = Memory(); val a = session(); val first = published(a, store)
   val b = session(root(null)); b.restoreRemote(b.readRemote(store).single().entry.manifest.id, store) { true }

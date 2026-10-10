@@ -312,6 +312,7 @@ class ProfileSession(
  fun targetInfo(): TargetGame? = versions.target(config.targetGame)
  // Immutable history reads do not take the mutation lock. Restore repeats this check under the lock.
  fun checkRestore(id: String) = versions.checkRestore(loadSnapshot(id), config.targetGame)
+ internal fun checkRestore(snapshot: Snapshot) = versions.checkRestore(snapshot,config.targetGame)
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = locked { remember(capture(stopped), "本地快照") }
  internal fun legacyPending(): Snapshot? = queue.load(queueKey)
  internal fun archiveLegacyPending() {
@@ -370,7 +371,7 @@ class ProfileSession(
   queue.replace(queueKey, chosen)
   pushPending(chosen, store)
  }
- internal fun restore(snapshot: Snapshot, stopped: () -> Boolean): RestoreResult {
+ internal fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>? = null): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
   var entry: HistoryEntry? = null
   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
@@ -381,6 +382,7 @@ class ProfileSession(
    captureBackup = { current ->
     require(current == root)
     val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
+    require(expectedFiles==null || captured.snapshot.manifest.files==expectedFiles) { "恢复前本机内容已变化，请重新选择" }
     backupFingerprint = captured.fingerprint
     versions.annotate(captured.snapshot).let { it.copy(manifest=it.manifest.copy(directoryMetadata=directoryMetadata.observe(it.manifest.files,initialImport=!historyRoot.exists()))) }
    }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) },
