@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState} from './model.mjs';
 let state = createState('history');
 let pathTimer;
 const app = document.querySelector('#app');
@@ -22,18 +22,19 @@ function historyView() {
   const nodes=rows.flat();
   const devices=[{deviceId:'cloud-column',deviceName:'云端存档'},{deviceId:state.currentDeviceId,deviceName:'本机'}];
   const lane=historyColumnId;
+  if(!rows.length)rows.push([]);
   const width=devices.length*220, height=rows.length*132;
   const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.findIndex(row=>row.some(n=>n.id===node.id))*132+66};};
-  const edges=historyEdges(visibleState).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const child=nodes.find(n=>n.id===edge.child);const kind=child.storage==='cloud'?'upload':child.restored?'restore':'inherit';return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
-  const cells=rows.map(row=>devices.map(d=>{
+  const edges=displayEdges(state).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const kind=edge.kind;return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
+  const cells=rows.map((row,rowIndex)=>devices.map(d=>{
     const n=row.find(n=>lane(n)===d.deviceId);
-    if(!n)return '<div class="history-cell"></div>';
+    if(!n)return rowIndex===0&&d.deviceId===state.currentDeviceId&&localState(state)==='empty'?'<div class="history-cell"><div class="empty-local">无存档</div></div>':'<div class="history-cell"></div>';
     const isCloud=n.storage==='cloud';
     const uploaded=state.history.some(c=>c.storage==='cloud'&&c.parentIds.includes(n.id));
-    const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(n.restored?'从云端恢复':uploaded?'已上传':'未上传');
-    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button></div>`;
+    const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(localState(state)==='synced'?'已同步云端':'未同步云端');
+    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':localState(state)==='unsynced'?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button></div>`;
   }).join('')).join('');
-  return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。绿线为上传，蓝线为恢复，灰线为进度延续；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs><marker id="history-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
+  return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机实线表示已同步，虚线表示未同步；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs><marker id="history-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
 }
 function targetView() {
   const target=selectedTarget(state);

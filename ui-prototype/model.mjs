@@ -58,7 +58,7 @@ function historyFixture(latest) {
     make('save-5','demo-tablet','Pixel Tablet','2026/10/09 09:30',5,['save-3'],'demo-unavailable',{available:false})
   ].flatMap(n=>[
     {...n,id:`device-${n.id}`,storage:'device',ownerDeviceId:n.deviceId,publishedOrder:null,available:true,parentIds:n.parentIds.map(id=>`device-${id}`)},
-    {...n,storage:'cloud',parentIds:[`device-${n.id}`]}
+    {...n,storage:'cloud',cloudParentIds:[...n.parentIds],parentIds:[`device-${n.id}`]}
   ]);
 }
 export function latestCloud(s) {
@@ -76,7 +76,32 @@ export function targetMatchesLocal(s) {
 }
 // Visibility is based on where the copy lives, never on its content's source device.
 export function visibleHistory(s) {
-  return s.history.filter(n=>n.storage==='cloud' || (n.storage==='device' && (n.ownerDeviceId||n.deviceId)===s.currentDeviceId));
+  return s.history.filter(n=>n.storage==='cloud' || (s.local === true && n.storage==='device' && n.id===s.localSnapshot?.id));
+}
+export function matchingCloud(s) {
+  return s.local===true && s.readStatus==='found' ? s.history.filter(n=>n.storage==='cloud'&&n.available&&n.contentId===s.localSnapshot?.contentId)
+    .sort((a,b)=>b.publishedOrder-a.publishedOrder)[0] || null : null;
+}
+export function localState(s) {
+  return localIsEmpty(s)?'empty':s.local===true&&s.readStatus==='found'?(matchingCloud(s)?'synced':'unsynced'):'unknown';
+}
+export function localBaseline(s) {
+  const visited=new Set();
+  const find=id=>{
+    if(visited.has(id))return null;visited.add(id);
+    const node=s.history.find(n=>n.id===id);if(!node)return null;
+    if(node.storage==='cloud')return node;
+    const copy=s.history.find(n=>n.storage==='cloud'&&n.parentIds?.includes(id)&&n.contentId===node.contentId);
+    return copy || (node.parentIds||[]).map(find).find(Boolean) || null;
+  };
+  return (s.localSnapshot?.parentIds||[]).map(find).find(Boolean)||null;
+}
+export function displayEdges(s) {
+  const nodes=visibleHistory(s),ids=new Set(nodes.map(n=>n.id));
+  const edges=nodes.filter(n=>n.storage==='cloud').flatMap(n=>(n.cloudParentIds||[]).filter(id=>ids.has(id)).map(id=>({parent:id,child:n.id,kind:'cloud'})));
+  const status=localState(s),base=status==='synced'?matchingCloud(s):status==='unsynced'?localBaseline(s):null;
+  if(base&&ids.has(base.id)&&ids.has(s.localSnapshot.id))edges.push({parent:base.id,child:s.localSnapshot.id,kind:status});
+  return edges;
 }
 export function historyColumnId(node) {
   return node.storage === 'cloud' ? 'cloud-column' : node.ownerDeviceId || node.deviceId;
@@ -109,7 +134,7 @@ function publishLocal(s) {
   const nextOrder=Math.max(0,...s.history.map(n=>n.order))+1;
   const publishedOrder=Math.max(0,...s.history.map(n=>n.publishedOrder||0))+1;
   const snapshot={...s.localSnapshot,storage:'cloud',id:`upload-${s.uploads+1}-${nextOrder}`,order:nextOrder,publishedOrder,
-    parentIds:s.localSnapshot?.id ? [s.localSnapshot.id] : [],available:true};
+    cloudParentIds:localBaseline(s)?[localBaseline(s).id]:[],parentIds:s.localSnapshot?.id ? [s.localSnapshot.id] : [],available:true};
   return {...s,history:[...s.history,snapshot],cloud:true,cloudSnapshot:snapshot,uploads:s.uploads+1};
 }
 function receiveCloud(s) {

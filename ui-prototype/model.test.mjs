@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -255,4 +255,18 @@ test('upload and another-device restore retain visible transfer edges and sorted
  assert.equal(historyColumnId(s.localSnapshot),s.currentDeviceId);assert.equal(selectedTarget(s).id,'save-3');
  const times=historyRows(view).map(r=>r[0].time);assert.deepEqual(times,[...times].sort().reverse());
  assert.equal(view.history.filter(n=>n.storage==='cloud').length,6);
+});
+
+test('current local has three states and old restored content matches its cloud copy',()=>{
+ assert.equal(localState(connected('empty')),'empty');assert.equal(localState(createState('history')),'unsynced');assert.equal(localState(connected('identical')),'synced');
+ assert.equal(localState(connected('recordsOnly')),'unsynced');
+ let s=act(createState('history'),'selectSnapshot',{id:'save-2'});s=settle(act(act(s,'askRestore'),'restore'));assert.equal(localState(s),'synced');assert.equal(matchingCloud(s).id,'save-2');assert.equal(visibleHistory(s).filter(n=>n.storage==='device').length,1);assert.ok(displayEdges(s).some(e=>e.parent==='save-2'&&e.child===s.localSnapshot.id&&e.kind==='synced'));
+});
+test('unsynced baseline is real; new local and empty local invent no cloud edge',()=>{
+ const s=createState('history');assert.ok(displayEdges(s).some(e=>e.parent==='save-2'&&e.child==='local-initial'&&e.kind==='unsynced'));
+ assert.equal(displayEdges(connected('local')).length,0);assert.equal(displayEdges(connected('empty')).length,0);
+ const uploaded=settle(act(s,'upload'));assert.equal(localState(uploaded),'synced');assert.ok(displayEdges(uploaded).some(e=>e.parent===latestCloud(uploaded).id&&e.kind==='synced'));
+});
+test('cloud branches use explicit cloud parents, not time adjacency',()=>{
+ const edges=displayEdges(createState('history')).filter(e=>e.kind==='cloud');assert.deepEqual(edges.filter(e=>e.parent==='save-1').map(e=>e.child),['save-2','save-3']);assert.equal(edges.some(e=>e.parent==='save-3'&&e.child==='save-4'),false);
 });
