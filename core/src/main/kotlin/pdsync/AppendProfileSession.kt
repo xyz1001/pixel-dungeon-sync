@@ -38,6 +38,9 @@ class AppendProfileSession(
  fun history() = local.history()
  fun deviceIdentity() = local.deviceIdentity()
  fun directoryStatus(): SidecarRead = local.locked { local.directoryMetadata.read() }
+ fun inspectDirectory(stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
+  requireNotNull(local.capture(stopped,null).manifest.directoryMetadata)
+ }
  fun renameCurrent(name: String, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
   local.guard(stopped)
   val captured=local.capture(stopped,null)

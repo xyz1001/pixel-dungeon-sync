@@ -91,6 +91,9 @@ internal fun runSyncApplication(
   var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
   var conflict by remember { mutableStateOf<AppendConflict?>(null) }
+  var directoryEditor by remember { mutableStateOf<DirectorySnapshotMetadata?>(null) }
+  var directoryName by remember { mutableStateOf("") }
+  var directoryNotice by remember { mutableStateOf<String?>(null) }
   var confirm by remember { mutableStateOf<OperationTrace?>(null) }
   val operationEvents = remember { OperationEvents(workspace.resolve(".local/operation-events.log")) }
   var confirmationNotice by remember { mutableStateOf<String?>(null) }
@@ -220,6 +223,7 @@ internal fun runSyncApplication(
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
+    Action.MERGE -> "正在检查单局身份和槽位，合并完整存档…"
     Action.PUSH -> "正在保留快照并校验云端…"
     else -> "正在处理…"
    }
@@ -252,6 +256,9 @@ internal fun runSyncApplication(
        Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。", appliedFiles = it.restored.files) }
        Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。恢复提交已冻结，将自动上传；暂停时可点击上传。", appliedFiles = it.restored.files) }
        Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped)).copy(appliedFiles = divergence.branches.single { it.snapshot.manifest.id == branchChoice }.snapshot.manifest.files)
+       Action.MERGE -> pushed(manager.merge(requireNotNull(divergence),store(),stopped)).let { result ->
+        if(result.conflict==null) result.copy(appliedFiles=manager.observedFiles()) else result
+       }
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
       trace.record(OperationEvent.WORK_SUCCEEDED)
@@ -279,7 +286,10 @@ internal fun runSyncApplication(
      terminalFailure = operationFailure(e)
      if (action == Action.PUSH) automatic.failed(monotonicMillis(), terminalFailure == OperationFailure.NETWORK || e is SaveNotStableException)
      trace.record(OperationEvent.WORK_FAILED, failure = terminalFailure)
-     status = "操作未完成：${e.message}。已保存的历史与备份保留。"; authenticationFailed(e)
+     status = if(action==Action.MERGE && withContext(Dispatchers.IO) { manager.retryablePending() })
+      "本机合并已完成，云端上传未完成。请点击上传重试同一份合并结果；原始历史与备份保留。"
+     else "操作未完成：${e.message}。已保存的历史与备份保留。"
+     authenticationFailed(e)
     }
     finally {
      try {
@@ -301,6 +311,23 @@ internal fun runSyncApplication(
     }
    }.invokeOnCompletion { cause ->
     trace.record(OperationEvent.OPERATION_FINISHED, failure = terminalFailure ?: cause?.let(::operationFailure))
+   }
+  }
+  fun editDirectory(change: ((AppendProfileSession, () -> Boolean) -> DirectorySnapshotMetadata)? = null) {
+   if(busy || connectingAtStartup || appClosed) return
+   val manager=session ?: return
+   busy=true;directoryNotice=null
+   scope.launch {
+    try {
+     val metadata=withContext(Dispatchers.IO) {
+      val target=manager.targetInfo()
+      val stopped={ processStatus(target) is GameProcessStatus.Stopped }
+      if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
+     }
+     directoryEditor=metadata;directoryName=metadata.displayName
+     directoryNotice=if(change==null)null else "已保存。点击上传可同步名称和已确认身份。"
+    } catch(e:Exception) { directoryNotice=e.message;status="无法更新存档信息：${e.message}" }
+    finally { busy=false }
    }
   }
   fun readRemote() {
@@ -339,7 +366,8 @@ internal fun runSyncApplication(
      } catch (e: Exception) { status = "暂不能选择恢复：${e.message}"; authenticationFailed(e) }
      finally { busy = false }
     }
-   } else requestConfirmation(if (selected in remoteTips) Action.REMOTE_TIP else Action.RESTORE)
+   } else if(selected in remoteTips) execute(operationEvents.begin(Action.REMOTE_TIP))
+   else requestConfirmation(Action.RESTORE)
   }
   fun setAutomaticPaused(paused: Boolean) {
    if (busy || connectingAtStartup) return
@@ -605,6 +633,34 @@ internal fun runSyncApplication(
    if (manager != null && value != null && id != null && !busy) conflictRestoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkResolution(id) }.exceptionOrNull()?.message }
   }
   MaterialTheme(colors = lightColors(primary = green, secondary = Color(0xFF8A6B42)), shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
+   directoryEditor?.let { metadata ->
+    AlertDialog(onDismissRequest={ if(!busy)directoryEditor=null }, title={ Text("存档名称与单局身份") },
+     text={ Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+      OutlinedTextField(directoryName,{directoryName=it},enabled=!busy,label={Text("存档名称")},singleLine=true)
+      Text("存档在同步器未观察期间发生变化时，需要确认是否仍为原来的一局。不能确定时请保留待确认。",style=MaterialTheme.typography.caption)
+      metadata.runs.forEach { (slot,run) ->
+       Text("$slot · "+if(run.runUUID==null)"身份待确认" else "身份已确认",fontWeight=FontWeight.Medium)
+       if(run.runUUID==null) Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        if(run.previousRunUUID!=null) TextButton(enabled=!busy,onClick={
+         editDirectory { manager,stopped ->
+          val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){"存档已变化，请关闭后重新检查"}
+          manager.confirmRunIdentity(slot,files,true,stopped)
+         }
+        }) { Text("同一局继续") }
+        TextButton(enabled=!busy,onClick={
+         editDirectory { manager,stopped ->
+          val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){"存档已变化，请关闭后重新检查"}
+          manager.confirmRunIdentity(slot,files,false,stopped)
+         }
+        }) { Text("这是新的一局") }
+       }
+      }
+      directoryNotice?.let { Text(it,style=MaterialTheme.typography.caption) }
+     } }, buttons={ Row(Modifier.fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.End) {
+      TextButton(enabled=!busy,onClick={directoryEditor=null}) {Text("关闭")}
+      Button(enabled=!busy,onClick={val name=directoryName;editDirectory {manager,stopped->manager.renameCurrent(name,stopped)}}) {Text("保存名称")}
+     } })
+   }
    Surface(Modifier.fillMaxSize(), color = Color(0xFFF3F5F1)) {
     Column(Modifier.fillMaxSize()) {
      if (closeBlocked) Surface(color = Color(0xFFFFECCD)) {
@@ -744,6 +800,7 @@ internal fun runSyncApplication(
            (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null)), onClick = { if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
          }
          locationIssue?.let { CompactFeedback(it, "无法读取存档，请在设置中重新检查。") }
+         TextButton(enabled=session!=null&&!busy&&!connectingAtStartup,onClick={editDirectory()}) { Text("存档名称与单局身份") }
          if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) CompactFeedback(restoreIssue!!, "暂不能恢复，请重新检查所选存档。")
          if (pending) Text("上次上传尚未完成，请先重试上传。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
          Card(Modifier.weight(1f).fillMaxWidth(), elevation = 0.dp) {
@@ -759,7 +816,7 @@ internal fun runSyncApplication(
              val m = entry.manifest
              Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color(0xFFF7F8F5)) {
               Column(Modifier.fillMaxWidth().clickable(enabled = !busy && !connectingAtStartup) { selected = m.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-               Text(m.metadata?.device?.label ?: "设备未知", fontWeight = FontWeight.Medium)
+               Text(m.directoryMetadata?.displayName?.takeIf { it.isNotBlank() } ?: m.metadata?.device?.label ?: "设备未知", fontWeight = FontWeight.Medium)
                Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
               }
              }
@@ -811,7 +868,8 @@ internal fun runSyncApplication(
         ConflictPage(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected,
          onSelect = { if (!busy && !connectingAtStartup) conflictSelection = it },
          onBack = { if (!busy && !connectingAtStartup) navigate(Page.HOME) },
-         onConfirm = { requestConfirmation(Action.RESOLVE) })
+         onConfirm = { execute(operationEvents.begin(Action.RESOLVE)) },
+         onMerge = { execute(operationEvents.begin(Action.MERGE)) })
        }
        Page.CONFIRM -> confirm?.let { trace ->
         ConfirmationPage(trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else selection?.manifest, busy || connectingAtStartup, confirmationNotice,
@@ -955,16 +1013,18 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
 }
 
 @Composable
-private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit) {
+private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit, onMerge: () -> Unit) {
  GuidedPage(
-  title = "选择要继续的存档",
-  subtitle = "云端有多份进度，请选择一份。",
+  title = "存档发生冲突",
+  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，同一局的不同进度各占一个槽位。原始历史保留。",
   footer = {
    restoreIssue?.let { Text("选择后校验：$it", color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    TextButton(enabled = !busy, onClick = onBack) { Text("稍后处理，返回主页") }
+    TextButton(enabled = !busy, onClick = onBack) { Text("取消") }
     Spacer(Modifier.weight(1f))
-    Button(enabled = !busy && connected && selected != null && restoreIssue == null, onClick = onConfirm) { Text("采用所选快照") }
+    OutlinedButton(enabled = !busy && connected && selected != null && restoreIssue == null, onClick = onConfirm) { Text("覆盖为所选存档") }
+    Spacer(Modifier.width(8.dp))
+    Button(enabled = !busy && connected, onClick = onMerge) { Text("合并") }
    }
   }
  ) {

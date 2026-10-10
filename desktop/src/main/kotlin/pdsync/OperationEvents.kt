@@ -22,7 +22,7 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 import javax.net.ssl.SSLException
 
-internal enum class OperationAction { CAPTURE, PUSH, RESTORE, RESOLVE, REMOTE_TIP, ARCHIVE }
+internal enum class OperationAction { CAPTURE, PUSH, RESTORE, RESOLVE, MERGE, REMOTE_TIP, ARCHIVE }
 internal enum class OperationEvent {
  CONFIRMATION_ENTERED, CONFIRMATION_CANCELED, CONFIRMATION_SUBMITTED, GUARD_REJECTED,
  OPERATION_QUEUED, OPERATION_STARTED, WORK_STARTED, WORK_SUCCEEDED, WORK_FAILED,
