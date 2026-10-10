@@ -43,31 +43,13 @@ function drawHistoryLines() {
   const boxes=new Map([...body.querySelectorAll('.history-node')].map(node=>{
     const r=node.getBoundingClientRect();return [node.dataset.snapshotId,{left:r.left-bounds.left,right:r.right-bounds.left,top:r.top-bounds.top,bottom:r.bottom-bounds.top,cx:(r.left+r.right)/2-bounds.left,cy:(r.top+r.bottom)/2-bounds.top}];
   }));
-  const rounded=points=>{
-    let d=`M ${points[0][0]} ${points[0][1]}`;
-    for(let i=1;i<points.length-1;i++){
-      const a=points[i-1],b=points[i],c=points[i+1],ab=Math.hypot(b[0]-a[0],b[1]-a[1]),bc=Math.hypot(c[0]-b[0],c[1]-b[1]);
-      if(!ab||!bc)continue;
-      const r=Math.min(6,ab/2,bc/2),before=[b[0]+(a[0]-b[0])*r/ab,b[1]+(a[1]-b[1])*r/ab],after=[b[0]+(c[0]-b[0])*r/bc,b[1]+(c[1]-b[1])*r/bc];
-      d+=` L ${before[0]} ${before[1]} Q ${b[0]} ${b[1]} ${after[0]} ${after[1]}`;
-    }
-    return d+` L ${points.at(-1)[0]} ${points.at(-1)[1]}`;
-  };
   svg.setAttribute('width',bounds.width);svg.setAttribute('height',bounds.height);svg.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
-  svg.innerHTML=displayEdges(state).map((edge,index)=>{
+  svg.innerHTML=displayEdges(state).map(edge=>{
     const a=boxes.get(edge.parent),b=boxes.get(edge.child);if(!a||!b)return '';
-    let points;
-    if(Math.abs(a.cx-b.cx)>1){
-      const right=b.cx>a.cx,start=[right?a.right:a.left,a.cy],end=[right?b.left:b.right,b.cy],middle=(start[0]+end[0])/2;
-      points=[start,[middle,start[1]],[middle,end[1]],end];
-    }else{
-      const down=b.cy>a.cy,start=[a.cx,down?a.bottom:a.top],end=[b.cx,down?b.top:b.bottom];
-      const rail=edge.kind==='cloud'?10+index*8:bounds.width-18;
-      const exit=start[1]+(down?8:-12),entry=end[1]+(down?-12:8);
-      points=[start,[start[0],exit],[rail,exit],[rail,entry],[end[0],entry],end];
-    }
-    const start=points[0],end=points.at(-1);
-    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" d="${rounded(points)}"/><circle class="anchor" cx="${start[0]}" cy="${start[1]}" r="3"/><circle class="anchor" cx="${end[0]}" cy="${end[1]}" r="3"/>`;
+    const cross=Math.abs(a.cx-b.cx)>1,right=b.cx>a.cx,down=b.cy>a.cy;
+    const start=cross?[right?a.right:a.left,a.cy]:[a.cx,down?a.bottom:a.top];
+    const end=cross?[right?b.left:b.right,b.cy]:[b.cx,down?b.top:b.bottom];
+    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" d="M ${start[0]} ${start[1]} L ${end[0]} ${end[1]}"/><circle class="anchor" cx="${start[0]}" cy="${start[1]}" r="3"/><circle class="anchor" cx="${end[0]}" cy="${end[1]}" r="3"/>`;
   }).join('');
 }
 function targetView() {
