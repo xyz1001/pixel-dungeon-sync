@@ -6,6 +6,9 @@ plugins {
 }
 
 subprojects {
+    tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEach {
+        exclude("**/config.json", "**/config.json.legacy*", "**/.local/**", "**/.pixel-dungeon-sync/**")
+    }
     dependencyLocking {
         lockAllConfigurations()
         // Native Compose dependencies differ by host. Only resolved hosts get a lockfile.

@@ -33,6 +33,9 @@ local.properties
 credentials*
 .credentials/
 .secrets/
+config.json
+config.json.legacy*
+.pixel-dungeon-sync/
 *.pem
 *.key
 *.p12

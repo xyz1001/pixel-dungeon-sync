@@ -11,7 +11,7 @@ data class ConnectionDraft(val config: AppConfig, val password: String = "") {
  /** An identity edit must never carry a different service/account's active password with it. */
  fun editingConfig(next: AppConfig): ConnectionDraft {
   val identityChanged = next.endpoint != config.endpoint || next.username != config.username
-  return ConnectionDraft(if (identityChanged) next.copy(rememberPassword = false, onboardingProgress = OnboardingProgress.PENDING) else next, if (identityChanged) "" else password)
+  return ConnectionDraft(if (identityChanged) next.copy(rememberPassword = false, password = null, onboardingProgress = OnboardingProgress.PENDING) else next, if (identityChanged) "" else password)
  }
 }
 
@@ -138,15 +138,20 @@ class ConnectionSetup(
   return tested
  }
 
- fun apply(configFile: ConfigFile, rememberPasswordStored: Boolean = draft.config.rememberPassword): AppliedConnection = synchronized(lock) {
+ fun apply(configFile: ConfigFile, rememberPasswordStored: Boolean = draft.config.rememberPassword, filePassword: String? = null): AppliedConnection = synchronized(lock) {
   check(!closed && !running && testedRevision == revision && result is ConnectionTestResult.Success) { "请先成功测试当前配置，再保存" }
   require(!rememberPasswordStored || current.config.rememberPassword) { "未请求保存密码" }
-  val safe = current.config.validated().copy(saveRoot = "", rememberPassword = rememberPasswordStored)
+  val safe = current.config.validated().copy(saveRoot = "", rememberPassword = rememberPasswordStored, password = filePassword)
   // Failed persistence leaves the tested draft available for retry, without claiming it was applied.
   configFile.save(safe)
   val applied = AppliedConnection(safe, current.password)
   current = ConnectionDraft(safe); testedRevision = null; result = null; revision++; closed = true
   applied
+ }
+
+ /** The explicit Connect action saves the submitted password to the local configuration file. */
+ fun applyFilePassword(configFile: ConfigFile): AppliedConnection = synchronized(lock) {
+  apply(configFile, false, current.password)
  }
 
  /** Cancel invalidates results and clears the draft; any already-created empty remote folders remain. */

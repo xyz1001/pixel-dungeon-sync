@@ -63,8 +63,10 @@ private fun validateRawEndpoint(endpoint: String) {
  val saveRoot: String = "", val endpoint: String = "http://127.0.0.1:8765",
  val profile: String = "demo", val version: String? = null, val targetGame: String = "",
  val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
- val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY
+ val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY,
+ val password: String? = null
 ) {
+ override fun toString() = "AppConfig(profile=$profile, targetGame=$targetGame, onboardingProgress=$onboardingProgress, password=<redacted>)"
  fun validated(): AppConfig {
   require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "档案名只允许 1–64 位字母、数字、下划线或连字符" }
   validateRawEndpoint(endpoint)
@@ -75,20 +77,21 @@ private fun validateRawEndpoint(endpoint: String) {
  }
 }
 
-/** Only explicitly enumerated, non-secret fields are written. Legacy roots are never restored. */
+/** Explicit local-file persistence. Password is plaintext by product choice; never log this file. */
 class ConfigFile(private val path: Path) {
  @Serializable private data class Persisted(
   val endpoint: String, val profile: String, val targetGame: String = "",
   val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
-  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY
+  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY, val password: String? = null
  )
  fun exists(): Boolean = SafePaths.checked(path).exists()
- fun load(): AppConfig? = if (exists())
+ fun load(): AppConfig? = try { if (exists())
   json.decodeFromString<AppConfig>(SafePaths.boundedRead(path, 16 * 1024).decodeToString())
    .copy(saveRoot = "").validated() else null
+ } catch (_: Exception) { error("配置文件无法读取或已损坏；原文件保留，请重新填写设置。") }
  fun save(config: AppConfig) {
   val safe = config.validated()
-  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress)).encodeToByteArray()
+  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress, safe.password)).encodeToByteArray()
   require(bytes.size <= 16 * 1024) { "配置过大，未保存" }
   preserveLegacy()
   SafePaths.atomicWrite(path, bytes)

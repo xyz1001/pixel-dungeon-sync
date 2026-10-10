@@ -19,7 +19,7 @@ import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
 import java.nio.file.Path
 
-private val workspace = Path.of(System.getProperty("pdsync.workspace", ".")).toAbsolutePath().normalize()
+private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
 private enum class Page { HOME, SETTINGS, DISCOVERY, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
@@ -58,6 +58,7 @@ internal fun runSyncApplication(
    delay(3000); check(window.isDisplayable && window.isShowing); println("PDSYNC_UI_SMOKE_OK ${window.width}x${window.height}"); exitApplication()
   }
   val configFile = remember { ConfigFile(workspace.resolve(".local/config.json")) }
+  val setupSelection = remember { SetupSelection(workspace.resolve(".local/setup-game.txt")) }
   val initialResult = remember { runCatching { configFile.load() } }
   var config by remember { mutableStateOf(initialResult.getOrNull()) }
   val location = remember { DefaultProfileLocation() }
@@ -69,7 +70,7 @@ internal fun runSyncApplication(
   var page by remember { mutableStateOf(if (config == null) Page.DISCOVERY else Page.HOME) }
   var pageGeneration by remember { mutableStateOf(0L) }
   var onboardingActive by remember { mutableStateOf(config == null || config?.onboardingProgress in setOf(OnboardingProgress.PENDING, OnboardingProgress.DEFERRED)) }
-  var setupDraft by remember { mutableStateOf(config ?: newConnectionConfig()) }
+  var setupDraft by remember { mutableStateOf(config ?: newConnectionConfig().copy(targetGame = runCatching { setupSelection.load() }.getOrNull().orEmpty())) }
   var discovery by remember { mutableStateOf<InstallationDiscoveryResult?>(null) }
   var discoveredTarget by remember { mutableStateOf<TargetGame?>(null) }
   var discoveryNotice by remember { mutableStateOf<String?>(null) }
@@ -104,13 +105,19 @@ internal fun runSyncApplication(
   var device by remember { mutableStateOf<DeviceIdentity?>(null) }
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
-  val secretStore = remember { SystemSecretStore.create() }
   val selection = history.firstOrNull { it.manifest.id == selected }
   val homeScroll = rememberScrollState()
   val historyScroll = rememberLazyListState()
 
   fun navigate(next: Page) {
    pageGeneration++; page = next; closeBlocked = false
+  }
+  suspend fun reconnectSaved(saved: AppConfig) {
+   when (val restored = withContext(Dispatchers.IO) { restoreSavedConnection(saved) }) {
+    is SavedConnectionResult.Connected -> { password = restored.connection.password; connected = true; connectionNotice = null }
+    is SavedConnectionResult.Retry -> { password = restored.connection.password; settingsMode = SettingsMode.UNLOCK; connectionNotice = restored.message }
+    is SavedConnectionResult.NeedsInput -> { settingsMode = SettingsMode.UNLOCK; connectionNotice = restored.message }
+   }
   }
   fun openConnection(mode: SettingsMode) {
    if (busy || connectingAtStartup || appClosed) return
@@ -375,6 +382,7 @@ internal fun runSyncApplication(
        require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
       }
       require(verified.trusted) { "无法识别所选游戏版本：${verified.reason}" }
+      withContext(Dispatchers.IO) { setupSelection.save(verified.path) }
       discoveredTarget = verified; discoveryNotice = null
      }
     } catch (e: Exception) { discoveryNotice = "未更改游戏选择：${e.message}" }
@@ -434,8 +442,10 @@ internal fun runSyncApplication(
       location.prepareDefaultDirectory()
      }
      val next = setupDraft.copy(targetGame = target.path, onboardingProgress = OnboardingProgress.PENDING)
+     withContext(Dispatchers.IO) { setupSelection.save(target.path) }
      if (config != null) { withContext(Dispatchers.IO) { configFile.save(next) }; config = next }
      setupDraft = next; onboardingActive = true; proceed = true
+     if (!connected && config?.password != null) reconnectSaved(next)
     } catch (e: Exception) { discoveryNotice = "尚不能继续：${e.message}" }
     finally { busy = false }
     if (proceed) {
@@ -513,6 +523,9 @@ internal fun runSyncApplication(
      onboardingActive = true; settingsMode = SettingsMode.FULL
      scanDiscovery(); page = Page.DISCOVERY
      initialResult.exceptionOrNull()?.let { discoveryNotice = "旧设置无法读取，原文件保留。请重新检查游戏并配置连接。" }
+     if (initialResult.isSuccess && System.getProperty("pdsync.workspace") == null && java.nio.file.Files.exists(Path.of(".local/config.json"))) {
+      discoveryNotice = "发现旧启动目录中的设置，原文件已保留。本次使用固定用户目录，请重新填写连接。"
+     }
     } else {
      refreshProfile(saved)
      if (session == null || targetInfo?.trusted != true) {
@@ -525,22 +538,8 @@ internal fun runSyncApplication(
       val resumed = saved.copy(onboardingProgress = progress)
       if (resumed != saved) withContext(Dispatchers.IO) { configFile.save(resumed) }
       config = resumed; setupDraft = resumed; onboardingActive = progress != OnboardingProgress.COMPLETE
-      fun requestUnlock(notice: String? = null) {
-       settingsMode = SettingsMode.UNLOCK; connectionNotice = notice; page = Page.CONNECTION
-      }
-      if (resumed.rememberPassword) {
-       val restored = withContext(Dispatchers.IO) { secretStore.read(resumed.endpoint, resumed.username) }
-       if (restored is SecretReadResult.Found) {
-        val checker = ConnectionSetup(resumed)
-        try {
-         checker.update(resumed, restored.password)
-         when (val checked = withContext(Dispatchers.IO) { checker.testConnection() }) {
-          is ConnectionTestResult.Success -> { password = restored.password; connected = true }
-          is ConnectionTestResult.Failure -> requestUnlock(checked.message)
-         }
-        } finally { checker.cancel() }
-       } else requestUnlock(if (restored is SecretReadResult.Unavailable) restored.message else "未找到已保存的密码，请重新输入。")
-      } else requestUnlock()
+      reconnectSaved(resumed)
+      if (!connected) page = Page.CONNECTION
      }
     }
    } catch (e: CancellationException) { throw e }
@@ -783,7 +782,7 @@ internal fun runSyncApplication(
        Page.CONNECTION -> key(pageGeneration) {
         val generation = pageGeneration
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
-        ConnectionPage(settingsMode, configFile, if (onboardingActive) setupDraft else config, password, secretStore, connectionNotice, busy || connectingAtStartup, onboardingActive,
+        ConnectionPage(settingsMode, configFile, if (onboardingActive) setupDraft else config, password, connectionNotice, busy || connectingAtStartup, onboardingActive,
          onBusy = { if (current()) busy = it },
          onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(if (onboardingActive) Page.DISCOVERY else Page.HOME) },
          onApplied = { applied, note ->
@@ -849,7 +848,7 @@ private fun CompactFeedback(raw: String, fallback: String) {
 }
 
 @Composable
-private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: AppConfig?, currentPassword: String, secretStore: SecureCredentialStore, initialNotice: String?, busy: Boolean, onboarding: Boolean, onBusy: (Boolean) -> Unit, onDismiss: () -> Unit, onApplied: (AppliedConnection, String?) -> Unit) {
+private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: AppConfig?, currentPassword: String, initialNotice: String?, busy: Boolean, onboarding: Boolean, onBusy: (Boolean) -> Unit, onDismiss: () -> Unit, onApplied: (AppliedConnection, String?) -> Unit) {
  val controller = remember { ConnectionSetup(initial) }
  val lifetime = remember { ConnectionPageLifetime() }
  var draft by remember { mutableStateOf(initial ?: newConnectionConfig()) }
@@ -887,7 +886,6 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
   scope.launch {
    var applied: AppliedConnection? = null
    var note: String? = null
-   var secretChanged = false
    var verified = false
    var finished = false
    try {
@@ -898,16 +896,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
       verified = true
       applied = withContext(Dispatchers.IO) {
        lifetime.persist(ticket) {
-        // Only a previously opted-in, unchanged identity can retain secure password storage.
-        // Disposal cannot interleave between this guard, credential storage and config apply.
-        var stored = false
-        if (submitted.config.rememberPassword) {
-         val written = secretStore.save(submitted.config.endpoint, submitted.config.username, submitted.password)
-         stored = written is SecretWriteResult.Success
-         secretChanged = stored
-         if (!stored) note = "安全存储不可用，密码仅用于本次会话。${(written as SecretWriteResult.Unavailable).message}"
-        }
-        controller.apply(configFile, stored)
+        controller.applyFilePassword(configFile)
        }
       }
      }
@@ -916,7 +905,6 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    catch (e: Exception) {
     if (lifetime.isCurrent(ticket)) {
      message = if (verified) "连接已通过，但本机设置未保存：${e.message ?: "请检查配置文件写入权限后重试"}" else "连接未完成，请检查地址、网络与服务状态后重试。"
-     if (secretChanged) message += " 系统安全存储中的密码已更新，其他设置尚未保存。"
      failed = true
     }
    } finally {

@@ -17,6 +17,7 @@ internal object NoviceCopy {
   OnboardingKind.BLOCKED -> "暂时无法比较，请检查问题后重试。"
  }
  fun feedback(raw: String, fallback: String): String = when {
+  raw.contains("本机设置未保存") -> "设置未保存，请检查配置目录权限后重试。"
   raw.contains("401") || raw.contains("403") -> "连接失败，请检查用户名、密码和访问权限。"
   raw.contains("不兼容") || raw.contains("兼容范围") || raw.contains("降级") || raw.contains("存档写入版本") -> "暂不能恢复，请检查游戏与存档版本。"
   raw.contains("游戏正在运行") || raw.contains("无法确认游戏") -> "请退出游戏后重试。"
