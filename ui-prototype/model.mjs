@@ -39,7 +39,7 @@ export function createState(scene = 'empty', gameId = 'shattered') {
   const state = {scene, gameId, currentDeviceId: 'demo-current', localSnapshot: fixtureLocal ? {deviceId: 'demo-current', deviceName: 'Windows-PC', contentId: 'demo-local-v1'} : null, cloudSnapshot: cloud ? {contentId: ['identical', 'running'].includes(scene) ? 'demo-local-v1' : 'demo-cloud-v2', deviceId: 'demo-remote', deviceName: scene === 'longDevice' ? 'MacBook-Example-Very-Long-Device-Name-用于窄屏展示的虚构设备名称' : 'MacBook'} : null, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud,
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
     completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null};
-  state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['save-2'] : [], available: true, publishedOrder: null};
+  state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', storage:'device', ownerDeviceId:'demo-current', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['device-save-2'] : [], available: true, publishedOrder: null};
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
   if (state.localSnapshot) state.history.push({...state.localSnapshot});
@@ -56,10 +56,13 @@ function historyFixture(latest) {
     make('save-3','demo-tablet','Pixel Tablet','2026/10/08 11:00',3,['save-1'],'demo-branch'),
     make('save-4',latest.deviceId,latest.deviceName,'2026/10/09 09:00',4,['save-2'],latest.contentId),
     make('save-5','demo-tablet','Pixel Tablet','2026/10/09 09:30',5,['save-3'],'demo-unavailable',{available:false})
-  ];
+  ].flatMap(n=>[
+    {...n,id:`device-${n.id}`,storage:'device',ownerDeviceId:n.deviceId,publishedOrder:null,available:true,parentIds:n.parentIds.map(id=>`device-${id}`)},
+    {...n,storage:'cloud',parentIds:[`device-${n.id}`]}
+  ]);
 }
 export function latestCloud(s) {
-  return s.history.filter(n => n.available && n.contentId && Number.isFinite(n.publishedOrder))
+  return s.history.filter(n => n.storage === 'cloud' && n.available && n.contentId && Number.isFinite(n.publishedOrder))
     .sort((a,b)=>b.publishedOrder-a.publishedOrder)[0] || null;
 }
 export function selectedTarget(s) {
@@ -69,7 +72,7 @@ export function selectedTarget(s) {
 export function targetMatchesLocal(s) {
   const target=selectedTarget(s);
   return s.connected && s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)
-    && Boolean(target?.available) && Number.isFinite(target.publishedOrder) && s.localSnapshot.contentId === target.contentId;
+    && target?.storage === 'cloud' && Boolean(target?.available) && Number.isFinite(target.publishedOrder) && s.localSnapshot.contentId === target.contentId;
 }
 export function historyEdges(s) {
   const ids=new Set(s.history.map(n=>n.id));
@@ -78,9 +81,15 @@ export function historyEdges(s) {
 function publishLocal(s) {
   const nextOrder=Math.max(0,...s.history.map(n=>n.order))+1;
   const publishedOrder=Math.max(0,...s.history.map(n=>n.publishedOrder||0))+1;
-  const snapshot={...s.localSnapshot,id:`upload-${s.uploads+1}-${nextOrder}`,order:nextOrder,publishedOrder,
+  const snapshot={...s.localSnapshot,storage:'cloud',id:`upload-${s.uploads+1}-${nextOrder}`,order:nextOrder,publishedOrder,
     parentIds:s.localSnapshot?.id ? [s.localSnapshot.id] : [],available:true};
   return {...s,history:[...s.history,snapshot],cloud:true,cloudSnapshot:snapshot,uploads:s.uploads+1};
+}
+function receiveCloud(s) {
+  const order=Math.max(0,...s.history.map(n=>n.order))+1;
+  const local={...s.pendingRestore,id:`restore-${s.restores+1}-${order}`,storage:'device',ownerDeviceId:s.currentDeviceId,
+    publishedOrder:null,parentIds:[s.pendingRestore.id],order,restored:true};
+  return {...s,localSnapshot:local,history:[...s.history,local]};
 }
 // Device identity belongs to the snapshot source, independently of storage location.
 export function deviceLabel(snapshot, currentDeviceId) {
@@ -102,7 +111,7 @@ export function isSynced(s) {
 }
 export function canRestore(s) {
   const target=selectedTarget(s);
-  return !s.busy && s.connected && s.cloud === true && Boolean(target?.contentId) && target.available && Number.isFinite(target.publishedOrder)
+  return !s.busy && s.connected && s.cloud === true && Boolean(target?.contentId) && target.storage === 'cloud' && target.available && Number.isFinite(target.publishedOrder)
     && s.scene !== 'running' && !targetMatchesLocal(s)
     && (localIsEmpty(s) || (s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)));
 }
@@ -163,7 +172,7 @@ export function reduce(s, action) {
         ? {...s, busy: false, pending: '', connected: false, connectionStatus: 'failed', testedRevision: null, message: ''}
         : {...s, busy: false, pending: '', connected: true, connectionStatus: 'success', testedRevision: s.configRevision, choice: '', message: ''};
       if (s.pending === 'upload') return {...publishLocal(s), busy: false, pending: '', message: '模拟上传完成。'};
-      if (s.pending === 'restore') return {...s, page: s.page === 'compare' ? 'home' : s.page, completed: s.page === 'compare' || s.completed, readStatus: 'found', preview: {playCount:s.pendingRestore.plays,slots:Array.from({length:s.pendingRestore.slots},(_,i)=>({slot:i+1,modified:s.pendingRestore.time})),records:true,fileCount:s.pendingRestore.slots*7+3}, busy: false, pending: '', local: true, localSnapshot: s.pendingRestore ? {...s.pendingRestore} : null, pendingRestore: null, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
+      if (s.pending === 'restore') return {...receiveCloud(s), page: s.page === 'compare' ? 'home' : s.page, completed: s.page === 'compare' || s.completed, readStatus: 'found', preview: {playCount:s.pendingRestore.plays,slots:Array.from({length:s.pendingRestore.slots},(_,i)=>({slot:i+1,modified:s.pendingRestore.time})),records:true,fileCount:s.pendingRestore.slots*7+3}, busy: false, pending: '', local: true, pendingRestore: null, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
       return s;
     }
     case 'choose': return s.page === 'compare' && ((action.value === 'local' && s.local) || (action.value === 'cloud' && s.cloud))

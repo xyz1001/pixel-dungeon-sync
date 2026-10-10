@@ -20,16 +20,26 @@ function historyView() {
   const nodes=[...state.history].sort((a,b)=>b.order-a.order);
   const devices=[...state.devices];
   for (const n of nodes) if (!devices.some(d=>d.deviceId===n.deviceId)) devices.push({deviceId:n.deviceId,deviceName:n.deviceName});
-  const width=devices.length*220, height=nodes.length*116;
-  const point=id=>{const row=nodes.findIndex(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===nodes[row].deviceId)*220+110,y:row*116+58};};
-  const edges=historyEdges(state).map(edge=>{const a=point(edge.parent),b=point(edge.child);return `<path d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
-  const cells=nodes.map(n=>devices.map(d=>d.deviceId!==n.deviceId ? '<div class="history-cell"></div>' : `<div class="history-cell"><button class="history-node ${state.localSnapshot?.id===n.id ? 'current-node' : ''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><time>${n.time}</time><span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id ? '本机当前使用 · ' : ''}${!Number.isFinite(n.publishedOrder) ? '仅本机 · 不可云端恢复' : !n.available ? '云端内容不可用' : latestCloud(state)?.id===n.id ? '最新云端' : '云端存档'}</small></button></div>`).join('')).join('');
-  return `<section class="history-section"><h2>存档历史</h2><p class="hint">上新下旧 · 点击存档选择恢复目标，连线表示进度延续。窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true">${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
+  devices.splice(1,0,{deviceId:'cloud-column',deviceName:'云端存档'});
+  const lane=n=>n.storage==='cloud'?'cloud-column':n.ownerDeviceId||n.deviceId;
+  const rows=[...new Set(nodes.map(n=>n.order))];
+  const width=devices.length*220, height=rows.length*132;
+  const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.indexOf(node.order)*132+66};};
+  const edges=historyEdges(state).map(edge=>{const a=point(edge.parent),b=point(edge.child);if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;}else{const direction=Math.sign(b.y-a.y);a.y+=direction*48;b.y-=direction*48;}const child=nodes.find(n=>n.id===edge.child);const kind=child.storage==='cloud'?'upload':child.restored?'restore':'inherit';return `<path class="edge-${kind}" marker-end="url(#history-arrow)" d="M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}"/>`;}).join('');
+  const cells=rows.map(order=>devices.map(d=>{
+    const n=nodes.find(n=>n.order===order&&lane(n)===d.deviceId);
+    if(!n)return '<div class="history-cell"></div>';
+    const isCloud=n.storage==='cloud';
+    const uploaded=state.history.some(c=>c.storage==='cloud'&&c.parentIds.includes(n.id));
+    const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(n.restored?'从云端恢复':uploaded?'已上传':'未上传');
+    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button></div>`;
+  }).join('')).join('');
+  return `<section class="history-section"><h2>存档历史</h2><p class="hint">最新操作在上 · 选择云端存档恢复。绿线为上传，蓝线为恢复，灰线为进度延续；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs><marker id="history-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
 }
 function targetView() {
   const target=selectedTarget(state);
-  const unavailable=target && (!target.available || !Number.isFinite(target.publishedOrder));
-  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">此存档没有可用的云端内容，请选择其他存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
+  const unavailable=target && (target.storage !== 'cloud' || !target.available || !Number.isFinite(target.publishedOrder));
+  return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">请选择“云端存档”列中可用的存档恢复；设备上的存档需先上传。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
 }
 function render() {
   app.setAttribute('aria-busy', String(state.busy));

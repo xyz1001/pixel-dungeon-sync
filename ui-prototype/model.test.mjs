@@ -132,8 +132,8 @@ test('source device labels use identity, preserve remote names, and never invent
 });
 test('selection and restore keep snapshot source identity on both setup and home',()=>{
  let s=connected('cloud');const remote={...s.cloudSnapshot};s=act(s,'choose',{value:'cloud'});assert.deepEqual(s.cloudSnapshot,remote);
- s=settle(act(s,'finish'));assert.deepEqual(s.localSnapshot,remote);assert.deepEqual(s.cloudSnapshot,remote);assert.equal(deviceLabel(s.localSnapshot,s.currentDeviceId),'MacBook');
- let home={...connected('conflict'),page:'home'};home=settle(act(act(home,'askRestore'),'restore'));assert.deepEqual(home.localSnapshot,remote);
+ s=settle(act(s,'finish'));assert.equal(s.localSnapshot.contentId,remote.contentId);assert.equal(s.localSnapshot.deviceId,remote.deviceId);assert.deepEqual(s.localSnapshot.parentIds,[remote.id]);assert.deepEqual(s.cloudSnapshot,remote);assert.equal(deviceLabel(s.localSnapshot,s.currentDeviceId),'MacBook');
+ let home={...connected('conflict'),page:'home'};home=settle(act(act(home,'askRestore'),'restore'));assert.equal(home.localSnapshot.contentId,remote.contentId);assert.equal(home.localSnapshot.deviceId,remote.deviceId);
  home=settle(act(home,'upload'));assert.deepEqual(home.cloudSnapshot,remote);
  let local=act(act(connected('local'),'choose',{value:'local'}),'finish');assert.equal(deviceLabel(local.cloudSnapshot,local.currentDeviceId),'本机');
 });
@@ -179,7 +179,7 @@ test('explicit old selection overrides synced latest, clearing restores the defa
  s=act(s,'clearSelection');assert.equal(selectedTarget(s).id,'save-4');assert.equal(canRestore(s),false);
 });
 test('only real parent references produce edges, including cross-device branching',()=>{
- const s=createState('history'),edges=historyEdges(s);assert.deepEqual(edges.filter(e=>e.parent==='save-1'),[{parent:'save-1',child:'save-2'},{parent:'save-1',child:'save-3'}]);
+ const s=createState('history'),edges=historyEdges(s);assert.deepEqual(edges.filter(e=>e.parent==='device-save-1'&&e.child.startsWith('device-')),[{parent:'device-save-1',child:'device-save-2'},{parent:'device-save-1',child:'device-save-3'}]);
  for(const edge of edges){const child=s.history.find(n=>n.id===edge.child);assert.ok(child.parentIds.includes(edge.parent));assert.ok(s.history.some(n=>n.id===edge.parent));}
  assert.equal(historyEdges({...s,history:[{id:'orphan',parentIds:['missing']}]}).length,0);
 });
@@ -188,7 +188,7 @@ test('unavailable and local-only nodes never silently fall back to latest',()=>{
 });
 test('old restore changes local pointer only, leaves immutable history and latest intact',()=>{
  let s=act(createState('history'),'selectSnapshot',{id:'save-2'});const history=JSON.stringify(s.history);s=act(s,'askRestore');s=act(s,'restore');assert.equal(s.pendingRestore.id,'save-2');assert.equal(act(s,'askRestore'),s);
- const token=s.token;s=settle(s);assert.equal(s.localSnapshot.id,'save-2');assert.equal(s.localSnapshot.deviceName,'MacBook');assert.equal(JSON.stringify(s.history),history);assert.equal(latestCloud(s).id,'save-4');assert.equal(s.restores,1);assert.equal(act(s,'settled',{token}),s);assert.equal(canRestore(s),false);
+ const token=s.token;s=settle(s);assert.deepEqual(s.localSnapshot.parentIds,['save-2']);assert.equal(s.localSnapshot.storage,'device');assert.equal(s.localSnapshot.ownerDeviceId,s.currentDeviceId);assert.equal(s.localSnapshot.deviceName,'MacBook');assert.equal(JSON.stringify(s.history.slice(0,-1)),history);assert.equal(s.history.at(-1).storage,'device');assert.equal(latestCloud(s).id,'save-4');assert.equal(s.restores,1);assert.equal(act(s,'settled',{token}),s);assert.equal(canRestore(s),false);
  s=act(s,'clearSelection');assert.ok(canRestore(s));assert.equal(selectedTarget(s).id,'save-4');
 });
 test('selection and selected content changes invalidate confirmation',()=>{
@@ -198,9 +198,21 @@ test('selection and selected content changes invalidate confirmation',()=>{
  changed=act(s,'clearSelection');assert.equal(changed.restoreConfirm,false);
 });
 test('empty local restores selected old cloud without confirmation; unknown source stays unknown',()=>{
- let s={...connected('cloud'),page:'home'};s=act(s,'selectSnapshot',{id:'save-3'});s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);s=settle(s);assert.equal(s.localSnapshot.id,'save-3');
+ let s={...connected('cloud'),page:'home'};s=act(s,'selectSnapshot',{id:'save-3'});s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);s=settle(s);assert.deepEqual(s.localSnapshot.parentIds,['save-3']);
  s={...s,history:s.history.map(n=>n.id==='save-2'?{...n,deviceName:''}:n)};s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(deviceLabel(selectedTarget(s),s.currentDeviceId),'未知设备');
 });
 test('explicit upload appends a published snapshot without rewriting history',()=>{
- let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,7);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
+ let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,12);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
+});
+
+test('cloud copies are distinct from device originals and connected by upload edges',()=>{
+ const s=createState('history');const cloud=s.history.filter(n=>n.storage==='cloud');assert.equal(cloud.length,5);
+ for(const n of cloud){const original=s.history.find(d=>d.id===n.parentIds[0]);assert.equal(original.storage,'device');assert.equal(original.contentId,n.contentId);assert.equal(original.deviceId,n.deviceId);assert.equal(original.publishedOrder,null);}
+ const original=s.history.find(n=>n.id==='device-save-4');const selected=act(s,'selectSnapshot',{id:original.id});assert.equal(canRestore(selected),false);
+});
+test('upload adds only one cloud copy, restore adds only a current-device copy',()=>{
+ let s=createState('history');const cloudBefore=s.history.filter(n=>n.storage==='cloud').length;const source=s.localSnapshot.id;
+ s=act(s,'upload');assert.equal(act(s,'upload'),s);s=settle(s);assert.equal(s.history.filter(n=>n.storage==='cloud').length,cloudBefore+1);assert.equal(latestCloud(s).storage,'cloud');assert.deepEqual(latestCloud(s).parentIds,[source]);assert.equal(act(s,'upload'),s);
+ s=act(s,'selectSnapshot',{id:'save-2'});const published=JSON.stringify(s.history.filter(n=>n.storage==='cloud'));s=settle(act(act(s,'askRestore'),'restore'));
+ assert.equal(JSON.stringify(s.history.filter(n=>n.storage==='cloud')),published);assert.equal(s.localSnapshot.storage,'device');assert.equal(s.localSnapshot.ownerDeviceId,s.currentDeviceId);assert.deepEqual(s.localSnapshot.parentIds,['save-2']);assert.equal(canRestore(s),false);
 });
