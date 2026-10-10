@@ -112,6 +112,7 @@ class OnboardingComparisonTest {
  @Test fun equalDescendantDoesNotSilentlyAdvanceBaseline() {
   val store = Memory(); val remote = session(); val first = publish(remote, store)
   val local = session(); local.adoptOnboardingRemote(compare(local, store), store) { true }
+  remote.renameCurrent("Same game bytes, new metadata") { true }
   val second = publish(remote, store)
   val result = compare(local, store)
   assertEquals(OnboardingKind.IDENTICAL, result.kind); assertEquals(OnboardingLineage.ANCESTOR_OF_TIP, result.baselineLineage)

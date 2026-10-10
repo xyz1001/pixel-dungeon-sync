@@ -159,7 +159,17 @@ class AppendProfileSession(
   // first attempt is durable, and restarting can retry these exact bytes without startup recapture.
   val plan = repository.pending() ?: run {
    val baseline = repository.baseline()
-   repository.prepare(local.capture(stopped, null), listOfNotNull(baseline), operation = local.operationMetadata())
+   val captured = local.capture(stopped, null)
+   val previous = baseline?.let { repository.cachedGraph().commits[it] }
+   // Identical content AND portable metadata is already protected by this verified baseline.
+   // Still observe the graph so a remote advance/conflict is reported without creating a sibling.
+   if (previous != null && previous.snapshot.files == captured.manifest.files &&
+       previous.snapshot.directoryMetadata == captured.manifest.directoryMetadata) {
+    val graph = discover(store)
+    return@locked if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
+     else AppendPushResult.Success(previous, currentFiles() != previous.snapshot.files, graph.tips.singleOrNull() != previous.id)
+   }
+   repository.prepare(captured, listOfNotNull(baseline), operation = local.operationMetadata())
   }
   publish(plan, store, stopped)
  }
