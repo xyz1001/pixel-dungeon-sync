@@ -43,6 +43,7 @@ export function createState(scene = 'empty', gameId = 'shattered') {
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
   if (state.localSnapshot) {
+    if(cloud && state.localSnapshot.contentId===state.cloudSnapshot.contentId)state.localSnapshot.parentIds=[state.cloudSnapshot.id];
     if(cloud && state.localSnapshot.contentId!==state.cloudSnapshot.contentId){
       const source=state.history.find(n=>n.id==='save-2');
       const baseline={...source,id:'local-baseline',storage:'device',ownerDeviceId:state.currentDeviceId,publishedOrder:null,parentIds:[source.id]};
@@ -122,10 +123,15 @@ export function displayEdges(s) {
   const nodes=visibleHistory(s),ids=new Set(nodes.map(n=>n.id));
   const edges=nodes.filter(n=>n.storage==='cloud').flatMap(n=>(n.cloudParentIds||[]).filter(id=>ids.has(id)).map(id=>({parent:id,child:n.id,kind:'cloud'})));
   const add=(parent,child,kind)=>{if(ids.has(parent)&&ids.has(child))edges.push({parent,child,kind});};
-  if(localState(s)==='synced')add(matchingCloud(s)?.id,s.localSnapshot.id,'synced');
+  const transfer=(cloud,local)=>{
+    // Copy provenance, not position or timestamps, defines transfer direction.
+    if(cloud?.parentIds?.includes(local?.id))add(local.id,cloud.id,'synced');
+    else if(local?.parentIds?.includes(cloud?.id))add(cloud.id,local.id,'synced');
+  };
+  if(localState(s)==='synced')transfer(matchingCloud(s),s.localSnapshot);
   if(localState(s)==='unsynced'){
     const baseline=localBaselineNode(s);
-    if(baseline){add(localBaseline(s)?.id,baseline.id,'synced');add(baseline.id,s.localSnapshot.id,'unsynced');}
+    if(baseline){transfer(localBaseline(s),baseline);add(baseline.id,s.localSnapshot.id,'unsynced');}
   }
   return edges;
 }

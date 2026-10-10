@@ -44,12 +44,15 @@ function drawHistoryLines() {
     const r=node.getBoundingClientRect();return [node.dataset.snapshotId,{left:r.left-bounds.left,right:r.right-bounds.left,top:r.top-bounds.top,bottom:r.bottom-bounds.top,cx:(r.left+r.right)/2-bounds.left,cy:(r.top+r.bottom)/2-bounds.top}];
   }));
   svg.setAttribute('width',bounds.width);svg.setAttribute('height',bounds.height);svg.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
-  svg.innerHTML=displayEdges(state).map(edge=>{
+  svg.innerHTML=`<defs>${['cloud','synced','unsynced'].map(kind=>`<marker id="arrow-${kind}" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" viewBox="0 0 10 10"><path class="arrow-${kind}" d="M 1 1 L 9 5 L 1 9 Z"/></marker>`).join('')}</defs>`+displayEdges(state).map(edge=>{
     const a=boxes.get(edge.parent),b=boxes.get(edge.child);if(!a||!b)return '';
     const cross=Math.abs(a.cx-b.cx)>1,right=b.cx>a.cx,down=b.cy>a.cy;
     const start=cross?[right?a.right:a.left,a.cy]:[a.cx,down?a.bottom:a.top];
     const end=cross?[right?b.left:b.right,b.cy]:[b.cx,down?b.top:b.bottom];
-    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" d="M ${start[0]} ${start[1]} L ${end[0]} ${end[1]}"/><circle class="anchor" cx="${start[0]}" cy="${start[1]}" r="3"/><circle class="anchor" cx="${end[0]}" cy="${end[1]}" r="3"/>`;
+    // Stop just before the card so the full arrowhead stays outside its opaque face.
+    const length=Math.hypot(end[0]-start[0],end[1]-start[1]),gap=Math.min(5,length/3);
+    if(length){end[0]-=(end[0]-start[0])*gap/length;end[1]-=(end[1]-start[1])*gap/length;}
+    return `<path marker-end="url(#arrow-${edge.kind})" class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" d="M ${start[0]} ${start[1]} L ${end[0]} ${end[1]}"/><circle class="anchor" cx="${start[0]}" cy="${start[1]}" r="3"/>`;
   }).join('');
 }
 function targetView() {
