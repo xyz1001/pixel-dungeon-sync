@@ -17,14 +17,26 @@ export function gameLabel(s) {
   return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
-  empty: '双方为空', local: '只有本机存档', cloud: '只有云端存档', conflict: '双方进度不同',
+  empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', local: '本机多槽存档', cloud: '只有云端存档', conflict: '双方进度不同',
   identical: '双方进度相同', failure: '连接失败', connecting: '连接中', running: '游戏运行中',
   reading: '读取中', readFailure: '读取失败（重试可恢复）'
 };
+// Fixed local modification times, not scan timestamps. Slot count is independent of file count.
+export function saveFixture(scene) {
+  const slots = ['local', 'conflict', 'identical', 'running', 'readFailure'].includes(scene)
+    ? [{slot: 1, modified: '2026/10/08 21:15'}, {slot: 3, modified: '2026/10/09 09:30'}] : [];
+  return {playCount: slots.length ? 28 : scene === 'recordsOnly' ? 12 : 0, slots, records: slots.length > 0 || scene === 'recordsOnly', fileCount: slots.length ? 17 : scene === 'recordsOnly' ? 3 : 0};
+}
+export function saveStatus(s) {
+  if (s.readStatus === 'loading') return '正在检查存档…';
+  if (s.readStatus === 'failed') return '检查失败，请修改路径或重试。';
+  if (!s.preview) return s.savePath.trim() ? '等待检查…' : '请设置存档路径';
+  return `游玩 ${s.preview.playCount} 次 · 存档 ${s.preview.slots.length} 个`;
+}
 export function createState(scene = 'empty', gameId = 'shattered') {
-  const fixtureLocal = ['local', 'conflict', 'identical', 'running', 'readFailure'].includes(scene);
+  const fixtureLocal = saveFixture(scene).records;
   const cloud = ['cloud', 'conflict', 'identical', 'running'].includes(scene);
-  return {scene, gameId, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
+  return {scene, gameId, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
     connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
     completed: false, returnPage: 'home', uploads: 0, restores: 0};
 }
@@ -39,8 +51,9 @@ export function canFinish(s) {
   const k = kind(s);
   return k !== 'unknown' && (k === 'empty' || k === 'identical' || (s.choice === 'local' && s.local) || (s.choice === 'cloud' && s.cloud && s.scene !== 'running'));
 }
-function startRead(s) {
-  return {...s, page: 'read', readStatus: 'loading', local: null, busy: true, pending: 'read', token: s.token + 1,
+function startRead(s, advance = false) {
+  if (!s.savePath.trim()) return s;
+  return {...s, preview: null, continueAfterRead: advance, page: 'read', readStatus: 'loading', local: null, busy: true, pending: 'read', token: s.token + 1,
     readAttempts: s.readAttempts + 1, connected: false, choice: '', message: ''};
 }
 export function reduce(s, action) {
@@ -49,25 +62,27 @@ export function reduce(s, action) {
     if (s.busy && !['connect', 'read'].includes(s.pending)) return s;
     const page = ['game', 'read'].includes(s.page) ? 'game' : s.page === 'compare' ? 'connect' : s.page === 'connect' ? (s.completed ? 'settings' : 'read') : 'home';
     return {...s, page, token: s.token + 1, busy: false, pending: '', restoreConfirm: false, folderOpen: false, message: '',
-      ...(page === 'game' ? {local: null, readStatus: 'unread', connected: false, choice: ''} : {})};
+      ...(page === 'game' ? {preview: null, continueAfterRead: false, local: null, readStatus: 'unread', connected: false, choice: ''} : {})};
   }
-  if (action.type === 'editPath' && s.page === 'read') return {...s, savePath: action.value, local: null, readStatus: 'unread', connected: false, choice: '', busy: false, pending: '', token: s.token + 1, message: ''};
+  if (action.type === 'editPath' && s.page === 'read') return {...s, savePath: action.value, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', connected: false, choice: '', busy: false, pending: '', token: s.token + 1, message: ''};
+  if (s.pending === 'read' && action.type === 'next') return {...s, continueAfterRead: true};
   if (s.busy && action.type !== 'settled') return s;
   switch (action.type) {
-    case 'chooseGame': return {...s, gameId: action.gameId || s.gameId, savePath: action.gameId && action.gameId !== s.gameId ? defaultSavePaths[action.gameId] || '' : s.savePath, folderOpen: false, page: 'game', selectedGame: true, local: null, readStatus: 'unread', readAttempts: 0, connected: false, completed: false, choice: '', token: s.token + 1, message: ''};
-    case 'next': return s.page === 'game' && s.selectedGame ? {...s, page: 'read', message: ''}
-      : s.page === 'read' && !s.folderOpen && s.savePath.trim() ? startRead(s) : s;
+    case 'chooseGame': return {...s, gameId: action.gameId || s.gameId, savePath: action.gameId && action.gameId !== s.gameId ? defaultSavePaths[action.gameId] || '' : s.savePath, folderOpen: false, page: 'game', selectedGame: true, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, connected: false, completed: false, choice: '', token: s.token + 1, message: ''};
+    case 'next': return s.page === 'game' && s.selectedGame ? startRead({...s, page: 'read', message: ''})
+      : s.page === 'read' && !s.folderOpen && s.savePath.trim() ? (s.preview ? {...s, page: 'connect'} : startRead(s, true)) : s;
+    case 'preview': return s.page === 'read' && action.token === s.token && !s.folderOpen ? startRead(s) : s;
     case 'retryRead': return s.page === 'read' && s.savePath.trim() ? startRead(s) : s;
     case 'chooseFolder': return s.page === 'read' ? {...s, folderOpen: true} : s;
     case 'cancelFolder': return {...s, folderOpen: false};
     case 'useFolder': return s.page === 'read' && s.folderOpen
-      ? {...reduce(s, {type: 'editPath', value: `D:\\Game Saves\\${s.gameId}`}), folderOpen: false} : s;
+      ? startRead({...reduce(s, {type: 'editPath', value: `D:\\Game Saves\\${s.gameId}`}), folderOpen: false}) : s;
     case 'connect': return s.page !== 'connect' ? s : {...s, busy: true, pending: 'connect', token: s.token + 1, message: ''};
     case 'settled': {
       if (!s.busy || action.token !== s.token) return s;
       if (s.pending === 'read') return s.scene === 'readFailure' && s.readAttempts === 1
-        ? {...s, busy: false, pending: '', readStatus: 'failed', local: null, message: ''}
-        : {...s, page: 'connect', busy: false, pending: '', readStatus: s.fixtureLocal ? 'found' : 'empty', local: s.fixtureLocal, message: ''};
+        ? {...s, busy: false, pending: '', readStatus: 'failed', preview: null, continueAfterRead: false, local: null, message: ''}
+        : {...s, page: s.continueAfterRead ? 'connect' : 'read', preview: saveFixture(s.scene), continueAfterRead: false, busy: false, pending: '', readStatus: s.fixtureLocal ? 'found' : 'empty', local: s.fixtureLocal, message: ''};
       if (s.pending === 'connect') return s.scene === 'failure'
         ? {...s, busy: false, pending: '', connected: false, message: '连接失败，请重试或切换测试场景。'}
         : {...s, busy: false, pending: '', connected: true, page: s.completed ? 'settings' : 'compare', choice: '', message: ''};

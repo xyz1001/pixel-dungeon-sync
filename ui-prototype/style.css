@@ -4,3 +4,5 @@
 .header>div,.settings-row>div{min-width:0}.game-summary,.game-card .grow,.settings-row p{overflow-wrap:anywhere}.game-icon,.pill,.settings-row button,.header>button{flex-shrink:0}.test-body select{max-width:100%;min-width:0}
 
 .game-icon{position:relative;flex-shrink:0}.game-icon img{position:absolute;inset:0;object-fit:contain;background:#eef3e8;border-radius:10px;image-rendering:pixelated}
+
+.slot-times{list-style:none;padding:0;margin:8px 0;max-width:360px}.slot-times li{display:flex;justify-content:space-between;gap:12px;margin:5px 0}.slot-times time{white-space:nowrap}.folder-picker p{overflow-wrap:anywhere}
