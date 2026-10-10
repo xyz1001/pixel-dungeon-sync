@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -141,7 +141,7 @@ test('selection and restore keep snapshot source identity on both setup and home
 test('matching content disables transfers regardless of device name or timestamps',()=>{
  const s={...connected('identical'),page:'home'};assert.ok(isSynced(s));assert.equal(canRestore(s),false);
  assert.equal(act(s,'askRestore'),s);assert.equal(act(s,'upload'),s);
- const different={...s,cloudSnapshot:{...s.localSnapshot,contentId:'different'}};
+ const different={...s,history:s.history.map(n=>n.id==='save-4'?{...n,contentId:'different'}:n)};
  assert.equal(isSynced(different),false);assert.ok(act(different,'askRestore').restoreConfirm);
  for(const readStatus of ['unread','loading','failed']){const unknown={...s,readStatus};assert.equal(isSynced(unknown),false);assert.equal(canRestore(unknown),false);assert.equal(act(unknown,'askRestore'),unknown);}
  assert.equal(isSynced({...s,localSnapshot:{deviceName:'MacBook'}}),false);
@@ -166,4 +166,41 @@ test('changed snapshot, selection, page or old confirmation token cannot overwri
  let s=act(base,'choose',{value:'local'});assert.equal(s.restoreConfirm,false);assert.equal(act(s,'restore',{confirmationToken:token}),s);
  s=act(act(s,'choose',{value:'cloud'}),'finish');assert.notEqual(s.restoreConfirm.token,token);s=act(s,'restore',{confirmationToken:token});assert.equal(s.busy,false);
  s=act(base,'back');assert.equal(s.restoreConfirm,false);assert.equal(act(s,'restore',{confirmationToken:token}),s);
+});
+
+test('default latest uses available cloud publication order, not local save time',()=>{
+ let s=createState('history');assert.equal(latestCloud(s).id,'save-4');assert.equal(selectedTarget(s).id,'save-4');
+ s={...s,history:s.history.map(n=>n.id==='save-2'?{...n,time:'2099/01/01 00:00'}:n)};assert.equal(selectedTarget(s).id,'save-4');
+ assert.equal(s.history.find(n=>n.id==='local-initial').publishedOrder,null);
+});
+test('explicit old selection overrides synced latest, clearing restores the default',()=>{
+ let s={...connected('identical'),page:'home'};assert.ok(isSynced(s));assert.equal(canRestore(s),false);
+ s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(selectedTarget(s).id,'save-2');assert.ok(canRestore(s));assert.equal(targetMatchesLocal(s),false);
+ s=act(s,'clearSelection');assert.equal(selectedTarget(s).id,'save-4');assert.equal(canRestore(s),false);
+});
+test('only real parent references produce edges, including cross-device branching',()=>{
+ const s=createState('history'),edges=historyEdges(s);assert.deepEqual(edges.filter(e=>e.parent==='save-1'),[{parent:'save-1',child:'save-2'},{parent:'save-1',child:'save-3'}]);
+ for(const edge of edges){const child=s.history.find(n=>n.id===edge.child);assert.ok(child.parentIds.includes(edge.parent));assert.ok(s.history.some(n=>n.id===edge.parent));}
+ assert.equal(historyEdges({...s,history:[{id:'orphan',parentIds:['missing']}]}).length,0);
+});
+test('unavailable and local-only nodes never silently fall back to latest',()=>{
+ for(const id of ['save-5','local-initial']){let s=act(createState('history'),'selectSnapshot',{id});assert.equal(selectedTarget(s).id,id);assert.equal(canRestore(s),false);assert.equal(act(s,'askRestore'),s);}
+});
+test('old restore changes local pointer only, leaves immutable history and latest intact',()=>{
+ let s=act(createState('history'),'selectSnapshot',{id:'save-2'});const history=JSON.stringify(s.history);s=act(s,'askRestore');s=act(s,'restore');assert.equal(s.pendingRestore.id,'save-2');assert.equal(act(s,'askRestore'),s);
+ const token=s.token;s=settle(s);assert.equal(s.localSnapshot.id,'save-2');assert.equal(s.localSnapshot.deviceName,'MacBook');assert.equal(JSON.stringify(s.history),history);assert.equal(latestCloud(s).id,'save-4');assert.equal(s.restores,1);assert.equal(act(s,'settled',{token}),s);assert.equal(canRestore(s),false);
+ s=act(s,'clearSelection');assert.ok(canRestore(s));assert.equal(selectedTarget(s).id,'save-4');
+});
+test('selection and selected content changes invalidate confirmation',()=>{
+ let s=act(act(createState('history'),'selectSnapshot',{id:'save-2'}),'askRestore');const token=s.restoreConfirm.token;
+ let changed=act(s,'selectSnapshot',{id:'save-3'});assert.equal(changed.restoreConfirm,false);assert.equal(act(changed,'restore',{confirmationToken:token}).busy,false);
+ changed={...s,history:s.history.map(n=>n.id==='save-2'?{...n,contentId:'changed'}:n)};assert.equal(act(changed,'restore',{confirmationToken:token}).busy,false);
+ changed=act(s,'clearSelection');assert.equal(changed.restoreConfirm,false);
+});
+test('empty local restores selected old cloud without confirmation; unknown source stays unknown',()=>{
+ let s={...connected('cloud'),page:'home'};s=act(s,'selectSnapshot',{id:'save-3'});s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);s=settle(s);assert.equal(s.localSnapshot.id,'save-3');
+ s={...s,history:s.history.map(n=>n.id==='save-2'?{...n,deviceName:''}:n)};s=act(s,'selectSnapshot',{id:'save-2'});assert.equal(deviceLabel(selectedTarget(s),s.currentDeviceId),'未知设备');
+});
+test('explicit upload appends a published snapshot without rewriting history',()=>{
+ let s=createState('history');const old=JSON.stringify(s.history);s=settle(act(s,'upload'));assert.equal(s.uploads,1);assert.equal(s.history.length,7);assert.equal(JSON.stringify(s.history.slice(0,-1)),old);assert.equal(latestCloud(s).contentId,s.localSnapshot.contentId);
 });
