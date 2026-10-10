@@ -30,13 +30,18 @@ object SafePaths {
   require(!a.startsWith(b) && !b.startsWith(a)) { "存档目录与同步器数据目录不能互相包含" }
  }
  fun atomicWrite(path: Path, bytes: ByteArray) {
+  atomicWrite(path,bytes) { from,to -> Files.move(from,to,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);Unit }
+ }
+ /** No silent non-atomic fallback for configuration, baseline, or durable operation markers. */
+ internal fun atomicWrite(path:Path,bytes:ByteArray,replace:(Path,Path)->Unit) {
   val target = checked(path)
   checked(target.parent).createDirectories()
   val temp = Files.createTempFile(target.parent, ".write-", ".tmp")
   try {
-   Files.write(temp, bytes)
-   try { Files.move(temp, checked(target), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING) }
-   catch (_: AtomicMoveNotSupportedException) { Files.move(temp, checked(target), StandardCopyOption.REPLACE_EXISTING) }
+   FileChannel.open(temp,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS).use { channel ->
+    val buffer=java.nio.ByteBuffer.wrap(bytes);while(buffer.hasRemaining())channel.write(buffer);channel.force(true)
+   }
+   replace(temp,checked(target))
   } finally { Files.deleteIfExists(temp) }
  }
  fun boundedRead(path: Path, limit: Int): ByteArray = Files.newInputStream(checked(path)).use {
