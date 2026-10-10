@@ -1,6 +1,7 @@
 import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName} from './model.mjs';
 let state = createState('history');
 let pathTimer;
+let historyObserver;
 const app = document.querySelector('#app');
 const sceneSelect = document.querySelector('#scene');
 const gameSelect = document.querySelector('#game-sample');
@@ -24,19 +25,6 @@ function historyView() {
   const devices=[{deviceId:'cloud-column',deviceName:'云端存档'},{deviceId:state.currentDeviceId,deviceName:'本机'}];
   const lane=historyColumnId;
   if(!rows.length)rows.push([]);
-  const width=devices.length*220, height=rows.length*270;
-  const point=id=>{const node=nodes.find(n=>n.id===id);return {x:devices.findIndex(d=>d.deviceId===lane(node))*220+110,y:rows.findIndex(row=>row.some(n=>n.id===node.id))*270+76};};
-  const edges=displayEdges(state).map((edge,index)=>{
-    const a=point(edge.parent),b=point(edge.child);
-    let path;
-    if(a.x!==b.x){const direction=Math.sign(b.x-a.x);a.x+=direction*96;b.x-=direction*96;path=`M ${a.x} ${a.y} C ${a.x} ${(a.y+b.y)/2}, ${b.x} ${(a.y+b.y)/2}, ${b.x} ${b.y}`;}
-    else {
-      // Route ancestry beside cards so skipped rows never look like false parents.
-      const side=edge.kind==='cloud'?-1:1,rail=edge.kind==='cloud'?4+index*3:width-7;
-      a.x+=side*96;b.x+=side*96;path=`M ${a.x} ${a.y} H ${rail} V ${b.y} H ${b.x}`;
-    }
-    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" marker-end="url(#history-arrow)" d="${path}"/>`;
-  }).join('');
   const cells=rows.map((row,rowIndex)=>devices.map(d=>{
     const n=row.find(n=>lane(n)===d.deviceId);
     if(!n)return rowIndex===0&&d.deviceId===state.currentDeviceId&&localState(state)==='empty'?'<div class="history-cell"><div class="empty-local">无存档</div></div>':'<div class="history-cell"></div>';
@@ -45,7 +33,42 @@ function historyView() {
     const status=isCloud?(!n.available?'云端内容不可用':latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(unsynced?'未同步云端':'已同步云端');
     return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><strong class="snapshot-name">${escapeText(snapshotName(n))}</strong><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button>${state.renameId===n.id?`<form class="rename-form" data-rename-id="${n.id}"><input aria-label="存档名称" maxlength="80" placeholder="留空使用默认名，最多40字"><div><button type="submit">保存</button><button type="button" data-action="cancelRename">取消</button></div></form>`:`<button class="rename-button" data-rename-id="${n.id}" ${state.busy?'disabled':''}>命名</button>`}</div>`;
   }).join('')).join('');
-  return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs><marker id="history-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>${edges}</svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
+  return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" aria-hidden="true"></svg><div class="history-grid">${cells}</div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
+}
+// Measure rendered cards after each layout change; text and editors can resize rows.
+function drawHistoryLines() {
+  const body=app.querySelector('.history-body'),svg=body?.querySelector('.history-lines');
+  if(!svg)return;
+  const bounds=body.getBoundingClientRect();
+  const boxes=new Map([...body.querySelectorAll('.history-node')].map(node=>{
+    const r=node.getBoundingClientRect();return [node.dataset.snapshotId,{left:r.left-bounds.left,right:r.right-bounds.left,top:r.top-bounds.top,bottom:r.bottom-bounds.top,cx:(r.left+r.right)/2-bounds.left,cy:(r.top+r.bottom)/2-bounds.top}];
+  }));
+  const rounded=points=>{
+    let d=`M ${points[0][0]} ${points[0][1]}`;
+    for(let i=1;i<points.length-1;i++){
+      const a=points[i-1],b=points[i],c=points[i+1],ab=Math.hypot(b[0]-a[0],b[1]-a[1]),bc=Math.hypot(c[0]-b[0],c[1]-b[1]);
+      if(!ab||!bc)continue;
+      const r=Math.min(6,ab/2,bc/2),before=[b[0]+(a[0]-b[0])*r/ab,b[1]+(a[1]-b[1])*r/ab],after=[b[0]+(c[0]-b[0])*r/bc,b[1]+(c[1]-b[1])*r/bc];
+      d+=` L ${before[0]} ${before[1]} Q ${b[0]} ${b[1]} ${after[0]} ${after[1]}`;
+    }
+    return d+` L ${points.at(-1)[0]} ${points.at(-1)[1]}`;
+  };
+  svg.setAttribute('width',bounds.width);svg.setAttribute('height',bounds.height);svg.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
+  svg.innerHTML=displayEdges(state).map((edge,index)=>{
+    const a=boxes.get(edge.parent),b=boxes.get(edge.child);if(!a||!b)return '';
+    let points;
+    if(Math.abs(a.cx-b.cx)>1){
+      const right=b.cx>a.cx,start=[right?a.right:a.left,a.cy],end=[right?b.left:b.right,b.cy],middle=(start[0]+end[0])/2;
+      points=[start,[middle,start[1]],[middle,end[1]],end];
+    }else{
+      const down=b.cy>a.cy,start=[a.cx,down?a.bottom:a.top],end=[b.cx,down?b.top:b.bottom];
+      const rail=edge.kind==='cloud'?10+index*8:bounds.width-18;
+      const exit=start[1]+(down?8:-12),entry=end[1]+(down?-12:8);
+      points=[start,[start[0],exit],[rail,exit],[rail,entry],[end[0],entry],end];
+    }
+    const start=points[0],end=points.at(-1);
+    return `<path class="edge-${edge.kind}" data-parent="${edge.parent}" data-child="${edge.child}" d="${rounded(points)}"/><circle class="anchor" cx="${start[0]}" cy="${start[1]}" r="3"/><circle class="anchor" cx="${end[0]}" cy="${end[1]}" r="3"/>`;
+  }).join('');
 }
 function targetView() {
   const target=selectedTarget(state);
@@ -53,6 +76,7 @@ function targetView() {
   return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${unavailable ? '<p class="error">请选择“云端存档”列中可用的存档恢复；设备上的存档需先上传。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}${state.selectedSnapshotId ? button('清除选择，使用最新云端','clearSelection',state.busy,'text-button') : ''}</div>`;
 }
 function render() {
+  historyObserver?.disconnect();
   app.setAttribute('aria-busy', String(state.busy));
   sceneSelect.value = state.scene;
   gameSelect.value = state.gameId;
@@ -108,9 +132,13 @@ function render() {
   }
   const canvas=app.querySelector('.history-canvas');
   if (canvas) {
-    const columns=Number(canvas.dataset.columns); canvas.style.width=`${columns*220}px`;
-    canvas.querySelector('.device-columns').style.gridTemplateColumns=`repeat(${columns},220px)`;
-    canvas.querySelector('.history-grid').style.gridTemplateColumns=`repeat(${columns},220px)`;
+    const columns=Number(canvas.dataset.columns); canvas.style.width=`${columns*280}px`;
+    canvas.querySelector('.device-columns').style.gridTemplateColumns=`repeat(${columns},280px)`;
+    canvas.querySelector('.history-grid').style.gridTemplateColumns=`repeat(${columns},280px)`;
+    historyObserver=new ResizeObserver(drawHistoryLines);
+    historyObserver.observe(canvas.querySelector('.history-grid'));
+    canvas.querySelectorAll('.history-node').forEach(node=>historyObserver.observe(node));
+    drawHistoryLines();
   }
   app.querySelectorAll('.rename-button').forEach(element=>element.addEventListener('click',()=>send({type:'beginRename',id:element.dataset.renameId})));
   const renameForm=app.querySelector('.rename-form');
