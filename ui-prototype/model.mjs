@@ -74,6 +74,29 @@ export function targetMatchesLocal(s) {
   return s.connected && s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)
     && target?.storage === 'cloud' && Boolean(target?.available) && Number.isFinite(target.publishedOrder) && s.localSnapshot.contentId === target.contentId;
 }
+export function historyColumnId(node) {
+  return node.storage === 'cloud' ? 'cloud-column' : node.ownerDeviceId || node.deviceId;
+}
+// The displayed time is the save-content time, retained by uploads/restores.
+// Parse the fixed fixture format explicitly; publication order never affects this axis.
+function saveTime(node) {
+  const m=/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/.exec(node.time || '');
+  return m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : -Infinity;
+}
+export function historyRows(s) {
+  const sorted=[...s.history].sort((a,b)=>{
+    const at=saveTime(a),bt=saveTime(b);
+    return at===bt ? (a.id<b.id?-1:a.id>b.id?1:0) : at>bt?-1:1;
+  });
+  const rows=[];let groupStart=0,previous;
+  for(const node of sorted){
+    const time=saveTime(node);
+    if(time!==previous){groupStart=rows.length;previous=time;}
+    let row=rows.slice(groupStart).find(r=>!r.some(n=>historyColumnId(n)===historyColumnId(node)));
+    if(!row){row=[];rows.push(row);}row.push(node);
+  }
+  return rows;
+}
 export function historyEdges(s) {
   const ids=new Set(s.history.map(n=>n.id));
   return s.history.flatMap(n=>(n.parentIds||[]).filter(id=>ids.has(id)).map(id=>({parent:id,child:n.id})));

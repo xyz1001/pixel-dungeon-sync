@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -215,4 +215,24 @@ test('upload adds only one cloud copy, restore adds only a current-device copy',
  s=act(s,'upload');assert.equal(act(s,'upload'),s);s=settle(s);assert.equal(s.history.filter(n=>n.storage==='cloud').length,cloudBefore+1);assert.equal(latestCloud(s).storage,'cloud');assert.deepEqual(latestCloud(s).parentIds,[source]);assert.equal(act(s,'upload'),s);
  s=act(s,'selectSnapshot',{id:'save-2'});const published=JSON.stringify(s.history.filter(n=>n.storage==='cloud'));s=settle(act(act(s,'askRestore'),'restore'));
  assert.equal(JSON.stringify(s.history.filter(n=>n.storage==='cloud')),published);assert.equal(s.localSnapshot.storage,'device');assert.equal(s.localSnapshot.ownerDeviceId,s.currentDeviceId);assert.deepEqual(s.localSnapshot.parentIds,['save-2']);assert.equal(canRestore(s),false);
+});
+
+test('one shared save-time axis sorts interleaved devices independently of publication order',()=>{
+ const s={history:[
+  {id:'a',time:'2026/10/08 12:00',storage:'device',deviceId:'a',order:99},
+  {id:'b',time:'2026/10/09 08:00',storage:'cloud',publishedOrder:1},
+  {id:'c',time:'2026/10/08 15:00',storage:'device',deviceId:'c',order:1}
+ ]};assert.deepEqual(historyRows(s).flat().map(n=>n.id),['b','c','a']);
+});
+test('equal save times have stable IDs and never overlap within a column',()=>{
+ const s=createState('history');const a=historyRows(s);const b=historyRows({...s,history:[...s.history].reverse()});assert.deepEqual(a,b);
+ for(const row of a){assert.equal(new Set(row.map(historyColumnId)).size,row.length);assert.equal(new Set(row.map(n=>n.time)).size,1);}
+ const duplicates={history:[{id:'b',time:'2026/10/09 08:00',storage:'cloud'},{id:'a',time:'2026/10/09 08:00',storage:'cloud'}]};assert.deepEqual(historyRows(duplicates).map(r=>r[0].id),['a','b']);
+});
+test('upload and restore keep displayed save time and selection while timeline reorders',()=>{
+ let s=createState('history');s=settle(act(s,'upload'));s=act(s,'selectSnapshot',{id:'save-2'});s=settle(act(act(s,'askRestore'),'restore'));
+ assert.equal(s.localSnapshot.time,'2026/10/08 09:00');assert.equal(selectedTarget(s).id,'save-2');assert.equal(latestCloud(s).time,'2026/10/09 10:00');
+ const rows=historyRows(s);const times=rows.map(r=>r[0].time);assert.deepEqual(times,[...times].sort().reverse());
+ assert.ok(rows.findIndex(r=>r.some(n=>n.id===s.localSnapshot.id))>0);
+ for(const edge of historyEdges(s)){assert.ok(rows.some(r=>r.some(n=>n.id===edge.parent)));assert.ok(rows.some(r=>r.some(n=>n.id===edge.child)));}
 });
