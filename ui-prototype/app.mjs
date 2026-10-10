@@ -12,7 +12,7 @@ const restoreWarning = '会先备份，再替换本机进度。云端没有的�
 const button = (label, action, disabled = false, cls = '') => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}${state.page !== 'game' ? `<p class="game-summary small">${gameSummary()}</p>` : ''}</div>${extra}</header>`;
 const footer = (left, right) => `<footer class="footer">${left}<div class="right">${right}</div></footer>`;
-const back = () => button(state.busy && state.pending === 'connect' ? '取消连接' : '上一步', 'back', state.busy && !['connect', 'read'].includes(state.pending), 'text-button');
+const back = () => button('上一步', 'back', state.busy && !['connect', 'read'].includes(state.pending), 'text-button');
 const notice = () => state.message ? `<p class="${state.scene === 'failure' ? 'error' : 'notice'}" role="status">${state.message}</p>` : '';
 const choice = (value, title, description) => `<label class="choice"><input type="radio" name="progress" value="${value}" ${state.choice === value ? 'checked' : ''}><span><strong>${title}</strong><time>${description}</time></span></label>`;
 function render() {
@@ -36,13 +36,14 @@ function render() {
       if (state.savePath.trim()) pathTimer = setTimeout(() => send({type: 'preview', token}), 400);
     });
   } else if (state.page === 'connect') {
-    app.innerHTML = header(state.completed ? '连接设置' : '连接云端', state.completed ? '' : '3 / 4') + `<section class="content"><form id="connection-form" class="form" autocomplete="off"><label class="field">WebDAV 地址<input id="endpoint" type="url" value="https://example.invalid/dav" ${state.busy ? 'disabled' : ''}></label><label class="field">用户名<input id="username" value="demo-player" ${state.busy ? 'disabled' : ''}></label><label class="field">密码<input id="password" type="password" placeholder="任意示例密码" autocomplete="off" ${state.busy ? 'disabled' : ''}></label><p class="hint">仅用示例数据，请勿输入真实密码。</p></form>${notice()}</section>` + footer(back(), `<button form="connection-form" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? '<span class="spinner" aria-hidden="true"></span>连接中…' : '连接'}</button>`);
+    app.innerHTML = header(state.completed ? '连接设置' : '连接云端', state.completed ? '' : '3 / 4') + `<section class="content"><form id="connection-form" class="form" autocomplete="off"><label class="field">WebDAV 地址<input id="endpoint" type="url" value="https://example.invalid/dav"></label><label class="field">用户名<input id="username" value="demo-player"></label><label class="field">密码<input id="password" type="password" placeholder="任意示例密码（可留空）" autocomplete="off"></label><p class="hint">仅用示例数据，请勿输入真实密码。</p><button id="test-connection" type="submit" class="secondary">测试连接</button><p id="connection-status" class="hint" role="status"></p></form></section>` + footer(back(), button('下一步', 'next', true));
     document.querySelector('#connection-form').addEventListener('submit', event => {
       event.preventDefault();
-      // Never read, retain or persist the password. No request is issued.
-      document.querySelector('#password').value = '';
+      // Only field-change events are tracked. Password values are never read or persisted.
       send({type: 'connect'});
     });
+    app.querySelectorAll('#connection-form input').forEach(input => input.addEventListener('input', () => send({type: 'editConnection'})));
+    updateConnectionControls();
   } else if (state.page === 'compare') {
     const k = kind(state);
     let content;
@@ -63,11 +64,20 @@ function render() {
   app.querySelectorAll('[data-action]').forEach(element => element.addEventListener('click', () => send({type: element.dataset.action})));
   app.querySelectorAll('input[name="progress"]').forEach(element => element.addEventListener('change', () => send({type: 'choose', value: element.value})));
 }
+function updateConnectionControls() {
+  const test = document.querySelector('#test-connection');
+  test.disabled = state.busy; test.textContent = state.connectionStatus === 'testing' ? '测试中…' : '测试连接';
+  const status = document.querySelector('#connection-status');
+  status.textContent = {untested: '', testing: '正在测试…', success: '连接成功', failed: '连接失败，请重试。'}[state.connectionStatus];
+  status.className = state.connectionStatus === 'failed' ? 'error' : 'hint';
+  app.querySelector('[data-action="next"]').disabled = state.busy || !state.connected || state.connectionStatus !== 'success' || state.testedRevision !== state.configRevision;
+  app.setAttribute('aria-busy', String(state.busy)); gameSelect.disabled = state.busy;
+}
 function send(action) {
   const previous = state;
   state = reduce(state, action);
   if (state === previous) return;
-  render();
+  if (previous.page === 'connect' && state.page === 'connect') updateConnectionControls(); else render();
   if (state.busy && (!previous.busy || state.token !== previous.token)) {
     const token = state.token;
     const delay = state.pending === 'read' ? (state.scene === 'reading' ? 5000 : 1200) : state.scene === 'connecting' ? 5000 : 550;

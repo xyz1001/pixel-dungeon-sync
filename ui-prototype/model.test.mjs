@@ -5,7 +5,7 @@ const act=(s,type,extra={})=>reduce(s,{type,...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
 const read=(scene='empty',id='shattered')=>settle(pathStep(scene,id));
-const connected=(scene='empty',id='shattered')=>settle(act(act(read(scene,id),'next'),'connect'));
+const connected=(scene='empty',id='shattered')=>act(settle(act(act(read(scene,id),'next'),'connect')),'next');
 test('four exact Windows defaults preserve separator, leading dot, case and spaces',()=>{
  const tails={shattered:'.shatteredpixel\\Shattered Pixel Dungeon',experienced:'.trashboxbobylev\\Experienced Pixel Dungeon',cruel:'.cruelpixel\\Too Cruel Pixel Dungeon',rearranged:'.rearrangedpixel\\Rearranged Pixel Dungeon'};
  for(const [id,tail] of Object.entries(tails)) assert.equal(defaultSavePaths[id],'C:\\Users\\Demo\\AppData\\Roaming\\'+tail);
@@ -45,7 +45,7 @@ test('empty and identical finish without transfer; differing progress requires d
 test('game metadata stays consistent through setup/settings and missing metadata stays omitted',()=>{
  for(const id of Object.keys(games)){
   let s=pathStep('empty',id);if(!s.savePath)s=act(s,'editPath',{value:'D:\\Example'});
-  s=settle(act(s,'next'));s=settle(act(s,'connect'));s=act(act(s,'finish'),'settings');const g=gameLabel(s);
+  s=settle(act(s,'next'));s=act(settle(act(s,'connect')),'next');s=act(act(s,'finish'),'settings');const g=gameLabel(s);
   assert.equal(g.name,games[id].name||'未命名游戏');assert.equal(g.version,games[id].version);assert.equal(g.icon,games[id].icon||'');assert.equal(g.author,'');assert.equal(g.updated,'');
  }
  assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
@@ -69,4 +69,25 @@ test('debounced checks ignore old path tokens, errors and edits never claim empt
  assert.equal(act(s,'preview',{token:old}),s);assert.equal(act(s,'settled',{token:old}),s);
  s=act(s,'preview',{token:s.token});s=settle(s);assert.equal(s.page,'read');assert.equal(s.preview.slots.length,2);
  const failed=read('readFailure');assert.equal(failed.preview,null);assert.equal(saveStatus(failed),'检查失败，请修改路径或重试。');
+});
+
+test('connection test succeeds in place, then only a separate next advances',()=>{
+ let s=act(read(),'next');assert.equal(act(s,'next'),s);
+ s=act(s,'connect');assert.equal(act(s,'connect'),s);assert.equal(act(s,'next'),s);
+ s=settle(s);assert.equal(s.page,'connect');assert.equal(s.connectionStatus,'success');
+ assert.equal(act(s,'next').page,'compare');
+});
+test('empty password requires no secret value; every field change invalidates success and late tests',()=>{
+ for(const field of ['endpoint','username','password']){
+  let s=act(read(),'next');s=settle(act(s,'connect'));assert.equal(s.connectionStatus,'success');
+  s=act(s,'editConnection',{field});assert.equal(s.connectionStatus,'untested');assert.equal(act(s,'next'),s);
+  s=act(s,'connect');const token=s.token;s=act(s,'editConnection',{field});assert.equal(act(s,'settled',{token}),s);
+  s=settle(act(s,'connect'));assert.equal(s.connectionStatus,'success');assert.equal(Object.hasOwn(s,'password'),false);
+ }
+});
+test('failed test, returning and scene reset cannot retain connection authorization',()=>{
+ let s=act(read('failure'),'next');s=settle(act(s,'connect'));assert.equal(s.connectionStatus,'failed');assert.equal(act(s,'next'),s);
+ s=act(act(read(),'next'),'connect');const token=s.token;s=act(s,'back');assert.equal(act(s,'settled',{token}),s);assert.equal(s.connected,false);
+ s=act(settle(act(act(read(),'next'),'connect')),'next');s=act(s,'back');assert.equal(s.page,'connect');assert.equal(act(s,'next'),s);
+ assert.equal(act(s,'reset').connectionStatus,'untested');
 });

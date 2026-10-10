@@ -37,7 +37,7 @@ export function createState(scene = 'empty', gameId = 'shattered') {
   const fixtureLocal = saveFixture(scene).records;
   const cloud = ['cloud', 'conflict', 'identical', 'running'].includes(scene);
   return {scene, gameId, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
-    connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
+    connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
     completed: false, returnPage: 'home', uploads: 0, restores: 0};
 }
 export function kind(s) {
@@ -54,22 +54,23 @@ export function canFinish(s) {
 function startRead(s, advance = false) {
   if (!s.savePath.trim()) return s;
   return {...s, preview: null, continueAfterRead: advance, page: 'read', readStatus: 'loading', local: null, busy: true, pending: 'read', token: s.token + 1,
-    readAttempts: s.readAttempts + 1, connected: false, choice: '', message: ''};
+    readAttempts: s.readAttempts + 1, connectionStatus: 'untested', testedRevision: null, connected: false, choice: '', message: ''};
 }
 export function reduce(s, action) {
   if (action.type === 'reset') return createState(action.scene || s.scene, s.gameId);
   if (action.type === 'back') {
     if (s.busy && !['connect', 'read'].includes(s.pending)) return s;
     const page = ['game', 'read'].includes(s.page) ? 'game' : s.page === 'compare' ? 'connect' : s.page === 'connect' ? (s.completed ? 'settings' : 'read') : 'home';
-    return {...s, page, token: s.token + 1, busy: false, pending: '', restoreConfirm: false, folderOpen: false, message: '',
+    return {...s, ...(s.page === 'connect' || page === 'connect' ? {connectionStatus: 'untested', testedRevision: null, connected: false} : {}), page, token: s.token + 1, busy: false, pending: '', restoreConfirm: false, folderOpen: false, message: '',
       ...(page === 'game' ? {preview: null, continueAfterRead: false, local: null, readStatus: 'unread', connected: false, choice: ''} : {})};
   }
   if (action.type === 'editPath' && s.page === 'read') return {...s, savePath: action.value, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', connected: false, choice: '', busy: false, pending: '', token: s.token + 1, message: ''};
+  if (action.type === 'editConnection' && s.page === 'connect') return {...s, connectionStatus: 'untested', testedRevision: null, configRevision: s.configRevision + 1, connected: false, busy: false, pending: '', token: s.token + 1, message: ''};
   if (s.pending === 'read' && action.type === 'next') return {...s, continueAfterRead: true};
   if (s.busy && action.type !== 'settled') return s;
   switch (action.type) {
-    case 'chooseGame': return {...s, gameId: action.gameId || s.gameId, savePath: action.gameId && action.gameId !== s.gameId ? defaultSavePaths[action.gameId] || '' : s.savePath, folderOpen: false, page: 'game', selectedGame: true, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, connected: false, completed: false, choice: '', token: s.token + 1, message: ''};
-    case 'next': return s.page === 'game' && s.selectedGame ? startRead({...s, page: 'read', message: ''})
+    case 'chooseGame': return {...s, connectionStatus: 'untested', testedRevision: null, gameId: action.gameId || s.gameId, savePath: action.gameId && action.gameId !== s.gameId ? defaultSavePaths[action.gameId] || '' : s.savePath, folderOpen: false, page: 'game', selectedGame: true, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, connected: false, completed: false, choice: '', token: s.token + 1, message: ''};
+    case 'next': return s.page === 'connect' ? (s.connectionStatus === 'success' && s.testedRevision === s.configRevision && s.connected ? {...s, page: s.completed ? 'settings' : 'compare', choice: '', message: ''} : s) : s.page === 'game' && s.selectedGame ? startRead({...s, page: 'read', message: ''})
       : s.page === 'read' && !s.folderOpen && s.savePath.trim() ? (s.preview ? {...s, page: 'connect'} : startRead(s, true)) : s;
     case 'preview': return s.page === 'read' && action.token === s.token && !s.folderOpen ? startRead(s) : s;
     case 'retryRead': return s.page === 'read' && s.savePath.trim() ? startRead(s) : s;
@@ -77,15 +78,16 @@ export function reduce(s, action) {
     case 'cancelFolder': return {...s, folderOpen: false};
     case 'useFolder': return s.page === 'read' && s.folderOpen
       ? startRead({...reduce(s, {type: 'editPath', value: `D:\\Game Saves\\${s.gameId}`}), folderOpen: false}) : s;
-    case 'connect': return s.page !== 'connect' ? s : {...s, busy: true, pending: 'connect', token: s.token + 1, message: ''};
+    case 'connect': return s.page !== 'connect' ? s : {...s, connected: false, connectionStatus: 'testing', testedRevision: null, busy: true, pending: 'connect', token: s.token + 1, message: ''};
     case 'settled': {
       if (!s.busy || action.token !== s.token) return s;
-      if (s.pending === 'read') return s.scene === 'readFailure' && s.readAttempts === 1
+      if (action.type === 'editConnection' && s.page === 'connect') return {...s, connectionStatus: 'untested', testedRevision: null, configRevision: s.configRevision + 1, connected: false, busy: false, pending: '', token: s.token + 1, message: ''};
+  if (s.pending === 'read') return s.scene === 'readFailure' && s.readAttempts === 1
         ? {...s, busy: false, pending: '', readStatus: 'failed', preview: null, continueAfterRead: false, local: null, message: ''}
         : {...s, page: s.continueAfterRead ? 'connect' : 'read', preview: saveFixture(s.scene), continueAfterRead: false, busy: false, pending: '', readStatus: s.fixtureLocal ? 'found' : 'empty', local: s.fixtureLocal, message: ''};
       if (s.pending === 'connect') return s.scene === 'failure'
-        ? {...s, busy: false, pending: '', connected: false, message: '连接失败，请重试或切换测试场景。'}
-        : {...s, busy: false, pending: '', connected: true, page: s.completed ? 'settings' : 'compare', choice: '', message: ''};
+        ? {...s, busy: false, pending: '', connected: false, connectionStatus: 'failed', testedRevision: null, message: ''}
+        : {...s, busy: false, pending: '', connected: true, connectionStatus: 'success', testedRevision: s.configRevision, choice: '', message: ''};
       if (s.pending === 'upload') return {...s, busy: false, pending: '', cloud: true, same: true, uploads: s.uploads + 1, message: '模拟上传完成。'};
       if (s.pending === 'restore') return {...s, busy: false, pending: '', local: true, same: true, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
       return s;
@@ -99,7 +101,7 @@ export function reduce(s, action) {
         same: s.local || s.cloud, uploads: s.uploads + Number(upload), restores: s.restores + Number(restore), message: ''};
     }
     case 'settings': return s.page === 'home' ? {...s, page: 'settings', message: ''} : s;
-    case 'connectionSettings': return s.page === 'settings' ? {...s, page: 'connect', message: ''} : s;
+    case 'connectionSettings': return s.page === 'settings' ? {...s, page: 'connect', connectionStatus: 'untested', testedRevision: null, connected: false, message: ''} : s;
     case 'upload': return s.page === 'home' && s.local && s.connected && s.scene !== 'running'
       ? {...s, busy: true, pending: 'upload', token: s.token + 1, message: ''} : s;
     case 'askRestore': return s.page === 'home' && s.cloud && s.connected && s.scene !== 'running' ? {...s, restoreConfirm: true, message: ''} : s;
