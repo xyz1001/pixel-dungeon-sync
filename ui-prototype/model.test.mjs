@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel} from './model.mjs';
-const act=(s,type,extra={})=>reduce(s,{type,...extra});
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore} from './model.mjs';
+const act=(s,type,extra={})=>reduce(s,{type,...(type==='restore'?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
 const read=(scene='empty',id='shattered')=>settle(pathStep(scene,id));
@@ -39,7 +39,7 @@ test('failed read stays on path step, remains unknown, permits edit and successf
 });
 test('empty and identical finish without transfer; differing progress requires deliberate choice',()=>{
  for(const scene of ['empty','identical']){let s=connected(scene);assert.ok(canFinish(s));s=act(s,'finish');assert.equal(s.page,'home');assert.equal(s.uploads+s.restores,0);assert.equal(act(s,'finish'),s);}
- for(const scene of ['local','cloud','conflict']){let s=connected(scene);assert.equal(canFinish(s),false);s=act(s,'choose',{value:scene==='cloud'?'cloud':'local'});assert.ok(canFinish(s));s=act(s,'finish');assert.equal(s.uploads+s.restores,1);}
+ for(const scene of ['local','cloud','conflict']){let s=connected(scene);assert.equal(canFinish(s),false);s=act(s,'choose',{value:scene==='cloud'?'cloud':'local'});assert.ok(canFinish(s));s=settle(act(s,'finish'));assert.equal(s.uploads+s.restores,1);}
  assert.equal(kind(connected('failure')),'unknown');
 });
 test('game metadata stays consistent through setup/settings and missing metadata stays omitted',()=>{
@@ -51,7 +51,7 @@ test('game metadata stays consistent through setup/settings and missing metadata
  assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
 });
 test('restore confirmation and running-game guards remain intact',()=>{
- let s=act(connected('identical'),'finish');assert.equal(act(s,'restore'),s);s=act(act(s,'askRestore'),'cancelRestore');assert.equal(s.restores,0);
+ let s={...connected('conflict'),page:'home'};assert.equal(act(s,'restore'),s);s=act(act(s,'askRestore'),'cancelRestore');assert.equal(s.restores,0);
  s=act(act(s,'askRestore'),'restore');assert.equal(act(s,'back'),s);s=settle(s);assert.equal(s.restores,1);
  const running=act(connected('running'),'finish');assert.equal(act(running,'askRestore'),running);assert.equal(act(running,'upload'),running);
 });
@@ -95,7 +95,7 @@ test('failed test, returning and scene reset cannot retain connection authorizat
 
 test('cloud-only waits for an explicit choice and finishes once without overwrite warning',()=>{
  let s=connected('cloud');assert.ok(localIsEmpty(s));assert.equal(s.restores,0);assert.equal(act(s,'finish'),s);
- s=act(s,'choose',{value:'cloud'});assert.equal(s.restores,0);s=act(s,'finish');assert.equal(s.restores,1);assert.equal(s.restoreConfirm,false);
+ s=act(s,'choose',{value:'cloud'});assert.equal(s.restores,0);s=settle(act(s,'finish'));assert.equal(s.restores,1);assert.equal(s.restoreConfirm,false);
  assert.equal(localIsEmpty(s),false);assert.equal(act(s,'finish'),s);
 });
 test('confirmed-empty home restore starts directly; repeat click and back cannot duplicate it',()=>{
@@ -103,13 +103,13 @@ test('confirmed-empty home restore starts directly; repeat click and back cannot
  s=act(s,'askRestore');assert.equal(s.pending,'restore');assert.equal(s.restoreConfirm,false);
  assert.equal(act(s,'askRestore'),s);assert.equal(act(s,'back'),s);const token=s.token;
  s=settle(s);assert.equal(s.restores,1);assert.equal(act(s,'settled',{token}),s);
- s=act(s,'askRestore');assert.equal(s.restoreConfirm,true);assert.equal(s.busy,false);
+ s=act(s,'askRestore');assert.equal(s.restoreConfirm,false);assert.equal(s.busy,false);
 });
 test('records-only and occupied slots preserve overwrite warning and confirmation',()=>{
  for(const scene of ['recordsConflict','conflict']){
   let s=connected(scene);assert.equal(kind(s),'conflict');assert.equal(localIsEmpty(s),false);
   s={...s,page:'home',completed:true};assert.equal(act(s,'restore'),s);
-  s=act(s,'askRestore');assert.equal(s.restoreConfirm,true);assert.equal(s.busy,false);
+  s=act(s,'askRestore');assert.ok(s.restoreConfirm);assert.equal(s.busy,false);
   s=act(s,'cancelRestore');assert.equal(s.restores,0);s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.restores,1);
  }
 });
@@ -132,8 +132,38 @@ test('source device labels use identity, preserve remote names, and never invent
 });
 test('selection and restore keep snapshot source identity on both setup and home',()=>{
  let s=connected('cloud');const remote={...s.cloudSnapshot};s=act(s,'choose',{value:'cloud'});assert.deepEqual(s.cloudSnapshot,remote);
- s=act(s,'finish');assert.deepEqual(s.localSnapshot,remote);assert.deepEqual(s.cloudSnapshot,remote);assert.equal(deviceLabel(s.localSnapshot,s.currentDeviceId),'MacBook');
+ s=settle(act(s,'finish'));assert.deepEqual(s.localSnapshot,remote);assert.deepEqual(s.cloudSnapshot,remote);assert.equal(deviceLabel(s.localSnapshot,s.currentDeviceId),'MacBook');
  let home={...connected('conflict'),page:'home'};home=settle(act(act(home,'askRestore'),'restore'));assert.deepEqual(home.localSnapshot,remote);
  home=settle(act(home,'upload'));assert.deepEqual(home.cloudSnapshot,remote);
  let local=act(act(connected('local'),'choose',{value:'local'}),'finish');assert.equal(deviceLabel(local.cloudSnapshot,local.currentDeviceId),'本机');
+});
+
+test('matching content disables transfers regardless of device name or timestamps',()=>{
+ const s={...connected('identical'),page:'home'};assert.ok(isSynced(s));assert.equal(canRestore(s),false);
+ assert.equal(act(s,'askRestore'),s);assert.equal(act(s,'upload'),s);
+ const different={...s,cloudSnapshot:{...s.localSnapshot,contentId:'different'}};
+ assert.equal(isSynced(different),false);assert.ok(act(different,'askRestore').restoreConfirm);
+ for(const readStatus of ['unread','loading','failed']){const unknown={...s,readStatus};assert.equal(isSynced(unknown),false);assert.equal(canRestore(unknown),false);assert.equal(act(unknown,'askRestore'),unknown);}
+ assert.equal(isSynced({...s,localSnapshot:{deviceName:'MacBook'}}),false);
+});
+test('setup conflict and records-only require the same cancellable confirmation as home',()=>{
+ for(const scene of ['conflict','recordsConflict']){
+  let s=act(connected(scene),'choose',{value:'cloud'});const original=s.localSnapshot;
+  s=act(s,'finish');assert.ok(s.restoreConfirm);assert.equal(s.restores,0);assert.equal(s.busy,false);
+  s=act(s,'cancelRestore');assert.deepEqual(s.localSnapshot,original);assert.equal(s.page,'compare');
+  s=act(s,'finish');s=act(s,'restore');assert.equal(s.restoreConfirm,false);assert.equal(act(s,'restore'),s);assert.equal(act(s,'finish'),s);
+  const token=s.token;s=settle(s);assert.equal(s.restores,1);assert.equal(s.page,'home');assert.ok(isSynced(s));assert.equal(act(s,'settled',{token}),s);
+ }
+});
+test('changed snapshot, selection, page or old confirmation token cannot overwrite',()=>{
+ const base=act(act(connected('conflict'),'choose',{value:'cloud'}),'finish');const token=base.restoreConfirm.token;
+ for(const changed of [
+  {...base,cloudSnapshot:{...base.cloudSnapshot,contentId:'new'}},
+  {...base,localSnapshot:{...base.localSnapshot,contentId:'new-local'}},
+  {...base,cloudSnapshot:{...base.cloudSnapshot,deviceName:'Changed name'}},
+  {...base,choice:'local'}, {...base,readStatus:'failed'}, {...base,connected:false}, {...base,page:'home'}
+ ]){const result=act(changed,'restore',{confirmationToken:token});assert.equal(result.restores,0);assert.equal(result.busy,false);assert.equal(result.restoreConfirm,false);}
+ let s=act(base,'choose',{value:'local'});assert.equal(s.restoreConfirm,false);assert.equal(act(s,'restore',{confirmationToken:token}),s);
+ s=act(act(s,'choose',{value:'cloud'}),'finish');assert.notEqual(s.restoreConfirm.token,token);s=act(s,'restore',{confirmationToken:token});assert.equal(s.busy,false);
+ s=act(base,'back');assert.equal(s.restoreConfirm,false);assert.equal(act(s,'restore',{confirmationToken:token}),s);
 });

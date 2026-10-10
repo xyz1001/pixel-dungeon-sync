@@ -8,3 +8,5 @@
 .slot-times{list-style:none;padding:0;margin:8px 0;max-width:360px}.slot-times li{display:flex;justify-content:space-between;gap:12px;margin:5px 0}.slot-times time{white-space:nowrap}.folder-picker p{overflow-wrap:anywhere}
 
 .choice>span,.save-card>div{min-width:0;overflow-wrap:anywhere}.save-card>.muted{flex-shrink:0}
+
+dialog{width:min(440px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;border:1px solid var(--line);border-radius:16px;padding:24px;color:inherit;box-shadow:0 20px 60px #15352533}dialog::backdrop{background:#14281f66}dialog p{overflow-wrap:anywhere}.dialog-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}.dialog-actions button{flex:1;min-width:0;padding:12px}
