@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, scenes} from './model.mjs';
+import {createState, reduce, kind, canFinish, scenes, games, gameLabel} from './model.mjs';
 function read(scene) { let s = reduce(createState(scene), {type:'next'}); return reduce(s,{type:'settled',token:s.token}); }
 function connected(scene) { let s = reduce(read(scene), {type:'next'}); s = reduce(s,{type:'connect'}); return reduce(s,{type:'settled',token:s.token}); }
 test('empty completion does not simulate upload or restore; repeated finish is ignored', () => {
@@ -62,4 +62,29 @@ test('upload, settings, back and all scenarios remain navigable', () => {
   let s=reduce(connected('identical'),{type:'finish'}); s=reduce(s,{type:'upload'}); s=reduce(s,{type:'settled',token:s.token}); assert.equal(s.uploads,1);
   s=reduce(s,{type:'settings'}); s=reduce(s,{type:'connectionSettings'}); assert.equal(s.page,'connect'); s=reduce(s,{type:'back'}); assert.equal(s.page,'settings'); s=reduce(s,{type:'back'}); assert.equal(s.page,'home');
   for (const scene of Object.keys(scenes)) {const next=reduce(s,{type:'reset',scene}); assert.equal(next.scene,scene); assert.equal(next.page,'game'); assert.equal(next.completed,false);}
+});
+
+test('each English game identity persists through all steps, home, settings and back', () => {
+  for (const gameId of Object.keys(games)) {
+    let s=reduce(createState(),{type:'chooseGame',gameId});
+    const label=gameLabel(s);
+    assert.equal(label.name,games[gameId].name || '未命名游戏');
+    s=reduce(s,{type:'next'}); s=reduce(s,{type:'settled',token:s.token});
+    s=reduce(s,{type:'next'}); s=reduce(s,{type:'back'});
+    assert.equal(s.page,'read'); assert.deepEqual(gameLabel(s),label);
+    s=reduce(s,{type:'next'}); s=reduce(s,{type:'connect'}); s=reduce(s,{type:'settled',token:s.token});
+    s=reduce(s,{type:'finish'}); s=reduce(s,{type:'settings'});
+    assert.deepEqual(gameLabel(s),label);
+    s=reduce(s,{type:'chooseGame',gameId:'cruel'});
+    assert.equal(s.gameId,'cruel'); assert.equal(s.readStatus,'unread'); assert.equal(s.local,null);
+    assert.equal(s.connected,false); assert.equal(s.completed,false); assert.equal(s.choice,'');
+  }
+});
+test('switching game invalidates previous reads and unknown names have a short fallback', () => {
+  let s=reduce(createState('local'),{type:'next'}); const token=s.token;
+  s=reduce(s,{type:'back'}); s=reduce(s,{type:'chooseGame',gameId:'experienced'});
+  assert.equal(reduce(s,{type:'settled',token}),s);
+  assert.equal(gameLabel(s).name,'Experienced Pixel Dungeon'); assert.equal(s.readStatus,'unread');
+  assert.equal(gameLabel(createState('empty','missing')).name,'未命名游戏');
+  assert.equal(reduce(s,{type:'reset',scene:'cloud'}).gameId,'experienced');
 });

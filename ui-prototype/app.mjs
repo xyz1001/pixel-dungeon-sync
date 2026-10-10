@@ -1,18 +1,22 @@
-import {scenes, createState, reduce, kind, canFinish} from './model.mjs';
+import {scenes, games, gameLabel, createState, reduce, kind, canFinish} from './model.mjs';
 let state = createState();
 const app = document.querySelector('#app');
 const sceneSelect = document.querySelector('#scene');
+const gameSelect = document.querySelector('#game-sample');
+const gameSummary = () => { const g = gameLabel(state); return `${g.name}${g.version ? ` · ${g.version}` : ''}`; };
 const restoreWarning = '会先备份，再替换本机进度。云端没有的本机进度会移除。';
 const button = (label, action, disabled = false, cls = '') => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
-const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}</div>${extra}</header>`;
+const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}${state.page !== 'game' ? `<p class="game-summary small">${gameSummary()}</p>` : ''}</div>${extra}</header>`;
 const footer = (left, right) => `<footer class="footer">${left}<div class="right">${right}</div></footer>`;
 const back = () => button(state.busy && state.pending === 'connect' ? '取消连接' : '上一步', 'back', state.busy && !['connect', 'read'].includes(state.pending), 'text-button');
 const notice = () => state.message ? `<p class="${state.scene === 'failure' ? 'error' : 'notice'}" role="status">${state.message}</p>` : '';
 const choice = (value, title, description) => `<label class="choice"><input type="radio" name="progress" value="${value}" ${state.choice === value ? 'checked' : ''}><span><strong>${title}</strong><time>${description}</time></span></label>`;
 function render() {
   app.setAttribute('aria-busy', String(state.busy));
+  gameSelect.value = state.gameId;
+  gameSelect.disabled = state.busy;
   if (state.page === 'game') {
-    app.innerHTML = header('选择游戏', '1 / 4') + `<section class="content"><div class="game-card"><div class="game-icon" aria-hidden="true">◆</div><div class="grow"><strong>Shattered Pixel Dungeon</strong><p class="small">3.3.8 · 示例游戏</p></div><span class="pill">已找到</span></div>${button('模拟选择游戏…', 'chooseGame', false, 'secondary')}${notice()}</section>` + footer('', button('下一步', 'next', !state.selectedGame));
+    app.innerHTML = header('选择游戏', '1 / 4') + `<section class="content"><div class="game-card"><div class="game-icon" aria-hidden="true">◆</div><div class="grow"><strong>${gameLabel(state).name}</strong><p class="small">${gameLabel(state).version}</p></div><span class="pill">已找到</span></div>${button('模拟选择游戏…', 'chooseGame', false, 'secondary')}${notice()}</section>` + footer('', button('下一步', 'next', !state.selectedGame));
   } else if (state.page === 'read') {
     const copy = {unread: '尚未读取存档', loading: '正在读取本地存档…', found: '已找到本地存档', empty: '本地暂无存档', failed: '读取失败，请重试。'}[state.readStatus];
     app.innerHTML = header('读取本地存档', '2 / 4') + `<section class="content"><p class="${state.readStatus === 'failed' ? 'error' : 'status'}" role="status">${state.readStatus === 'loading' ? '<span class="spinner" aria-hidden="true"></span>' : ''}${copy}</p>${state.readStatus === 'loading' ? '<p class="hint">正在检查游戏默认位置（模拟）</p>' : ''}</section>` + footer(back(), state.readStatus === 'failed' ? button('重试', 'retryRead') : button('下一步', 'next', !['found', 'empty'].includes(state.readStatus)));
@@ -34,7 +38,7 @@ function render() {
   } else if (state.page === 'home') {
     app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.scene === 'running' ? '游戏运行中，请退出后再同步。' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', state.busy || !state.cloud || state.scene === 'running', 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${state.restoreConfirm ? `<div class="warning">${restoreWarning}<div class="home-actions">${button('取消', 'cancelRestore', state.busy, 'secondary')}${button('备份并恢复', 'restore', state.busy)}</div></div>` : ''}<div class="records">${state.local ? '<div class="save-card"><div><strong>本机进度</strong><p class="small">这台电脑</p></div><span class="small muted">今天 09:30</span></div>' : ''}${state.cloud ? '<div class="save-card"><div><strong>云端进度</strong><p class="small">另一台设备</p></div><span class="small muted">昨天 21:15</span></div>' : ''}</div>${notice()}</section>`;
   } else {
-    app.innerHTML = header('设置') + `<section class="content"><div class="settings-row"><div><strong>游戏</strong><p class="small">Shattered Pixel Dungeon 3.3.8</p></div>${button('模拟更换', 'chooseGame', false, 'text-button')}</div><div class="settings-row"><div><strong>云端连接</strong><p class="small">示例账号</p></div>${button('修改', 'connectionSettings', false, 'text-button')}</div>${notice()}</section>` + footer(button('返回', 'back', false, 'text-button'), '');
+    app.innerHTML = header('设置') + `<section class="content"><div class="settings-row"><div><strong>游戏</strong><p class="small">${gameSummary()}</p></div>${button('模拟更换', 'chooseGame', false, 'text-button')}</div><div class="settings-row"><div><strong>云端连接</strong><p class="small">示例账号</p></div>${button('修改', 'connectionSettings', false, 'text-button')}</div>${notice()}</section>` + footer(button('返回', 'back', false, 'text-button'), '');
   }
   app.querySelectorAll('[data-action]').forEach(element => element.addEventListener('click', () => send({type: element.dataset.action})));
   app.querySelectorAll('input[name="progress"]').forEach(element => element.addEventListener('change', () => send({type: 'choose', value: element.value})));
@@ -42,7 +46,6 @@ function render() {
 function send(action) {
   const previous = state;
   state = reduce(state, action);
-  if (action.type === 'chooseGame' && state !== previous) state = {...state, message: '已选择示例游戏 desktop-3.3.8.jar。'};
   if (state === previous) return;
   render();
   if (state.busy && (!previous.busy || state.token !== previous.token)) {
@@ -55,9 +58,11 @@ for (const [value, label] of Object.entries(scenes)) { const option = document.c
 function reset() {
   // Increment the epoch so a timer from the previous scene can never affect this one.
   const token = state.token + 1;
-  state = {...createState(sceneSelect.value), token};
+  state = {...createState(sceneSelect.value, state.gameId), token};
   render();
 }
+for (const [value, game] of Object.entries(games)) { const option = document.createElement('option'); option.value = value; option.textContent = game.name || '名称缺失'; gameSelect.append(option); }
+gameSelect.addEventListener('change', () => send({type: 'chooseGame', gameId: gameSelect.value}));
 sceneSelect.addEventListener('change', reset);
 document.querySelector('#reset').addEventListener('click', reset);
 render();
