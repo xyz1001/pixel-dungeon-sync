@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus} from './model.mjs';
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty} from './model.mjs';
 const act=(s,type,extra={})=>reduce(s,{type,...extra});
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
@@ -90,4 +90,35 @@ test('failed test, returning and scene reset cannot retain connection authorizat
  s=act(act(read(),'next'),'connect');const token=s.token;s=act(s,'back');assert.equal(act(s,'settled',{token}),s);assert.equal(s.connected,false);
  s=act(settle(act(act(read(),'next'),'connect')),'next');s=act(s,'back');assert.equal(s.page,'connect');assert.equal(act(s,'next'),s);
  assert.equal(act(s,'reset').connectionStatus,'untested');
+});
+
+
+test('cloud-only waits for an explicit choice and finishes once without overwrite warning',()=>{
+ let s=connected('cloud');assert.ok(localIsEmpty(s));assert.equal(s.restores,0);assert.equal(act(s,'finish'),s);
+ s=act(s,'choose',{value:'cloud'});assert.equal(s.restores,0);s=act(s,'finish');assert.equal(s.restores,1);assert.equal(s.restoreConfirm,false);
+ assert.equal(localIsEmpty(s),false);assert.equal(act(s,'finish'),s);
+});
+test('confirmed-empty home restore starts directly; repeat click and back cannot duplicate it',()=>{
+ let s={...connected('cloud'),page:'home',completed:true};assert.equal(s.restores,0);
+ s=act(s,'askRestore');assert.equal(s.pending,'restore');assert.equal(s.restoreConfirm,false);
+ assert.equal(act(s,'askRestore'),s);assert.equal(act(s,'back'),s);const token=s.token;
+ s=settle(s);assert.equal(s.restores,1);assert.equal(act(s,'settled',{token}),s);
+ s=act(s,'askRestore');assert.equal(s.restoreConfirm,true);assert.equal(s.busy,false);
+});
+test('records-only and occupied slots preserve overwrite warning and confirmation',()=>{
+ for(const scene of ['recordsConflict','conflict']){
+  let s=connected(scene);assert.equal(kind(s),'conflict');assert.equal(localIsEmpty(s),false);
+  s={...s,page:'home',completed:true};assert.equal(act(s,'restore'),s);
+  s=act(s,'askRestore');assert.equal(s.restoreConfirm,true);assert.equal(s.busy,false);
+  s=act(s,'cancelRestore');assert.equal(s.restores,0);s=settle(act(act(s,'askRestore'),'restore'));assert.equal(s.restores,1);
+ }
+});
+test('unknown, loading, failed and absent previews never qualify as empty',()=>{
+ for(const readStatus of ['unread','loading','failed']){
+  const s={...connected('cloud'),readStatus,page:'home'};assert.equal(localIsEmpty(s),false);
+  assert.equal(act(s,'askRestore').pending,'');
+ }
+ assert.equal(localIsEmpty({...connected('cloud'),preview:null}),false);
+ let s=act(connected('cloud'),'back');assert.equal(s.restores,0);assert.equal(s.connected,false);
+ s=act(settle(act(s,'connect')),'next');assert.equal(s.restores,0);assert.equal(s.choice,'');
 });

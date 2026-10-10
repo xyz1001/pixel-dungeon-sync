@@ -17,7 +17,7 @@ export function gameLabel(s) {
   return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
-  empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', local: '本机多槽存档', cloud: '只有云端存档', conflict: '双方进度不同',
+  empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', conflict: '双方进度不同',
   identical: '双方进度相同', failure: '连接失败', connecting: '连接中', running: '游戏运行中',
   reading: '读取中', readFailure: '读取失败（重试可恢复）'
 };
@@ -25,7 +25,7 @@ export const scenes = {
 export function saveFixture(scene) {
   const slots = ['local', 'conflict', 'identical', 'running', 'readFailure'].includes(scene)
     ? [{slot: 1, modified: '2026/10/08 21:15'}, {slot: 3, modified: '2026/10/09 09:30'}] : [];
-  return {playCount: slots.length ? 28 : scene === 'recordsOnly' ? 12 : 0, slots, records: slots.length > 0 || scene === 'recordsOnly', fileCount: slots.length ? 17 : scene === 'recordsOnly' ? 3 : 0};
+  return {playCount: slots.length ? 28 : ['recordsOnly', 'recordsConflict'].includes(scene) ? 12 : 0, slots, records: slots.length > 0 || ['recordsOnly', 'recordsConflict'].includes(scene), fileCount: slots.length ? 17 : ['recordsOnly', 'recordsConflict'].includes(scene) ? 3 : 0};
 }
 export function saveStatus(s) {
   if (s.readStatus === 'loading') return '正在检查存档…';
@@ -35,7 +35,7 @@ export function saveStatus(s) {
 }
 export function createState(scene = 'empty', gameId = 'shattered') {
   const fixtureLocal = saveFixture(scene).records;
-  const cloud = ['cloud', 'conflict', 'identical', 'running'].includes(scene);
+  const cloud = ['cloud', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
   return {scene, gameId, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud, same: ['identical', 'running'].includes(scene),
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
     completed: false, returnPage: 'home', uploads: 0, restores: 0};
@@ -45,6 +45,9 @@ export function kind(s) {
   if (!s.local && !s.cloud) return 'empty';
   if (s.local && s.cloud) return s.same ? 'identical' : 'conflict';
   return s.local ? 'local' : 'cloud';
+}
+export function localIsEmpty(s) {
+  return s.readStatus === 'empty' && s.local === false && s.preview?.records === false && s.preview.slots.length === 0;
 }
 export function canFinish(s) {
   if (s.busy || s.page !== 'compare' || !s.connected || s.completed) return false;
@@ -104,7 +107,7 @@ export function reduce(s, action) {
     case 'connectionSettings': return s.page === 'settings' ? {...s, page: 'connect', connectionStatus: 'untested', testedRevision: null, connected: false, message: ''} : s;
     case 'upload': return s.page === 'home' && s.local && s.connected && s.scene !== 'running'
       ? {...s, busy: true, pending: 'upload', token: s.token + 1, message: ''} : s;
-    case 'askRestore': return s.page === 'home' && s.cloud && s.connected && s.scene !== 'running' ? {...s, restoreConfirm: true, message: ''} : s;
+    case 'askRestore': return s.page === 'home' && s.cloud && s.connected && s.scene !== 'running' ? (localIsEmpty(s) ? {...s, busy: true, pending: 'restore', restoreConfirm: false, token: s.token + 1, message: ''} : {...s, restoreConfirm: true, message: ''}) : s;
     case 'cancelRestore': return {...s, restoreConfirm: false};
     case 'restore': return s.page === 'home' && s.restoreConfirm && s.cloud && s.scene !== 'running'
       ? {...s, busy: true, pending: 'restore', token: s.token + 1, message: ''} : s;

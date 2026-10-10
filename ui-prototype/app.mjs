@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty} from './model.mjs';
 let state = createState();
 let pathTimer;
 const app = document.querySelector('#app');
@@ -49,7 +49,7 @@ function render() {
     let content;
     if (k === 'empty') content = `<section class="content complete"><h1>配置完成</h1></section>`;
     else if (k === 'identical') content = `<section class="content complete"><h1>两边进度相同</h1><p>可以完成配置。</p></section>`;
-    else content = `<section class="content"><p>${k === 'conflict' ? '选择要继续的进度' : k === 'local' ? (state.preview?.slots.length === 0 ? '本机有游戏记录' : '本机有存档') : '云端有存档'}</p><div class="choices">${state.local ? choice('local', '使用本机进度', '这台电脑 · 今天 09:30 · 模拟上传') : ''}${state.cloud ? choice('cloud', '使用云端进度', '另一台设备 · 昨天 21:15 · 模拟恢复') : ''}</div>${state.choice === 'cloud' ? `<p class="warning">${restoreWarning}</p>` : state.choice === 'local' && state.cloud ? '<p class="small">上传本机进度，保留原云端记录。</p>' : ''}</section>`;
+    else content = `<section class="content"><p>${k === 'conflict' ? '选择要继续的进度' : k === 'local' ? (state.preview?.slots.length === 0 ? '本机有游戏记录' : '本机有存档') : '云端有存档'}</p><div class="choices">${state.local ? choice('local', '使用本机进度', '这台电脑 · 今天 09:30 · 模拟上传') : ''}${state.cloud ? choice('cloud', '使用云端进度', '另一台设备 · 昨天 21:15 · 模拟恢复') : ''}</div>${state.choice === 'cloud' && !localIsEmpty(state) ? `<p class="warning">${restoreWarning}</p>` : state.choice === 'local' && state.cloud ? '<p class="small">上传本机进度，保留原云端记录。</p>' : ''}</section>`;
     app.innerHTML = header(k === 'empty' ? '' : '选择存档', '4 / 4') + content + footer(back(), button('完成', 'finish', !canFinish(state)));
   } else if (state.page === 'home') {
     app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.scene === 'running' ? '游戏运行中，请退出后再同步。' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', state.busy || !state.cloud || state.scene === 'running', 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${state.restoreConfirm ? `<div class="warning">${restoreWarning}<div class="home-actions">${button('取消', 'cancelRestore', state.busy, 'secondary')}${button('备份并恢复', 'restore', state.busy)}</div></div>` : ''}<div class="records">${state.local ? '<div class="save-card"><div><strong>本机进度</strong><p class="small">这台电脑</p></div><span class="small muted">今天 09:30</span></div>' : ''}${state.cloud ? '<div class="save-card"><div><strong>云端进度</strong><p class="small">另一台设备</p></div><span class="small muted">昨天 21:15</span></div>' : ''}</div>${notice()}</section>`;
