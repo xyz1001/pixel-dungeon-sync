@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName, planMerge} from './model.mjs';
 let state = createState('history');
 let pathTimer;
 let historyObserver;
@@ -11,12 +11,12 @@ const gameDetails = () => { const g = gameLabel(state); return [g.author ? `作�
 const pathStatus = () => `${saveStatus(state)}${state.preview?.slots.length ? `<ul class="slot-times">${state.preview.slots.map(slot => `<li>存档 ${slot.slot}<time>${slot.modified}</time></li>`).join('')}</ul><span class="hint">示例存档修改时间</span>` : ''}`;
 const escapeText = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const sourceName = snapshot => escapeText(deviceLabel(snapshot, state.currentDeviceId));
-const restoreWarning = () => `将用来自 ${sourceName(selectedTarget(state))} 的“${escapeText(snapshotName(selectedTarget(state)))}”（${selectedTarget(state)?.time || '时间未知'}）替换本机存档及游戏记录，不保留本机备份。`;
+const restoreWarning = () => state.restoreConfirm?.direction==='upload' ? '选择覆盖云端：将本机完整档案设为云端当前版本，原云端历史仍保留。' : `选择覆盖本机：将用来自 ${sourceName(selectedTarget(state))} 的“${escapeText(snapshotName(selectedTarget(state)))}”（${selectedTarget(state)?.time || '时间未知'}）替换本机存档及游戏记录，不保留本机备份。`;
 const button = (label, action, disabled = false, cls = '') => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 const header = (title, step = '', extra = '') => `<header class="header"><div>${step ? `<div class="eyebrow">${step}</div>` : ''}${title ? `<h1>${title}</h1>` : ''}${state.page !== 'game' ? `<p class="game-summary small">${gameSummary()}</p>` : ''}</div>${extra}</header>`;
 const footer = (left, right) => `<footer class="footer">${left}<div class="right">${right}</div></footer>`;
 const back = () => button('上一步', 'back', state.busy && !['connect', 'read'].includes(state.pending), 'text-button');
-const notice = () => state.message ? `<p class="${state.scene === 'failure' ? 'error' : 'notice'}" role="status">${state.message}</p>` : '';
+const notice = () => state.message ? `<p class="${state.message.includes('失败') ? 'error' : 'notice'}" role="status">${state.message}</p>` : '';
 const choice = (value, title, description) => `<label class="choice"><input type="radio" name="progress" value="${value}" ${state.choice === value ? 'checked' : ''}><span><strong>${title}</strong><time>${description}</time></span></label>`;
 function historyView() {
   const visibleState={...state,history:visibleHistory(state)};
@@ -31,9 +31,9 @@ function historyView() {
     const isCloud=n.storage==='cloud';
     const unsynced=!isCloud&&n.id===state.localSnapshot?.id&&localState(state)==='unsynced';
     const status=isCloud?(latestCloud(state)?.id===n.id?'最新云端':'云端存档'):(unsynced?'未同步云端':'已同步云端');
-    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><strong class="snapshot-name">${escapeText(snapshotName(n))}</strong><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>存档 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button>${state.renameId===n.id?`<form class="rename-form" data-rename-id="${n.id}"><input aria-label="存档名称" maxlength="80" placeholder="留空使用默认名，最多40字"><div><button type="submit">保存</button><button type="button" data-action="cancelRename">取消</button></div></form>`:`<button class="rename-button" data-rename-id="${n.id}" ${state.busy?'disabled':''}>命名</button>`}</div>`;
+    return `<div class="history-cell"><button class="history-node ${isCloud?'cloud-node':unsynced?'unsynced-node':''} ${state.localSnapshot?.id===n.id?'current-node':''}" data-snapshot-id="${n.id}" aria-pressed="${state.selectedSnapshotId===n.id}" ${state.busy?'disabled':''}><strong class="snapshot-name">${escapeText(snapshotName(n))}</strong><time>${n.time}</time>${isCloud?`<span>来源：${sourceName(n)}</span>`:''}<span>游戏槽位 ${n.slots} 个 · 游玩 ${n.plays} 次</span><small>${state.localSnapshot?.id===n.id?'本机当前 · ':''}${status}</small></button>${state.renameId===n.id?`<form class="rename-form" data-rename-id="${n.id}"><input aria-label="存档名称" maxlength="80" placeholder="留空使用默认名，最多40字"><div><button type="submit">保存</button><button type="button" data-action="cancelRename">取消</button></div></form>`:`<button class="rename-button" data-rename-id="${n.id}" ${state.busy?'disabled':''}>命名</button>`}</div>`;
   }).join('')).join('');
-  return `<section class="history-section"><h2>存档历史</h2><p class="hint">按存档时间从新到旧 · 选择云端存档恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-layout"><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" aria-hidden="true"></svg><div class="history-grid">${cells}</div></div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
+  return `<section class="history-section"><h2>完整档案历史</h2><p class="hint">每个节点包含全部游戏槽位与记录。按存档时间从新到旧 · 选择云端档案恢复。本机保留同步基线；黄色为当前未同步存档，虚线连接本机基线；窄屏可左右滚动。</p><p class="small">本机当前：${state.localSnapshot ? `${sourceName(state.localSnapshot)} · ${state.localSnapshot.time}` : '暂无存档'}</p><div class="history-layout"><div class="history-scroll" role="region" aria-label="按设备排列的存档历史，可左右滚动" tabindex="0"><div class="history-canvas" data-columns="${devices.length}"><div class="device-columns">${devices.map(d=>`<strong>${d.deviceId==='cloud-column'?'云端存档':sourceName(d)}</strong>`).join('')}</div><div class="history-body"><svg class="history-lines" aria-hidden="true"></svg><div class="history-grid">${cells}</div></div></div></div></div>${nodes.length?'':'<p class="hint">暂无存档历史</p>'}</section>`;
 }
 // Measure rendered cards after each layout change; text and editors can resize rows.
 function drawHistoryLines() {
@@ -59,6 +59,15 @@ function targetView() {
   const target=selectedTarget(state);
   const localTarget=target && target.storage !== 'cloud';
   return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${localTarget ? '<p class="error">本机存档不能作为云端恢复来源，请选择云端存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}</div>`;
+}
+function mergePlanView() {
+  const target=state.history.find(n=>n.id===state.restoreConfirm.snapshotId),plan=planMerge(state,target);
+  return plan.ok?`<p class="merge-plan">合并后 ${plan.slots} 个槽位 · 新增占用 ${plan.addedSlots} 个</p>`:`<p class="error">${escapeText(plan.error)}</p>`;
+}
+function mergeView() {
+  if(!state.mergeResult)return '';
+  const p=state.localSnapshot.profile;
+  return `<section class="merge-result"><h2>本机单局槽位 · 模拟结果</h2><p>已按单局数据生成 ${p.runs.length} 个槽位。这里只更新页面内存，未读写真实存档。</p><ul>${p.runs.map(r=>`<li><strong>槽位 ${r.slot} · ${escapeText(r.name)}</strong><span>${r.sourceRunUUID?'来自同一局的独立分支':'保留原单局身份'}</span></li>`).join('')}</ul><details><summary>查看逐局比较结果</summary>${state.mergeResult.decisions.map(d=>`<p class="small">${escapeText(d)}</p>`).join('')}</details></section>`;
 }
 function render() {
   historyObserver?.disconnect();
@@ -96,20 +105,21 @@ function render() {
     let content;
     if (k === 'empty') content = `<section class="content complete"><h1>配置完成</h1></section>`;
     else if (k === 'identical') content = `<section class="content complete"><h1>两边进度相同</h1><p>可以完成配置。</p></section>`;
+    else if(k==='conflict') content = `<section class="content"><h2>本机与云端进度不同</h2><p>可以覆盖本机，或按单局比较共同基线后合并。合并前会检查全部槽位需求，失败不会修改原内容。</p>${notice()}</section>`;
     else content = `<section class="content"><p>${k === 'conflict' ? '选择要继续的进度' : k === 'local' ? (state.preview?.slots.length === 0 ? '本机有游戏记录' : '本机有存档') : '云端有存档'}</p><div class="choices">${state.local ? choice('local', '使用本机进度', `${sourceName(state.localSnapshot)} · 今天 09:30 · 模拟上传`) : ''}${state.cloud ? choice('cloud', '使用云端进度', `${sourceName(state.cloudSnapshot)} · 昨天 21:15 · 模拟恢复`) : ''}</div>${state.choice === 'local' && state.cloud ? '<p class="small">上传本机进度，保留原云端记录。</p>' : ''}</section>`;
-    app.innerHTML = header(k === 'empty' ? '' : '选择存档', '4 / 4') + content + footer(back(), button('完成', 'finish', !canFinish(state)));
+    app.innerHTML = header(k === 'empty' ? '' : '选择存档', '4 / 4') + content + footer(back(), button(state.busy?'合并中…':k==='conflict'?'处理冲突':'完成', 'finish', !canFinish(state)));
   } else if (state.page === 'home') {
-    app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.scene === 'running' ? '游戏运行中，请退出后再同步。' : isSynced(state) ? '已同步 · 模拟模式' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || isSynced(state) || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', !canRestore(state), 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${targetView()}${historyView()}${notice()}</section>`;
+    app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.pending === 'merge' ? '正在验证并合并示例单局…' : state.scene === 'running' ? '游戏运行中，请退出后再同步。' : isSynced(state) ? '已同步 · 模拟模式' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || isSynced(state) || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', !canRestore(state), 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${targetView()}${notice()}${mergeView()}${historyView()}</section>`;
   } else {
     app.innerHTML = header('设置') + `<section class="content"><div class="settings-row"><div><strong>游戏</strong><p class="small">${gameSummary()}</p></div>${button('模拟更换', 'chooseGame', false, 'text-button')}</div><div class="settings-row"><div><strong>云端连接</strong><p class="small">示例账号</p></div>${button('修改', 'connectionSettings', false, 'text-button')}</div>${notice()}</section>` + footer(button('返回', 'back', false, 'text-button'), '');
   }
   if (state.restoreConfirm) {
-    app.insertAdjacentHTML('beforeend', `<dialog id="restore-dialog" aria-labelledby="restore-title" aria-describedby="restore-description"><h2 id="restore-title">覆盖本机进度？</h2><p id="restore-description">${restoreWarning()}</p><div class="dialog-actions"><button data-action="cancelRestore" class="secondary" autofocus>取消</button><button data-action="restore" data-confirmation-token="${state.restoreConfirm.token}">覆盖恢复</button></div></dialog>`);
+    app.insertAdjacentHTML('beforeend', `<dialog id="restore-dialog" aria-labelledby="restore-title" aria-describedby="restore-description"><h2 id="restore-title">如何处理冲突？</h2><p id="restore-description">${restoreWarning()}</p><p class="hint">合并会逐局比较：单边改动直接采用；同一局双方改动不同才占两个槽位。槽位不足则合并失败。</p>${mergePlanView()}<div class="dialog-actions"><button data-action="cancelRestore" class="secondary" autofocus>取消</button><button data-action="restore" data-confirmation-token="${state.restoreConfirm.token}">覆盖${state.restoreConfirm.direction==='upload'?'云端':'本机'}</button><button data-action="merge" data-confirmation-token="${state.restoreConfirm.token}">合并</button></div></dialog>`);
     const dialog = app.querySelector('#restore-dialog');
     dialog.addEventListener('cancel', event => { event.preventDefault(); send({type: 'cancelRestore'}); });
     dialog.addEventListener('keydown', event => {
       if (event.key !== 'Tab') return;
-      const [cancel, confirm] = dialog.querySelectorAll('button');
+      const buttons=dialog.querySelectorAll('button'),cancel=buttons[0],confirm=buttons[buttons.length-1];
       if (event.shiftKey && document.activeElement === cancel) { event.preventDefault(); confirm.focus(); }
       else if (!event.shiftKey && document.activeElement === confirm) { event.preventDefault(); cancel.focus(); }
     });

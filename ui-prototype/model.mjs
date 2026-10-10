@@ -17,6 +17,7 @@ export function gameLabel(s) {
   return {name: game?.name || '未命名游戏', version: game?.version || '', icon: game?.icon || '', author: game?.author || '', updated: game?.updated || ''};
 }
 export const scenes = {
+  splitUpdates:'远端改 A，本机改 B · 两槽合并', sameRun:'同一局双端改动 · 拆成两槽', sameChanges:'两端相同改动 · 去重', mergeFull:'槽位不足 · 合并失败', missingBase:'无共同基线 · 合并失败', missingIdentity:'单局身份不明 · 合并失败', globalConflict:'全局记录冲突 · 合并失败', mergeFailure:'合并写入失败 · 原内容不变',
   history: '多设备存档历史', remoteUpdate: '远端更新，本机无改动', empty: '无存档，无游戏记录', recordsOnly: '无存档，有游戏记录', recordsConflict: '本机仅记录，云端有存档', local: '本机多槽存档', cloud: '只有云端存档', longDevice: '云端设备长名称', conflict: '双方进度不同',
   identical: '双方进度相同', failure: '连接失败', connecting: '连接中', running: '游戏运行中',
   reading: '读取中', readFailure: '读取失败（重试可恢复）'
@@ -34,11 +35,12 @@ export function saveStatus(s) {
   return `游玩 ${s.preview.playCount} 次 · 存档 ${s.preview.slots.length} 个`;
 }
 export function createState(scene = 'empty', gameId = 'shattered') {
+  if(['splitUpdates','sameRun','sameChanges','mergeFull','missingBase','missingIdentity','globalConflict','mergeFailure'].includes(scene))return mergeFixture({...createState('history',gameId),scene});
   const fixtureLocal = saveFixture(scene).records;
   const cloud = ['history', 'remoteUpdate', 'cloud', 'longDevice', 'recordsConflict', 'conflict', 'identical', 'running'].includes(scene);
   const state = {scene, gameId, currentDeviceId: 'demo-current', localSnapshot: fixtureLocal ? {deviceId: 'demo-current', deviceName: 'Windows-PC', contentId: 'demo-local-v1'} : null, cloudSnapshot: cloud ? {contentId: ['identical', 'running'].includes(scene) ? 'demo-local-v1' : 'demo-cloud-v2', deviceId: 'demo-remote', deviceName: scene === 'longDevice' ? 'MacBook-Example-Very-Long-Device-Name-用于窄屏展示的虚构设备名称' : 'MacBook'} : null, savePath: defaultSavePaths[gameId] || '', folderOpen: false, page: 'game', selectedGame: true, fixtureLocal, preview: null, continueAfterRead: false, local: null, readStatus: 'unread', readAttempts: 0, cloud,
     connectionStatus: 'untested', configRevision: 0, testedRevision: null, connected: false, choice: '', busy: false, pending: '', token: 0, message: '', restoreConfirm: false,
-    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null, renameId: null, syncedBaseline: null};
+    completed: false, returnPage: 'home', uploads: 0, restores: 0, selectedSnapshotId: null, pendingRestore: null, renameId: null, syncedBaseline: null, merges:0,pendingMerge:null,mergeResult:null};
   state.localSnapshot = state.localSnapshot && {...state.localSnapshot, id: 'local-initial', storage:'device', ownerDeviceId:'demo-current', time: '2026/10/09 10:00', order: 6, slots: saveFixture(scene).slots.length, plays: saveFixture(scene).playCount, parentIds: cloud ? ['device-save-2'] : [], available: true, publishedOrder: null};
   state.history = cloud ? historyFixture(state.cloudSnapshot) : [];
   state.cloudSnapshot = cloud ? {...state.history.find(n => n.id === 'save-4')} : null;
@@ -59,7 +61,70 @@ export function createState(scene = 'empty', gameId = 'shattered') {
     state.syncedBaseline={cloudId:cloudBase.id,contentId:cloudBase.contentId};
   }
   if (['history','remoteUpdate'].includes(scene)) Object.assign(state, {page:'home',completed:true,connected:true,connectionStatus:'success',testedRevision:0,local:true,readStatus:'found',preview:saveFixture(scene)});
-  return state;
+  return mergeFixture(state);
+}
+// Synthetic, fully parsed single-run data. No real game file parsing or rewriting.
+function mergeFixture(s) {
+  const run=(id,hash,slot)=>({runUUID:id,contentHash:hash,slot,name:`冒险 ${id.replace('run-','')}`});
+  let base=[run('run-A','A0',1),run('run-B','B0',2)],local=[run('run-A','A0',1),run('run-B','B1',2)],remote=[run('run-A','A1',1),run('run-B','B0',2)];
+  if(['sameRun','mergeFull'].includes(s.scene)){
+    base=Array.from({length:s.scene==='mergeFull'?6:1},(_,i)=>run(`run-${i+1}`,`base-${i}`,i+1));
+    local=base.map((r,i)=>({...r,contentHash:i===0?'local-change':r.contentHash}));remote=base.map((r,i)=>({...r,contentHash:i===0?'remote-change':r.contentHash}));
+  }
+  if(s.scene==='sameChanges'){local=[run('run-A','A1',1),run('run-B','B1',2)];remote=[run('run-A','A1',1),run('run-B','B0',2)];}
+  if(s.scene==='missingIdentity')local=local.map(r=>({...r,runUUID:null}));
+  const profile=(runs,records='records-0')=>({format:'shattered-3.3.8-demo',runs,globals:{records,playCount:records==='local-records'?28:records==='remote-records'?24:22}});
+  const baseProfile=profile(base),remoteProfile=profile(remote,s.scene==='globalConflict'?'remote-records':'records-0');
+  const localProfile=s.localSnapshot?.contentId===s.cloudSnapshot?.contentId?remoteProfile:s.scene==='remoteUpdate'?baseProfile:profile(local,s.scene==='globalConflict'?'local-records':'records-0');
+  const history=s.history.map(n=>({...n,profile:n.id==='save-2'?baseProfile:n.id===s.localSnapshot?.id?localProfile:n.id==='save-4'?remoteProfile:profile(base)}));
+  const localSnapshot=s.localSnapshot?history.find(n=>n.id===s.localSnapshot.id):null;
+  const cloudSnapshot=s.cloudSnapshot?history.find(n=>n.id===s.cloudSnapshot.id):null;
+  // In the targeted demo scenes, card counts and parsed units describe the same data.
+  if(['splitUpdates','sameRun','sameChanges','mergeFull','missingBase','missingIdentity','globalConflict','mergeFailure'].includes(s.scene)){
+    for(const n of history)if(n.id===localSnapshot?.id||n.id===cloudSnapshot?.id){n.slots=n.profile.runs.length;n.plays=n.profile.globals.playCount;}
+  }
+  return {...s,history,localSnapshot,cloudSnapshot,mergeBase:s.scene==='missingBase'?null:{snapshotId:'save-2',contentId:history.find(n=>n.id==='save-2')?.contentId,profile:baseProfile},slotCapacity:6};
+}
+
+export function planMerge(s, target=selectedTarget(s)) {
+  const fail=error=>({ok:false,error:`合并失败：${error}。本机和云端均未修改。`});
+  const local=s.localSnapshot?.profile,remote=target?.profile,b=s.mergeBase;
+  if(s.gameId!=='shattered'||!local||!remote||local.format!==remote.format)return fail('此示例没有可用的同版本单局解析数据');
+  const baseNode=s.history.find(n=>n.id===b?.snapshotId&&n.storage==='cloud'&&n.available&&n.contentId===b.contentId);
+  if(!b||!baseNode||b.profile.format!==local.format||JSON.stringify(b.profile)!==JSON.stringify(baseNode.profile))return fail('缺少已验证的共同基线，无法判断哪一局被修改');
+  // A common base must actually be an ancestor of both snapshots, not merely a saved file.
+  const descends=(node,seen=new Set())=>{
+    if(!node||seen.has(node.id))return false;seen.add(node.id);
+    if(node.id===baseNode.id)return true;
+    return [...(node.parentIds||[]),...(node.cloudParentIds||[])].some(id=>descends(s.history.find(n=>n.id===id),seen));
+  };
+  if(!descends(s.localSnapshot)||!descends(target))return fail('所选版本没有可验证的共同基线');
+  const profiles=[b.profile,local,remote];
+  if(profiles.some(p=>p.runs.some(r=>!r.runUUID||!r.contentHash)||new Set(p.runs.map(r=>r.runUUID)).size!==p.runs.length))return fail('单局身份缺失或重复，不能按槽号或种子猜测');
+  if(profiles.some(p=>p.runs.some(r=>!Number.isInteger(r.slot)||r.slot<1||r.slot>s.slotCapacity)||new Set(p.runs.map(r=>r.slot)).size!==p.runs.length))return fail('输入槽位数据无效');
+  const [beforeGlobals,localGlobals,remoteGlobals]=profiles.map(p=>JSON.stringify(p.globals));
+  let globals;
+  if(localGlobals===remoteGlobals||remoteGlobals===beforeGlobals)globals={...local.globals};
+  else if(localGlobals===beforeGlobals)globals={...remote.globals};
+  else return fail('全局记录双方均有不同修改，尚无安全的语义合并规则');
+  const maps=profiles.map(p=>new Map(p.runs.map(r=>[r.runUUID,r]))),runs=[],decisions=[];
+  for(const id of new Set(profiles.flatMap(p=>p.runs.map(r=>r.runUUID)))){
+    const [before,l,r]=maps.map(m=>m.get(id)),hash=x=>x?.contentHash;
+    if(hash(l)===hash(r)){if(l)runs.push({...l});decisions.push(`${id}：相同内容只保留一份`);}
+    else if(hash(l)===hash(before)){if(r)runs.push({...r});decisions.push(`${id}：采用远端改动`);}
+    else if(hash(r)===hash(before)){if(l)runs.push({...l});decisions.push(`${id}：采用本机改动`);}
+    else if(!l||!r)return fail(`${id} 存在删除与继续修改冲突`);
+    else {
+      // Deterministic mock IDs stand in for persisted UUIDs in one frozen merge plan.
+      for(const [side,run] of [['local',l],['remote',r]])runs.push({...run,runUUID:`demo-fork-${s.merges+1}-${id}-${side}`,sourceRunUUID:id,parentRunUUIDs:[id],name:`${run.name} · ${side==='local'?'本机':'远端'}分支`});
+      decisions.push(`${id}：双方改动不同，保留两个槽位`);
+    }
+  }
+  if(runs.length>s.slotCapacity)return fail(`需要 ${runs.length} 个游戏槽位，容量只有 ${s.slotCapacity} 个`);
+  const occupied=new Set();
+  for(const run of runs){if(!Number.isInteger(run.slot)||run.slot<1||run.slot>s.slotCapacity||occupied.has(run.slot))run.slot=Array.from({length:s.slotCapacity},(_,i)=>i+1).find(n=>!occupied.has(n));occupied.add(run.slot);}
+  const profile={format:local.format,runs,globals};
+  return {ok:true,profile,decisions,slots:runs.length,addedSlots:Math.max(0,runs.length-local.runs.length),baseId:baseNode.id,localId:s.localSnapshot.id,remoteId:target.id,contentId:`demo-merged:${JSON.stringify(profile)}`};
 }
 // Synthetic immutable snapshots. Published order is independent of save time and local edits.
 function historyFixture(latest) {
@@ -178,7 +243,16 @@ function receiveCloud(s) {
   const order=Math.max(0,...s.history.map(n=>n.order))+1;
   const local={...s.pendingRestore,id:`restore-${s.restores+1}-${order}`,storage:'device',ownerDeviceId:s.currentDeviceId,
     publishedOrder:null,parentIds:[s.pendingRestore.id],order,restored:true};
-  return {...s,syncedBaseline:{cloudId:s.pendingRestore.id,contentId:s.pendingRestore.contentId},localSnapshot:local,history:[...s.history,local]};
+  return {...s,syncedBaseline:{cloudId:s.pendingRestore.id,contentId:s.pendingRestore.contentId},localSnapshot:local,history:[...s.history,local],mergeResult:null};
+}
+function receiveMerge(s) {
+  const plan=s.pendingMerge.plan,remote=s.history.find(n=>n.id===plan.remoteId),original=s.localSnapshot;
+  // Only a successful, fully planned operation publishes sources and merged output.
+  const saved=matchingCloud(s)?s:publishLocal(s),localCloud=matchingCloud(saved);
+  const order=Math.max(...saved.history.map(n=>n.order))+1;
+  const merged={id:`merge-${s.merges+1}-${order}`,storage:'cloud',ownerDeviceId:s.currentDeviceId,deviceId:s.currentDeviceId,deviceName:'Windows-PC',time:'2026/10/10 10:00',order,publishedOrder:Math.max(...saved.history.map(n=>n.publishedOrder||0))+1,contentId:plan.contentId,profile:plan.profile,slots:plan.slots,plays:plan.profile.globals.playCount,available:true,parentIds:[localCloud.id,remote.id],cloudParentIds:[localCloud.id,remote.id],displayName:'合并后的完整档案',mergedFrom:[original.id,remote.id],baseId:plan.baseId};
+  const received={...merged,id:`merge-local-${s.merges+1}-${order}`,storage:'device',publishedOrder:null,parentIds:[merged.id],cloudParentIds:undefined};
+  return {...saved,history:[...saved.history,merged,received],cloudSnapshot:merged,localSnapshot:received,selectedSnapshotId:merged.id,syncedBaseline:{cloudId:merged.id,contentId:merged.contentId},mergeBase:{snapshotId:merged.id,contentId:merged.contentId,profile:merged.profile},merges:s.merges+1,mergeResult:plan,preview:{...s.preview,playCount:merged.plays,slots:plan.profile.runs.map(r=>({slot:r.slot,modified:merged.time}))}};
 }
 // Device identity belongs to the snapshot source, independently of storage location.
 export function deviceLabel(snapshot, currentDeviceId) {
@@ -205,7 +279,7 @@ export function canRestore(s) {
     && (localIsEmpty(s) || (s.readStatus === 'found' && s.local === true && Boolean(s.localSnapshot?.contentId)));
 }
 function restoreTarget(s) {
-  return JSON.stringify([s.page, s.choice, s.gameId, s.savePath, s.configRevision, s.readStatus, s.local, s.cloud, s.localSnapshot, s.cloudSnapshot, s.selectedSnapshotId, selectedTarget(s), s.syncedBaseline]);
+  return JSON.stringify([s.page, s.choice, s.gameId, s.savePath, s.configRevision, s.connected, s.readStatus, s.local, s.cloud, s.localSnapshot, s.cloudSnapshot, s.selectedSnapshotId, selectedTarget(s), s.syncedBaseline]);
 }
 function beginRestore(s) {
   return {...s, pendingRestore: {...selectedTarget(s)}, renameId:null, busy: true, pending: 'restore', restoreConfirm: false, token: s.token + 1, message: ''};
@@ -220,12 +294,16 @@ export function localUnchangedSinceSync(s) {
 function requestRestore(s) {
   if (!canRestore(s)) return s;
   return localIsEmpty(s)||localUnchangedSinceSync(s)||Boolean(matchingCloud(s)) ? beginRestore(s) : {...s, token: s.token + 1,
-    restoreConfirm: {target: restoreTarget(s), token: s.token + 1}, message: ''};
+    restoreConfirm: {target: restoreTarget(s), token: s.token + 1, direction:'restore',snapshotId:selectedTarget(s).id}, message: ''};
+}
+function requestUpload(s) {
+  if(s.cloud&&!matchingCloud(s)&&!localUnchangedSinceSync(s))return {...s,token:s.token+1,restoreConfirm:{target:restoreTarget(s),token:s.token+1,direction:'upload',snapshotId:latestCloud(s).id},message:''};
+  return {...s,busy:true,pending:'upload',renameId:null,token:s.token+1,message:''};
 }
 export function canFinish(s) {
   if (s.busy || s.page !== 'compare' || !s.connected || s.completed) return false;
   const k = kind(s);
-  return k !== 'unknown' && (k === 'empty' || k === 'identical' || (s.choice === 'local' && s.local) || (s.choice === 'cloud' && s.cloud && s.scene !== 'running'));
+  return k !== 'unknown' && (k === 'empty' || k === 'identical' || (k==='conflict'&&s.scene!=='running') || (s.choice === 'local' && s.local) || (s.choice === 'cloud' && s.cloud && s.scene !== 'running'));
 }
 function startRead(s, advance = false) {
   if (!s.savePath.trim()) return s;
@@ -233,7 +311,7 @@ function startRead(s, advance = false) {
     readAttempts: s.readAttempts + 1, connectionStatus: 'untested', testedRevision: null, connected: false, choice: '', message: ''};
 }
 export function reduce(s, action) {
-  if (s.restoreConfirm && !['restore', 'cancelRestore'].includes(action.type)) s = {...s, restoreConfirm: false};
+  if (s.restoreConfirm && !['restore', 'merge', 'cancelRestore'].includes(action.type)) s = {...s, restoreConfirm: false};
   if (action.type === 'reset') return createState(action.scene || s.scene, s.gameId);
   if (action.type === 'back') {
     if (s.busy && !['connect', 'read'].includes(s.pending)) return s;
@@ -276,6 +354,12 @@ export function reduce(s, action) {
         ? {...s, busy: false, pending: '', connected: false, connectionStatus: 'failed', testedRevision: null, message: ''}
         : {...s, busy: false, pending: '', connected: true, connectionStatus: 'success', testedRevision: s.configRevision, choice: '', message: ''};
       if (s.pending === 'upload') return {...publishLocal(s), busy: false, pending: '', message: '模拟上传完成。'};
+      if(s.pending==='merge'){
+        const plan=planMerge(s,s.history.find(n=>n.id===s.pendingMerge.plan.remoteId));
+        if(s.pendingMerge.guard!==restoreTarget(s)||!plan.ok||JSON.stringify(plan)!==JSON.stringify(s.pendingMerge.plan))return {...s,busy:false,pending:'',pendingMerge:null,message:'合并失败：内容或基线已变化，请重新操作。本机和云端均未修改。'};
+        if(s.scene==='mergeFailure'||action.failMerge)return {...s,busy:false,pending:'',pendingMerge:null,message:'合并失败：模拟写入未成功，本机和云端均未修改。'};
+        return {...receiveMerge(s),page:'home',completed:true,busy:false,pending:'',pendingMerge:null,restoreConfirm:false,message:`模拟合并完成：${plan.slots} 个游戏槽位，新增占用 ${plan.addedSlots} 个。`};
+      }
       if (s.pending === 'restore') return {...receiveCloud(s), page: s.page === 'compare' ? 'home' : s.page, completed: s.page === 'compare' || s.completed, readStatus: 'found', preview: {playCount:s.pendingRestore.plays,slots:Array.from({length:s.pendingRestore.slots},(_,i)=>({slot:i+1,modified:s.pendingRestore.time})),records:true,fileCount:s.pendingRestore.slots*7+3}, busy: false, pending: '', local: true, pendingRestore: null, restores: s.restores + 1, restoreConfirm: false, message: '模拟恢复完成。'};
       return s;
     }
@@ -284,20 +368,28 @@ export function reduce(s, action) {
     case 'finish': {
       if (!canFinish(s)) return s;
       const k = kind(s), upload = !['empty', 'identical'].includes(k) && s.choice === 'local';
+      if(k==='conflict')return s.choice==='local'?requestUpload(s):requestRestore(s);
       if (!['empty', 'identical'].includes(k) && s.choice === 'cloud') return requestRestore(s);
       return {...(upload ? publishLocal(s) : s), page:'home',completed:true,message:''};
     }
     case 'settings': return s.page === 'home' ? {...s, page: 'settings', message: ''} : s;
     case 'connectionSettings': return s.page === 'settings' ? {...s, page: 'connect', connectionStatus: 'untested', testedRevision: null, connected: false, message: ''} : s;
     case 'upload': return s.page === 'home' && s.local && s.connected && !isSynced(s) && s.scene !== 'running'
-      ? {...s, busy: true, pending: 'upload', renameId:null, token: s.token + 1, message: ''} : s;
+      ? requestUpload(s) : s;
     case 'askRestore': return s.page === 'home' ? requestRestore(s) : s;
     case 'cancelRestore': return {...s, restoreConfirm: false};
     case 'restore': {
       if (!s.restoreConfirm) return s;
       const valid = action.confirmationToken === s.restoreConfirm.token && s.restoreConfirm.target === restoreTarget(s)
-        && ['home', 'compare'].includes(s.page) && (s.page !== 'compare' || s.choice === 'cloud') && canRestore(s);
-      return valid ? beginRestore(s) : {...s, restoreConfirm: false, message: '进度已变化，请重新选择恢复。'};
+        && ['home', 'compare'].includes(s.page) && s.scene!=='running' && s.connected && (s.restoreConfirm.direction==='upload'?s.local:canRestore(s));
+      return valid ? s.restoreConfirm.direction==='upload'?{...s,restoreConfirm:false,busy:true,pending:'upload',token:s.token+1,message:''}:beginRestore(s) : {...s, restoreConfirm: false, message: '进度已变化，请重新选择操作。'};
+    }
+    case 'merge': {
+      if(!s.restoreConfirm)return s;
+      if(action.confirmationToken!==s.restoreConfirm.token||s.restoreConfirm.target!==restoreTarget(s)||!s.connected||s.scene==='running')return {...s,restoreConfirm:false,message:'进度已变化，请重新选择操作。'};
+      const plan=planMerge(s,s.history.find(n=>n.id===s.restoreConfirm.snapshotId));
+      if(!plan.ok)return {...s,restoreConfirm:false,message:plan.error};
+      return {...s,restoreConfirm:false,busy:true,pending:'merge',pendingMerge:{plan,guard:restoreTarget(s)},token:s.token+1,message:''};
     }
     default: return s;
   }
