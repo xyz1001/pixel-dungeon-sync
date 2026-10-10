@@ -64,7 +64,9 @@ private fun validateRawEndpoint(endpoint: String) {
  val profile: String = "demo", val version: String? = null, val targetGame: String = "",
  val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY,
- val password: String? = null
+ val password: String? = null,
+ /** Explicit selection in the new path step; old saveRoot remains ignored by desktop migration. */
+ val selectedSaveRoot: String? = null
 ) {
  override fun toString() = "AppConfig(profile=$profile, targetGame=$targetGame, onboardingProgress=$onboardingProgress, password=<redacted>)"
  fun validated(): AppConfig {
@@ -82,7 +84,8 @@ class ConfigFile(private val path: Path) {
  @Serializable private data class Persisted(
   val endpoint: String, val profile: String, val targetGame: String = "",
   val username: String = "", val rememberPassword: Boolean = false, val autoUploadPaused: Boolean = false,
-  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY, val password: String? = null
+  val onboardingProgress: OnboardingProgress = OnboardingProgress.LEGACY, val password: String? = null,
+  val selectedSaveRoot: String? = null
  )
  fun exists(): Boolean = SafePaths.checked(path).exists()
  fun load(): AppConfig? = try { if (exists())
@@ -91,7 +94,7 @@ class ConfigFile(private val path: Path) {
  } catch (_: Exception) { error("配置文件无法读取或已损坏；原文件保留，请重新填写设置。") }
  fun save(config: AppConfig) {
   val safe = config.validated()
-  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress, safe.password)).encodeToByteArray()
+  val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress, safe.password, safe.selectedSaveRoot)).encodeToByteArray()
   require(bytes.size <= 16 * 1024) { "配置过大，未保存" }
   preserveLegacy()
   SafePaths.atomicWrite(path, bytes)

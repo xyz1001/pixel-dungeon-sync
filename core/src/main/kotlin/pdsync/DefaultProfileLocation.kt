@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 
-/** Desktop entry point: the game adapter determines the location, never saved UI configuration. */
+/** Old saveRoot is not silently reused; the new explicit selection is persisted independently. */
 class DefaultProfileLocation(
  private val context: SavePathContext = SavePathContext.current(),
  private val paths: GameSavePaths = ShatteredDefaultSavePaths,
@@ -33,5 +33,15 @@ class DefaultProfileLocation(
   return requireDirectory()
  }
  fun open(config: AppConfig, stateRoot: Path): AppendProfileSession =
-  AppendProfileSession(config.copy(saveRoot = requireDirectory().toString()), stateRoot, adapter, versions)
+  AppendProfileSession(config.copy(saveRoot = selected(config).toString()), stateRoot, adapter, versions)
+ fun selected(config: AppConfig): Path = config.selectedSaveRoot?.let { requireSelected(it,false) } ?: requireDirectory()
+ fun requireSelected(value: String, create: Boolean): Path {
+  val raw=Path.of(value)
+  require(value.isNotBlank() && raw.isAbsolute && raw.none { it.toString() in setOf(".","..") }) { "请输入完整的存档目录路径" }
+  val root=SafePaths.checked(raw)
+  require(root.parent!=null && root!=Path.of(context.userHome.orEmpty()).toAbsolutePath().normalize()) { "请选择专用存档目录" }
+  if(create)Files.createDirectories(root)
+  require(Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS)) { "目录尚不存在；点击下一步可创建空目录" }
+  return root
+ }
 }

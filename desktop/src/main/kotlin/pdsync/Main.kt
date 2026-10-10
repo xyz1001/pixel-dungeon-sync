@@ -22,7 +22,7 @@ import java.nio.file.Path
 private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
-private enum class Page { HOME, SETTINGS, DISCOVERY, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
+private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
 private enum class SetupAction { UPLOAD, RESTORE, ADOPT }
 private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null)
 private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
@@ -63,7 +63,9 @@ internal fun runSyncApplication(
   var config by remember { mutableStateOf(initialResult.getOrNull()) }
   val location = remember { DefaultProfileLocation() }
   val pathResult = remember { runCatching { location.resolve() } }
-  val pathText = pathResult.getOrNull()?.toString() ?: "无法解析此系统的默认目录"
+  var pathText by remember { mutableStateOf(config?.selectedSaveRoot ?: pathResult.getOrNull()?.toString().orEmpty()) }
+  var pathPreview by remember { mutableStateOf<SaveSummary?>(null) }
+  var pathNotice by remember { mutableStateOf<String?>(null) }
   var password by remember { mutableStateOf("") }
   var connected by remember { mutableStateOf(false) }
   var connectionNotice by remember { mutableStateOf<String?>(null) }
@@ -133,7 +135,7 @@ internal fun runSyncApplication(
   suspend fun refreshProfile(value: AppConfig?) {
    try {
     val data = withContext(Dispatchers.IO) {
-     location.requireDirectory()
+     if(value==null)location.requireDirectory() else location.selected(value)
      if (value == null) null else {
       val manager = location.open(value, workspace.resolve(".local/manager"))
       val target = runCatching { manager.targetInfo() }
@@ -467,7 +469,6 @@ internal fun runSyncApplication(
     try {
      withContext(Dispatchers.IO) {
       require(ShatteredInstallationDiscovery().validateJar(Path.of(target.path)).target == target && target.trusted) { "游戏文件已变化，请重新选择" }
-      location.prepareDefaultDirectory()
      }
      val next = setupDraft.copy(targetGame = target.path, onboardingProgress = OnboardingProgress.PENDING)
      withContext(Dispatchers.IO) { setupSelection.save(target.path) }
@@ -477,8 +478,28 @@ internal fun runSyncApplication(
     } catch (e: Exception) { discoveryNotice = "尚不能继续：${e.message}" }
     finally { busy = false }
     if (proceed) {
-     if (connected) inspectOnboarding() else { settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION) }
+     navigate(Page.PATH)
     }
+   }
+  }
+  fun continuePath() {
+   if(busy || connectingAtStartup || appClosed)return
+   busy=true
+   scope.launch {
+    var proceed=false
+    try {
+     val root=withContext(Dispatchers.IO) { location.requireSelected(pathText,true) }
+     val next=setupDraft.copy(selectedSaveRoot=root.toString(),onboardingProgress=OnboardingProgress.PENDING)
+     withContext(Dispatchers.IO) {
+      // Validate the selected directory before persisting it or advancing.
+      val preview=SaveSummary.read(root)
+      require(preview.files>0 || java.nio.file.Files.list(root).use { it.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { "此目录没有可识别存档，请选择档案根目录或空目录" }
+      if(config!=null)configFile.save(next)
+     }
+     setupDraft=next;if(config!=null)config=next;proceed=true
+    } catch(e:Exception) { pathNotice=e.message }
+    finally { busy=false }
+    if(proceed){settingsMode=SettingsMode.FULL;navigate(Page.CONNECTION)}
    }
   }
   fun postponeOnboarding(emptyDecision: Boolean = false) {
@@ -579,6 +600,16 @@ internal fun runSyncApplication(
    } finally { connectingAtStartup = false }
    if (connected && onboardingActive && page != Page.DISCOVERY) inspectOnboarding()
   }
+  LaunchedEffect(page,pathText) {
+   if(page==Page.PATH) {
+    pathPreview=null;pathNotice="正在读取存档…";delay(350)
+    try {
+     val result=withContext(Dispatchers.IO){SaveSummary.read(location.requireSelected(pathText,false))}
+     pathPreview=result;pathNotice=if(result.files==0)"目录存在，尚无游戏存档或记录。" else null
+    } catch(e:CancellationException){throw e}
+    catch(e:Exception){pathNotice=e.message}
+   }
+  }
   LaunchedEffect(session, connected) {
    while (isActive && !appClosed) {
     delay(1000)
@@ -672,7 +703,7 @@ internal fun runSyncApplication(
      Box(Modifier.weight(1f).fillMaxWidth()) {
       when (page) {
        Page.DISCOVERY -> GuidedPage(
-        title = "1 / 3  选择游戏", subtitle = "",
+        title = "1 / 4  选择游戏", subtitle = "",
         footer = {
          discoveryNotice?.let { CompactFeedback(it, "检查未完成，请重新选择游戏或重试。") }
          if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -693,7 +724,6 @@ internal fun runSyncApplication(
           }
          }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text(if (discoveredTarget == null) "选择游戏…" else "更换游戏…") }
-         Text(DiscoveryCopy.directory(discovery?.defaultSave), color = muted)
          Details {
           Text("存档位置：$pathText")
           discoveredTarget?.let { Text("游戏文件：${it.path}") }
@@ -702,8 +732,30 @@ internal fun runSyncApplication(
          }
         }
        }
+       Page.PATH -> GuidedPage(title="2 / 4  设置存档路径",subtitle="",footer={
+        if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth()) {
+         TextButton(enabled=!busy,onClick={navigate(Page.DISCOVERY)}){Text("上一步")}
+         Spacer(Modifier.weight(1f))
+         Button(enabled=!busy&&pathText.isNotBlank(),onClick={continuePath()}){Text("下一步")}
+        }
+       }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+         OutlinedTextField(pathText,{pathText=it},Modifier.fillMaxWidth(),enabled=!busy,label={Text("存档目录")},singleLine=true)
+         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+          OutlinedButton(enabled=!busy,onClick={busy=true;scope.launch {try{NativeFolderChooser.choose(pathText)?.let{pathText=it}}catch(e:Exception){pathNotice=e.message}finally{busy=false}}}){Text("选择目录…")}
+          TextButton(enabled=!busy&&pathResult.isSuccess,onClick={pathText=pathResult.getOrThrow().toString()}){Text("使用默认路径")}
+         }
+         pathPreview?.let { summary ->
+          Text("游戏槽位 ${summary.slots.size} 个 · 游玩 ${summary.plays?.toString() ?: "未知"} 次")
+          summary.slots.forEach { (slot,time) -> Text("$slot · ${time?.let(::localTime) ?: "时间未知"}",color=muted) }
+         }
+         pathNotice?.let { Text(it,color=muted) }
+         Text("目录不存在时，下一步会创建空目录用于恢复。不会运行游戏。",style=MaterialTheme.typography.caption,color=muted)
+        }
+       }
        Page.COMPARISON -> GuidedPage(
-        title = if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) "3 / 3" else "3 / 3  选择存档", subtitle = "",
+        title = if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) "4 / 4  配置完成" else "4 / 4  选择存档", subtitle = "",
         footer = {
          comparisonNotice?.let { CompactFeedback(it, "操作未完成，请重试。") }
          comparison?.blocker?.let { CompactFeedback(it, "暂不能继续，请检查存档或连接后重试。") }
@@ -845,7 +897,8 @@ internal fun runSyncApplication(
          Details { Text("存档位置：$pathText"); Text(processMessage(gameStatus)) }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
-         TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery() }) { Text("重新检查三步引导") }
+         TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH) }) { Text("修改存档路径") }
+         TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery() }) { Text("重新检查四步引导") }
          if (pending) TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("检查并归档中断的待上传操作") }
         }
        }
@@ -854,7 +907,7 @@ internal fun runSyncApplication(
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
         ConnectionPage(settingsMode, configFile, if (onboardingActive) setupDraft else config, password, connectionNotice, busy || connectingAtStartup, onboardingActive,
          onBusy = { if (current()) busy = it },
-         onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(if (onboardingActive) Page.DISCOVERY else Page.HOME) },
+         onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(if (onboardingActive) Page.PATH else Page.HOME) },
          onApplied = { applied, note ->
           if (current()) {
            config = applied.config; setupDraft = applied.config; password = applied.password; connected = true
@@ -926,6 +979,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
  var secret by remember { mutableStateOf(currentPassword) }
  var message by remember { mutableStateOf(initialNotice) }
  var failed by remember { mutableStateOf(false) }
+ var connectionVerified by remember { mutableStateOf(false) }
  // Both the UI state and lifetime reservation change synchronously before recomposition.
  var inFlight by remember { mutableStateOf(false) }
  var closed by remember { mutableStateOf(false) }
@@ -943,14 +997,17 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
   if (busy || inFlight || closed) return
   val next = ConnectionDraft(draft, password).editingConfig(value)
   draft = next.config; secret = next.password
+  connectionVerified=false
+  controller.update(draft,secret)
   // Keep the last failure visible while correcting inputs, until the next explicit attempt.
  }
  fun cancel() {
   if (busy || inFlight || closed) return
   closed = true; lifetime.close { controller.cancel() }; secret = ""; onDismiss()
  }
- fun connect() {
+ fun connect(apply: Boolean = false) {
   if (busy || inFlight || closed) return
+  if(apply && !connectionVerified)return
   val ticket = lifetime.begin() ?: return
   inFlight = true; onBusy(true); failed = false; message = null
   val submitted = ConnectionDraft(draft, secret)
@@ -961,11 +1018,12 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    var finished = false
    try {
     controller.update(submitted.config, submitted.password)
-    when (val checked = withContext(Dispatchers.IO) { controller.connect() }) {
+    when (val checked = if(apply)ConnectionTestResult.Success(false) else withContext(Dispatchers.IO) { controller.connect() }) {
      is ConnectionTestResult.Failure -> if (lifetime.isCurrent(ticket)) { message = checked.message; failed = true }
      is ConnectionTestResult.Success -> {
       verified = true
-      applied = withContext(Dispatchers.IO) {
+      connectionVerified=true;message="连接测试通过。"
+      if(apply)applied = withContext(Dispatchers.IO) {
        lifetime.persist(ticket) {
         controller.applyFilePassword(configFile)
        }
@@ -991,7 +1049,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
   }
  }
  GuidedPage(
-  title = if (onboarding) "2 / 3  连接云端" else if (mode == SettingsMode.UNLOCK) "欢迎回来，连接云端" else if (initial == null) "让存档跟着你" else "连接设置",
+  title = if (onboarding) "3 / 4  连接云端" else if (mode == SettingsMode.UNLOCK) "欢迎回来，连接云端" else if (initial == null) "让存档跟着你" else "连接设置",
   subtitle = "",
   footer = {
    // Feedback and the single submit action remain visible independently of form scrolling.
@@ -1000,7 +1058,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
     TextButton(enabled = !controlsBusy, onClick = { cancel() }) { Text("返回") }
     Spacer(Modifier.weight(1f))
-    Button(enabled = !controlsBusy, onClick = { connect() }) { Text(if (inFlight) "正在连接…" else "连接") }
+    Button(enabled = !controlsBusy && connectionVerified, onClick = { connect(true) }) { Text(if(onboarding)"下一步" else "保存") }
    }
   }
  ) {
@@ -1008,6 +1066,8 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("WebDAV 地址") }, placeholder = { Text("https://example.com/dav") }, singleLine = true)
    OutlinedTextField(draft.username, { edit(draft.copy(username = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("用户名") }, singleLine = true)
    OutlinedTextField(secret, { edit(password = it) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+   OutlinedButton(enabled=!controlsBusy,onClick={connect()}) { Text(if(inFlight)"正在测试…" else "测试连接") }
+   Text("密码可留空。测试会检查并准备本应用的同步目录。",style=MaterialTheme.typography.caption,color=muted)
   }
  }
 }
