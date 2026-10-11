@@ -225,6 +225,32 @@ class ProductionWebDavFlowTest {
   assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
   assertContentEquals(bytes,b.root.resolve("journal.dat").readBytes());assertEquals("[7]",current())
  }
+ @Test fun rankingMissingEvidenceAndSoleResetRetainProgressThroughProductionHttp()=Dav().use { dav ->
+  val ca=configured("fallback-A",dav);val cb=configured("fallback-B",dav);seed(Path.of(ca.saveRoot),1)
+  val a=open(ca);val b=open(cb)
+  val old=rankingRecord("00000000-0000-0000-0000-000000000101",100)
+  val left=rankingRecord("00000000-0000-0000-0000-000000000102",300)
+  val right=rankingRecord("00000000-0000-0000-0000-000000000103",200,true)
+  fun counts(rows:List<kotlinx.serialization.json.JsonObject>,total:Int,won:Int):ByteArray {
+   val value=GlobalBundles.decode(rankings(*rows.toTypedArray()),"rankings.dat")
+   return GlobalBundles.encode(kotlinx.serialization.json.JsonObject(value+mapOf("total" to kotlinx.serialization.json.JsonPrimitive(total),"won" to kotlinx.serialization.json.JsonPrimitive(won))))
+  }
+  a.root.resolve("rankings.dat").writeBytes(counts(listOf(old),100,20));published(a,dav);restore(b,dav)
+  a.root.resolve("rankings.dat").writeBytes(counts(listOf(old,left),101,20));published(a,dav)
+  b.root.resolve("rankings.dat").writeBytes(counts(listOf(old,right),106,21)) // Missing five event IDs: do not add this delta.
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  fun current()=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
+  assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
+  assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
+  restore(a,dav)
+  a.root.resolve("rankings.dat").writeBytes(counts(emptyList(),0,0));published(a,dav)
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}) // Only the remote rankings file changed.
+  assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
+  assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
+  val bytes=b.root.resolve("rankings.dat").readBytes()
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  assertContentEquals(bytes,b.root.resolve("rankings.dat").readBytes())
+ }
  @Test fun malformedGlobalCountersFailPreflightWithoutAnyWrites()=Dav().use { dav ->
   val ca=configured("ambiguous-A",dav);val cb=configured("ambiguous-B",dav);seed(Path.of(ca.saveRoot),1)
   val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)

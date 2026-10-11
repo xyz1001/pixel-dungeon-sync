@@ -1101,7 +1101,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
 private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit, onMerge: () -> Unit) {
  GuidedPage(
   title = "存档发生冲突",
-  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；排行榜去重后保留分数最高的11条。无法核实次数或超出六槽容量时会停止，原始快照保留。",
+  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；图鉴次数取最大，排行榜去重后保留最高分11条。累计统计缺少完整证据时保守取较大值，可能少计；格式损坏或超出六槽仍停止，原始快照保留。",
   footer = {
    restoreIssue?.let { Text("选择后校验：$it", color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

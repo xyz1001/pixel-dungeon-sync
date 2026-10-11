@@ -15,10 +15,8 @@ internal object GlobalRecordMerge {
    val changed=branches.map { it[path] }.filter { !same(old,it) }
    if(changed.isEmpty()) { old?.let { output[path]=it };continue }
    // A missing whole file is a reset, not evidence that earned progress should be erased.
-   val originals=changed.filterNotNull()
-   if(originals.isEmpty()) {
-    output[path]=requireNotNull(old);decisions+="$path：分支缺失，保留共同基线记录";continue
-   }
+   // Even an all-reset recovery validates the retained baseline before writing it.
+   val originals=changed.filterNotNull().ifEmpty { listOf(requireNotNull(old)) }
    val before=old?.let { GlobalBundles.decode(it,path) }
    val inputs=originals.map { GlobalBundles.decode(it,path) }
    val result=when(path) {
@@ -26,11 +24,6 @@ internal object GlobalRecordMerge {
     "journal.dat" -> JournalMerge.merge(before,inputs)
     "rankings.dat" -> RankingsMerge.merge(before,inputs)
     else -> globalFail("不支持的全局文件 $path")
-   }
-   if(changed.size==1 && path=="rankings.dat") {
-    // Rankings preserve the sole source encoding after validation. Badge/journal
-    // resets must apply their baseline-aware union/maxima instead.
-    output[path]=originals.single();decisions+="$path：校验后采用唯一分支的改动";continue
    }
    // Reuse an exact original encoding if semantics match; otherwise write deterministic gzip JSON.
    output[path]=originals.zip(inputs).firstOrNull { it.second==result }?.first ?: GlobalBundles.encode(result)

@@ -7,8 +7,8 @@ import kotlin.test.*
 class GlobalRecordMergeTest {
  private fun bytes(value:String)=value.encodeToByteArray()
  @Test fun changesToDifferentFilesPreserveTheirOriginalBytes() {
-  val base=mapOf("badges.dat" to bytes("{\"badges\":[]}"),"rankings.dat" to bytes("{\"records\":[],\"total\":0,\"won\":0,\"latest\":-1}"))
-  val a=base+("badges.dat" to bytes("{\"badges\":[\"MONSTERS_SLAIN_1\"]}"));val b=base+("rankings.dat" to bytes("{ \"records\":[],\"total\":0,\"won\":0,\"latest\":-1}"))
+  val base=mapOf("badges.dat" to bytes("{\"badges\":[]}"),"rankings.dat" to bytes("{\"records\":[],\"total\":0,\"won\":0,\"latest\":-1,\"daily_history_dates\":[],\"daily_history_scores\":[]}"))
+  val a=base+("badges.dat" to bytes("{\"badges\":[\"MONSTERS_SLAIN_1\"]}"));val b=base+("rankings.dat" to bytes("{ \"records\":[],\"total\":0,\"won\":0,\"latest\":-1,\"daily_history_dates\":[],\"daily_history_scores\":[]}"))
   val result=GlobalRecordMerge.plan(base,listOf(a,b))
   assertContentEquals(a.getValue("badges.dat"),result.files.getValue("badges.dat"))
   assertContentEquals(b.getValue("rankings.dat"),result.files.getValue("rankings.dat"))
@@ -23,6 +23,13 @@ class GlobalRecordMergeTest {
   assertEquals(JsonArray(listOf(JsonPrimitive(true))),merged["catalog_seen"])
  }
 
+ @Test fun uniqueRankingResetCannotBypassBaselineCounterRetention() {
+  fun ranks(total:Int,won:Int)=bytes("""{"records":[],"total":$total,"won":$won,"latest":-1,"daily_history_dates":[],"daily_history_scores":[]}""")
+  val base=mapOf("rankings.dat" to ranks(100,20));val reset=mapOf("rankings.dat" to ranks(0,0))
+  val result=GlobalRecordMerge.plan(base,listOf(base,reset))
+  val value=GlobalBundles.decode(result.files.getValue("rankings.dat"),"rankings.dat")
+  assertEquals(100,globalInt(value["total"],"total"));assertEquals(20,globalInt(value["won"],"won"))
+ }
  @Test fun unchangedOpaqueBytesAreNotReencodedOrReinterpreted() {
   val old=mapOf("journal.dat" to byteArrayOf(1,2,3))
   assertContentEquals(old.getValue("journal.dat"),GlobalRecordMerge.plan(old,listOf(old,old)).files.getValue("journal.dat"))
@@ -40,6 +47,12 @@ class GlobalRecordMergeTest {
   val reset=mapOf("badges.dat" to bytes("""{"badges":[]}"""))
   val result=GlobalRecordMerge.plan(base,listOf(base,reset))
   assertEquals(setOf("UNLOCK_MAGE"),globalStringSet(GlobalBundles.decode(result.files.getValue("badges.dat"),"badges.dat")["badges"],"badges"))
+ }
+ @Test fun missingFilesCannotRecoverAnUnparseableBaseline() {
+  for(path in listOf("badges.dat","rankings.dat","journal.dat")) {
+   val error=assertFailsWith<RunMergeException>{GlobalRecordMerge.plan(mapOf(path to bytes("broken")),listOf(emptyMap(),emptyMap()))}
+   assertContains(error.message!!,path)
+  }
  }
  @Test fun corruptConflictingFilesFailWithDomainContext() {
   for(path in listOf("badges.dat","rankings.dat","journal.dat")) {
