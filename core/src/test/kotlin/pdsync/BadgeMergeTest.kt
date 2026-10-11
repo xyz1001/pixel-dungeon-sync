@@ -29,8 +29,9 @@ class BadgeMergeTest {
   assertFalse("VICTORY" in merged)
  }
 
- @Test fun rejectsDeletionResetDuplicateNamesAndNonStringFields() {
-  assertFailsWith<RunMergeException> { BadgeMerge.merge(bundle("UNLOCK_MAGE"),listOf(bundle(),bundle("UNLOCK_MAGE","UNLOCK_ROGUE"))) }
+ @Test fun resetsRetainEarnedBadgesWhileMalformedNamesStillFail() {
+  assertEquals(setOf("UNLOCK_MAGE","UNLOCK_ROGUE"),names(BadgeMerge.merge(bundle("UNLOCK_MAGE"),listOf(bundle(),bundle("UNLOCK_ROGUE")))))
+  assertEquals(setOf("UNLOCK_MAGE"),names(BadgeMerge.merge(bundle("UNLOCK_MAGE"),listOf(bundle(),bundle()))))
   for(text in listOf("{}","{\"badges\":null}","{\"badges\":[1]}","{\"badges\":[\"A\",\"A\"]}","{\"badges\":[\"\"]}"))
    assertFailsWith<RunMergeException> { BadgeMerge.merge(null,listOf(obj(text))) }
  }

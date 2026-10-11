@@ -11,9 +11,9 @@ internal object BadgeMerge {
   if(branches.isEmpty())globalFail("badges.dat 缺少合并分支")
   val old=base?.let { globalStringSet(it["badges"], "badges.dat/badges 基线") }.orEmpty()
   val sets=branches.map { globalStringSet(it["badges"], "badges.dat/badges") }
-  if(sets.any { !it.containsAll(old) })globalFail("badges.dat 存在徽章删除或重置，不能按新增集合合并")
   val result=mergeOpaqueFields(base,branches,setOf("badges"),"badges.dat")
-  // Preserve every name, including unknown future/mod names. No enum loading or name guessing.
+  // Preserve earned baseline progress even after a branch resets its badge set.
+  // Keep unknown future/mod names too; no enum loading or name guessing.
   val unlocked=(old+sets.flatten()).toMutableSet()
   replacements.forEach { tiers ->
    val highest=tiers.indexOfLast { it in unlocked }

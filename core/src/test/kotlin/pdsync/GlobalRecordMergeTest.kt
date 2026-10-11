@@ -27,9 +27,19 @@ class GlobalRecordMergeTest {
   val old=mapOf("journal.dat" to byteArrayOf(1,2,3))
   assertContentEquals(old.getValue("journal.dat"),GlobalRecordMerge.plan(old,listOf(old,old)).files.getValue("journal.dat"))
  }
- @Test fun deletionCannotSilentlyDiscardGlobalRecords() {
-  val base=mapOf("badges.dat" to bytes("old"))
-  assertContains(assertFailsWith<RunMergeException>{GlobalRecordMerge.plan(base,listOf(emptyMap(),base))}.message!!,"删除或重置")
+ @Test fun missingGlobalFileRetainsBaselineInsteadOfErasingProgress() {
+  val bytes=bytes("""{"badges":["UNLOCK_MAGE"]}""");val base=mapOf("badges.dat" to bytes)
+  assertContentEquals(bytes,GlobalRecordMerge.plan(base,listOf(emptyMap(),base)).files.getValue("badges.dat"))
+  assertContentEquals(bytes,GlobalRecordMerge.plan(base,listOf(emptyMap(),emptyMap())).files.getValue("badges.dat"))
+  val other=mapOf("badges.dat" to bytes("""{"badges":["UNLOCK_ROGUE"]}"""))
+  val both=GlobalRecordMerge.plan(base,listOf(emptyMap(),other))
+  assertEquals(setOf("UNLOCK_MAGE","UNLOCK_ROGUE"),globalStringSet(GlobalBundles.decode(both.files.getValue("badges.dat"),"badges.dat")["badges"],"badges"))
+ }
+ @Test fun singleChangedBadgeResetAppliesBaselineUnion() {
+  val base=mapOf("badges.dat" to bytes("""{"badges":["UNLOCK_MAGE"]}"""))
+  val reset=mapOf("badges.dat" to bytes("""{"badges":[]}"""))
+  val result=GlobalRecordMerge.plan(base,listOf(base,reset))
+  assertEquals(setOf("UNLOCK_MAGE"),globalStringSet(GlobalBundles.decode(result.files.getValue("badges.dat"),"badges.dat")["badges"],"badges"))
  }
  @Test fun corruptConflictingFilesFailWithDomainContext() {
   for(path in listOf("badges.dat","rankings.dat","journal.dat")) {
