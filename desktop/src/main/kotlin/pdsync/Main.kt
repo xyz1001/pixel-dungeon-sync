@@ -234,7 +234,7 @@ internal fun runSyncApplication(
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
-    Action.MERGE -> "正在检查单局身份和槽位，合并完整存档…"
+    Action.MERGE -> "正在检查单局身份、徽章、历史和图鉴…"
     Action.PUSH -> "正在保留快照并校验云端…"
     else -> "正在处理…"
    }
@@ -1101,7 +1101,7 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
 private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit, onMerge: () -> Unit) {
  GuidedPage(
   title = "存档发生冲突",
-  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，同一局的不同进度各占一个槽位。原始历史保留。",
+  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；无法核实次数或超出容量时会停止，原始历史保留。",
   footer = {
    restoreIssue?.let { Text("选择后校验：$it", color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
