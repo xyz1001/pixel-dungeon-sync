@@ -136,7 +136,7 @@ class DirectoryMetadataStore(private val root: Path,
  }
 
  /** Any changed bytes may be a reused slot. Keep a hint, but invalidate unproven continuity. */
- fun observe(files: Map<String,String>, initialImport: Boolean = true): DirectorySnapshotMetadata {
+ fun observe(files: Map<String,String>, initialImport: Boolean = true, persist: Boolean = true): DirectorySnapshotMetadata {
   val read=read(); val old=(read as? SidecarRead.Valid)?.value
   val runs=runContentHashes(files).mapValues { (slot,digest) ->
    val prior=old?.runs?.get(slot)
@@ -149,7 +149,7 @@ class DirectoryMetadataStore(private val root: Path,
   }
   val value=DirectorySidecar(displayName=old?.displayName ?: "",currentContentSha256=contentSha256(files),lastSynced=old?.lastSynced,runs=runs)
   // Damaged metadata remains available for diagnosis; never silently replace lost identities.
-  if(read !is SidecarRead.Damaged)write(value)
+  if(persist && read !is SidecarRead.Damaged)write(value)
   return DirectorySnapshotMetadata(displayName=value.displayName,contentSha256=value.currentContentSha256,runs=runs).validated(files)
  }
 

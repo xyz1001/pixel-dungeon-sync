@@ -279,7 +279,7 @@ class AppendProfileSession(
   val nearest=common.filter { candidate -> common.none { it!=candidate&&graph.descendsFrom(it,candidate) } }
   if(nearest.size!=1)throw RunMergeException("没有唯一可验证的共同祖先")
   val base=repository.download(store,graph.commits.getValue(nearest.single()))
-  val current=local.capture(stopped,null)
+  val current=local.capture(stopped,null,persistDirectoryMetadata=false)
   require(current.manifest.files==conflict.observedLocalFiles) { "采集期间内容发生变化，未合并" }
   val branches=graph.tips.sorted().map { id ->
    val commit=graph.commits.getValue(id)

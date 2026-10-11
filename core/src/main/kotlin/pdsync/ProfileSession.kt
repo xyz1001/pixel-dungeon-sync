@@ -263,13 +263,13 @@ class ProfileSession(
   manifest.metadata?.validated(manifest.files.keys)
   manifest.directoryMetadata?.validated(manifest.files)
  }
- internal fun capture(stopped: () -> Boolean, parent: String? = head()): Snapshot {
+ internal fun capture(stopped: () -> Boolean, parent: String? = head(), persistDirectoryMetadata: Boolean = true): Snapshot {
   guard(stopped); validateRoot()
   val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
   require(snapshot.manifest.files.isNotEmpty()) { "空目录只能用于恢复，不能创建或上传空快照" }
   guard(stopped)
   if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException("采集期间存档发生变化；已停止操作，等待文件稳定后重试")
-  return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists())))
+  return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists(),persist=persistDirectoryMetadata)))
  }
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
   SafePaths.boundedRead(headPath, 128).decodeToString().trim().also { require(it.matches(Regex("[0-9a-fA-F-]{36}"))) } else null

@@ -109,4 +109,16 @@ class DirectoryMetadataTest {
   source.resolve(DIRECTORY_METADATA_FILE).deleteExisting()
   assertNull(a.createSnapshot {true}.manifest.directoryMetadata?.runs?.get("game1")?.runUUID)
  }
+ @Test fun readOnlyObservationDoesNotCreateOrRewriteSidecar() {
+  val root=root();val store=DirectoryMetadataStore(root);val f=files()
+  store.observe(f,initialImport=false,persist=false)
+  assertFalse(root.resolve(DIRECTORY_METADATA_FILE).exists())
+  val initial=store.observe(f);val sidecar=root.resolve(DIRECTORY_METADATA_FILE)
+  val bytes=sidecar.readBytes();val modified=Files.getLastModifiedTime(sidecar)
+  val changed=f+("badges.dat" to hash("new badge".encodeToByteArray()))
+  val preview=store.observe(changed,persist=false)
+  assertEquals(initial.runs,preview.runs);assertEquals(contentSha256(changed),preview.contentSha256)
+  assertContentEquals(bytes,sidecar.readBytes());assertEquals(modified,Files.getLastModifiedTime(sidecar))
+ }
+
 }
