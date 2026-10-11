@@ -4,9 +4,11 @@ import kotlinx.serialization.json.*
 import java.util.UUID
 
 /**
- * Lossless 3.3.8 rankings merge. Counters describe recorded end-of-game submissions, not
+ * 3.3.8 rankings merge with a score-ranked display capped at the official capacity.
+ * Counters describe recorded end-of-game submissions, not
  * active-run identities. Each branch must expose every counted addition since the base.
- * No game classes are instantiated, counters estimated, or leaderboard rows truncated.
+ * Counters are proved against the complete event union before display rows are trimmed.
+ * No game classes are instantiated and no missing events or counts are guessed.
  */
 internal object RankingsMerge {
  private const val CAPACITY = 11
@@ -45,30 +47,21 @@ internal object RankingsMerge {
    additions.putAll(newRecords)
   }
   val records = (original.records + additions).values.toList()
-  if (records.size > CAPACITY) globalFail("排行榜合并需要 ${records.size} 条记录，容量只有 $CAPACITY；不能丢弃历史")
   val total = checkedCount(original.total, additions.values.count { it.seed.isEmpty() }, "总局数")
   val won = checkedCount(original.won, additions.values.count { it.seed.isEmpty() && it.win }, "胜局数")
   validateZeroFallback(records, total, won)
 
-  // The official comparator subtracts signed Java ints, including UUID hash codes.
-  // Reject overflow rather than introduce a different order or a non-transitive comparator.
-  for (i in records.indices) for (j in i + 1 until records.size) {
-   val left = records[i]; val right = records[j]
-   if (left.seed.isEmpty() == right.seed.isEmpty()) {
-    val difference = if (left.score != right.score) right.score.toLong() - left.score else right.id.hashCode().toLong() - left.id.hashCode()
-    if (difference !in -Int.MAX_VALUE.toLong()..Int.MAX_VALUE.toLong()) globalFail("排行榜同分排序的整数差超出安全范围")
-   }
-  }
-  val sorted = records.sortedBy { it.id }.sortedWith { left, right ->
-   when {
-    left.seed.isEmpty() != right.seed.isEmpty() -> if (left.seed.isEmpty()) -1 else 1
-    left.score != right.score -> right.score.compareTo(left.score)
-    else -> right.id.hashCode().compareTo(left.id.hashCode())
-   }
-  }
+  // User-selected merge policy: highest scores across all normal/custom-seed rows.
+  // Official load preserves this order. A future game submission applies the game's own
+  // ordinary-first/latest-retaining policy. Compare without signed subtraction overflow;
+  // use the complete stable ID to break the (possible) String.hashCode collision.
+  val sorted = records.sortedWith(
+   compareByDescending<Record> { it.score }.thenByDescending { it.id.hashCode() }.thenBy { it.id }
+  ).take(CAPACITY)
   val changedLatest = states.map { it.latest }.filter { it != original.latest }.distinct()
   val latest = when (changedLatest.size) { 0 -> original.latest; 1 -> changedLatest.single(); else -> null }
-  // -1 deliberately means no unique highlight; RankingsScene only compares pos == latest.
+  // A truncated latest ID, like an ambiguous latest, becomes -1 (no highlight).
+  // RankingsScene only compares pos == latest; no dangling index is written.
   out["records"] = JsonArray(sorted.map { it.raw })
   out["latest"] = JsonPrimitive(sorted.indexOfFirst { it.id == latest })
   out["total"] = JsonPrimitive(total)

@@ -69,7 +69,7 @@ class RankingsMergeTest {
   val b = record(1); val custom = record(2, score = 999_999, seed = "same-seed"); val regular = record(3)
   val result = merged(ranking(listOf(b)), ranking(listOf(b, custom)), ranking(listOf(b, regular)))
   assertEquals(2, result["total"]!!.jsonPrimitive.int)
-  assertEquals(custom, result["records"]!!.jsonArray.last())
+  assertEquals(custom, result["records"]!!.jsonArray.first())
   assertEquals(setOf(b, custom, regular), result["records"]!!.jsonArray.toSet())
  }
 
@@ -91,11 +91,52 @@ class RankingsMergeTest {
   assertRejected(base, ranking(listOf(b), 10, 4), ranking(listOf(b, record(2)), 11, 5), reason = "统计减少")
  }
 
- @Test fun allInputRowsMustFitOfficialCapacity() {
+ @Test fun capacityKeepsHighestElevenWhileCountsUseTheCompleteEventUnion() {
+  val rows = (1..10).map { record(it, win = it == 1) }; val base = ranking(rows)
+  val left = ranking(rows + record(11, win = true)); val right = ranking(rows + record(12))
+  val result = merged(base, left, right)
+  assertEquals((12 downTo 2).map { record(it)["gameID"] }, result["records"]!!.jsonArray.map { it.jsonObject["gameID"] })
+  assertEquals(12, result["total"]!!.jsonPrimitive.int)
+  assertEquals(2, result["won"]!!.jsonPrimitive.int) // Includes the winning base row that was trimmed.
+  assertEquals(-1, result["latest"]!!.jsonPrimitive.int)
+  assertEquals(result, merged(base, right, left)); assertEquals(result, merged(base, left, right))
+  assertEquals(result, merged(result, result, result))
+  assertRejected(base, result, right, reason = "基线记录消失")
+  assertRejected(base, ranking(rows + record(11) + record(12)), right, reason = "输入超过")
+ }
+
+ @Test fun seededHighScoresCompeteForCapacityWithoutIncreasingCumulativeCounts() {
   val rows = (1..10).map { record(it) }; val base = ranking(rows)
-  assertRejected(base, ranking(rows + record(11)), ranking(rows + record(12)), reason = "需要 12 条")
-  val result = merged(ranking(rows.take(9)), ranking(rows.take(9) + record(10)), ranking(rows.take(9) + record(11)))
+  val custom = record(11, score = Int.MAX_VALUE, seed = "custom")
+  val result = merged(base, ranking(rows + custom), ranking(rows + record(12)))
+  assertEquals(custom, result["records"]!!.jsonArray.first())
+  assertEquals(11, result["total"]!!.jsonPrimitive.int)
+  assertEquals(0, result["won"]!!.jsonPrimitive.int)
   assertEquals(11, ids(result).size)
+ }
+
+ @Test fun aUniqueLatestTrimmedOutOfTheTopElevenHasNoDanglingHighlight() {
+  val rows = (1..10).map { record(it, score = 1000 + it) }; val base = ranking(rows, latest = -1)
+  val lowest = record(11, score = 0); val highest = record(12, score = Int.MAX_VALUE)
+  val result = merged(base, ranking(rows + lowest), ranking(rows + highest, latest = -1))
+  assertEquals(-1, result["latest"]!!.jsonPrimitive.int)
+  assertFalse(ids(result).contains(lowest["gameID"]!!.jsonPrimitive.content))
+  assertEquals(highest, result["records"]!!.jsonArray.first())
+  assertEquals(12, result["total"]!!.jsonPrimitive.int)
+ }
+
+ @Test fun tiesAtTheCutoffUseHashThenFullIdWithStableOrdering() {
+  val lowId = "12e8b071-8d85-3fba-83d3-d91ca9f2a5b0"
+  val highId = "ddc76671-5131-3180-9670-caaac9a8d580"
+  assertEquals(lowId.hashCode(), highId.hashCode())
+  val rows = (1..10).map { record(it, score = 200) }; val base = ranking(rows, latest = -1)
+  val low = change(record(11, score = 100), "gameID", JsonPrimitive(lowId))
+  val high = change(record(12, score = 100), "gameID", JsonPrimitive(highId))
+  val left = ranking(rows + low); val right = ranking(rows + high)
+  val result = merged(base, left, right)
+  assertEquals(low, result["records"]!!.jsonArray.last())
+  assertFalse(ids(result).contains(highId))
+  assertEquals(result, merged(base, right, left))
  }
 
  @Test fun identicalIdWithDifferentPayloadAndDuplicateIdsAreRejected() {
@@ -132,13 +173,16 @@ class RankingsMergeTest {
   assertEquals(listOf(r, l, b), result["records"]!!.jsonArray.toList())
  }
 
- @Test fun overflowingUuidHashTieFailsRatherThanUsingNontransitiveOrder() {
+ @Test fun overflowingUuidHashTieUsesSafeStableComparison() {
   val b = record(1, score = 50)
   val ids = (1..1000).map { java.util.UUID.nameUUIDFromBytes("test-$it".toByteArray()).toString() }
   val low = ids.minBy { it.hashCode() }; val high = ids.maxBy { it.hashCode() }
   assertTrue(high.hashCode().toLong() - low.hashCode() > Int.MAX_VALUE)
   val left = change(record(2, score = 100), "gameID", JsonPrimitive(low)); val right = change(record(3, score = 100), "gameID", JsonPrimitive(high))
-  assertRejected(ranking(listOf(b)), ranking(listOf(b, left)), ranking(listOf(b, right)), reason = "排序")
+  val base = ranking(listOf(b)); val l = ranking(listOf(b, left)); val r = ranking(listOf(b, right))
+  val result = merged(base, l, r)
+  assertEquals(listOf(right, left, b), result["records"]!!.jsonArray.toList())
+  assertEquals(result, merged(base, r, l))
  }
 
  @Test fun latestIsAnIdentityReferenceAfterSortingAndAmbiguityClearsHighlight() {

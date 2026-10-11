@@ -190,6 +190,27 @@ class ProductionWebDavFlowTest {
   val after=b.observedFiles();assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
   assertEquals(after,b.observedFiles());assertEquals(3,SaveSummary.read(b.root).plays)
  }
+ @Test fun highestElevenRankingRowsKeepFullEventCountersThroughProductionHttp()=Dav().use { dav ->
+  val ca=configured("top-A",dav);val cb=configured("top-B",dav);seed(Path.of(ca.saveRoot),1)
+  val a=open(ca);val b=open(cb)
+  val rows=(1..10).map { rankingRecord("00000000-0000-0000-0000-${it.toString().padStart(12,'0')}",it*100) }
+  a.root.resolve("rankings.dat").writeBytes(rankings(*rows.toTypedArray()));published(a,dav);restore(b,dav)
+  val active=b.observedFiles().filterKeys { it.startsWith("game1/") }
+  val high=rankingRecord("00000000-0000-0000-0000-000000000011",10000)
+  val lowWin=rankingRecord("00000000-0000-0000-0000-000000000012",1,true)
+  a.root.resolve("rankings.dat").writeBytes(rankings(*(rows+high).toTypedArray()));published(a,dav)
+  b.root.resolve("rankings.dat").writeBytes(rankings(*(rows+lowWin).toTypedArray()))
+  val merged=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val output=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
+  val kept=output["records"] as kotlinx.serialization.json.JsonArray
+  assertEquals(11,kept.size);assertEquals(high,kept.first());assertFalse(kept.contains(lowWin))
+  assertEquals(12,globalInt(output["total"],"total"));assertEquals(1,globalInt(output["won"],"won"))
+  assertEquals(active,b.observedFiles().filterKeys { it.startsWith("game1/") });assertEquals(2,merged.parents.size)
+  val before=b.observedFiles();val remote=dav.fingerprint()
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  assertEquals(before,b.observedFiles());assertTrue(remote.all { (path,hash) -> dav.fingerprint()[path]==hash })
+  assertEquals(12,SaveSummary.read(b.root).plays)
+ }
  @Test fun ambiguousGlobalCountersAndResetFailPreflightWithoutAnyWrites()=Dav().use { dav ->
   val ca=configured("ambiguous-A",dav);val cb=configured("ambiguous-B",dav);seed(Path.of(ca.saveRoot),1)
   val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
