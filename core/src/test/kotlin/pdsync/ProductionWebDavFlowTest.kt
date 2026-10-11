@@ -146,4 +146,61 @@ class ProductionWebDavFlowTest {
   val files=b.observedFiles();restore(b,dav);assertEquals(files,b.observedFiles());assertFalse(b.hasPending())
   assertFails{b.restoreRemote(chosen,dav.store()){false}};assertEquals(files,b.observedFiles())
  }
+ private fun rankingRecord(id:String,score:Int,win:Boolean=false):kotlinx.serialization.json.JsonObject = json.parseToJsonElement("""{
+  "__className":"com.shatteredpixel.shatteredpixeldungeon.Rankings${'$'}Record",
+  "gameID":"$id","score":$score,"win":$win,"custom_seed":"","daily":false,
+  "class":"WARRIOR","tier":1,"level":1,"depth":1,"ascending":false,
+  "date":"2026-10-11","version":"v3.3.8","gameData":{"opaque":{"keep":9223372036854775807}}
+ }""").let { it as kotlinx.serialization.json.JsonObject }
+ private fun rankings(vararg records:kotlinx.serialization.json.JsonObject):ByteArray {
+  val wins=records.count { it["win"].toString()=="true" }
+  return gzip("""{"records":[${records.joinToString(",")}],"total":${records.size},"won":$wins,"latest":${if(records.isEmpty())-1 else 0},"daily_history_dates":[],"daily_history_scores":[],"extension":{"preserve":true}}""")
+ }
+ private fun globals(s:AppendProfileSession,badge:String,record:kotlinx.serialization.json.JsonObject?,item:String) {
+  s.root.resolve("badges.dat").writeBytes(gzip("""{"badges":[$badge]}"""))
+  s.root.resolve("rankings.dat").writeBytes(if(record==null)rankings() else rankings(record))
+  s.root.resolve("journal.dat").writeBytes(gzip(if(item.isEmpty()) """{"documents":{}}""" else """{"catalog_classes":["$item"],"catalog_seen":[true],"catalog_uses":[1],"documents":{}}"""))
+ }
+ @Test fun globalDomainsMergeThroughProductionHttpAndDuplicateEventsStaySingle()=Dav().use { dav ->
+  val ca=configured("global-A",dav);val cb=configured("global-B",dav);seed(Path.of(ca.saveRoot),1)
+  val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
+  val left=rankingRecord(java.util.UUID.randomUUID().toString(),100,true)
+  val right=rankingRecord(java.util.UUID.randomUUID().toString(),90)
+  globals(a,"\"MONSTERS_SLAIN_1\"",left,"com.shatteredpixel.shatteredpixeldungeon.items.food.Food");published(a,dav)
+  globals(b,"\"GOLD_COLLECTED_1\"",right,"com.shatteredpixel.shatteredpixeldungeon.items.potions.PotionOfHealing")
+  val merged=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val records=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
+  assertEquals(2,globalInt(records["total"],"total"));assertEquals(1,globalInt(records["won"],"won"))
+  assertEquals(2,(records["records"] as kotlinx.serialization.json.JsonArray).size)
+  assertEquals(setOf("MONSTERS_SLAIN_1","GOLD_COLLECTED_1"),globalStringSet(GlobalBundles.decode(b.root.resolve("badges.dat").readBytes(),"badges.dat")["badges"],"badges"))
+  val journal=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")
+  assertEquals(2,(journal["catalog_classes"] as kotlinx.serialization.json.JsonArray).size)
+  assertEquals(2,merged.parents.size);assertTrue(merged.snapshot.files.keys.none(::isDirectoryMetadata))
+  val content=b.observedFiles();val remote=dav.fingerprint();assertEquals(merged.id,published(b,dav).id)
+  assertEquals(content,b.observedFiles());assertEquals(remote,dav.fingerprint())
+  restore(a,dav);assertEquals(content,a.observedFiles())
+
+  // One genuine completed-game ID copied to both branches must increase totals only once.
+  val common=rankingRecord(java.util.UUID.randomUUID().toString(),110)
+  a.root.resolve("rankings.dat").writeBytes(rankings(common,left,right));published(a,dav)
+  b.root.resolve("rankings.dat").writeBytes(rankings(common,left,right))
+  b.root.resolve("badges.dat").writeBytes(gzip("""{"badges":["MONSTERS_SLAIN_1","GOLD_COLLECTED_1","ITEM_LEVEL_1"]}"""))
+  val dedup=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  assertEquals(3,SaveSummary.read(b.root).plays)
+  val after=b.observedFiles();assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  assertEquals(after,b.observedFiles());assertEquals(3,SaveSummary.read(b.root).plays)
+ }
+ @Test fun ambiguousGlobalCountersAndResetFailPreflightWithoutAnyWrites()=Dav().use { dav ->
+  val ca=configured("ambiguous-A",dav);val cb=configured("ambiguous-B",dav);seed(Path.of(ca.saveRoot),1)
+  val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
+  val item="com.shatteredpixel.shatteredpixeldungeon.items.food.Food"
+  globals(a,"\"MONSTERS_SLAIN_1\"",null,item);published(a,dav)
+  globals(b,"\"GOLD_COLLECTED_1\"",null,item)
+  val local=b.observedFiles();val remote=dav.fingerprint();val baseline=b.baseline()
+  val sidecar=b.root.resolve(DIRECTORY_METADATA_FILE);val sidecarBytes=sidecar.readBytes();val sidecarTime=Files.getLastModifiedTime(sidecar)
+  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"缺少事件标识")
+  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertEquals(baseline,b.baseline());assertFalse(b.hasPending())
+  assertContentEquals(sidecarBytes,sidecar.readBytes());assertEquals(sidecarTime,Files.getLastModifiedTime(sidecar))
+ }
+
 }

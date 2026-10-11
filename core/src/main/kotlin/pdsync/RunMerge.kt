@@ -32,12 +32,9 @@ object RunMergePlanner {
   val all=listOf(base)+branches
   if(all.any { it.manifest.game!=base.manifest.game||it.manifest.profile!=base.manifest.profile })fail("档案不一致")
   val before=input(base); val inputs=branches.map(::input)
-  val globalHash: (Map<String,ByteArray>)->String = { contentSha256(it.mapValues { e->hash(e.value) }) }
-  val originalGlobal=globalHash(before.globals)
-  val changedGlobals=inputs.map { it.globals }.filter { globalHash(it)!=originalGlobal }.distinctBy(globalHash)
-  if(changedGlobals.size>1)fail("排行榜、成就或其他全局记录同时出现不同修改，尚无安全的语义合并规则")
-  val globalFiles=changedGlobals.singleOrNull() ?: before.globals
-  val outputRuns=mutableListOf<Run>();val decisions=mutableListOf<String>()
+  val globals=GlobalRecordMerge.plan(before.globals,inputs.map { it.globals })
+  val globalFiles=globals.files
+  val outputRuns=mutableListOf<Run>();val decisions=globals.decisions.toMutableList()
   val ids=(before.runs.keys+inputs.flatMap { it.runs.keys }).sorted()
   for(id in ids){
    val old=before.runs[id]; val variants=inputs.map { it.runs[id] }
@@ -55,8 +52,11 @@ object RunMergePlanner {
   if(outputRuns.size>6)fail("需要 ${outputRuns.size} 个游戏槽位，容量只有 6 个")
   val occupied=mutableSetOf<Int>();val merged=globalFiles.toMutableMap();val identities=linkedMapOf<String,RunIdentity>()
   val times=mutableMapOf<String,String>()
-  val globalSource=(listOf(before)+inputs).first { globalHash(it.globals)==globalHash(globalFiles) }.snapshot
-  globalFiles.keys.forEach { path -> globalSource.manifest.metadata?.fileModifiedAt?.get(path)?.let { times[path]=it } }
+  globalFiles.forEach { (path,bytes) ->
+   val source=(listOf(before)+inputs).firstOrNull { it.globals[path]?.contentEquals(bytes)==true }
+   // Synthesized global bundles are new content; never claim an unrelated source modification time.
+   times[path]=source?.snapshot?.manifest?.metadata?.fileModifiedAt?.get(path) ?: context.capturedAt
+  }
   outputRuns.forEach { run ->
    val preferred=run.slot.removePrefix("game").toInt()
    val slot=if(preferred !in occupied)preferred else (1..6).first { it !in occupied };occupied+=slot
