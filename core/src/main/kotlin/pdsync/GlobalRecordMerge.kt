@@ -24,8 +24,9 @@ internal object GlobalRecordMerge {
     "rankings.dat" -> RankingsMerge.merge(before,inputs)
     else -> globalFail("不支持的全局文件 $path")
    }
-   if(changed.size==1) {
-    // Validation still detects resets/corruption; no semantic rewrite is needed for one source.
+   if(changed.size==1 && path!="journal.dat") {
+    // Other domains preserve the sole source encoding after validation. Journal must
+    // apply its baseline-aware maxima even when the only changed branch was reset.
     output[path]=originals.single();decisions+="$path：校验后采用唯一分支的改动";continue
    }
    // Reuse an exact original encoding if semantics match; otherwise write deterministic gzip JSON.

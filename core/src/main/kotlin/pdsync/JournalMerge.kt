@@ -4,7 +4,8 @@ import kotlinx.serialization.json.*
 
 /** Shattered 3.3.8 global Journal schema, not the per-run Notes stored in game.dat.
  * Source: official v3.3.8 Journal, Catalog, Bestiary, Document and Bundle classes.
- * Counters have no event IDs: concurrent increments must fail rather than invent an exact total.
+ * Known counters keep the greatest observed value, including the common baseline.
+ * This is deterministic and reset-safe, but does not claim an exact total across concurrent play.
  */
 internal object JournalMerge {
  private data class Entry(val seen: Boolean, val count: Int)
@@ -50,12 +51,7 @@ internal object JournalMerge {
   (old.keys+variants.flatMap { it.keys }).sorted().forEach { cls ->
    val before=old[cls] ?: absent
    val states=variants.map { it[cls] ?: absent }
-   if(states.any { (before.seen && !it.seen) || it.count<before.count })
-    globalFail("journal.dat/$prefix/$cls 存在发现状态或次数回退，不能安全合并")
-   val increased=states.filter { it.count>before.count }
-   if(increased.size>1)
-    globalFail("journal.dat/$prefix/$cls 的次数在多个分支增加，缺少事件标识，无法证明互不重叠")
-   val entry=Entry(before.seen || states.any { it.seen },increased.singleOrNull()?.count ?: before.count)
+   val entry=Entry(before.seen || states.any { it.seen },maxOf(before.count,states.maxOf { it.count }))
    // Explicit false/zero overrides old ALL_*_IDENTIFIED badge migration during official restore.
    // Keep every represented class; omitting such a row can turn an unseen item into seen.
    merged[cls]=entry
@@ -89,7 +85,6 @@ internal object JournalMerge {
     }
     val previous=state(before)
     val states=after.map(::state)
-    if(states.any { it<previous })globalFail("journal.dat/documents/$doc/$page 存在删除或未读回退")
     val merged=maxOf(previous,states.max())
     // An explicit 0 can override Dungeon's nonzero default. Do not erase that override.
     if(merged>0 || merged!=default)pageResult[page]=JsonPrimitive(merged)

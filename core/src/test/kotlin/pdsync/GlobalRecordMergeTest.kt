@@ -14,6 +14,15 @@ class GlobalRecordMergeTest {
   assertContentEquals(b.getValue("rankings.dat"),result.files.getValue("rankings.dat"))
   assertEquals(2,result.decisions.size)
  }
+ @Test fun uniqueJournalResetAppliesBaselineMaxRatherThanReusingTheResetBytes() {
+  fun journal(n:Int,seen:Boolean)=bytes("""{"catalog_classes":["com.shatteredpixel.shatteredpixeldungeon.items.food.Food"],"catalog_seen":[$seen],"catalog_uses":[$n],"documents":{}}""")
+  val base=mapOf("journal.dat" to journal(8,true));val reset=mapOf("journal.dat" to journal(2,false))
+  val result=GlobalRecordMerge.plan(base,listOf(reset,base))
+  val merged=GlobalBundles.decode(result.files.getValue("journal.dat"),"journal.dat")
+  assertEquals(JsonArray(listOf(JsonPrimitive(8))),merged["catalog_uses"])
+  assertEquals(JsonArray(listOf(JsonPrimitive(true))),merged["catalog_seen"])
+ }
+
  @Test fun unchangedOpaqueBytesAreNotReencodedOrReinterpreted() {
   val old=mapOf("journal.dat" to byteArrayOf(1,2,3))
   assertContentEquals(old.getValue("journal.dat"),GlobalRecordMerge.plan(old,listOf(old,old)).files.getValue("journal.dat"))

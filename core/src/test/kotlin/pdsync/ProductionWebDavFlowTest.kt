@@ -211,15 +211,30 @@ class ProductionWebDavFlowTest {
   assertEquals(before,b.observedFiles());assertTrue(remote.all { (path,hash) -> dav.fingerprint()[path]==hash })
   assertEquals(12,SaveSummary.read(b.root).plays)
  }
- @Test fun ambiguousGlobalCountersAndResetFailPreflightWithoutAnyWrites()=Dav().use { dav ->
+ @Test fun journalConcurrentCountsKeepMaximumThroughProductionHttp()=Dav().use { dav ->
+  val ca=configured("max-A",dav);val cb=configured("max-B",dav);seed(Path.of(ca.saveRoot),1)
+  val a=open(ca);val b=open(cb)
+  fun counts(n:Int)=gzip("""{"catalog_classes":["com.shatteredpixel.shatteredpixeldungeon.items.food.Food"],"catalog_seen":[true],"catalog_uses":[$n],"documents":{}}""")
+  a.root.resolve("journal.dat").writeBytes(counts(2));published(a,dav);restore(b,dav)
+  a.root.resolve("journal.dat").writeBytes(counts(4));published(a,dav)
+  b.root.resolve("journal.dat").writeBytes(counts(7))
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  fun current()=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")["catalog_uses"].toString()
+  assertEquals("[7]",current())
+  val bytes=b.root.resolve("journal.dat").readBytes()
+  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  assertContentEquals(bytes,b.root.resolve("journal.dat").readBytes());assertEquals("[7]",current())
+ }
+ @Test fun malformedGlobalCountersFailPreflightWithoutAnyWrites()=Dav().use { dav ->
   val ca=configured("ambiguous-A",dav);val cb=configured("ambiguous-B",dav);seed(Path.of(ca.saveRoot),1)
   val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
   val item="com.shatteredpixel.shatteredpixeldungeon.items.food.Food"
   globals(a,"\"MONSTERS_SLAIN_1\"",null,item);published(a,dav)
   globals(b,"\"GOLD_COLLECTED_1\"",null,item)
+  b.root.resolve("journal.dat").writeBytes(gzip("""{"catalog_classes":["$item"],"catalog_seen":[true],"catalog_uses":["broken"],"documents":{}}"""))
   val local=b.observedFiles();val remote=dav.fingerprint();val baseline=b.baseline()
   val sidecar=b.root.resolve(DIRECTORY_METADATA_FILE);val sidecarBytes=sidecar.readBytes();val sidecarTime=Files.getLastModifiedTime(sidecar)
-  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"缺少事件标识")
+  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"非负整数")
   assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertEquals(baseline,b.baseline());assertFalse(b.hasPending())
   assertContentEquals(sidecarBytes,sidecar.readBytes());assertEquals(sidecarTime,Files.getLastModifiedTime(sidecar))
  }
