@@ -1,0 +1,218 @@
+package pdsync
+
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import kotlin.test.*
+
+class GameLauncherTest {
+ @TempDir lateinit var root: Path
+ private fun target(path: Path = root.resolve("selected game.jar"), trusted: Boolean = true) =
+  TargetGame(path.toString(), "3.3.8", 896, "fixture", trusted, 802, "identified fixture")
+ private fun context() = SavePathContext("Linux", root.resolve("home with spaces").toString(), mapOf("XDG_DATA_HOME" to root.resolve("data with spaces").toString()))
+ private fun defaultRoot(): Path = DefaultProfileLocation(context()).prepareDefaultDirectory()
+ private class Child(var alive: Boolean = true, val id: Long = 123) : Process() {
+  override fun getOutputStream() = ByteArrayOutputStream()
+  override fun getInputStream() = ByteArrayInputStream(byteArrayOf())
+  override fun getErrorStream() = ByteArrayInputStream(byteArrayOf())
+  override fun waitFor() = 0
+  override fun waitFor(timeout: Long, unit: TimeUnit) = !alive
+  override fun exitValue(): Int = if (alive) throw IllegalThreadStateException() else 1
+  override fun destroy() { alive = false }
+  override fun isAlive() = alive
+  override fun pid() = id
+ }
+ private fun launcher(
+  state: (TargetGame?) -> GameProcessStatus = { GameProcessStatus.Stopped },
+  inspect: (Path) -> TargetGame? = { target(it) },
+  java: () -> Path? = { root.resolve("runtime/bin/java") },
+  start: (GameLaunchPlan) -> Process = { Child() },
+  pathContext: SavePathContext = context(),
+  platform: GameProcessPlatform = GameProcessPlatform.LINUX
+ ) = GameLauncher(state, pathContext, platform, inspect, java, start, 0)
+
+ @Test fun launchesSelectedJarWithSeparateArgumentsAndMatchingHome() {
+  var seen: GameLaunchPlan? = null
+  val jar = root.resolve("游戏 folder/name ; $(not-a-command).jar")
+  val result = launcher(start = { seen = it; Child() }).launch(jar.toString(), defaultRoot().toString())
+  assertIs<GameLaunchResult.Started>(result)
+  assertEquals(listOf(root.resolve("runtime/bin/java").toString(), "-Duser.home=${context().userHome}", "-jar", jar.toString()), seen!!.command)
+  assertEquals(jar.parent, seen!!.directory)
+ }
+ @Test fun defaultSelectionWithoutDirectoryDoesNotCreateOrRewriteSaves() {
+  val before = root.toFile().walkTopDown().toList()
+  assertIs<GameLaunchResult.Started>(launcher().launch(target().path, null))
+  assertEquals(before, root.toFile().walkTopDown().toList())
+ }
+ @Test fun customSaveDirectoryDoesNotLaunchIntoDifferentDefaultDirectory() {
+  val custom = Files.createDirectories(root.resolve("custom-saves"))
+  val result = launcher(start = { fail("must not launch") }).launch(target().path, custom.toString())
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "不是游戏默认位置")
+ }
+ @Test fun matchingExplicitDefaultIsAllowed() {
+  assertIs<GameLaunchResult.Started>(launcher().launch(target().path, defaultRoot().toString()))
+ }
+ @Test fun invalidSaveDirectoryFailsClosed() {
+  val result = launcher(start = { fail("must not launch") }).launch(target().path, "relative")
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "存档位置")
+ }
+ @Test fun invalidXdgNeverFallsBackToAnotherDirectory() {
+  val context = context().copy(environment = mapOf("XDG_DATA_HOME" to "relative"))
+  val result = launcher(pathContext = context, start = { fail("must not launch") }).launch(target().path, null)
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "存档位置")
+ }
+ @Test fun linkedSaveDirectoryFailsClosed() {
+  val actual = Files.createDirectories(root.resolve("elsewhere"))
+  val link = Files.createSymbolicLink(root.resolve("linked"), actual)
+  val result = launcher(start = { fail("must not launch") }).launch(target().path, link.toString())
+  assertIs<GameLaunchResult.Failed>(result)
+ }
+ @Test fun missingOrUnrecognizedJarAsksToChooseAgain() {
+  val result = launcher(inspect = { null }, start = { fail("must not launch") }).launch(target().path, null)
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "重新选择")
+ }
+ @Test fun rejectedJarExceptionDoesNotLeakPathOrTechnicalDetails() {
+  val result = launcher(inspect = { error("private/path/secret") }).launch(target().path, null)
+  assertIs<GameLaunchResult.Failed>(result)
+  assertFalse(result.message.contains("secret"))
+ }
+ @Test fun untrustedJarIsNotExecuted() {
+  assertIs<GameLaunchResult.Failed>(launcher(inspect = { target(it, false) }, start = { fail("must not launch") }).launch(target().path, null))
+ }
+ @Test fun blankRelativeOrNativeExecutableCannotLaunch() {
+  for (path in listOf("", "relative.jar", root.resolve("shattered.exe").toString(), "\u0000.jar")) {
+   assertIs<GameLaunchResult.Failed>(launcher(inspect = { fail("must not inspect") }).launch(path, null))
+  }
+ }
+ @Test fun targetIsFreshlyInspectedOnEveryAttempt() {
+  var inspections = 0
+  val launch = launcher(inspect = { inspections++; target(it) }, start = { Child(false) })
+  repeat(2) { assertIs<GameLaunchResult.Failed>(launch.launch(target().path, null)) }
+  assertEquals(2, inspections)
+ }
+ @Test fun alreadyRunningGameUsesExistingDetectorWithoutSpawning() {
+  val launch = launcher(state = { GameProcessStatus.Running(setOf(5)) }, start = { fail("must not launch") })
+  assertEquals(setOf(5L), assertIs<GameLaunchResult.AlreadyRunning>(launch.launch(target().path, null)).status.pids)
+ }
+ @Test fun uncertainProcessStateDoesNotStartAnotherGame() {
+  val result = launcher(state = { GameProcessStatus.Unknown("details") }, start = { fail("must not launch") }).launch(target().path, null)
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "无法确认")
+ }
+ @Test fun liveChildPreventsDuplicateEvenIfInventoryMissesIt() {
+  var starts = 0
+  val launch = launcher(start = { starts++; Child() })
+  assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
+  assertIs<GameLaunchResult.AlreadyRunning>(launch.launch(target().path, null))
+  assertEquals(1, starts)
+  assertIs<GameProcessStatus.Running>(launch.status(target()))
+ }
+ @Test fun closedGameCanBeLaunchedAgain() {
+  var starts = 0
+  val first = Child()
+  val launch = launcher(start = { if (++starts == 1) first else Child(id = 456) })
+  assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
+  first.destroy()
+  assertEquals(GameProcessStatus.Stopped, launch.status(target()))
+  assertEquals(456L, assertIs<GameLaunchResult.Started>(launch.launch(target().path, null)).pid)
+  assertEquals(2, starts)
+ }
+ @Test fun concurrentDoubleClickIsRejectedWhileFirstIsInspecting() {
+  val entered = CountDownLatch(1); val proceed = CountDownLatch(1)
+  val launch = launcher(inspect = { entered.countDown(); check(proceed.await(5, TimeUnit.SECONDS)); target(it) })
+  val executor = Executors.newSingleThreadExecutor()
+  try {
+   val result = executor.submit<GameLaunchResult> { launch.launch(target().path, null) }
+   assertTrue(entered.await(5, TimeUnit.SECONDS))
+   assertEquals(GameLaunchResult.Busy, launch.launch(target().path, null))
+   proceed.countDown()
+   assertIs<GameLaunchResult.Started>(result.get(5, TimeUnit.SECONDS))
+  } finally { proceed.countDown(); executor.shutdownNow() }
+ }
+ @Test fun processStartFailureReleasesGuardForRetry() {
+  var attempts = 0
+  val launch = launcher(start = { if (++attempts == 1) throw java.io.IOException("failed") else Child() })
+  assertIs<GameLaunchResult.Failed>(launch.launch(target().path, null))
+  assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
+  assertEquals(2, attempts)
+ }
+ @Test fun earlyExitReleasesGuardForRetry() {
+  var attempts = 0
+  val launch = launcher(start = { Child(alive = ++attempts != 1) })
+  assertContains(assertIs<GameLaunchResult.Failed>(launch.launch(target().path, null)).message, "已退出")
+  assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
+ }
+ @Test fun invalidPathFailureCanBeRetriedWithFixedSelection() {
+  val launch = launcher()
+  assertIs<GameLaunchResult.Failed>(launch.launch("", null))
+  assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
+ }
+ @Test fun missingJavaHasActionableMessageAndDoesNotSpawn() {
+  val result = launcher(java = { null }, start = { fail("must not launch") }).launch(target().path, null)
+  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "Java")
+ }
+ @Test fun unsupportedPlatformDoesNotSpawn() {
+  assertIs<GameLaunchResult.Failed>(launcher(platform = GameProcessPlatform.UNSUPPORTED, start = { fail("must not launch") }).launch(target().path, null))
+ }
+ @Test fun macRequiresFirstThreadFlagAndSameHome() {
+  val plan = gameLaunchPlan(target(), root.resolve("bin/java"), context().copy(osName = "Mac OS X"), GameProcessPlatform.MAC)
+  assertEquals("-XstartOnFirstThread", plan.command[1])
+  assertEquals("-Duser.home=${context().userHome}", plan.command[2])
+  assertEquals(listOf("-jar", target().path), plan.command.takeLast(2))
+ }
+ @Test fun windowsDoesNotUseShellOrMacFlag() {
+  val plan = gameLaunchPlan(target(), root.resolve("bin/javaw.exe"), context().copy(osName = "Windows 11"), GameProcessPlatform.WINDOWS)
+  assertEquals(4, plan.command.size)
+  assertFalse(plan.command.any { it == "cmd" || it == "start" || it == "-XstartOnFirstThread" })
+ }
+ @Test fun currentRuntimeJavaWinsOverEnvironmentFallbacks() {
+  val java = root.resolve("runtime/bin/java")
+  assertEquals(java, gameJavaExecutable(root.resolve("runtime").toString(), mapOf("JAVA_HOME" to root.resolve("jdk").toString(), "PATH" to root.resolve("tools").toString()), GameProcessPlatform.LINUX) { true })
+ }
+ @Test fun strippedRuntimeFallsBackToExplicitJavaHomeThenPath() {
+  val jdk = root.resolve("jdk/bin/java"); val path = root.resolve("tools/java")
+  val environment = mapOf("JAVA_HOME" to root.resolve("jdk").toString(), "PATH" to root.resolve("tools").toString())
+  assertEquals(jdk, gameJavaExecutable(root.resolve("stripped").toString(), environment, GameProcessPlatform.LINUX) { it == jdk || it == path })
+  assertEquals(path, gameJavaExecutable(root.resolve("stripped").toString(), environment, GameProcessPlatform.LINUX) { it == path })
+ }
+ @Test fun noRuntimeLauncherNeverFallsBackToSyncExecutableOrWorkingDirectory() {
+  val candidates = mutableListOf<Path>()
+  assertNull(gameJavaExecutable(null, mapOf("PATH" to ":.:relative"), GameProcessPlatform.LINUX) { candidates.add(it); true })
+  assertTrue(candidates.isEmpty())
+ }
+ @Test fun windowsChoosesJavawAndCanFallbackToJava() {
+  val home = root.resolve("runtime").toString()
+  assertEquals(root.resolve("runtime/bin/javaw.exe"), gameJavaExecutable(home, emptyMap(), GameProcessPlatform.WINDOWS) { true })
+  assertEquals(root.resolve("runtime/bin/java.exe"), gameJavaExecutable(home, emptyMap(), GameProcessPlatform.WINDOWS) { it.fileName.toString() == "java.exe" })
+ }
+ @Test fun windowsEnvironmentKeysAreCaseInsensitive() {
+  val home = root.resolve("external-jdk")
+  val path = root.resolve("path-java")
+  val environment = mapOf("Java_Home" to home.toString(), "Path" to path.toString())
+  assertEquals(home.resolve("bin/javaw.exe"), gameJavaExecutable(null, environment, GameProcessPlatform.WINDOWS) { true })
+  assertEquals(path.resolve("java.exe"), gameJavaExecutable(null, environment, GameProcessPlatform.WINDOWS) { it == path.resolve("java.exe") })
+ }
+ @Test fun executableInspectionFailureIsNotFatal() {
+  assertNull(gameJavaExecutable(root.toString(), emptyMap(), GameProcessPlatform.LINUX) { throw SecurityException() })
+ }
+ @Test fun realJvmEarlyExitIsReportedAndRetryRemainsAvailable() {
+  val jar = root.resolve("invalid-launch.jar")
+  Files.writeString(jar, "not a runnable jar")
+  val launch = GameLauncher({ GameProcessStatus.Stopped }, context(), GameProcessPlatform.current(),
+   inspect = { target(it) }, startupMillis = 3000)
+  repeat(2) {
+   assertContains(assertIs<GameLaunchResult.Failed>(launch.launch(jar.toString(), null)).message, "已退出")
+   assertEquals(GameProcessStatus.Stopped, launch.status(target(jar)))
+  }
+ }
+ @Test fun actualJavaResolverSelectsAnExecutableWithJavaName() {
+  val java = assertNotNull(gameJavaExecutable())
+  assertTrue(Files.isExecutable(java))
+  assertTrue(java.fileName.toString() in setOf("java", "java.exe", "javaw.exe"))
+ }
+}

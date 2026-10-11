@@ -109,6 +109,9 @@ internal fun runSyncApplication(
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
   var status by remember { mutableStateOf("正在检查默认存档位置…") }
   var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown("请在设置中选择官方游戏 JAR")) }
+  val gameLauncher = remember { GameLauncher(processStatus) }
+  var launchingGame by remember { mutableStateOf(false) }
+  var launchNotice by remember { mutableStateOf<String?>(null) }
   var automaticStatus by remember { mutableStateOf("正在建立本地观察基线…") }
   var automatic by remember { mutableStateOf(AutomaticUpload()) }
   var remoteReadAt by remember { mutableStateOf(0L) }
@@ -193,6 +196,26 @@ internal fun runSyncApplication(
     updated?.let { loadProfile(it); navigate(Page.DISCOVERY) }
    }
   }
+  fun launchGame() {
+   if (busy || connectingAtStartup || appClosed || launchingGame) return
+   val saved = config ?: return
+   busy = true; launchingGame = true; launchNotice = "正在启动游戏…"
+   scope.launch {
+    try {
+     val result = withContext(Dispatchers.IO) { gameLauncher.launch(saved.targetGame, saved.selectedSaveRoot) }
+     if (!appClosed) {
+      launchNotice = result.message
+      when (result) {
+       is GameLaunchResult.Started -> { targetInfo = result.target; gameStatus = GameProcessStatus.Running(setOf(result.pid)) }
+       is GameLaunchResult.AlreadyRunning -> gameStatus = result.status
+       else -> Unit
+      }
+     }
+    } catch (e: CancellationException) { throw e }
+    catch (_: Exception) { launchNotice = "启动失败，请重试。" }
+    finally { launchingGame = false; busy = false }
+   }
+  }
   fun authenticationFailed(e: Exception) {
    if (e is WebDavException && e.statusCode in setOf(401, 403)) {
     connected = false; password = ""; settingsMode = SettingsMode.UNLOCK; navigate(Page.CONNECTION)
@@ -247,12 +270,12 @@ internal fun runSyncApplication(
       trace.record(OperationEvent.WORK_STARTED)
       val target = manager.targetInfo()
       val stopped = {
-       val fresh = processStatus(target)
+       val fresh = gameLauncher.status(target)
        if (fresh !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(fresh))
        fresh == GameProcessStatus.Stopped
       }
       if (action != Action.ARCHIVE) {
-       val state = processStatus(target)
+       val state = gameLauncher.status(target)
        if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
        SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
       }
@@ -338,7 +361,7 @@ internal fun runSyncApplication(
     try {
      val metadata=withContext(Dispatchers.IO) {
       val target=manager.targetInfo()
-      val stopped={ processStatus(target) is GameProcessStatus.Stopped }
+      val stopped={ gameLauncher.status(target) is GameProcessStatus.Stopped }
       if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
      }
      directoryEditor=metadata;directoryName=metadata.displayName
@@ -376,8 +399,8 @@ internal fun runSyncApplication(
      try {
       val found = withContext(Dispatchers.IO) {
        val target = manager.targetInfo()
-       val stopped = { processStatus(target) is GameProcessStatus.Stopped }
-       require(stopped()) { processMessage(processStatus(target)) }
+       val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
+       require(stopped()) { processMessage(gameLauncher.status(target)) }
        SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
        manager.inspectConflict(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, config?.username ?: "", password), stopped)
       }
@@ -462,7 +485,7 @@ internal fun runSyncApplication(
      val result = withContext(Dispatchers.IO) {
       val target = manager.targetInfo()
       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
-       processStatus(target) is GameProcessStatus.Stopped
+       gameLauncher.status(target) is GameProcessStatus.Stopped
       }
      }
      if (appClosed) return@launch
@@ -472,7 +495,7 @@ internal fun runSyncApplication(
      if (result.kind == OnboardingKind.IDENTICAL && result.baselineLineage == OnboardingLineage.SAME_TIP) {
       withContext(Dispatchers.IO) {
        val target = manager.targetInfo()
-       manager.confirmOnboardingReady(result, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { processStatus(target) is GameProcessStatus.Stopped }
+       manager.confirmOnboardingReady(result, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
       }
       remoteInspectionReady = true
       selected = OnboardingGate.homeSelection(result.baselineId, result.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
@@ -537,13 +560,13 @@ internal fun runSyncApplication(
       val manager = requireNotNull(session)
       val fresh = withContext(Dispatchers.IO) {
        val target = manager.targetInfo()
-       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { processStatus(target) is GameProcessStatus.Stopped }
+       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
       }
       comparison = fresh
       require(fresh.kind == OnboardingKind.BOTH_EMPTY) { "存档状态已变化，请重新查看并选择" }
       withContext(Dispatchers.IO) {
        val target = manager.targetInfo()
-       manager.confirmOnboardingReady(fresh, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { processStatus(target) is GameProcessStatus.Stopped }
+       manager.confirmOnboardingReady(fresh, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
       }
       remoteInspectionReady = true
       automatic.applied(emptyMap(), monotonicMillis())
@@ -564,7 +587,7 @@ internal fun runSyncApplication(
      withContext(Dispatchers.IO) {
       val target = manager.targetInfo()
       val stopped = {
-       val state = processStatus(target)
+       val state = gameLauncher.status(target)
        if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
        true
       }
@@ -633,6 +656,20 @@ internal fun runSyncApplication(
     catch(e:Exception){pathNotice=e.message}
    }
   }
+  // Keep launch availability fresh even when disconnected or automatic upload is paused.
+  LaunchedEffect(targetInfo) {
+   while (isActive && !appClosed) {
+    if (!busy && !connectingAtStartup) {
+     val target = targetInfo
+     val observed = withContext(Dispatchers.IO) { gameLauncher.status(target) }
+     if (!busy && !connectingAtStartup && targetInfo == target && !appClosed) {
+      if (gameStatus is GameProcessStatus.Running && observed is GameProcessStatus.Stopped) launchNotice = null
+      gameStatus = observed
+     }
+    }
+    delay(1000)
+   }
+  }
   LaunchedEffect(session, connected) {
    while (isActive && !appClosed) {
     delay(1000)
@@ -646,7 +683,7 @@ internal fun runSyncApplication(
     try {
      val target = targetInfo
      val observation = withContext(Dispatchers.IO) {
-      val state = processStatus(target)
+      val state = gameLauncher.status(target)
       state to manager.observedFiles()
      }
      if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager) continue
@@ -875,7 +912,11 @@ internal fun runSyncApplication(
           }
          }
          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          Button(enabled = !busy && !connectingAtStartup && (!connected || session != null && (pending || graphHistory?.currentFiles?.isNotEmpty()==true)), onClick = {
+          Button(enabled = config != null && !busy && !connectingAtStartup && gameStatus !is GameProcessStatus.Running,
+           onClick = { launchGame() }, modifier = Modifier.weight(1f)) {
+           Text(if (launchingGame) "正在启动…" else if (gameStatus is GameProcessStatus.Running) "游戏已运行" else "启动游戏")
+          }
+          OutlinedButton(enabled = !busy && !connectingAtStartup && (!connected || session != null && (pending || graphHistory?.currentFiles?.isNotEmpty()==true)), onClick = {
            if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
            else if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding()
            else execute(operationEvents.begin(Action.PUSH))
@@ -883,6 +924,7 @@ internal fun runSyncApplication(
           OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && connected && (config?.onboardingProgress != OnboardingProgress.COMPLETE || !pending &&
            (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null)), onClick = { if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
          }
+         launchNotice?.let { Text(it, color = green, style = MaterialTheme.typography.body2) }
          locationIssue?.let { CompactFeedback(it, "无法读取存档，请在设置中重新检查。") }
          TextButton(enabled=session!=null&&!busy&&!connectingAtStartup,onClick={editDirectory()}) { Text("存档名称与单局身份") }
          if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) CompactFeedback(restoreIssue!!, "暂不能恢复，请重新检查所选存档。")
