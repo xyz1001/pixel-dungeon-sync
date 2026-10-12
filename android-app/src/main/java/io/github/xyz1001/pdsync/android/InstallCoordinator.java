@@ -211,7 +211,7 @@ public final class InstallCoordinator {
         PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         params.setAppPackageName(packageName); params.setAppLabel(game?pair.gameLabel:pair.gameLabel+" · 存档助手");
         long size=0; for(File apk:apks) { size=Math.addExact(size,apk.length()); }
-        params.setSize(size); params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
+        params.setSize(size); RuntimePlatformCompat.requireInstallConfirmation(params);
         int sessionId=installer.createSession(params); String nonce=UUID.randomUUID().toString(); boolean commitAttempted=false;
         try(PackageInstaller.Session session=installer.openSession(sessionId)) {
             ArrayList<String> writtenHashes=new ArrayList<>();

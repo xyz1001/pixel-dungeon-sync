@@ -379,7 +379,8 @@ public final class MainRuntimeRecoveryChecks {
         check(!InstallProgressPolicy.acceptsCallback(false,7,8,"nonce","nonce"), "install session must match");
         check(!InstallProgressPolicy.acceptsCallback(false,-1,-1,"nonce","nonce"), "install session must exist");
         check(InstallProgressPolicy.acceptsCallback(true,-1,-2,"nonce","nonce"), "uninstall callback has no installer session");
-        equal(33554432 | 134217728, AndroidCompat.mutableCallbackFlags(), "mutable update-current callback flags retained");
+        equal(134217728 | (android.os.Build.VERSION.SDK_INT >= 31 ? 33554432 : 0),
+                AndroidCompat.mutableCallbackFlags(), "mutable update-current callback behavior retained across SDKs");
         android.os.Bundle bundle = new android.os.Bundle();
         android.os.ParcelFileDescriptor descriptor = new android.os.ParcelFileDescriptor();
         bundle.put("fd",descriptor);

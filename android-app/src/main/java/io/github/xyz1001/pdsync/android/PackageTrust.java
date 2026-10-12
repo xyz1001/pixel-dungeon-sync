@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
 import android.content.pm.Signature;
+import android.os.Build;
 import android.os.Bundle;
 import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
 import java.io.File;
@@ -30,22 +31,54 @@ public final class PackageTrust {
     }
 
     public static PackageInfo installed(Context context, String str) throws PackageManager.NameNotFoundException {
-        return context.getPackageManager().getPackageInfo(str, 134217728 | 128);
+        return context.getPackageManager().getPackageInfo(str, signingFlags() | PackageManager.GET_META_DATA);
+    }
+
+    /** Request current APK signers using the platform API available on this device. */
+    @SuppressWarnings("deprecation")
+    public static int signingFlags() {
+        return Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+    }
+
+    /** Never use certificate history as a substitute for the currently installed APK signer. */
+    @SuppressWarnings("deprecation")
+    public static Signature[] currentSigners(PackageInfo packageInfo) {
+        if (packageInfo == null) throw new SecurityException("应用签名不能确认。");
+        Signature[] signatures = Build.VERSION.SDK_INT >= 28
+                ? Api28.currentSigners(packageInfo) : packageInfo.signatures;
+        if (signatures == null || signatures.length == 0) throw new SecurityException("应用签名不能确认。");
+        for (Signature signature : signatures) {
+            if (signature == null) throw new SecurityException("应用签名不能确认。");
+        }
+        return signatures.clone();
     }
 
     public static String signer(PackageInfo packageInfo) throws Exception {
-        if (packageInfo.signingInfo == null || packageInfo.signingInfo.hasMultipleSigners()) {
-            throw new SecurityException("应用签名不能确认。");
-        }
-        Signature[] apkContentsSigners = packageInfo.signingInfo.getApkContentsSigners();
-        if (apkContentsSigners == null || apkContentsSigners.length != 1) {
+        Signature[] apkContentsSigners = currentSigners(packageInfo);
+        if (apkContentsSigners.length != 1 || (Build.VERSION.SDK_INT >= 28 && Api28.hasMultipleSigners(packageInfo))) {
             throw new SecurityException("应用签名不能确认。");
         }
         return hex(MessageDigest.getInstance("SHA-256").digest(apkContentsSigners[0].toByteArray()));
     }
 
+    @SuppressWarnings("deprecation")
     public static long versionCode(PackageInfo packageInfo) {
-        return packageInfo.getLongVersionCode();
+        return Build.VERSION.SDK_INT >= 28 ? Api28.versionCode(packageInfo) : (packageInfo.versionCode & 0xffffffffL);
+    }
+
+    /** Isolate new framework references so API 26 never resolves SigningInfo. */
+    private static final class Api28 {
+        static Signature[] currentSigners(PackageInfo info) {
+            return info.signingInfo == null ? null : info.signingInfo.getApkContentsSigners();
+        }
+
+        static boolean hasMultipleSigners(PackageInfo info) {
+            return info.signingInfo.hasMultipleSigners();
+        }
+
+        static long versionCode(PackageInfo info) {
+            return info.getLongVersionCode();
+        }
     }
 
     public static void requireBridge(Context context, String str) throws Exception {

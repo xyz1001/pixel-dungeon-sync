@@ -150,7 +150,7 @@ public final class AutoSyncService extends Service {
             return 2;
         }
         try {
-            startForeground(7301, notification("等待游戏退出或进入后台；有冲突会跳过上传。"), 1);
+            RuntimePlatformCompat.startDataSyncForeground(this, 7301, notification("等待游戏退出或进入后台；有冲突会跳过上传。"));
             if ("pdsync.RETURN".equals(intent.getAction())) {
                 this.returned = true;
             }

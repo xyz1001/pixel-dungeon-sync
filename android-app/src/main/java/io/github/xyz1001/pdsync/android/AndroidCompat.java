@@ -1,6 +1,8 @@
 package io.github.xyz1001.pdsync.android;
 
 import android.content.Intent;
+import android.app.PendingIntent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.Parcelable;
@@ -8,7 +10,8 @@ import android.os.Parcelable;
 /* loaded from: classes.dex */
 final class AndroidCompat {
     static int mutableCallbackFlags() {
-        return 33554432 | 134217728;
+        // Before Android 12 callbacks are mutable unless FLAG_IMMUTABLE is set.
+        return PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
     }
 
     private AndroidCompat() {

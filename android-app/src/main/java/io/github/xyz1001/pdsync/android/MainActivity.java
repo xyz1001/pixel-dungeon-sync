@@ -14,7 +14,6 @@ import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
-import android.graphics.Insets;
 import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -194,7 +193,7 @@ public final class MainActivity extends Activity {
         super.onResume();
         this.resumed = true;
         if (!this.receiverRegistered) {
-            registerReceiver(this.installChanged, new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED"), 4);
+            RuntimePlatformCompat.registerInternalReceiver(this, this.installChanged, new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED"));
             this.receiverRegistered = true;
         }
         try {
@@ -701,8 +700,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$render$5$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ WindowInsets m75lambda$render$5$iogithubxyz1001pdsyncandroidMainActivity(int i, View view, WindowInsets windowInsets) {
-        Insets insets = windowInsets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
-        view.setPadding(insets.left + i, dp(12) + insets.top, insets.right + i, i + insets.bottom);
+        RuntimePlatformCompat.applyInsets(view, windowInsets, i, dp(12), i);
         return windowInsets;
     }
 
