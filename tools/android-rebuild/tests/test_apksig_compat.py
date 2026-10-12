@@ -13,6 +13,9 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('apksig_compat', HERE.parent / 'apksig_compat.py')
 compat = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(compat)
+fixture_spec = importlib.util.spec_from_file_location('public_fixture', HERE / 'public_fixture.py')
+public_fixture = importlib.util.module_from_spec(fixture_spec)
+fixture_spec.loader.exec_module(public_fixture)
 
 class PatchTests(unittest.TestCase):
     def test_unrecognized_bytes_rejected(self):
@@ -43,8 +46,17 @@ class PatchTests(unittest.TestCase):
             subprocess.run([java, 'com.sun.tools.javac.Main', '-source', '8', '-target', '8',
                             '-bootclasspath', str(android), '-classpath', str(output), '-d', str(classes),
                             str(HERE / 'ApksigApi26CompatTest.java')], check=True)
+            fixture = public_fixture.aosp_v1_fixture()
+            tampered = tmp / 'tampered-v1.apk'
+            with zipfile.ZipFile(fixture) as original, zipfile.ZipFile(tampered, 'w') as changed:
+                for entry in original.infolist():
+                    payload = original.read(entry)
+                    if entry.filename == 'temp.txt':
+                        payload = b'tampered payload'
+                    changed.writestr(entry, payload)
             subprocess.run([java, '-cp', str(classes) + os.pathsep + str(output),
-                            'com.android.apksig.internal.asn1.ApksigApi26CompatTest'], check=True)
+                            'com.android.apksig.internal.asn1.ApksigApi26CompatTest',
+                            str(fixture), str(tampered)], check=True)
             dex = tmp / 'dex'
             dex.mkdir()
             subprocess.run([java, '-Xmx512m', '-cp', str(sdk / 'build-tools/36.0.0/lib/d8.jar'),
