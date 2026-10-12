@@ -22,12 +22,25 @@ The local reconstruction layout is detected automatically. Reuse the same retain
 Run from the source checkout:
 
 ```sh
+set -eu
 tools/android-rebuild/test-helper-host.sh
 tools/android-rebuild/build-apk.sh --module android-helper --standalone --unsigned --out "$PDSYNC_BUILD_HOME/helper-unsigned.apk"
-tools/android-rebuild/build-apk.sh --module android-app --core core/build/libs/core.jar --asset "helper-unsigned.apk=$PDSYNC_BUILD_HOME/helper-unsigned.apk" --out "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-test.apk"
+python3 - "$PDSYNC_BUILD_HOME/helper-unsigned.apk" "$PDSYNC_BUILD_HOME/bridge-runtime.dex" <<'PYTHON'
+import sys, zipfile
+from pathlib import Path
+with zipfile.ZipFile(sys.argv[1]) as apk:
+    if sorted(name for name in apk.namelist() if name.endswith(".dex")) != ["classes.dex"]:
+        raise SystemExit("Expected exactly one standalone bridge classes.dex")
+    Path(sys.argv[2]).write_bytes(apk.read("classes.dex"))
+PYTHON
+tools/android-rebuild/build-apk.sh --module android-app --core core/build/libs/core.jar --asset "bridge-runtime.dex=$PDSYNC_BUILD_HOME/bridge-runtime.dex" --out "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-test.apk"
 ```
 
-The helper is an unbound template. The main application's preparation flow rewrites its per-game manifest bindings and signs it with the prepared game's key. The helper independently authenticates the main app's exact pinned certificate and independent UID.
+The current flow embeds a Provider runtime in the prepared game. The `android-helper` module is reused only to compile the standalone runtime; its unsigned APK is an intermediate container from which `classes.dex` is extracted. Only `bridge-runtime.dex` is bundled as a main-app asset. The helper APK and its legacy manifest are neither bundled nor installed in this flow, and no separately installed helper is required. `--standalone` excludes core, Kotlin, OkHttp and apksig dependencies from the runtime DEX.
+
+During game preparation, the main app appends that standalone DEX as the next unused `classesN.dex` entry in the base APK (or `classes.dex` if none existed), patches the manifest with the per-game Provider and activation bindings, and signs the prepared APK set with the retained local game key. Original game DEX, resources, assets and native libraries remain byte-for-byte unchanged as ZIP-entry payloads; the manifest, APK signatures and ZIP packaging necessarily change. Split APKs receive the permitted manifest patch and new signatures, with no injected DEX. Payload verification checks the original protected entries plus exactly the declared runtime DEX. The embedded bridge authenticates the main app's exact pinned certificate and independent UID.
+
+The main app has `minSdkVersion=26` (Android 8.0) and `targetSdkVersion=36`; D8 also uses minimum API 26 for the standalone runtime. Prepared games have their minimum SDK raised to at least 26 while retaining the game's original target SDK, including its effective target when the source manifest omitted an explicit value. The build script reads these SDK settings from the module manifests; its SDK command-line defaults do not override existing manifest values.
 
 Build output includes `.build.json`, `.badging.txt` and, for signed APKs, `.verify.txt`. Inputs, hashes, SDK versions, new signer identity, and device-test status are recorded. ZIP payload timestamps are fixed. A host smoke test confirms deterministic signed output when inputs and the retained key are unchanged.
 
