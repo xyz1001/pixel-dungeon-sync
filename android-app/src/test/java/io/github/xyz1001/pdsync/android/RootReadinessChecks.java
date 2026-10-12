@@ -21,6 +21,8 @@ public final class RootReadinessChecks {
                     check(state.identityVerified == verified, "Package identity requires actual verification");
                     check(state.canContinue() == (verified && !system && !pending && access == InstallationReadiness.AccessStatus.READY),
                             "Support or installed identity never implies access readiness");
+                    check(state.canRequestRootAccess() == (verified && !system && !pending && access != InstallationReadiness.AccessStatus.RECOVERY_NEEDED),
+                            "Deliberate action eligibility does not claim READY");
                     check(!state.canContinueInstallation(), "Root never starts installation");
                     check(!state.requiresGameUninstall() && !state.requiresHelperUninstall(), "Root never asks to uninstall");
                     check(!state.canInitializeGame(), "Root does not enter embedded first-launch activation");
@@ -44,13 +46,29 @@ public final class RootReadinessChecks {
         InstallationReadiness metadata = InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
                 true, false, false, InstallationReadiness.AccessStatus.NOT_CHECKED);
         check(!metadata.canContinue(), "PM-only verification is not Root authorization");
+        check(metadata.canRequestRootAccess(), "Stored selection may request access without a separate restart authorization button");
         check(metadata.installationDescription().contains("尚不代表 Root 权限"), "Identity copy does not claim Root readiness");
         check(metadata.accessDescription().contains("不会自动请求 Root"), "Unrequested startup access is explicitly excluded");
         check(InstallationReadiness.classify("ROOT_AUTH_REQUIRED") == InstallationReadiness.AccessStatus.SECURITY_ERROR, "Authorization failure classified");
         check(InstallationReadiness.classify("ROOT_DENIED_OR_EXITED") == InstallationReadiness.AccessStatus.IPC_ERROR, "Denial classified without fake success");
+        check(InstallationReadiness.classify("ROOT_RUNNER_TIMEOUT") == InstallationReadiness.AccessStatus.IPC_ERROR, "Watchdog timeout never implies completion");
         check(InstallationReadiness.classify("ROOT_UNRELIABLE") == InstallationReadiness.AccessStatus.GAME_BUSY, "Unknown process evidence blocks");
         check(InstallationReadiness.classify("ROOT_MISSING_DIRECTORY") == InstallationReadiness.AccessStatus.FIRST_LAUNCH_NEEDED, "Missing save root is not empty ready saves");
         check(InstallationReadiness.classify("ROOT_UNRECOGNIZED_LAYOUT") == InstallationReadiness.AccessStatus.UNRECOGNIZED_LAYOUT, "Unknown layout stays blocked");
+        for (String code : new String[]{"ROOT_ATTRIBUTES_UNSUPPORTED", "ROOT_MUTATION_UNAVAILABLE"}) {
+            InstallationReadiness unavailable = metadata.withAccessCode(code);
+            check(unavailable.access == InstallationReadiness.AccessStatus.CAPABILITY_UNAVAILABLE, "Native/file support failure is explicit");
+            check(!unavailable.canContinue(), "Native/file support failure is never readiness");
+            check(unavailable.accessDescription().contains("没有把它当成授权或恢复成功"), "Failure copy cannot imply grant or applied result");
+        }
+        for (String code : new String[]{"ROOT_RECOVERY_REQUIRED", "ROOT_RESTORE_CONFLICT", "ROOT_RECOVERY_CONFLICT",
+                "ROOT_RESTORE_COMMITTED_CLEANUP_PENDING", "ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING",
+                "ROOT_RESTORE_VERIFY_FAILED", "ROOT_RECOVERY_RECEIPT_INVALID"}) {
+            check(metadata.withAccessCode(code).access == InstallationReadiness.AccessStatus.RECOVERY_NEEDED,
+                    "Pending/partial result routes to recovery rather than another restore");
+        }
+        check(metadata.withAccessCode("ROOT_NO_PENDING_RECOVERY").access == InstallationReadiness.AccessStatus.NOT_CHECKED,
+                "No pending journal is not a readiness probe");
         System.out.println("Root readiness policy checks passed: " + checks + " assertions; no Root, Android UI, or device execution.");
     }
 }

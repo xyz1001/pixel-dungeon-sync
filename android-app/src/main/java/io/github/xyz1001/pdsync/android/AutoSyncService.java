@@ -203,9 +203,12 @@ public final class AutoSyncService extends Service {
             AndroidSyncFacade.ControlledObservation controlledObservation = this.facade.beginControlledObservation(this.token);
             GameAccessBackend.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
             this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
-            AutoSyncPolicy.Step stepObserve = this.policy.observe(observationObserveLifecycle.reliable, observationObserveLifecycle.foreground, System.currentTimeMillis());
+            // Root can reliably report an active background process. It is not yet a quiet exit.
+            // CACHED or ABSENT produces ready=true; process absence alone is never required.
+            boolean reliableForAutomatic = reliableForAutomaticObservation(this.bridge.mode(), observationObserveLifecycle);
+            AutoSyncPolicy.Step stepObserve = this.policy.observe(reliableForAutomatic, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
-                finish("BLOCKED", "多次无法可靠观察游戏状态，已停止本次监听。请返回首页检查助手或手动同步。");
+                finish("BLOCKED", "多次无法可靠确认游戏已空闲，已停止本次监听。请正常退出游戏后返回首页检查。");
                 return;
             }
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNOBSERVED) {
@@ -221,6 +224,11 @@ public final class AutoSyncService extends Service {
             }
             schedule(1500L);
         }
+    }
+
+    static boolean reliableForAutomaticObservation(GameAccessBackend.Mode mode, GameAccessBackend.Observation observation) {
+        return observation.reliable && (mode != GameAccessBackend.Mode.ROOT_DIRECT
+                || observation.foreground || observation.ready);
     }
 
     private void schedule(long j) {

@@ -23,17 +23,35 @@ class RootUiContract(unittest.TestCase):
         resumed = body(MAIN, 'void m69xebc6eee5(')
         self.assertIn('this.rootGame == null && this.page == SyncPage.HOME', resumed)
 
-    def test_authorization_is_explicit_foreground_and_bound_to_selection(self):
+    def test_explicit_check_has_no_repeated_custom_authorization_gate(self):
         self.assertEqual(MAIN.count('SyncRuntime.probeRootAuthorization(this)'), 1)
         request = body(MAIN, 'private void requestRootAuthorization()')
-        self.assertIn('confirm("授权并检查 Root 访问？"', request)
+        self.assertNotIn('confirm(', request)
         self.assertIn('!this.resumed', request)
         self.assertIn('chosen.matches(SyncRuntime.rootGame(this))', request)
-        self.assertLess(request.index('hasAnyRestoreJournal()'), request.index('SyncRuntime.probeRootAuthorization(this)'))
-        self.assertLess(request.index('SyncRuntime.probeRootAuthorization(this)'), request.index('checkRootAccess()'))
+        self.assertIn('checkRootAccess()', request)
         check = body(MAIN, 'private void checkRootAccess()')
         self.assertIn('!this.resumed', check)
+        self.assertIn('if (hasAnyRestoreJournal()) {', check)
+        self.assertIn('SyncRuntime.probeRootAuthorization(this)', check)
+        self.assertIn('AccessStatus.RECOVERY_NEEDED', check)
         self.assertLess(check.index('inspectReady()'), check.index('AccessStatus.READY'))
+        discovery = body(MAIN, 'private void renderRootDiscovery()')
+        check_button = discovery.split('button("检查 Root 存档访问"', 1)[1].split(';', 1)[0]
+        self.assertNotIn('restorePending', check_button)
+        self.assertIn('!this.installer.hasActiveRequest()', check_button)
+
+    def test_restart_allows_deliberate_operations_without_claiming_ready(self):
+        requestable = body(MAIN, 'private boolean canRequestSaveAccess()')
+        self.assertIn('canRequestRootAccess()', requestable)
+        self.assertNotIn('AccessStatus.READY', requestable)
+        startup = body(MAIN, 'void m69xebc6eee5(')
+        self.assertIn('if (!canRequestSaveAccess())', startup)
+        self.assertNotIn('checkRootAccess()', startup)
+        preview = body(MAIN, 'SaveSummary m64x685e4018()')
+        self.assertLess(preview.index('checkRootAccess()'), preview.index('exportTo('))
+        explicit_compare = body(MAIN, 'Boolean m66x99ceaa21(')
+        self.assertIn('if (this.rootGame != null) checkRootAccess()', explicit_compare)
 
     def test_root_rendering_does_not_start_io(self):
         for signature in ('private void renderRootDiscovery()', 'private void renderHome()', 'private void renderSettings()'):
@@ -60,8 +78,10 @@ class RootUiContract(unittest.TestCase):
         for field in ('facade', 'history', 'inspection', 'selected', 'confirmedAction', 'confirmationMerge'):
             self.assertIn('this.' + field + ' = null', reset)
 
-    def test_root_game_launch_uses_only_installed_identity(self):
+    def test_root_first_launch_fallback_uses_only_installed_identity(self):
         launch = body(MAIN, 'private void launchSelectedRootGame()')
+        self.assertIn('AccessStatus.FIRST_LAUNCH_NEEDED', launch)
+        self.assertIn('launchGame()', launch)
         self.assertIn('chosen.matches(SyncRuntime.rootGame(this))', launch)
         self.assertIn('SyncRuntime.backend(this).targetGame()', launch)
         self.assertIn('getLaunchIntentForPackage(chosen.gamePackage)', launch)
@@ -73,7 +93,7 @@ class RootUiContract(unittest.TestCase):
     def test_restore_and_recovery_capabilities_gate_both_ui_and_actions(self):
         self.assertIn('accessCapabilities.restoreSupported', body(MAIN, 'private boolean restoreSupported()'))
         self.assertIn('accessCapabilities.interruptedBackupRecovery', body(MAIN, 'private boolean backupRecoverySupported()'))
-        self.assertIn('restoreSupported() && readyForSaves()', body(MAIN, 'private void renderHome()'))
+        self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private void renderHome()'))
         self.assertIn('.setEnabled(backupRecoverySupported())', body(MAIN, 'private void renderSettings()'))
         for signature in ('public void requestRestore()', 'public void previewMerge()', 'void m87x12f15700()'):
             self.assertIn('if (!allowRestoreAction()) return;', body(MAIN, signature))
@@ -88,13 +108,26 @@ class RootUiContract(unittest.TestCase):
                           'InstallNext m32xc4841ad1()', 'Object m33x39fe4112(', 'Object m36x9a6cb3d5('):
             self.assertIn('if (SyncRuntime.rootMode(this)) throw', body(MAIN, signature))
 
-    def test_auto_service_uses_selected_backend_without_enabling_root(self):
+    def test_auto_service_uses_actual_capabilities_and_quiet_root_observation(self):
         self.assertIn('SyncRuntime.currentSelectionToken(context)', SERVICE)
         self.assertIn('SyncRuntime.currentSelectionToken(this)', SERVICE)
         self.assertIn('this.bridge = SyncRuntime.backend(this)', SERVICE)
         initialization = body(SERVICE, 'void m1x57256bb9()')
         self.assertLess(initialization.index('SyncRuntime.automaticAllowed'), initialization.index('SyncRuntime.backend(this)'))
-        self.assertIn('this.rootGame != null || this.connection == null', body(MAIN, 'void m49x6e86027e('))
+        launch = body(MAIN, 'void m49x6e86027e(')
+        self.assertIn('!automaticObservationSupported()', launch)
+        self.assertNotIn('if (this.rootGame != null ||', launch)
+        capture = body(MAIN, 'Intent m48xf90bdc3d()')
+        self.assertIn('if (this.rootGame != null && !this.cloudVerified) readComparison()', capture)
+        self.assertLess(capture.index('readComparison()'), capture.index('beginControlledSession()'))
+        policy = body(SERVICE, 'static boolean reliableForAutomaticObservation(')
+        self.assertIn('observation.reliable', policy)
+        self.assertIn('observation.foreground || observation.ready', policy)
+        self.assertNotIn('processPresent', policy)
+        self.assertIn('this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground)', SERVICE)
+        settings = body(MAIN, 'private void renderSettings()')
+        self.assertIn('r0.setEnabled(automaticObservationSupported())', settings)
+        self.assertNotIn('r0.setEnabled(this.rootGame == null)', settings)
 
 
 if __name__ == '__main__':

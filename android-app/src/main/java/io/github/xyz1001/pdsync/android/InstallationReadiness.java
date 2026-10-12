@@ -21,7 +21,8 @@ public final class InstallationReadiness {
         RECOVERY_NEEDED,
         SECURITY_ERROR,
         IPC_ERROR,
-        ERROR
+        ERROR,
+        CAPABILITY_UNAVAILABLE
     }
 
     public enum PackageStatus {
@@ -89,6 +90,12 @@ public final class InstallationReadiness {
         return this.identityVerified;
     }
 
+    /** Allows a deliberate Root action to check access; never means access is ready. */
+    public boolean canRequestRootAccess() {
+        return this.rootDirect && this.identityVerified && !this.systemRequestActive && !this.restorePending
+                && this.access != AccessStatus.RECOVERY_NEEDED;
+    }
+
     public boolean canContinue() {
         return this.identityVerified && !this.systemRequestActive && (!this.rootDirect || !this.restorePending) && this.access == AccessStatus.READY;
     }
@@ -151,7 +158,7 @@ public final class InstallationReadiness {
             return "检测到未完成恢复。不能切换游戏或访问方式，请先核对恢复记录。";
         }
         if (this.rootDirect && this.access == AccessStatus.NOT_CHECKED) {
-            return "Root 存档访问尚未检查。请保持应用在前台，明确授权后再检查；返回应用不会自动请求 Root。";
+            return "Root 存档访问尚未检查。点击检查、同步或启动时会向 Root 管理器请求实际权限；显示页面或返回应用不会自动请求 Root。";
         }
         if (this.rootDirect && this.access == AccessStatus.READY) {
             return "本次 Root 存档访问检查通过。后续操作仍会重新核验游戏身份与存档状态。";
@@ -161,9 +168,10 @@ public final class InstallationReadiness {
                 case FIRST_LAUNCH_NEEDED: return "所选游戏尚无可读取的存档目录；请先正常游玩并退出，再手动检查。";
                 case GAME_BUSY: return "游戏仍运行、存档变化或进程状态不明确。正常退出后再手动检查。";
                 case UNRECOGNIZED_LAYOUT: return "Root 已连接，但尚不能识别存档布局；未把它当成空存档。";
-                case SECURITY_ERROR: return "Root 权限或所选游戏身份尚未通过验证，请查看诊断并重新授权检查。";
+                case SECURITY_ERROR: return "Root 权限或所选游戏身份尚未通过验证，请查看诊断并重新检查。";
                 case IPC_ERROR: return "尚未完成 Root 请求；可能未安装、被拒绝、超时或回复无效。请查看诊断。";
-                case RECOVERY_NEEDED: return "有未完成恢复，请先核对恢复记录，暂时不要启动游戏。";
+                case RECOVERY_NEEDED: return "有未完成恢复或清理，请先核对所选游戏的事务与主程序恢复记录，暂时不要启动游戏。";
+                case CAPABILITY_UNAVAILABLE: return "此设备尚不能安全执行该 Root 文件操作。原生库、原子重命名或文件属性支持未通过检查；没有把它当成授权或恢复成功。请保留游戏与备份并查看诊断。";
                 default: return "Root 存档访问检查未完成，请查看诊断并明确重新检查。";
             }
         }
@@ -220,7 +228,7 @@ public final class InstallationReadiness {
     }
 
     public static AccessStatus classify(String str) {
-        if (str == null || str.isEmpty() || "NOT_CHECKED".equals(str)) {
+        if (str == null || str.isEmpty() || "NOT_CHECKED".equals(str) || "ROOT_NO_PENDING_RECOVERY".equals(str)) {
             return AccessStatus.NOT_CHECKED;
         }
         str.hashCode();
@@ -228,6 +236,7 @@ public final class InstallationReadiness {
             case "ROOT_UNAVAILABLE":
             case "ROOT_DENIED_OR_EXITED":
             case "ROOT_TIMEOUT":
+            case "ROOT_RUNNER_TIMEOUT":
             case "ROOT_CANCELLED":
             case "ROOT_INVALID_REPLY":
             case "ROOT_PIPE_FAILED":
@@ -241,11 +250,25 @@ public final class InstallationReadiness {
             case "ACTIVATION_COMPONENT_UNAVAILABLE":
             case "IPC_CALL_FAILED":
                 return AccessStatus.IPC_ERROR;
+            case "ROOT_RECOVERY_REQUIRED":
+            case "ROOT_RESTORE_CONFLICT":
+            case "ROOT_RECOVERY_CONFLICT":
+            case "ROOT_RESTORE_FAILED":
+            case "ROOT_RESTORE_VERIFY_FAILED":
+            case "ROOT_RESTORE_RECEIPT_INVALID":
+            case "ROOT_RECOVERY_FAILED":
+            case "ROOT_RECOVERY_VERIFY_FAILED":
+            case "ROOT_RECOVERY_RECEIPT_INVALID":
+            case "ROOT_RESTORE_COMMITTED_CLEANUP_PENDING":
+            case "ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING":
             case "RESTORE_COMMITTED_CLEANUP_PENDING":
             case "RECOVERY_REQUIRED":
             case "RESTORE_ROLLED_BACK":
             case "RESTORE_VERIFY_FAILED":
                 return AccessStatus.RECOVERY_NEEDED;
+            case "ROOT_ATTRIBUTES_UNSUPPORTED":
+            case "ROOT_MUTATION_UNAVAILABLE":
+                return AccessStatus.CAPABILITY_UNAVAILABLE;
             case "ROOT_AUTH_REQUIRED":
             case "ROOT_TARGET_CHANGED":
             case "ROOT_BINDING_MISMATCH":

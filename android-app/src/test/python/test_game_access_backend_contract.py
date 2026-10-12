@@ -53,9 +53,16 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertIn('BridgeReadiness.failureCode(', readiness)
         self.assertNotIn('capabilities()', readiness)
         automatic = body(RUNTIME, 'static boolean automaticAllowed(')
-        self.assertIn('if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false;', automatic)
+        self.assertIn('backendSupportsAutomatic(', automatic)
+        self.assertNotIn('rootMode(context) ||', automatic)
+        support = body(RUNTIME, 'static boolean backendSupportsAutomatic(')
+        self.assertIn('exportSupported', support)
+        self.assertIn('lifecycleObservation', support)
+        self.assertIn('LEGACY_HELPER_BRIDGE', support)
+        for operation in ('inspectReady(', 'observeLifecycle(', 'probeRootAuthorization(', 'exportTo('):
+            self.assertNotIn(operation, automatic)
         self.assertIn('OnboardingGate.allowsAutomatic(', automatic)
-        self.assertNotIn('capabilities()', automatic)
+        self.assertIn('capabilities()', automatic)
         self.assertIn('call("recover", null)', body(CLIENT, 'public String recoverInterruptedBackup()'))
 
 
