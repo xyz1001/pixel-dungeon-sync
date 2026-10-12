@@ -111,6 +111,33 @@ public final class HelperHostTests {
         try { SaveDirectoryPolicy.content(many.toFile()); throw new AssertionError("oversize root accepted"); }
         catch(BridgeFailure expected) { check("SAVE_TOO_LARGE".equals(expected.code),"original scan size rejection preserved"); }
     }
+    static void knownNonSaveFileTests(Path base) throws Exception {
+        Path root=dir(base,"known-non-save-files"), target=base.resolve("known-non-save-target");
+        Files.writeString(target,"must never be read through a link");
+        for(String name:List.of("profileInstalled","profileinstaller_profileWrittenFor_lastUpdateTime.dat","keybinds.dat")) {
+            Files.writeString(root.resolve(name),"non-save contents");
+            SaveDirectoryPolicy.Content content=SaveDirectoryPolicy.content(root.toFile());
+            check(content.state==SaveDirectoryPolicy.ContentState.NO_TRANSFERABLE_FILES && content.transferable(),"exact regular non-save file accepted: "+name);
+            check(entry(content,name).classification==SaveDirectoryPolicy.Classification.EXCLUDED,"known non-save classification: "+name);
+            check(!SaveArchive.included(name),"archive whitelist stays unchanged: "+name);
+            Files.delete(root.resolve(name)); Files.createDirectory(root.resolve(name));
+            content=SaveDirectoryPolicy.content(root.toFile());
+            check(content.state==SaveDirectoryPolicy.ContentState.UNRECOGNIZED_LAYOUT && !content.transferable(),"non-save directory lookalike rejected: "+name);
+            check(entry(content,name).type==SaveDirectoryPolicy.EntryType.DIRECTORY,"non-save directory type retained: "+name);
+            Files.delete(root.resolve(name)); Files.createSymbolicLink(root.resolve(name),target);
+            content=SaveDirectoryPolicy.content(root.toFile());
+            check(content.state==SaveDirectoryPolicy.ContentState.UNRECOGNIZED_LAYOUT && !content.transferable(),"non-save symlink lookalike rejected: "+name);
+            check(entry(content,name).type==SaveDirectoryPolicy.EntryType.SYMLINK,"non-save symlink type retained: "+name);
+            Files.delete(root.resolve(name));
+            for(String lookalike:List.of(name.toUpperCase(Locale.ROOT),name+".extra",name+".spdtmp")) {
+                Files.writeString(root.resolve(lookalike),"");
+                check(!SaveDirectoryPolicy.content(root.toFile()).transferable(),"no wildcard or case folding: "+lookalike);
+                Files.delete(root.resolve(lookalike));
+            }
+        }
+        Files.writeString(root.resolve(".spdtmp"),"");
+        check(!SaveDirectoryPolicy.content(root.toFile()).transferable(),"unknown temporary root file remains blocked");
+    }
     static void identityTests(Path base) throws Exception {
         String origin="1".repeat(64), main="io.github.xyz1001.pdsync.android";
         String game="test.pixel.game", helper="io.github.xyz1001.pdsync.bridge.g"+origin.substring(0,32), shared="io.github.xyz1001.pdsync.shared.g"+origin.substring(0,32);
@@ -239,7 +266,7 @@ public final class HelperHostTests {
     }
     public static void main(String[] args) throws Exception {
         Path base=Files.createTempDirectory("pdsync-helper-host-");
-        archiveTests(base); policyTests(base); layoutDiagnosticTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
+        archiveTests(base); policyTests(base); layoutDiagnosticTests(base); knownNonSaveFileTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
         System.out.println("PASS: "+assertions+" helper host security assertions; no Android runtime executed.");
     }
 }

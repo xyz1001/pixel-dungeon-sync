@@ -26,3 +26,14 @@ This metadata is informational. It does not grant transfer access, ignore unknow
 - Unsigned helper/runtime and main-app compilation through `tools/android-rebuild/build-apk.sh`
 
 Host tests and compilation do not establish Android Binder, ART, or real-device UI behavior. The actual device diagnostic is still needed to identify every root entry present on that installation.
+
+## Exact known non-save files
+
+The layout policy now recognizes two additional top-level regular files without adding them to the archive payload:
+
+- `profileinstaller_profileWrittenFor_lastUpdateTime.dat`: AndroidX ProfileInstaller's skip marker for the last package update time. The [official ProfileInstaller source](https://github.com/androidx/androidx/blob/androidx-main/profileinstaller/profileinstaller/src/main/java/androidx/profileinstaller/ProfileInstaller.java) writes it under the app's files directory using `DataOutputStream.writeLong`. Static inspection of the selected game's installed APK also confirmed this writer and corresponding reader.
+- `keybinds.dat`: the selected game's input bindings, read/written by `SPDAction.loadBindings` and `SPDAction.saveBindings` through `FileUtils.bundleFromFile` / `bundleToFile`, as confirmed by static inspection of that APK.
+
+These and the pre-existing `profileInstalled` marker are excluded only when metadata identifies an ordinary non-symlink file. Directory or symlink lookalikes, case changes, suffix variants, `.spdtmp`, and other unknown names remain unsupported and block transfer. Neither device settings nor runtime marker contents enter the save archive, hashes, or diagnostics. These fixes address confirmed non-save writers; they do not establish which files were present in the inaccessible device root or claim that every unsupported-layout cause has been identified.
+
+`python3 -m unittest discover -s android-helper/src/test -p 'test_save_layout_snapshot.py'` executes the production `SafeSaveTree` scanner against real temporary files with host-only Android OS adapters. It checks that creation/content changes of the exact regular files leave save fingerprints unchanged, that their contents are never opened or copied, and that unknown/type-mismatched entries still fail. It does not simulate Binder, SELinux, or concurrent descriptor replacement.

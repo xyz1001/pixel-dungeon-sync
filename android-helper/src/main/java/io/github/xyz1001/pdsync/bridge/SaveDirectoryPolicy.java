@@ -19,6 +19,11 @@ import java.util.Set;
 public final class SaveDirectoryPolicy {
     private static final Set<String> EXCLUDED = new HashSet(Arrays.asList("settings.dat", "settings.xml", "preferences.dat", "preferences.xml", "ShatteredPixelDungeon.xml", "bones.dat", ".nomedia", ".pdsync-meta.json"));
 
+    // Exact known non-save files. Unlike the legacy exclusions above, their type must
+    // be verified: a directory or symlink with one of these names is still unknown.
+    private static final Set<String> REGULAR_FILE_EXCLUSIONS = new HashSet<>(Arrays.asList(
+            "profileInstalled", "profileinstaller_profileWrittenFor_lastUpdateTime.dat", "keybinds.dat"));
+
     // These are diagnostic payload limits, independent of the archive/transfer limits.
     public static final int MAX_DIAGNOSTIC_ENTRIES = 64;
     public static final int MAX_DIAGNOSTIC_NAME_LENGTH = 96;
@@ -112,15 +117,15 @@ public final class SaveDirectoryPolicy {
                     throw new BridgeFailure("SAVE_TOO_LARGE", "Too many entries in the selected game's files directory");
                 String name = entry.getFileName().toString();
                 boolean supported = SaveArchive.included(name);
-                boolean profileMarker = "profileInstalled".equals(name);
+                boolean regularFileExclusion = REGULAR_FILE_EXCLUSIONS.contains(name);
                 BasicFileAttributes attrs = null;
                 try {
                     // Metadata only. Never open a file, descend into a directory or resolve a link target.
                     attrs = Files.readAttributes(entry, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
                 } catch (IOException unavailable) {
-                    // Preserve the existing policy: included entries and the exact runtime marker
+                    // Preserve the existing policy: included entries and exact known non-save files
                     // require a verified type. Optional diagnostics must not change excluded/unknown handling.
-                    if (supported || profileMarker) throw unavailable;
+                    if (supported || regularFileExclusion) throw unavailable;
                 }
                 Classification classification;
                 if (supported) {
@@ -129,7 +134,7 @@ public final class SaveDirectoryPolicy {
                         throw new BridgeFailure("UNSAFE_SAVE_PATH", "A supported save entry is linked or has an unexpected file type");
                     included++;
                     classification = Classification.INCLUDED;
-                } else if (profileMarker) {
+                } else if (regularFileExclusion) {
                     if (attrs.isRegularFile() && !attrs.isSymbolicLink()) {
                         excluded++;
                         classification = Classification.EXCLUDED;
