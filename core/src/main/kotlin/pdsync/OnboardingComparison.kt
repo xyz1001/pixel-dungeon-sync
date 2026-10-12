@@ -18,6 +18,7 @@ class OnboardingComparison internal constructor(
  remoteEntries: List<AppendRemoteEntry>,
  observedTips: Set<String>,
  val blocker: String? = null,
+ val blockReason: SyncBlockReason? = null,
  val canAdoptRemote: Boolean = false,
  val retryablePending: Boolean = false,
  val pendingCommitId: String? = null,

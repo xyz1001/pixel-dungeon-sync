@@ -342,8 +342,8 @@ class AppendProfileSession(
    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
    val fingerprint = stability.awaitStable()
    val baseline = repository.baseline()
-   if (needsApply()) return@locked blockedComparison("上次恢复尚未确认完成，请先明确归档并检查保留的快照与备份。", fingerprint, baseline)
-   if (local.legacyPending() != null) return@locked blockedComparison("旧版待上传快照仍保留，请先明确归档；不会作为新版操作上传。", fingerprint, baseline)
+   if (needsApply()) return@locked blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, "上次恢复尚未确认完成，请先明确归档并检查保留的快照与备份。", fingerprint, baseline)
+   if (local.legacyPending() != null) return@locked blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, "旧版待上传快照仍保留，请先明确归档；不会作为新版操作上传。", fingerprint, baseline)
    val pending = repository.pending()
    // A failed/missing page or object must not become an apparently empty cloud.
    val graph = discover(store)
@@ -370,25 +370,30 @@ class AppendProfileSession(
    }
    OnboardingComparison(kind, fingerprint.files, baseline, lineage, entries, graph.tips,
     blocker = if (pending == null) null else "已有冻结的待上传操作；重试会使用原快照，不会重新采集当前存档。",
+    blockReason = if (pending == null) null else SyncBlockReason.PENDING_UPLOAD,
     canAdoptRemote = kind == OnboardingKind.IDENTICAL && lineage in setOf(OnboardingLineage.NONE, OnboardingLineage.SAME_TIP, OnboardingLineage.ANCESTOR_OF_TIP),
     retryablePending = pending != null, pendingCommitId = pending?.commit?.id,
     owner = comparisonOwner, fingerprint = fingerprint, graph = graph, pendingCommit = pending?.commit)
   }
  } catch (failure: Exception) {
   if (failure is InterruptedException) Thread.currentThread().interrupt()
-  val message = when (failure) {
-   is SaveNotStableException -> "游戏正在运行、状态未知或存档仍在变化；比较已停止，请退出游戏并等待存档稳定后重试。"
-   is LegacyProtocolException -> "发现旧版云端协议；已停止比较，不会当作空云端或自动迁移。"
-   is UnsettledRemoteException -> "云端存在缺失、未完整上传或无法验证的提交；比较已停止，请稍后重试。"
-   is RemoteIntegrityException -> "云端不可变历史校验失败；比较已停止，双方存档均未覆盖。"
+  val reason = SyncBlockReason.fromFailure(failure)
+  val message = when (reason) {
+   SyncBlockReason.SAVE_NOT_STABLE -> "游戏正在运行、状态未知或存档仍在变化；比较已停止，请退出游戏并等待存档稳定后重试。"
+   SyncBlockReason.LEGACY_REMOTE_PROTOCOL -> "发现旧版云端协议；已停止比较，不会当作空云端或自动迁移。"
+   SyncBlockReason.REMOTE_INCOMPLETE -> "云端存在缺失、未完整上传或无法验证的提交；比较已停止，请稍后重试。"
+   SyncBlockReason.REMOTE_INTEGRITY_FAILED -> "云端不可变历史校验失败；比较已停止，双方存档均未覆盖。"
+   SyncBlockReason.TARGET_CHANGED -> "所选游戏、安装版本或来源绑定已变化；请重新选择游戏并比较。"
+   SyncBlockReason.UNSUPPORTED_SAVE_FORMAT -> "存档格式不受支持或无法读取；未视为空存档，请检查所选游戏。"
+   SyncBlockReason.INTERRUPTED -> "比较被中断；未确认上传成功，请重新检查。"
    else -> "无法完成本地与完整云端历史的安全比较；请检查连接、目录和同步记录后重试。"
   }
-  blockedComparison(message)
+  blockedComparison(reason, message)
  }
 
- private fun blockedComparison(message: String, fingerprint: SaveFingerprint? = null, baseline: String? = null) =
+ private fun blockedComparison(reason: SyncBlockReason, message: String, fingerprint: SaveFingerprint? = null, baseline: String? = null) =
   OnboardingComparison(OnboardingKind.BLOCKED, fingerprint?.files.orEmpty(), baseline, OnboardingLineage.BLOCKED,
-   emptyList(), emptySet(), blocker = message, owner = comparisonOwner)
+   emptyList(), emptySet(), blocker = message, blockReason = reason, owner = comparisonOwner)
 
  /** Never trust UI-visible collections or an old comparison without repeating every safety gate. */
  private fun revalidateComparison(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean,
