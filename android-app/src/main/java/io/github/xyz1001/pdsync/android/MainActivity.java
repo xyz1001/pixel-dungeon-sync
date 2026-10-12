@@ -355,6 +355,7 @@ public final class MainActivity extends Activity {
         long jVersionCode;
         PreparationDiagnostics.Failure failureFind = PreparationDiagnostics.find(exc);
         InstallDiagnostics.Failure installFailure = InstallDiagnostics.find(exc);
+        SyncInspectionDiagnostics.Failure syncFailure = SyncInspectionDiagnostics.find(exc);
         if (installFailure != null) {
             this.diagnosticReport = InstallDiagnostics.report(installFailure);
             exc2 = exc;
@@ -384,6 +385,19 @@ public final class MainActivity extends Activity {
                 this.diagnosticReport += "\nbridge_mode=embedded-v1\nprovider_auth=current_main_certificate\nsignature_permission_required=false";
             if (BridgeDiagnostics.find(exc).saveLayout != null)
                 this.diagnosticReport += "\nprivacy=Relative entry names and file types only; no file contents or absolute paths. Review names before sharing.";
+        } else if (syncFailure != null) {
+            String appVersion = "unknown";
+            long appVersionCode = -1;
+            try {
+                PackageInfo app = PackageTrust.installed(this, getPackageName());
+                appVersion = app.versionName;
+                appVersionCode = PackageTrust.versionCode(app);
+            } catch (Exception unused) {
+                // Reporting must preserve the original comparison failure if metadata is unavailable.
+            }
+            this.diagnosticReport = SyncInspectionDiagnostics.report(syncFailure, Build.VERSION.SDK_INT,
+                    appVersion, appVersionCode, getPackageName(), this.prepared == null ? null : this.prepared.gamePackage);
+            exc2 = exc;
         } else {
             exc2 = exc;
             this.diagnosticReport = "";
@@ -2136,25 +2150,35 @@ public final class MainActivity extends Activity {
         this.inspection = null;
         // One facade and one observation own both the action proof and its timeline.
         // Drawing, paging, selecting, or dismissing the timeline must never re-export saves.
-        AndroidSyncFacade activeFacade = sync();
-        AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
-        this.inspection = inspectionInspect;
-        if ("BLOCKED".equals(inspectionInspect.getKind())) {
-            return;
-        }
-        this.history = activeFacade.historyPresentation(inspectionInspect);
-        this.cloudVerified = true;
-        HashSet hashSet = new HashSet();
-        Iterator<AppendCommit> it = this.history.getCloud().iterator();
-        while (it.hasNext()) {
-            hashSet.add(it.next().getSnapshot().getId());
-        }
-        String str = this.selected;
-        if (str != null && !hashSet.contains(str)) {
-            this.selected = null;
-        }
-        if (this.selected == null) {
-            this.selected = this.history.getDefaultSnapshot();
+        SyncInspectionDiagnostics.Stage stage = SyncInspectionDiagnostics.Stage.RUNTIME;
+        try {
+            AndroidSyncFacade activeFacade = sync();
+            stage = SyncInspectionDiagnostics.Stage.INSPECT;
+            AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
+            this.inspection = inspectionInspect;
+            if ("BLOCKED".equals(inspectionInspect.getKind())) {
+                return;
+            }
+            stage = SyncInspectionDiagnostics.Stage.HISTORY;
+            this.history = activeFacade.historyPresentation(inspectionInspect);
+            this.cloudVerified = true;
+            HashSet hashSet = new HashSet();
+            Iterator<AppendCommit> it = this.history.getCloud().iterator();
+            while (it.hasNext()) {
+                hashSet.add(it.next().getSnapshot().getId());
+            }
+            String str = this.selected;
+            if (str != null && !hashSet.contains(str)) {
+                this.selected = null;
+            }
+            if (this.selected == null) {
+                this.selected = this.history.getDefaultSnapshot();
+            }
+        } catch (Exception error) {
+            // Keep existing structured details and recovery handling exactly as they were.
+            if (InstallDiagnostics.find(error) != null || PreparationDiagnostics.find(error) != null
+                    || BridgeDiagnostics.find(error) != null) throw error;
+            throw SyncInspectionDiagnostics.at(stage, error);
         }
     }
 
@@ -3855,6 +3879,8 @@ public final class MainActivity extends Activity {
         if (failureFind != null) {
             return failureFind.userMessage();
         }
+        SyncInspectionDiagnostics.Failure syncFailure = SyncInspectionDiagnostics.find(exc);
+        if (syncFailure != null) return syncFailure.userMessage();
         String strSafeText = safeText(exc.getMessage());
         String lowerCase = strSafeText.toLowerCase(Locale.ROOT);
         if (lowerCase.contains("ssl") || lowerCase.contains("certificate path") || lowerCase.contains("handshake")) {
