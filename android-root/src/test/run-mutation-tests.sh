@@ -9,6 +9,7 @@ SHARED="$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge"
 java com.sun.tools.javac.Main -source 17 -target 17 -d "$OUT" \
   "$SHARED"/{SaveArchive,SaveDirectoryPolicy,BridgeFailure}.java \
   "$SRC"/{RootBinding,RootProtocol,RootFileSystem}.java \
-  "$SRC"/mutation/{MutationOs,RootMutationSession}.java \
+  "$SRC"/mutation/{MutationOs,MutationProcessLock,RootMutationSession,RootMutationReadGuard}.java \
   "$BASE/src/test/java/io/github/xyz1001/pdsync/root/mutation/"*.java
 java -cp "$OUT" io.github.xyz1001.pdsync.root.mutation.MutationHostTests
+java -cp "$OUT" io.github.xyz1001.pdsync.root.mutation.ReadGuardHostTests

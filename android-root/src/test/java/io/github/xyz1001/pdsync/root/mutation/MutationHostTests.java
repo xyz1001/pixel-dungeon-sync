@@ -30,7 +30,7 @@ public final class MutationHostTests {
     public static void main(String[] args) throws Exception {
         gateBeforeTouches(); validateRoots(); workspaceOwnership(); locks(); privateCopiesAndBounds(); preflightRequired();
         hardlinkNoReplace(); quarantineAndRollback(); preserveUnknownMove(); preserveSameInodeEdit(); revalidateOriginalNames();
-        privateCleanupExact(); journalReplacement(); noArchiveMetadata(); lowLevelNoReplaceDirectories(); adversarialEntries(); publishRace(); foreignCapabilities();
+        privateCleanupExact(); journalReplacement(); noArchiveMetadata(); lowLevelNoReplaceDirectories(); adversarialEntries(); publishRace(); foreignCapabilities(); fakeArchiveStream();
         System.out.println("MutationHostTests: " + assertions + " assertions passed (in-memory fake OS only; no Android/root/device execution)");
     }
     private static void gateBeforeTouches() throws Exception {
@@ -258,6 +258,39 @@ public final class MutationHostTests {
                 code(RootMutationSession.Code.UNSAFE, () -> b.removePrivate(file));
                 check(first.workspace().children.containsKey("local"));
             }
+        }
+    }
+    private static void fakeArchiveStream() throws Exception {
+        FakeMutationOs os = new FakeMutationOs();
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("game1/game.dat")); zip.write(bytes("save")); zip.closeEntry();
+            zip.putNextEntry(new java.util.zip.ZipEntry("rankings.dat")); zip.write(bytes("ranks")); zip.closeEntry();
+        }
+        final boolean[] eof = {false}, closed = {false};
+        java.io.InputStream source = new java.io.ByteArrayInputStream(bytes.toByteArray()) {
+            @Override public synchronized int read(byte[] buffer, int offset, int length) {
+                int n = super.read(buffer, offset, length); if (n == -1) eof[0] = true; return n;
+            }
+            @Override public void close() throws IOException { closed[0] = true; super.close(); }
+        };
+        try (RootMutationSession s = open(os)) {
+            MutationOs.Handle workspace = s.workspaceHandle(); os.mkdirExclusive(workspace, "archive-input", 0700);
+            io.github.xyz1001.pdsync.bridge.SaveArchive.Inventory result = os.extractArchive(workspace, "archive-input", source);
+            check(eof[0] && closed[0]); check(result.hashes.size() == 2 && result.bytes == 9);
+            check(os.workspace().children.get("archive-input").children.get("rankings.dat").uid == 0);
+            check(os.workspace().children.get("archive-input").children.get("game1").children.get("game.dat").uid == 0);
+            fails(() -> os.extractArchive(workspace, "archive-input", new java.io.ByteArrayInputStream(bytes.toByteArray())));
+        }
+        java.io.ByteArrayOutputStream invalid = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(invalid)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("../escape")); zip.write(bytes("bad")); zip.closeEntry();
+        }
+        FakeMutationOs unsafe = new FakeMutationOs();
+        try (RootMutationSession s = open(unsafe)) {
+            MutationOs.Handle workspace = s.workspaceHandle(); os.mkdirExclusive(workspace, "archive-input", 0700);
+            fails(() -> unsafe.extractArchive(workspace, "archive-input", new java.io.ByteArrayInputStream(invalid.toByteArray())));
+            check(unsafe.workspace().children.get("archive-input").children.isEmpty());
         }
     }
     private static void lowLevelNoReplaceDirectories() throws Exception {

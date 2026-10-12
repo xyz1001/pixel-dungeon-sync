@@ -105,8 +105,7 @@ public final class RootMutationSession implements AutoCloseable {
         @Override public void close() throws IOException { if (!closed) { closed = true; handle.close(); } }
         private RootMutationSession owner() { return RootMutationSession.this; }
     }
-    private static final java.util.concurrent.ConcurrentHashMap<String, RootMutationSession> PROCESS_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
-    private String processLockKey;
+    private MutationProcessLock.Lease processLock;
     private final MutationOs os;
     private final RootBinding binding;
     private MutationOs.Handle data, files, workspace, lockFile;
@@ -139,9 +138,8 @@ public final class RootMutationSession implements AutoCloseable {
         catch (MutationOs.Failure e) { if (e.error != MutationOs.Error.EXISTS) throw e; }
         workspace = os.openDirectory(data, WORKSPACE); originalWorkspace = os.stat(workspace);
         privateDirectory(originalWorkspace);
-        String lockKey = originalWorkspace.device + ":" + originalWorkspace.inode;
-        if (PROCESS_LOCKS.putIfAbsent(lockKey, this) != null) fail(Code.BUSY);
-        processLockKey = lockKey;
+        try { processLock = MutationProcessLock.acquire(originalWorkspace.device, originalWorkspace.inode); }
+        catch (MutationOs.Failure busy) { throw new Failure(Code.BUSY, null, busy); }
         try { lockFile = os.createExclusive(workspace, LOCK, 0600); os.chmod(lockFile, 0600); os.sync(lockFile); }
         catch (MutationOs.Failure e) {
             if (e.error != MutationOs.Error.EXISTS) throw e;
@@ -573,7 +571,7 @@ public final class RootMutationSession implements AutoCloseable {
         AutoCloseable[] all = {lock, lockFile, workspace, files, data};
         for (AutoCloseable item : all) if (item != null) try { item.close(); }
         catch (Exception e) { if (error == null) error = new IOException(e); else error.addSuppressed(e); }
-        if (processLockKey != null) PROCESS_LOCKS.remove(processLockKey, this);
+        if (processLock != null) processLock.close();
         if (error != null) throw error;
     }
 }

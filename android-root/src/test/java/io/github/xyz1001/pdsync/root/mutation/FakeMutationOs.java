@@ -1,6 +1,7 @@
 package io.github.xyz1001.pdsync.root.mutation;
 
 import io.github.xyz1001.pdsync.bridge.SaveDirectoryPolicy;
+import io.github.xyz1001.pdsync.bridge.SaveArchive;
 import io.github.xyz1001.pdsync.root.RootFileSystem.Stat;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -93,6 +94,63 @@ public final class FakeMutationOs implements MutationOs {
                     state == SaveDirectoryPolicy.ContentState.NO_TRANSFERABLE_FILES ? 1 : 0,
                     state == SaveDirectoryPolicy.ContentState.UNRECOGNIZED_LAYOUT ? 1 : 0, java.util.Collections.emptyList(), false);
         } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
+    }
+    /** Orchestration fixture only. Production uses the unchanged shared ZIP parser, not this model. */
+    @Override public SaveArchive.Inventory extractArchive(Handle parent, String name, java.io.InputStream input) throws IOException {
+        Node parentNode = n(parent), target = child(parent, name);
+        if (!parentNode.directory() || parentNode.uid != 0 || parentNode.gid != 0 || (parentNode.mode & 07777) != 0700
+                || !target.directory() || target.uid != 0 || target.gid != 0 || (target.mode & 07777) != 0700
+                || target.device != parentNode.device || !target.children.isEmpty()) throw new Failure(Error.IO);
+        java.io.ByteArrayOutputStream compressed = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[32768];
+        try (java.io.InputStream source = input) {
+            int count;
+            while ((count = source.read(buffer)) != -1) {
+                if (count <= 0 || compressed.size() > SaveArchive.MAX_BYTES - count) throw new Failure(Error.IO);
+                compressed.write(buffer, 0, count);
+            }
+        } // The bounded transport sees its actual EOF and footer before any restore mutation.
+        byte[] archive = compressed.toByteArray();
+        if (archive.length < 22 || archive[0] != 'P' || archive[1] != 'K'
+                || !((archive[2] == 3 && archive[3] == 4) || (archive[2] == 5 && archive[3] == 6))) throw new Failure(Error.IO);
+        java.util.TreeMap<String, String> hashes = new java.util.TreeMap<>();
+        java.util.Set<String> folded = new java.util.HashSet<>(); long total = 0; int entries = 0;
+        try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(archive))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                String path = entry.getName();
+                if (entry.isDirectory() || !SaveArchive.safeName(path) || !folded.add(path.toLowerCase(java.util.Locale.ROOT))
+                        || hashes.size() >= SaveArchive.MAX_FILES || (entry.getMethod() != java.util.zip.ZipEntry.STORED
+                        && entry.getMethod() != java.util.zip.ZipEntry.DEFLATED)) throw new Failure(Error.IO);
+                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32(); int count;
+                while ((count = zip.read(buffer)) != -1) {
+                    if (count <= 0 || count > SaveArchive.MAX_BYTES - total) throw new Failure(Error.IO);
+                    bytes.write(buffer, 0, count); crc.update(buffer, 0, count); total += count;
+                }
+                zip.closeEntry();
+                if (entry.getSize() != bytes.size() || entry.getCrc() != crc.getValue()) throw new Failure(Error.IO);
+                String[] parts = path.split("/"); Node directory = target;
+                for (int i = 0; i < parts.length - 1; i++) {
+                    Node next = directory.children.get(parts[i]);
+                    if (next == null) {
+                        if (++entries > SaveArchive.MAX_ENTRIES) throw new Failure(Error.IO);
+                        next = dir(directory, parts[i], 0700, 0, 0); next.device = target.device;
+                        mutation("mkdir", directory, parts[i]);
+                    }
+                    if (!next.directory() || next.uid != 0 || (next.mode & 07777) != 0700) throw new Failure(Error.IO);
+                    directory = next;
+                }
+                String leaf = parts[parts.length - 1]; exclusive(directory, leaf);
+                if (++entries > SaveArchive.MAX_ENTRIES) throw new Failure(Error.IO);
+                Node file = fresh(Stat.REGULAR | 0600, 0, 0); file.device = target.device; file.bytes = bytes.toByteArray();
+                if (entry.getTime() >= 0) file.mtime = entry.getTime() / 1000;
+                directory.children.put(leaf, file); mutation("create", directory, leaf);
+                hashes.put(path, SaveArchive.sha256(file.bytes));
+            }
+        }
+        SaveArchive.requireCompleteRuns(hashes.keySet());
+        return new SaveArchive.Inventory(hashes, total);
     }
     @Override public void mkdirExclusive(Handle parent, String name, int mode) throws IOException {
         Node p = n(parent); exclusive(p, name); dir(p, name, mode, 0, 0); mutation("mkdir", p, name);
