@@ -42,6 +42,7 @@ public final class MainRuntimeRecoveryChecks {
         connectionPersistence();
         endpointPolicy();
         legacyConnection();
+        autoSyncPolicy();
         System.out.println("Main runtime host regression checks passed: " + assertions + " assertions.");
         System.out.println("Boundary: pure Java only; Android service lifecycle, Binder, permissions and device behavior are not executed.");
     }
@@ -315,6 +316,50 @@ public final class MainRuntimeRecoveryChecks {
     static long descriptorCount() throws Exception {
         if (!Files.isDirectory(Path.of("/proc/self/fd"))) return -1;
         try (java.util.stream.Stream<Path> paths = Files.list(Path.of("/proc/self/fd"))) { return paths.count(); }
+    }
+
+
+    static void autoSyncPolicy() throws Exception {
+        AutoSyncPolicy waiting = new AutoSyncPolicy(1000, false);
+        equal(AutoSyncPolicy.Step.WAIT, waiting.observe(true, false, 61000), "no guessed exit at timeout boundary");
+        equal(AutoSyncPolicy.Step.STOP_UNOBSERVED, waiting.observe(true, false, 61001), "unobserved foreground times out");
+        AutoSyncPolicy unknown = new AutoSyncPolicy(0, true);
+        for (int i = 0; i < 19; i++) equal(AutoSyncPolicy.Step.WAIT, unknown.observe(false, false, 999999), "unreliable observation never publishes");
+        equal(AutoSyncPolicy.Step.STOP_UNKNOWN, unknown.observe(false, false, 999999), "unknown observation budget finite");
+        AutoSyncPolicy reset = new AutoSyncPolicy(0, false);
+        for (int i = 0; i < 19; i++) reset.observe(false, false, 100);
+        equal(AutoSyncPolicy.Step.WAIT, reset.observe(true, true, 100), "foreground resets unknown counter");
+        check(reset.hasSeenForeground(), "foreground observation retained");
+        equal(AutoSyncPolicy.Step.WAIT, reset.observe(false, false, 200), "unknown state after foreground does not infer exit");
+        equal(AutoSyncPolicy.Step.UPLOAD, reset.observe(true, false, 300), "reliable observed foreground exit permits upload");
+        AutoSyncPolicy returned = new AutoSyncPolicy(0, false);
+        returned.knownReturn();
+        equal(AutoSyncPolicy.Step.WAIT, returned.observe(false, false, 100), "known return still needs reliable game observation");
+        equal(AutoSyncPolicy.Step.UPLOAD, returned.observe(true, false, 200), "known return and reliable background permits check");
+        AutoSyncPolicy active = new AutoSyncPolicy(0, false);
+        active.knownReturn();
+        equal(AutoSyncPolicy.Step.WAIT, active.observe(true, true, 200), "known return cannot override observed foreground");
+        for (int i = 1; i <= 3; i++) equal(i * 3000L, active.nextTransientRetryMillis(), "bounded retry backoff");
+        for (int i = 0; i < 10; i++) equal(-1L, active.nextTransientRetryMillis(), "retries stay exhausted");
+        for (boolean stopped : new boolean[]{false,true}) for (boolean enabled : new boolean[]{false,true}) {
+            equal(!stopped && enabled, AutoSyncPolicy.mayPublish(stopped, enabled, "token", "token"), "publication gates");
+            check(!AutoSyncPolicy.mayPublish(stopped, enabled, "old-token", "new-token"), "changed session blocks publication");
+            check(!AutoSyncPolicy.mayPublish(stopped, enabled, null, null), "uninitialized session cannot publish");
+        }
+        for (String code : List.of("COMPARISON_FAILED", "HISTORY_CONFLICT", "LEGACY_PENDING_UPLOAD", "PENDING_UPLOAD",
+                "RESTORE_RECOVERY_REQUIRED", "TARGET_CHANGED", "REMOTE_INCOMPLETE", "BRIDGE_UNAVAILABLE", "BASELINE_UNVERIFIED",
+                "REMOTE_ONLY", "INTERRUPTED", "REMOTE_INTEGRITY_FAILED", "TARGET_UNVERIFIED", "UNSUPPORTED_SAVE_FORMAT",
+                "FIRST_LAUNCH_NEEDED", "UPLOAD_NOT_CONFIRMED", "SAVE_NOT_STABLE", "LEGACY_REMOTE_PROTOCOL")) {
+            equal(code, AutoSyncMessages.knownCode(code), "known reason is preserved");
+            check(AutoSyncMessages.blocked(code).contains("（" + code + "）"), "message carries precise safe code");
+        }
+        equal("COMPARISON_FAILED", AutoSyncMessages.knownCode(null), "null reason safe fallback");
+        equal("COMPARISON_FAILED", AutoSyncMessages.knownCode("password=secret"), "unknown reason cannot leak untrusted text");
+        check(!AutoSyncMessages.blocked("password=secret").contains("secret"), "unknown message redacted");
+        equal("RESTORE_RECOVERY_REQUIRED", AutoSyncMessages.bridgeReasonCode("RECOVERY", "RECOVERY_REQUIRED"), "pending recovery reason preserved");
+        equal("TARGET_CHANGED", AutoSyncMessages.bridgeReasonCode("TARGET_IDENTITY", "INSTALLED_APK_SET_MISMATCH"), "changed installed bytes are not transient network issue");
+        equal("TARGET_UNVERIFIED", AutoSyncMessages.bridgeReasonCode("PACKAGE_TRUST", "unknown"), "unverified identity reason");
+        equal("SAVE_NOT_STABLE", AutoSyncMessages.bridgeReasonCode("SAVE_READINESS", "PROCESS_STATE_UNKNOWN"), "unknown running state remains unsafe");
     }
 
     static void packageTrust() throws Exception {
