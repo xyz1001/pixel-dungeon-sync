@@ -11,15 +11,15 @@ Environment variables (paths must be absolute):
 - `ANDROID_SDK_ROOT`: SDK containing `platforms/android-36/android.jar` and `build-tools/36.0.0`
 - `PDSYNC_BUILD_HOME`: directory outside the checkout for intermediate output
 - `PDSYNC_RUNTIME_LIB`: directory containing the pinned core runtime dependencies named in `build-apk.py`
-- `PDSYNC_KEYSTORE_FILE`, `PDSYNC_PASSWORD_FILE`, `PDSYNC_KEY_ALIAS`: retained, repository-external test keystore and single-line password file. Signing secrets must never enter Git, assets, logs, or APKs. The password value is never printed or passed as a command argument. Keystore/password files must have mode 0600; their parent should have mode 0700.
+- `PDSYNC_KEYSTORE_FILE`, `PDSYNC_PASSWORD_FILE`, `PDSYNC_KEY_ALIAS`: needed only for signing on the build host; these identify the retained, repository-external test keystore, single-line password file and key alias. They are not required for `--unsigned` builds. Signing secrets must never enter Git, assets, logs, or APKs. The password value is never printed or passed as a command argument. For build-host signing, keystore/password files must have mode 0600; their parent should have mode 0700.
 - `JAVA_BIN`: optional Java executable
 - `PDSYNC_APKSIG_JAR`: optional explicit runtime apksig dependency. By default, builds with minSdk below 28 generate the checksum-pinned API-26 compatibility jar described below. Final APK signing and verification still use the unmodified official SDK apksigner.
 
-The local reconstruction layout is detected automatically. Reuse the same retained key; this build never generates or silently replaces one. Export and back up the keystore only through a separately authorized secure channel.
+The local reconstruction layout is detected automatically. Reuse the same retained key; this build never generates or silently replaces one. Keep a durable local backup of the signing key and its recovery information. For the recommended user-device signing workflow below, the private key, keystore and passwords remain on the user's device and local backup; never upload them to the cloud build host, repository, chat or an anonymous file-transfer service. Only the public certificate and its SHA-256 fingerprint are needed by the build host.
 
 ## Commands
 
-Run from the source checkout:
+Run from the source checkout. These commands show the supported build-host signing alternative. For recommended user-device final signing, run the same host tests, helper compilation and DEX extraction, then replace the final main-app build command with the unsigned command in the next section.
 
 ```sh
 set -eu
@@ -45,6 +45,51 @@ The main app has `minSdkVersion=26` (Android 8.0) and `targetSdkVersion=36`; D8 
 Build output includes `.build.json`, `.badging.txt` and, for signed APKs, `.verify.txt`. Inputs, hashes, SDK versions, new signer identity, and device-test status are recorded. ZIP payload timestamps are fixed. A host smoke test confirms deterministic signed output when inputs and the retained key are unchanged.
 
 The installed cloud Java runtime exposes javac but lacks `ct.sym`, so application compilation uses `-source 17 -target 17` rather than `--release 17`. This proves JVM17 bytecode compatibility, not a Java17 API fence. D8 uses the selected module manifest's minimum SDK. Android device/runtime testing remains required.
+
+## User-device final signing (recommended)
+
+This optional split workflow keeps the main-app signing key durable on the user's Windows device while the cloud builds the unsigned APK. It does not require changing or rebuilding an already delivered, correctly signed APK. Build-host signing above remains supported when the retained signing material is intentionally available on that host.
+
+### Coordinate the public signer before building
+
+The embedded runtime has an immutable main-app certificate pin. The certificate used for final signing must match the runtime bundled in that same APK. Coordinate only the public X.509 certificate in DER form and the lowercase SHA-256 digest of those DER bytes, not a hash of the Base64 text. Keep these source values consistent:
+
+- `android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/MainCallerPolicy.java`: `MAIN_SIGNER_SHA256`
+- `android-helper/res/values/strings.xml`: legacy `expected_main_cert_sha256`
+- `android-helper/src/test/main-public-certificate.base64`: the public DER certificate encoded as Base64 for the authentication test
+
+These are public certificate data, not a private key. Keep the same signer for future updates; a different key breaks ordinary update compatibility and the embedded caller-authentication pin. If an intentional signer change is needed, coordinate these public inputs before rebuilding the helper runtime and main app. Never substitute a newly generated key merely because a build machine was replaced. This main-app signing key is separate from the game-signing key held by the Android app for game preparation.
+
+### Build and transfer the unsigned main app
+
+After extracting `bridge-runtime.dex` as above, use this main-app command on the build host:
+
+```sh
+tools/android-rebuild/build-apk.sh --module android-app --core core/build/libs/core.jar --asset "bridge-runtime.dex=$PDSYNC_BUILD_HOME/bridge-runtime.dex" --unsigned --out "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-unsigned.apk"
+```
+
+The script already runs zipalign before producing this unsigned APK and checks the resulting alignment. The main build still includes its runtime APK-signing dependencies for game preparation; `--unsigned` skips only the final main-app signature. Transfer the unsigned APK to the user's Windows device and compare its SHA-256 before signing. No signing secrets need to cross to the cloud.
+
+### Sign and verify on Windows
+
+Use the unmodified official Build-Tools 36.0.0 `lib/apksigner.jar`, not the API-26 runtime compatibility jar. The official jar's class files are major version 52 and these final-signing commands are compatible with Java 11; building the source still requires the Java compiler described above. Set `ANDROID_SDK_ROOT`, `PDSYNC_BUILD_HOME`, `PDSYNC_KEYSTORE_FILE` and `PDSYNC_KEY_ALIAS` to the appropriate device-local SDK, output directory, existing keystore and alias. `PDSYNC_BUILD_HOME` here is a Windows-local directory containing the transferred unsigned APK, not the cloud path. Optionally set `JAVA_BIN` to the local Java executable.
+
+Run in a local PowerShell terminal. The signing command prompts locally for the keystore password (and key password if different); no password appears in the command or needs to be supplied to the cloud:
+
+```powershell
+$java = if ($env:JAVA_BIN) { $env:JAVA_BIN } else { "java" }
+$apksigner = Join-Path $env:ANDROID_SDK_ROOT 'build-tools/36.0.0/lib/apksigner.jar'
+$unsigned = Join-Path $env:PDSYNC_BUILD_HOME 'pixel-dungeon-sync-android-unsigned.apk'
+$signed = Join-Path $env:PDSYNC_BUILD_HOME 'pixel-dungeon-sync-android-test.apk'
+& $java -jar $apksigner sign --ks $env:PDSYNC_KEYSTORE_FILE --ks-key-alias $env:PDSYNC_KEY_ALIAS --min-sdk-version 26 --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out $signed $unsigned
+if ($LASTEXITCODE -ne 0) { throw 'APK signing failed' }
+& $java -jar $apksigner verify --verbose --print-certs --min-sdk-version 26 --max-sdk-version 26 $signed
+if ($LASTEXITCODE -ne 0) { throw 'API-26 signature verification failed' }
+& $java -jar $apksigner verify --verbose --print-certs --min-sdk-version 36 --max-sdk-version 36 $signed
+if ($LASTEXITCODE -ne 0) { throw 'API-36 signature verification failed' }
+```
+
+Check that the printed signer certificate SHA-256 digest exactly matches the public fingerprint pinned in the source. API 26 uses v2 signatures; v3 applies from API 28, so do not expect v3 verification on API 26. Do not modify or run zipalign on the signed APK afterward, because post-signing changes invalidate its signature. These checks establish signature verification at the selected API levels, not a real-device runtime test. Preserve the same local key and backup for every later update; transfer only the resulting APK and public verification information as needed.
 
 ## API-26 runtime apksig compatibility
 
