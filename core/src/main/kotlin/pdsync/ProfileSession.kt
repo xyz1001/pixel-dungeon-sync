@@ -45,7 +45,7 @@ object SafePaths {
   } finally { Files.deleteIfExists(temp) }
  }
  fun boundedRead(path: Path, limit: Int): ByteArray = Files.newInputStream(checked(path)).use {
-  it.readNBytes(limit + 1).also { data -> require(data.size <= limit) { "本地文件过大" } }
+  it.readUpTo(limit + 1).also { data -> require(data.size <= limit) { "本地文件过大" } }
  }
 }
 
@@ -144,7 +144,7 @@ object ShatteredProfileVersions : ProfileVersions {
   }
   return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected))
  }
- override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(Path.of(path))
+ override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(java.nio.file.Paths.get(path))
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   val actual = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))
   snapshot.manifest.saveVersions?.let { require(it == actual) { "快照的版本元数据与存档内容不一致" } }
@@ -157,12 +157,13 @@ object ShatteredProfileVersions : ProfileVersions {
 class ProfileSession(
  config: AppConfig, private val stateRoot: Path, val adapter: GameAdapter = Shattered,
  private val versions: ProfileVersions = ShatteredProfileVersions,
- private val captureQuietMillis: Long = 2_000
+ private val captureQuietMillis: Long = 2_000,
+ deviceLabel: (() -> String?)? = null
 ) {
  val config = config.validated()
- val root = SafePaths.directory(Path.of(this.config.saveRoot))
+ val root = SafePaths.directory(java.nio.file.Paths.get(this.config.saveRoot))
  private val state = SafePaths.checked(stateRoot)
- private val metadata = DeviceMetadata(state)
+ private val metadata = if (deviceLabel == null) DeviceMetadata(state) else DeviceMetadata(state, hostname = deviceLabel)
  internal val directoryMetadata = DirectoryMetadataStore(root)
  private val scopeKey = hash(listOf("auto-version-v2", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
  val directory: Path = state.resolve("profiles").resolve(scopeKey)
@@ -172,7 +173,8 @@ class ProfileSession(
  private val queue = PendingSnapshots(directory.resolve("pending"), adapter)
  private val queueKey = scopeKey
  init {
-  require(root.parent != null && root != Path.of(System.getProperty("user.home")).toAbsolutePath().normalize()) { "不能选择磁盘根目录或用户主目录" }
+  val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() }?.let { java.nio.file.Paths.get(it).toAbsolutePath().normalize() }
+  require(root.parent != null && root != userHome) { "不能选择磁盘根目录或用户主目录" }
   SafePaths.disjoint(root, state)
   validateRoot()
   locked { importLegacyScopes() }
@@ -200,7 +202,7 @@ class ProfileSession(
   if (!profiles.exists()) return
   data class Legacy(val key: String, val directory: Path, val entries: List<Path>, val pending: Snapshot?, val head: String?)
   val candidates = Files.list(profiles).use { paths ->
-   val dirs = paths.toList(); require(dirs.size <= 4096) { "本地档案目录过多，停止自动导入" }
+   val dirs = paths.iterator().asSequence().toList(); require(dirs.size <= 4096) { "本地档案目录过多，停止自动导入" }
    dirs.mapNotNull { old ->
     val key = old.fileName.toString()
     if (key == scopeKey || !key.matches(Regex("[0-9a-f]{64}"))) return@mapNotNull null
@@ -209,7 +211,7 @@ class ProfileSession(
     if (SafePaths.checked(directory.resolve("imported-$key.txt")).exists()) return@mapNotNull null
     val oldHistory = SafePaths.checked(old.resolve("history"))
     if (!oldHistory.exists()) return@mapNotNull null
-    val entries = Files.list(oldHistory).use { stream -> stream.filter { it.fileName.toString().endsWith(".entry.json") }.toList() }
+    val entries = Files.list(oldHistory).use { stream -> stream.filter { it.fileName.toString().endsWith(".entry.json") }.iterator().asSequence().toList() }
     require(entries.size <= 10000) { "旧历史条目过多，停止自动导入" }
     // The old scope encoded one declared version; any valid entry can prove its binding.
     val bound = entries.take(32).any { entryPath ->
@@ -297,7 +299,7 @@ class ProfileSession(
  }
  fun history(): List<HistoryEntry> = locked {
   if (!SafePaths.checked(historyRoot).exists()) return@locked emptyList()
-  Files.list(historyRoot).use { paths -> paths.filter { it.fileName.toString().endsWith(".entry.json") }.toList().map { path ->
+  Files.list(historyRoot).use { paths -> paths.filter { it.fileName.toString().endsWith(".entry.json") }.iterator().asSequence().toList().map { path ->
    val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(path, MAX_MANIFEST_BYTES).decodeToString())
    checkedManifest(entry.manifest)
    entry.remoteObservedAt?.let(::requireUtcTimestamp)

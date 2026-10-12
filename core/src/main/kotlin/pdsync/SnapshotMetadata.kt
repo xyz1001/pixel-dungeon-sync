@@ -113,9 +113,9 @@ class DeviceMetadata(
 
 private fun systemDeviceLabel(): String? {
  listOf("COMPUTERNAME", "HOSTNAME", "HOST").forEach { key -> System.getenv(key)?.takeIf { it.isNotBlank() }?.let { return it } }
- val hostnameFile = Path.of("/etc/hostname")
+ val hostnameFile = java.nio.file.Paths.get("/etc/hostname")
  if (Files.isRegularFile(hostnameFile)) runCatching {
-  Files.newInputStream(hostnameFile).use { it.readNBytes(4096).decodeToString().trim() }
+  Files.newInputStream(hostnameFile).use { it.readUpTo(4096).decodeToString().trim() }
  }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
  return runCatching { InetAddress.getLocalHost().hostName }.getOrNull()?.takeIf { it.isNotBlank() }
 }

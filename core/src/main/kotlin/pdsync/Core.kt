@@ -67,7 +67,7 @@ object Snapshots {
      require(safePath(name) && portableNames.add(name.lowercase(java.util.Locale.ROOT))) { "Unsafe or aliased save path" }
      require(files.size < MAX_SNAPSHOT_FILES)
      val remaining = MAX_SNAPSHOT_BYTES - total.toInt()
-     val bytes = Files.newInputStream(p).use { it.readNBytes(remaining + 1) }
+     val bytes = Files.newInputStream(p).use { it.readUpTo(remaining + 1) }
      total += bytes.size; require(total <= MAX_SNAPSHOT_BYTES)
      files[name] = bytes
      if (captureContext != null) modifiedAt[name] = Files.getLastModifiedTime(p, LinkOption.NOFOLLOW_LINKS).toInstant().toString()

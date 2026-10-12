@@ -26,9 +26,10 @@ sealed interface AppendPushResult {
  */
 class AppendProfileSession(
  config: AppConfig, stateRoot: Path, adapter: GameAdapter = Shattered,
- versions: ProfileVersions = ShatteredProfileVersions, private val captureQuietMillis: Long = 2000
+ versions: ProfileVersions = ShatteredProfileVersions, private val captureQuietMillis: Long = 2000,
+ deviceLabel: (() -> String?)? = null
 ) {
- private val local = ProfileSession(config, stateRoot, adapter, versions, captureQuietMillis)
+ private val local = ProfileSession(config, stateRoot, adapter, versions, captureQuietMillis, deviceLabel)
  val config get() = local.config
  val root get() = local.root
  val adapter get() = local.adapter

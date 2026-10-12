@@ -67,7 +67,7 @@ object ShatteredVersions {
     require(bytes.size <= MAX_SAVE_INPUT_BYTES) { "game.dat exceeds the 8 MiB input limit" }
     val expanded = if (bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()) {
      GZIPInputStream(bytes.inputStream()).use { input ->
-      input.readNBytes(MAX_SAVE_EXPANDED_BYTES + 1).also {
+      input.readUpTo(MAX_SAVE_EXPANDED_BYTES + 1).also {
        require(it.size <= MAX_SAVE_EXPANDED_BYTES) { "game.dat exceeds the 16 MiB expanded limit" }
       }
      }
@@ -93,7 +93,7 @@ object ShatteredVersions {
   require(Files.isRegularFile(checked, LinkOption.NOFOLLOW_LINKS)) { "Target game must be a regular JAR file" }
   require(Files.size(checked) <= maxInputBytes) { "Target JAR exceeds the $maxInputBytes byte input limit" }
   val bytes = Files.newInputStream(checked, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use {
-   it.readNBytes(maxInputBytes + 1).also { data ->
+   it.readUpTo(maxInputBytes + 1).also { data ->
     require(data.size <= maxInputBytes) { "Target JAR exceeds the $maxInputBytes byte input limit" }
    }
   }

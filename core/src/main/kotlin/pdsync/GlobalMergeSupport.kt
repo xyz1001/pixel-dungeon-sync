@@ -50,7 +50,7 @@ internal object GlobalBundles {
  fun decode(source: ByteArray, path: String): JsonObject = try {
   require(source.size in 2..INPUT_LIMIT) { "文件大小不受支持" }
   val bytes=if(source[0]==0x1f.toByte() && source[1]==0x8b.toByte())
-   GZIPInputStream(source.inputStream()).use { it.readNBytes(EXPANDED_LIMIT+1) } else source
+   GZIPInputStream(source.inputStream()).use { it.readUpTo(EXPANDED_LIMIT+1) } else source
   require(bytes.size<=EXPANDED_LIMIT) { "解压后超出大小限制" }
   val text=bytes.decodeToString(throwOnInvalidSequence=true)
   requireUniqueJsonKeys(text)

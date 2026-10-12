@@ -10,13 +10,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.w3c.dom.Document
 import org.w3c.dom.Element
-import org.xml.sax.SAXParseException
-import org.xml.sax.helpers.DefaultHandler
 import java.io.IOException
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 
 /** Safe, non-secret reasons for explicit namespace setup failures. */
 enum class NamespaceFailureReason {
@@ -234,7 +231,7 @@ class AppendOnlyWebDav(
  private fun readBounded(response: Response, limit: Int): ByteArray {
   val body = response.body ?: throw IOException("WebDAV response body missing")
   require(body.contentLength() <= limit) { "Remote response exceeds size limit" }
-  return body.byteStream().readNBytes(limit + 1).also { require(it.size <= limit) { "Remote response exceeds size limit" } }
+  return body.byteStream().readUpTo(limit + 1).also { require(it.size <= limit) { "Remote response exceeds size limit" } }
  }
 
  private fun fileUrl(name: String) = collection.newBuilder().addPathSegment(name).build()
@@ -268,24 +265,7 @@ class AppendOnlyWebDav(
   require(it.encodedPath == collection.encodedPath) { "WebDAV continuation must use the same collection" }
  }
 
- private fun parseXml(bytes: ByteArray): Document = try {
-   val factory = DocumentBuilderFactory.newInstance().apply {
-    isNamespaceAware = true; isXIncludeAware = false; isExpandEntityReferences = false
-    setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-    setFeature("http://xml.org/sax/features/external-general-entities", false)
-    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-    setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-    setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-    setAttribute("http://www.oracle.com/xml/jaxp/properties/maxElementDepth", 64)
-   }
-   factory.newDocumentBuilder().apply {
-    setErrorHandler(object: DefaultHandler() {
-     override fun error(e: SAXParseException) { throw e }
-     override fun fatalError(e: SAXParseException) { throw e }
-    })
-   }.parse(bytes.inputStream())
-  } catch (_: Exception) { throw IllegalArgumentException("Invalid or unsafe WebDAV listing XML") }
+ private fun parseXml(bytes: ByteArray): Document = SafeDavXml.parse(bytes)
 
  private fun validateMultistatusRoot(root: Element) {
   require(root.isDav("multistatus")) { "Expected DAV multistatus listing" }

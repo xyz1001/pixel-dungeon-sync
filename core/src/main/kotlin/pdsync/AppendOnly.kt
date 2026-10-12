@@ -84,7 +84,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  }
  private fun idsIn(root: Path): Set<String> {
   if (!SafePaths.checked(root).exists()) return emptySet()
-  return java.nio.file.Files.list(root).use { files -> files.toList().also { require(it.size <= MAX_COMMITS) }.map { path ->
+  return java.nio.file.Files.list(root).use { files -> files.iterator().asSequence().toList().also { require(it.size <= MAX_COMMITS) }.map { path ->
    require(path.fileName.toString().endsWith(".json")); path.fileName.toString().removeSuffix(".json").also { require(validCommitId(it)) }
   }.toSet() }
  }

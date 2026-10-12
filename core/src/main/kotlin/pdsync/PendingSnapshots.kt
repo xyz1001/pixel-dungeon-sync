@@ -15,12 +15,12 @@ class PendingSnapshots(private val root: Path, private val adapter: GameAdapter 
  fun load(endpoint: String): Snapshot? {
   checked(root)
   if(!marker.exists()) return null
-  val lines = Files.newInputStream(marker).use { it.readNBytes(513) }.also { require(it.size <= 512) }.decodeToString().lines()
+  val lines = Files.newInputStream(marker).use { it.readUpTo(513) }.also { require(it.size <= 512) }.decodeToString().lines()
   require(lines.size == 2 && lines[0] == hash(endpoint.encodeToByteArray())) { "Pending snapshot belongs to another endpoint" }
   val id = lines[1]; require(id.matches(Regex("[0-9a-fA-F-]{36}")))
-  val manifestBytes = Files.newInputStream(checked(root.resolve("$id.json"))).use { it.readNBytes(MAX_MANIFEST_BYTES + 1) }; require(manifestBytes.size <= MAX_MANIFEST_BYTES)
+  val manifestBytes = Files.newInputStream(checked(root.resolve("$id.json"))).use { it.readUpTo(MAX_MANIFEST_BYTES + 1) }; require(manifestBytes.size <= MAX_MANIFEST_BYTES)
   val manifest = json.decodeFromString<Manifest>(manifestBytes.decodeToString()); require(manifest.id == id)
-  val bytes = Files.newInputStream(checked(root.resolve("$id.zip"))).use { it.readNBytes(MAX_SNAPSHOT_BYTES + 1) }; require(bytes.size <= MAX_SNAPSHOT_BYTES)
+  val bytes = Files.newInputStream(checked(root.resolve("$id.zip"))).use { it.readUpTo(MAX_SNAPSHOT_BYTES + 1) }; require(bytes.size <= MAX_SNAPSHOT_BYTES)
   return Snapshot(manifest,bytes).also { Snapshots.verify(it,adapter) }
  }
  fun save(endpoint: String, snapshot: Snapshot) {
