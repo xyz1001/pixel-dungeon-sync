@@ -13,7 +13,7 @@ data class SaveSummary(val slots: Map<String,String?>, val plays: Int?, val file
    val plays=bytes["rankings.dat"]?.let { source -> runCatching {
     require(source.size<=8*1024*1024)
     val expanded=if(source.size>=2 && source[0]==0x1f.toByte() && source[1]==0x8b.toByte())
-     GZIPInputStream(source.inputStream()).use { it.readNBytes(16*1024*1024+1) } else source
+     GZIPInputStream(source.inputStream()).use { it.readUpTo(16*1024*1024+1) } else source
     require(expanded.size<=16*1024*1024)
     val text=expanded.decodeToString(throwOnInvalidSequence=true);requireUniqueJsonKeys(text)
     (json.parseToJsonElement(text).jsonObject["total"] as? JsonPrimitive)?.intOrNull?.takeIf { it>=0 }

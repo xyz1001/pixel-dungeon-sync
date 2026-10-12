@@ -146,9 +146,9 @@ object ShatteredProfileVersions : ProfileVersions {
  }
  override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(java.nio.file.Paths.get(path))
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
-  require(recordedGamePackage(snapshot.manifest) == "com.shatteredpixel.shatteredpixeldungeon") { "快照属于不同游戏包，不能恢复到 Shattered Pixel Dungeon" }
   val actual = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))
   snapshot.manifest.saveVersions?.let { require(it == actual) { "快照的版本元数据与存档内容不一致" } }
+  require(recordedGamePackage(snapshot.manifest) == "com.shatteredpixel.shatteredpixeldungeon") { "快照属于不同游戏包，不能恢复到所选游戏。" }
   val target = target(targetPath) ?: error("请先选择目标游戏 JAR；不能从存档推断已安装游戏版本")
   ShatteredVersions.requireCompatible(actual, target)
  }

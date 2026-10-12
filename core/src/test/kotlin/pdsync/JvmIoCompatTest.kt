@@ -11,6 +11,12 @@ class JvmIoCompatTest {
   assertContentEquals(byteArrayOf(1, 2), byteArrayOf(1, 2).inputStream().readUpTo(4))
   assertFailsWith<IllegalArgumentException> { byteArrayOf().inputStream().readUpTo(-1) }
  }
+ @Test fun compressedSaveSummaryUsesTheAndroidSafeBoundedReader() {
+  val output = java.io.ByteArrayOutputStream()
+  java.util.zip.GZIPOutputStream(output).use { it.write("{\"total\":7}".encodeToByteArray()) }
+  val snapshot = Snapshots.fromFiles(mapOf("game1/game.dat" to "{\"version\":896}".encodeToByteArray(), "rankings.dat" to output.toByteArray()), Shattered, "demo", "test")
+  assertEquals(7, SaveSummary.from(snapshot).plays)
+ }
  @Test fun handlesZeroLengthReadsWithoutSpinningOrExceedingLimit() {
   val stream = object : InputStream() {
    var next = 0
