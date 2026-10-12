@@ -354,7 +354,11 @@ public final class MainActivity extends Activity {
         Exception exc2;
         long jVersionCode;
         PreparationDiagnostics.Failure failureFind = PreparationDiagnostics.find(exc);
-        if (failureFind != null) {
+        InstallDiagnostics.Failure installFailure = InstallDiagnostics.find(exc);
+        if (installFailure != null) {
+            this.diagnosticReport = InstallDiagnostics.report(installFailure);
+            exc2 = exc;
+        } else if (failureFind != null) {
             this.diagnosticReport = PreparationDiagnostics.report(failureFind);
             exc2 = exc;
         } else if (BridgeDiagnostics.find(exc) != null) {
@@ -3843,6 +3847,8 @@ public final class MainActivity extends Activity {
     }
 
     private String safeError(Exception exc) {
+        InstallDiagnostics.Failure installFailure = InstallDiagnostics.find(exc);
+        if (installFailure != null) return installFailure.userMessage();
         PreparationDiagnostics.Failure failureFind = PreparationDiagnostics.find(exc);
         if (failureFind != null) {
             return failureFind.userMessage();

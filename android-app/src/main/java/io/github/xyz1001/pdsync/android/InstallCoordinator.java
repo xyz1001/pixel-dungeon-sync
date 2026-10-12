@@ -7,15 +7,12 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
+import android.os.Build;
+import android.util.Log;
 import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.FileInputStream;
 import java.io.OutputStream;
-import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import pdsync.android.app.AndroidSyncFacade;
@@ -203,47 +200,62 @@ public final class InstallCoordinator {
             throw new IOException("当前应用仍需用户确认卸载，不能直接覆盖安装。");
         List<File> apks=pair.gameApks;
         if(installedMatches(packageName,apks)) { reconcile(); return; }
-        PackageInstaller installer=context.getPackageManager().getPackageInstaller();
-        PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-        params.setAppPackageName(packageName); params.setAppLabel(pair.gameLabel);
-        long size=0; for(File apk:apks) { size=Math.addExact(size,apk.length()); }
-        params.setSize(size); RuntimePlatformCompat.requireInstallConfirmation(params);
-        int sessionId=installer.createSession(params); String nonce=UUID.randomUUID().toString(); boolean commitAttempted=false;
-        try(PackageInstaller.Session session=installer.openSession(sessionId)) {
-            ArrayList<String> writtenHashes=new ArrayList<>();
-            for(int i=0;i<apks.size();i++) {
-                File apk=apks.get(i); String name=i==0?"base.apk":"split_"+i+".apk";
-                try(InputStream input=new FileInputStream(apk); OutputStream output=session.openWrite(name,0,apk.length())) {
-                    byte[] buffer=new byte[65536];int n;
-                    while((n=input.read(buffer))!=-1) output.write(buffer,0,n);
-                    session.fsync(output);
-                }
-                try(InputStream staged=session.openRead(name)) {
-                    MessageDigest hash=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];int n;
-                    while((n=staged.read(buffer))!=-1) hash.update(buffer,0,n);
-                    writtenHashes.add(PackageTrust.hex(hash.digest()));
-                }
+        PackageInstaller installer=null;
+        int sessionId=-1; boolean commitAttempted=false;
+        InstallDiagnostics.Stage stage=InstallDiagnostics.Stage.READ_SOURCE_VERIFY;
+        try {
+            InstallSessionWriter.Snapshot source=InstallSessionWriter.inspect(apks);
+            stage=InstallDiagnostics.Stage.CREATE;
+            installer=context.getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            params.setAppPackageName(packageName); params.setAppLabel(pair.gameLabel);
+            params.setSize(source.length); RuntimePlatformCompat.requireInstallConfirmation(params);
+            sessionId=installer.createSession(params); String nonce=UUID.randomUUID().toString();
+            stage=InstallDiagnostics.Stage.OPEN;
+            try(PackageInstaller.Session session=installer.openSession(sessionId)) {
+                String expected=InstallSessionWriter.write(source,new InstallSessionWriter.Session() {
+                    public OutputStream openWrite(String name,long length) throws Exception {
+                        return session.openWrite(name,0,length);
+                    }
+                    public void fsync(OutputStream output) throws Exception { session.fsync(output); }
+                });
+                stage=InstallDiagnostics.Stage.READ_SOURCE_VERIFY;
+                preparation.validatePrepared(pair);
+                assertCanPrepare();
+                InstallSessionWriter.verifySources(source);
+                stage=InstallDiagnostics.Stage.GET_NAMES;
+                InstallSessionWriter.requireNames(session.getNames(),apks.size());
+                stage=InstallDiagnostics.Stage.CHECKPOINT;
+                persist(prefs.edit().putString("state","INSTALLING").putString("operation","install").putString("package",packageName)
+                        .putInt("session",sessionId).putString("nonce",nonce).putString("expectedApkSet",expected).putBoolean("gameRequest",game)
+                        .remove("expectedApk").remove("confirmation").putString("message","安装包已交给 Android，等待系统确认或结果。"));
+                stage=InstallDiagnostics.Stage.CALLBACK;
+                PendingIntent callback=PendingIntent.getBroadcast(context,sessionId,new Intent(context,InstallResultReceiver.class)
+                        .setAction(CHANGED+"."+nonce).putExtra("requestNonce",nonce),AndroidCompat.mutableCallbackFlags());
+                android.content.IntentSender sender=callback.getIntentSender();
+                stage=InstallDiagnostics.Stage.COMMIT;
+                // Once commit is attempted its result is uncertain, even if commit or close throws.
+                commitAttempted=true; session.commit(sender);
+                stage=InstallDiagnostics.Stage.CLOSE;
             }
-            preparation.validatePrepared(pair);
-            assertCanPrepare();
-            String expected=ApkSetIdentity.digest(writtenHashes);
-            if(!expected.equals(PackageTrust.apkSetSha256(apks)) || session.getNames().length!=apks.size())
-                throw new IOException("系统暂存 APK 完整集合校验失败。");
-            persist(prefs.edit().putString("state","INSTALLING").putString("operation","install").putString("package",packageName)
-                    .putInt("session",sessionId).putString("nonce",nonce).putString("expectedApkSet",expected).putBoolean("gameRequest",game)
-                    .remove("expectedApk").remove("confirmation").putString("message","安装包已交给 Android，等待系统确认或结果。"));
-            PendingIntent callback=PendingIntent.getBroadcast(context,sessionId,new Intent(context,InstallResultReceiver.class)
-                    .setAction(CHANGED+"."+nonce).putExtra("requestNonce",nonce),AndroidCompat.mutableCallbackFlags());
-            // Once commit is attempted its result is uncertain, even if commit or close throws.
-            commitAttempted=true; session.commit(callback.getIntentSender());
         } catch(Exception error) {
+            InstallDiagnostics.Failure failure=InstallDiagnostics.failure(stage,packageName,sessionId,
+                    Build.VERSION.SDK_INT,commitAttempted,error);
             if(commitAttempted) {
-                try { persist(prefs.edit().putString("message","安装提交结果未知。进度已保留，请返回后检查或取消系统会话；不会自动重复提交。")); }
-                catch(IOException checkpointError) { error.addSuppressed(checkpointError); }
+                try { persist(prefs.edit().putString("message",failure.userMessage())); }
+                catch(IOException checkpointError) { failure.addSuppressed(InstallDiagnostics.at(InstallDiagnostics.Stage.CHECKPOINT,checkpointError)); }
             } else {
-                try { installer.abandonSession(sessionId); } catch(Exception cleanupError) { error.addSuppressed(cleanupError); }
+                // Only this invocation's successfully created session is eligible for cleanup.
+                if(installer!=null && sessionId>=0) {
+                    try { installer.abandonSession(sessionId); }
+                    catch(Exception cleanupError) { failure.addSuppressed(InstallDiagnostics.at(InstallDiagnostics.Stage.ABANDON,cleanupError)); }
+                }
             }
-            throw error;
+            String report=InstallDiagnostics.report(failure);
+            // Plain text, in bounded chunks: Android 8's Throwable logger hides DeadSystemException.
+            for(int offset=0;offset<report.length();offset+=3000)
+                Log.e("PDInstall",report.substring(offset,Math.min(offset+3000,report.length())));
+            throw failure;
         }
     }
 

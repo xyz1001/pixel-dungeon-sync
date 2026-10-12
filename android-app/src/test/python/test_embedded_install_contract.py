@@ -43,7 +43,38 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         self.assertNotIn('helperPackage', request)
         self.assertNotIn('helperPackage', body(INSTALL, 'public void requestUninstall('))
         self.assertNotIn('helperStrategy', INSTALL)
-        self.assertIn('session.getNames().length!=apks.size()', request)
+        self.assertIn('InstallSessionWriter.requireNames(session.getNames(),apks.size())', request)
+
+    def test_installer_uses_accepted_writes_without_reading_session_storage(self):
+        request = body(INSTALL, 'public void requestInstall(')
+        self.assertNotIn('.openRead(', request)
+        self.assertIn('InstallSessionWriter.inspect(apks)', request)
+        self.assertIn('InstallSessionWriter.write(source,', request)
+        self.assertIn('session.openWrite(name,0,length)', request)
+        self.assertIn('session.fsync(output)', request)
+        self.assertIn('InstallSessionWriter.verifySources(source)', request)
+        self.assertLess(request.index('freshPair()'), request.index('InstallSessionWriter.inspect(apks)'))
+        self.assertLess(request.index('InstallSessionWriter.write(source,'), request.index('preparation.validatePrepared(pair)'))
+        self.assertLess(request.index('InstallSessionWriter.verifySources(source)'), request.index('session.commit('))
+        self.assertLess(request.index('InstallSessionWriter.requireNames('), request.index('session.commit('))
+        self.assertIn('installer!=null && sessionId>=0', request)
+        self.assertIn('installer.abandonSession(sessionId)', request)
+        self.assertNotIn('getMySessions', request)
+        self.assertIn('PackageTrust.signer(packageInfoInstalled)', body(INSTALL, 'public void reconcile()'))
+        self.assertIn('PackageTrust.apkSetSha256(PackageTrust.installedApks(packageInfoInstalled))', body(INSTALL, 'public void reconcile()'))
+
+    def test_installer_diagnostics_are_copyable_plain_text_and_stage_specific(self):
+        request = body(INSTALL, 'public void requestInstall(')
+        for stage in ('CREATE', 'OPEN', 'READ_SOURCE_VERIFY', 'GET_NAMES', 'CHECKPOINT', 'CALLBACK', 'COMMIT', 'CLOSE'):
+            self.assertIn('InstallDiagnostics.Stage.' + stage, request)
+        self.assertIn('InstallDiagnostics.report(failure)', request)
+        self.assertIn('Log.e("PDInstall",report.substring(', request)
+        self.assertNotIn('Log.e("PDInstall",report,failure)', request)
+        self.assertLess(request.index('callback.getIntentSender()'), request.index('commitAttempted=true'))
+        capture = body(MAIN, 'private void captureDiagnostic(')
+        self.assertIn('InstallDiagnostics.find(exc)', capture)
+        self.assertIn('this.diagnosticReport = InstallDiagnostics.report(installFailure)', capture)
+        self.assertIn('installFailure.userMessage()', body(MAIN, 'private String safeError('))
 
     def test_single_real_readiness_state_never_fakes_helper_verification(self):
         readiness = body(MAIN, 'private void readInstallationReadiness()')
