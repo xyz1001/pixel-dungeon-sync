@@ -113,8 +113,17 @@ public final class RootClientChecks {
         RootGameBridge unauthorized=new RootGameBridge(game,identity,g->verifies.incrementAndGet(),(r,o)->{calls.incrementAndGet();return okayUnchecked(gamet());},()->false,dir.toFile());
         check(unauthorized.mode()==GameAccessBackend.Mode.ROOT_DIRECT,"root mode");
         unauthorized.targetGame();check(calls.get()==0,"target/readiness render never requests root");
-        rejects(unauthorized::inspectReady,"授权");check(calls.get()==0,"authorization gates transport");
+        rejects(unauthorized::inspectReady,"Root 游戏选择");check(calls.get()==0,"authorization gates transport");
         unauthorized.probeAuthorization();check(calls.get()==1,"explicit probe only");
+        // A fresh process can use the same persisted opt-in for a deliberate operation; construction is passive.
+        AtomicInteger restartedCalls=new AtomicInteger();
+        RootGameBridge restarted=new RootGameBridge(store.load(),identity,g->{},(r,o)->{
+            restartedCalls.incrementAndGet();return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
+                    "EMPTY_DIRECTORY",0,0,DirectoryMetadataKt.contentSha256(Collections.emptyMap()),"ABSENT",true,null);
+        },()->{try{return game.matches(store.load());}catch(IOException invalid){return false;}},dir.toFile());
+        restarted.targetGame();check(restartedCalls.get()==0,"restart construction/target is passive");
+        restarted.inspectReady();check(restartedCalls.get()==1,"explicit post-restart inspect needs no redundant manual probe");
+
         check(!unauthorized.capabilities().restoreSupported&&!unauthorized.capabilities().interruptedBackupRecovery,"readonly caps");
         rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),"尚未实现");
         try{unauthorized.restoreFrom(dir,Collections.emptyMap());}catch(BridgeDiagnostics.Failure failure){

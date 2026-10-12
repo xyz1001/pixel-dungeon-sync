@@ -29,7 +29,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     private RootGameBridge(Context context, SelectedRootGame selected, AndroidGameIdentity identity,
             RootProcessTransport transport) {
         this(selected,identity,new RootTargetResolver(context)::requireUnchanged,
-                transport::exchange,()->SyncRuntime.rootAuthorized(context),context.getCacheDir());
+                transport::exchange,()->SyncRuntime.rootSelectionMatches(context,selected),context.getCacheDir());
         this.ownedTransport=transport;
     }
     public RootGameBridge(SelectedRootGame selected, AndroidGameIdentity identity, TargetVerifier verifier,
@@ -125,7 +125,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     }
     private static BridgeDiagnostics.Failure failure(String code,Throwable cause) {
         String message=code.contains("UNSUPPORTED")?"Root 模式尚未实现安全恢复，当前只允许读取与导出。":
-                "ROOT_AUTH_REQUIRED".equals(code)?"请先点击“授权并检查 Root”。不会在启动时自动请求 Root。":
+                "ROOT_AUTH_REQUIRED".equals(code)?"Root 游戏选择已变化或不可读取，请重新选择。只会在明确操作时向 Root 管理器请求权限。":
                 "ROOT_MISSING_DIRECTORY".equals(code)?"游戏尚未创建存档目录。请启动一次游戏，正常退出后再授权并检查 Root。":
                 "ROOT_TIMEOUT".equals(code)?"Root 请求超时，已关闭本次进程。请检查 Root 管理器后手动重试。":
                 "Root 存档访问未完成（"+code+"）。请保留游戏安装，重新检查授权与目标。";

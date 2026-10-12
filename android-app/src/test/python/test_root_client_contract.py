@@ -36,14 +36,19 @@ class RootClientContract(unittest.TestCase):
         self.assertIn('"namespace." + root.originIdentity', text)
         self.assertIn('if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false', text)
 
-    def test_root_authorization_never_persists_or_runs_from_lookup(self):
+    def test_root_opt_in_never_probes_from_lookup(self):
         runtime = (BASE / 'SyncRuntime.java').read_text()
-        for method in ('rootGame', 'rootAuthorized'):
-            body = re.search(r'static .*? ' + method + r'\(Context context\).*?\n    }', runtime, re.S).group()
+        for method in ('rootGame', 'rootAuthorized', 'rootSelectionMatches'):
+            body = re.search(r'static .*? ' + method + r'\(Context context[^)]*\).*?\n    }', runtime, re.S).group()
             self.assertNotIn('.exchange(', body)
             self.assertNotIn('.probeAuthorization(', body)
         store = (BASE / 'RootSelectionStore.java').read_text()
         self.assertNotIn('rootAuthorizationToken', store)
+        self.assertNotIn('rootAuthorizationToken', runtime)
+        probe = runtime.split('static String probeRootAuthorization', 1)[1].split('\n    }', 1)[0]
+        self.assertNotIn('requireBackendSwitchAllowed', probe)
+        self.assertNotIn('hasUnresolvedRestore', probe)
+        self.assertIn('current.matches(game)', probe)
         self.assertNotIn('password', store)
         transport = (BASE / 'RootProcessTransport.java').read_text()
         self.assertIn('cancelled.set(true)', transport)

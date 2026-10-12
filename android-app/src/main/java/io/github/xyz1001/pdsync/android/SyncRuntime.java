@@ -20,7 +20,6 @@ final class SyncRuntime {
     private static final String PREFS = "sync-presentation-v2";
     private static volatile SecureConnectionStore.Connection connection;
     private static volatile GamePreparationService.PreparedPair selected;
-    private static volatile String rootAuthorizationToken;
     private static RootGameBridge rootBackend;
     private static String rootBackendToken;
 
@@ -72,7 +71,6 @@ final class SyncRuntime {
             requireFreshBackendComparison(context);
             new RootTargetResolver(context).requireUnchanged(game);
             AutoSyncService.cancelForConnectionChange(context);
-            rootAuthorizationToken = null;
             closeRootBackend();
             new RootSelectionStore(context.getFilesDir()).save(game);
         }
@@ -83,7 +81,6 @@ final class SyncRuntime {
             requireBackendSwitchAllowed(context);
             requireFreshBackendComparison(context);
             AutoSyncService.cancelForConnectionChange(context);
-            rootAuthorizationToken = null;
             closeRootBackend();
             new RootSelectionStore(context.getFilesDir()).clear();
         }
@@ -101,11 +98,18 @@ final class SyncRuntime {
             throw new IOException("存在未完成恢复，请先在原后端处理恢复记录，不能切换存档后端。");
     }
 
-    /** Authorization is intentionally memory-only and bound to this exact selection. */
+    /** Explicit persisted Root selection opts in to deliberate operations; the su manager grants access. */
     static boolean rootAuthorized(Context context) {
+        try { return rootGame(context) != null; }
+        catch (Exception invalid) { return false; }
+    }
+
+    /** Metadata-only cancellation gate. It never probes root or reads target save data. */
+    static boolean rootSelectionMatches(Context context, SelectedRootGame expected) {
         try {
-            SelectedRootGame game = rootGame(context);
-            return game != null && rootAuthorizationToken != null && rootAuthorizationToken.equals(game.selectionToken());
+            SelectedRootGame current = rootGame(context);
+            return expected != null && expected.matches(current)
+                    && expected.selectionToken().equals(current.selectionToken());
         } catch (Exception invalid) { return false; }
     }
 
@@ -114,15 +118,15 @@ final class SyncRuntime {
         synchronized (OPERATION_LOCK) {
             SelectedRootGame game = rootGame(context);
             if (game == null) throw new IOException("请先选择 Root 游戏。");
-            requireBackendSwitchAllowed(context);
-            rootAuthorizationToken = null;
+            // Recovery needs root on this exact existing selection even when a restore is pending.
+            if (new InstallCoordinator(context).hasActiveRequest())
+                throw new IOException("系统安装或卸载请求尚未结束，请先完成当前系统请求。");
             String result;
             try (RootGameBridge probe = new RootGameBridge(context, game, rootIdentity(context, game))) {
                 result = probe.probeAuthorization();
             }
             SelectedRootGame current = rootGame(context);
             if (current == null || !current.matches(game)) throw new IOException("Root 选择已变化，请重新授权。");
-            rootAuthorizationToken = game.selectionToken();
             return result;
         }
     }
