@@ -77,6 +77,23 @@ public final class ProviderInjectionTest {
                 rejects(() -> BinaryManifestPatch.patchProvider(ApkArchive.manifest(fixtures.resolve(conflict + ".apk").toFile()), binding), conflict);
             BinaryManifestPatch.verifyProviderManifest(BinaryManifestPatch.patchProvider(ApkArchive.manifest(fixtures.resolve("existing-query.apk").toFile()), binding), binding); checks++;
 
+            for (String processFixture : new String[]{"process-application", "process-qualified-application", "process-component", "process-qualified-component"}) {
+                byte[] processManifest = ApkArchive.manifest(fixtures.resolve(processFixture + ".apk").toFile());
+                rejects(() -> BinaryManifestPatch.patchProvider(processManifest, binding), "reserved original bridge process: " + processFixture);
+                rejects(() -> BinaryManifestPatch.validateProviderSource(processManifest, binding), "source gate rejects reserved bridge process: " + processFixture);
+            }
+            for (String processFixture : new String[]{"process-split-application", "process-split-component"}) {
+                File processSplit = fixtures.resolve(processFixture + ".apk").toFile();
+                byte[] processManifest = ApkArchive.manifest(processSplit);
+                rejects(() -> BinaryManifestPatch.patchProviderSplit(processManifest), "reserved bridge process in split patch: " + processFixture);
+                rejects(() -> BinaryManifestPatch.validateProviderSource(processManifest, binding), "reserved bridge process in split source gate: " + processFixture);
+                rejects(() -> ApkArchive.validateBridgeRuntime(List.of(fixtures.resolve("base.apk").toFile(), processSplit), runtime, binding), "complete APK set reserved bridge process: " + processFixture);
+            }
+            File unrelatedSource = fixtures.resolve("process-unrelated.apk").toFile();
+            Map<String, byte[]> unrelatedEntries = entries(unrelatedSource);
+            unrelatedEntries.put("AndroidManifest.xml", BinaryManifestPatch.patchProvider(ApkArchive.manifest(unrelatedSource), binding));
+            archive(Path.of(args[3], "process-unrelated-patched.apk"), unrelatedEntries); checks++;
+
             for (String sdkFixture : new String[]{"sdk-old", "sdk-26", "sdk-new", "sdk-no-min", "sdk-no-target", "sdk-absent", "sdk-split-old"}) {
                 File sdkSource = fixtures.resolve(sdkFixture + ".apk").toFile();
                 byte[] sdkManifest = ApkArchive.manifest(sdkSource);

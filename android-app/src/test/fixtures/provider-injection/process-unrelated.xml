@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.game" android:versionCode="123" android:versionName="test" android:sharedUserId="com.example.old.shared" android:sharedUserLabel="@android:string/ok" android:sharedUserMaxSdkVersion="32" android:targetSandboxVersion="2" android:installLocation="auto">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:label="Original game" android:name=".GameApplication" android:debuggable="false" android:allowBackup="true" android:permission="com.example.ORIGINAL_PERMISSION" android:process=":original_game">
+        <activity android:name=".GameActivity" android:process=":other_game" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+        </activity>
+        <provider android:name=".ExistingProvider" android:authorities="com.example.original;com.example.second" android:exported="false"/>
+        <meta-data android:name="com.example.setting" android:value="retained"/>
+    </application>
+</manifest>

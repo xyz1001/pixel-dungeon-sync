@@ -242,6 +242,8 @@ public final class BinaryManifestPatch {
         Document document = new Document(bytes);
         ManifestInfo before = new ManifestInfo(document);
         require(!before.splitName.isEmpty(), "Expected a split APK manifest");
+        Node application = document.singleChild(document.root, "application", false);
+        if (application != null) rejectBridgeProcessConflicts(document, application, before.packageName);
         removeSharedIdentity(document);
         ensureBridgeMinSdk(document);
         byte[] result = document.encode();
@@ -281,6 +283,7 @@ public final class BinaryManifestPatch {
 
     private static void rejectBridgeConflicts(Document document, Node application, String gamePackage,
             BridgeBinding binding) throws IOException {
+        rejectBridgeProcessConflicts(document, application, gamePackage);
         for (Node node : document.nodes) {
             Attribute name = node.find(ANDROID_NS, "name");
             if (node == application || node.parent == application && ("activity".equals(node.name)
@@ -302,6 +305,18 @@ public final class BinaryManifestPatch {
                 String key = stringValue(name, document.pool.strings, "");
                 require(!key.startsWith(BINDING_PREFIX) && !binding.metadata().containsKey(key), "Existing conflicting bridge metadata");
             }
+        }
+    }
+
+    private static void rejectBridgeProcessConflicts(Document document, Node application, String gamePackage) throws IOException {
+        for (Node node : document.nodes) {
+            if (node != application && !(node.parent == application && node.namespace == null
+                    && ("activity".equals(node.name) || "activity-alias".equals(node.name) || "service".equals(node.name)
+                    || "receiver".equals(node.name) || "provider".equals(node.name)))) continue;
+            String process = stringValue(node.find(ANDROID_NS, "process"), document.pool.strings, "");
+            if (process.startsWith(":")) process = gamePackage + process;
+            require(!(gamePackage + BRIDGE_PROCESS).equals(process),
+                    "Unsupported source application/component uses the reserved bridge process");
         }
     }
 

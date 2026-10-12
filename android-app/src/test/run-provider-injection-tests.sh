@@ -28,6 +28,7 @@ echo "AAPT2 independently parsed injected manifest: $OUT/injected-manifest.txt"
 for fixture in "$OUT"/sdk-*-patched.apk; do
     "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$fixture" --file AndroidManifest.xml > "${fixture%.apk}.txt"
 done
+"$SDK/build-tools/36.0.0/aapt2" dump xmltree "$OUT/process-unrelated-patched.apk" --file AndroidManifest.xml > "$OUT/process-unrelated-patched.txt"
 python3 - "$OUT" <<'PY'
 import copy, pathlib, re, sys
 out = pathlib.Path(sys.argv[1])
@@ -93,6 +94,12 @@ for name, minimum, target, maximum in (
     assert value('targetSdkVersion') == str(target), (name,sdk)
     assert value('maxSdkVersion') == (None if maximum is None else str(maximum)), (name,sdk)
     if name == 'sdk-absent': assert root['children'].index(nodes[0]) < next(i for i,n in enumerate(root['children']) if n['tag']=='application')
+unrelated = tree(out / 'process-unrelated-patched.txt')
+unrelated_app = next(n for n in unrelated['children'] if n['tag']=='application')
+assert '":original_game"' in next(v for k,v in unrelated_app['attrs'].items() if ':process(' in k)
+unrelated_activity = next(n for n in unrelated_app['children'] if n['tag']=='activity' and '.GameActivity' in str(n['attrs']))
+assert '":other_game"' in next(v for k,v in unrelated_activity['attrs'].items() if ':process(' in k)
+print('Independent AAPT2 process checks passed: original unrelated application and component processes preserved')
 print('Independent AAPT2 SDK-floor checks passed: old/missing minima raised, 26+ never lowered, explicit and implicit targets/maxima retained, split compatible')
 print('Independent AAPT2 tree comparison passed: original application/components/launcher/settings retained; exact new provider/activity/query and nine string bindings')
 PY
