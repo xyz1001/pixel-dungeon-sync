@@ -10,8 +10,8 @@ object RunMergePlanner {
  private data class Run(val slot: String,val identity: RunIdentity,val snapshot: Snapshot,val files: Map<String,ByteArray>)
  private data class Input(val snapshot: Snapshot,val runs: Map<String,Run>,val globals: Map<String,ByteArray>)
  private fun fail(message: String): Nothing = throw RunMergeException(message)
- private fun input(snapshot: Snapshot): Input {
-  val files=Snapshots.verify(snapshot,Shattered)
+ private fun input(snapshot: Snapshot, adapter: GameAdapter): Input {
+  val files=Snapshots.verify(snapshot,adapter)
   val versions=ShatteredVersions.detect(files)
   if(versions.runs.values.any { it!=896 })fail("当前仅验证 Shattered 3.3.8 写入格式")
   val metadata=snapshot.manifest.directoryMetadata ?: fail("快照缺少单局身份，需要先建立共同身份基线")
@@ -26,12 +26,17 @@ object RunMergePlanner {
   return Input(snapshot,runs,globals)
  }
 
- fun plan(base: Snapshot, branches: List<Snapshot>, target: TargetGame, context: SnapshotCaptureContext): RunMergeResult {
-  if(target.displayVersion!="3.3.8"||target.versionCode!=896||!target.trusted)fail("所选游戏版本尚未验证槽位合并能力")
+ fun plan(base: Snapshot, branches: List<Snapshot>, target: TargetGame, context: SnapshotCaptureContext, adapter: GameAdapter = Shattered): RunMergeResult {
+  if(!target.trusted || (target.mergeFormat!="shattered-896" && (target.displayVersion!="3.3.8"||target.versionCode!=896)))fail("所选游戏版本尚未验证槽位合并能力")
   require(branches.isNotEmpty() && branches.size<=MAX_COMMIT_PARENTS+1)
   val all=listOf(base)+branches
   if(all.any { it.manifest.game!=base.manifest.game||it.manifest.profile!=base.manifest.profile })fail("档案不一致")
-  val before=input(base); val inputs=branches.map(::input)
+  val packages=all.map { recordedGamePackage(it.manifest) }
+  val source=all.map { it.manifest.gameSource }.distinct().singleOrNull()
+  val knownPackages=packages.filterNotNull().distinct()
+  if(knownPackages.size>1 || packages.any { it==null })fail("Game package families differ or legacy package identity is unknown")
+  val packageName=if(base.manifest.game==Shattered.id && all.all { it.manifest.gamePackage==null && it.manifest.gameSource==null }) null else knownPackages.singleOrNull()
+  val before=input(base,adapter); val inputs=branches.map { input(it,adapter) }
   val globals=GlobalRecordMerge.plan(before.globals,inputs.map { it.globals })
   val globalFiles=globals.files
   val outputRuns=mutableListOf<Run>();val decisions=globals.decisions.toMutableList()
@@ -72,7 +77,8 @@ object RunMergePlanner {
   val files=merged.mapValues { hash(it.value) }
   val metadata=DirectorySnapshotMetadata(displayName=branches.first().manifest.directoryMetadata?.displayName.orEmpty(),contentSha256=contentSha256(files),runs=identities).validated(files)
   val provenance=if(times.keys==files.keys)SnapshotMetadata(device=context.device,capturedAt=context.capturedAt,fileModifiedAt=times).validated(files.keys) else null
-  val snapshot=Snapshots.fromFiles(merged,Shattered,base.manifest.profile,"Shattered 3.3.8",metadata,provenance)
-  return RunMergeResult(snapshot,outputRuns.size,maxOf(0,outputRuns.size-inputs.first().runs.size),decisions)
+  val snapshot=Snapshots.fromFiles(merged,adapter,base.manifest.profile,"Shattered 3.3.8",metadata,provenance)
+  val annotated=snapshot.copy(manifest=snapshot.manifest.copy(saveVersions=ShatteredVersions.detect(merged),gameSource=source,gamePackage=packageName))
+  return RunMergeResult(annotated,outputRuns.size,maxOf(0,outputRuns.size-inputs.first().runs.size),decisions)
  }
 }

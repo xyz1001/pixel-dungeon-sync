@@ -26,7 +26,7 @@ data class SaveVersions(
   if (inactiveSlots.isEmpty()) "" else " (${inactiveSlots.size} inactive slots)"
 }
 
-data class TargetGame(
+data class TargetGame @JvmOverloads constructor(
  val path: String,
  val displayVersion: String,
  val versionCode: Int,
@@ -34,7 +34,8 @@ data class TargetGame(
  /** Legacy field name: identified game metadata, NOT publisher/checksum authentication. */
  val trusted: Boolean,
  val minimumSaveVersion: Int?,
- val reason: String
+ val reason: String,
+ val mergeFormat: String? = null
 )
 
 /** Static inspection only: game classes and Java-serialized objects are never loaded. */
@@ -377,4 +378,19 @@ object ShatteredVersions {
   private fun take(char: Char): Boolean = if (peek() == char) { offset++; true } else false
   private fun expect(char: Char) { require(take(char)) { "Expected '$char' in JSON at character $offset" } }
  }
+}
+
+/** Source fingerprints are provenance, never a package-family compatibility restriction. */
+@Serializable data class GameSaveSource(val originalSourceIdentity: String, val originalApkSha256: String) {
+ fun validated(): GameSaveSource = also {
+  require(Regex("[0-9a-f]{64}").matches(originalSourceIdentity) && Regex("[0-9a-f]{64}").matches(originalApkSha256)) { "Invalid game source provenance" }
+ }
+}
+internal fun requireGamePackage(value: String) {
+ require(value.length <= 255 && Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+").matches(value)) { "Invalid game package family" }
+}
+internal fun recordedGamePackage(manifest: Manifest): String? = manifest.gamePackage ?: when {
+ manifest.game == Shattered.id && manifest.gameSource == null -> "com.shatteredpixel.shatteredpixeldungeon"
+ manifest.gameSource?.originalSourceIdentity == "32cd68da7bd2cdb467330cf33ca7c0e9b18eaae94ecf0b4b944313def1732f89" -> "com.shatteredpixel.shatteredpixeldungeon"
+ else -> null
 }

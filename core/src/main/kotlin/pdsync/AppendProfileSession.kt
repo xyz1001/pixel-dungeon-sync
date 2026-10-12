@@ -290,7 +290,7 @@ class AppendProfileSession(
   }.toMutableList()
   if(branches.none { it===current })branches.add(0,current) else { branches.remove(current);branches.add(0,current) }
   val operation=local.operationMetadata()
-  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException("尚未选择已验证游戏"),SnapshotCaptureContext(operation.device,operation.preparedAt))
+  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException("尚未选择已验证游戏"),SnapshotCaptureContext(operation.device,operation.preparedAt),adapter)
  }
  fun merge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   mergeLocked(conflict,store,stopped)

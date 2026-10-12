@@ -8,7 +8,7 @@ import java.util.UUID
 import java.util.zip.*
 import kotlin.io.path.*
 
-@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null, val directoryMetadata: DirectorySnapshotMetadata? = null)
+@Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null, val directoryMetadata: DirectorySnapshotMetadata? = null, val gameSource: GameSaveSource? = null, val gamePackage: String? = null)
 val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
 fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 interface GameAdapter {
@@ -86,6 +86,8 @@ object Snapshots {
  fun verify(snapshot: Snapshot, adapter: GameAdapter): Map<String, ByteArray> {
   require(snapshot.zip.size <= MAX_SNAPSHOT_BYTES && snapshot.manifest.files.size <= MAX_SNAPSHOT_FILES)
   require(snapshot.manifest.schema == 1 && snapshot.manifest.game == adapter.id)
+  snapshot.manifest.gameSource?.validated()
+  snapshot.manifest.gamePackage?.let(::requireGamePackage)
   snapshot.manifest.metadata?.validated(snapshot.manifest.files.keys)
   snapshot.manifest.directoryMetadata?.validated(snapshot.manifest.files)
   require(hash(snapshot.zip) == snapshot.manifest.sha256) { "Archive checksum mismatch" }
