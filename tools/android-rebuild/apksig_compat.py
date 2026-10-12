@@ -21,6 +21,7 @@ JAR_SHA256 = '3716d9311e55d2b0918a2fd9d54ba9e406c5f6abeea700b287f11259bc163dec'
 CLASS_SHA256 = '4ca7f8f668bfc2739233655e34632f71aa2f20d51b8ff29c6d0402697c12c575'
 PARSER = 'com/android/apksig/internal/asn1/Asn1BerParser.class'
 HELPER = 'com/android/apksig/internal/asn1/Android26ElementType'
+NOTICE = 'META-INF/pdsync-apksig-api26.NOTICE'
 DESCRIPTOR = '(Ljava/lang/reflect/Field;)Ljava/lang/Class;'
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -139,6 +140,16 @@ def build_compat_jar(source, output, android_jar, java='java'):
             entries = {item.filename: archive.read(item) for item in archive.infolist() if not item.is_dir()}
         entries[PARSER] = patch_parser(entries[PARSER])
         entries[HELPER + '.class'] = helper
+        entries[NOTICE] = (
+            'PD Sync API-26 compatibility modification to Android Open Source Project apksig.\n'
+            'License: Apache License 2.0. Original copyright: Android Open Source Project.\n'
+            'Original source: https://dl.google.com/android/repository/build-tools_r36_linux.zip\n'
+            'Original jar SHA-256: ' + JAR_SHA256 + '\n'
+            'Changed Asn1BerParser.getElementType(Field) to call Android26ElementType.\n'
+            'This helper uses ParameterizedType and a single concrete element Class;\n'
+            'no certificate validation or signing scheme has been removed.\n'
+            'Locally maintained compatibility patch; not an upstream apksig release.\n'
+        ).encode('utf-8')
         output.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_output = tempfile.mkstemp(prefix=output.name + '.', suffix='.tmp', dir=output.parent)
         os.close(fd)
@@ -156,6 +167,7 @@ def build_compat_jar(source, output, android_jar, java='java'):
     report = {'source_jar_sha256': JAR_SHA256, 'source_parser_sha256': CLASS_SHA256,
               'output_jar_sha256': sha(output.read_bytes()), 'helper_source_sha256': sha(source_java.read_bytes()),
               'patched_entry': PARSER, 'new_entry': HELPER + '.class',
+              'modification_notice_entry': NOTICE,
               'replacement_method': 'getElementType' + DESCRIPTOR,
               'official_source': 'https://dl.google.com/android/repository/build-tools_r36_linux.zip',
               'license': 'Apache-2.0', 'device_tested': False}

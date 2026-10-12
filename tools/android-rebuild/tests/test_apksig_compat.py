@@ -37,7 +37,7 @@ class PatchTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), second.read_bytes(), 'Generated jar must be deterministic')
             with zipfile.ZipFile(source) as original, zipfile.ZipFile(output) as patched:
                 names = {n for n in original.namelist() if not n.endswith('/')}
-                self.assertEqual(set(patched.namelist()) - names, {compat.HELPER + '.class'})
+                self.assertEqual(set(patched.namelist()) - names, {compat.HELPER + '.class', compat.NOTICE})
                 changed = [n for n in names if original.read(n) != patched.read(n)]
                 self.assertEqual(changed, [compat.PARSER])
             self.assertEqual(compat.sha(source.read_bytes()), compat.JAR_SHA256)
