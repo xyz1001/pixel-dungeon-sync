@@ -18,3 +18,10 @@ for fixture in "$HERE/fixtures/preparation/"*.xml; do
     "$SDK/build-tools/36.0.0/aapt2" link -I "$SDK/platforms/android-36/android.jar" --manifest "$fixture" -o "$FIXTURES/$(basename "$fixture" .xml).apk"
 done
 "$JAVA" -cp "$CLASSES:$SDK/build-tools/36.0.0/lib/apksigner.jar" io.github.xyz1001.pdsync.android.prepare.PreparationRecoveryTest "$HELPER" "$RELEASE" "$FIXTURES"
+
+# The real service receipt constructor can also be exercised after the complete app Java build.
+# No Android framework method is executed by this optional host-only test.
+if [[ -n "${PDSYNC_APP_CLASSES:-}" ]]; then
+    "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$CLASSES:$PDSYNC_APP_CLASSES:$CP" -d "$CLASSES" "$HERE/java/io/github/xyz1001/pdsync/android/prepare/PreparationReceiptTest.java"
+    "$JAVA" -cp "$CLASSES:$PDSYNC_APP_CLASSES:$CP" io.github.xyz1001.pdsync.android.prepare.PreparationReceiptTest
+fi

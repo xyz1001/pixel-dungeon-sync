@@ -360,26 +360,28 @@ public final class GamePreparationService {
             }
             for (File file : InstalledPreparationReuse.prioritizeCurrentReceipt(this.root.listFiles(), currentReceiptId)) {
                 if (file.isDirectory() && new File(file, "receipt.properties").isFile()) {
+                    PreparedPair preparedPairLoadReceipt;
                     try {
-                        PreparedPair preparedPairLoadReceipt = loadReceipt(file.getName());
-                        if (InstalledPreparationReuse.sameApkSet(listCapture, preparedPairLoadReceipt.gameHashes)) {
-                            validatePrepared(preparedPairLoadReceipt);
-                            GameSourceIdentity gameSourceIdentity = new GameSourceIdentity(preparedPairLoadReceipt.gamePackage, preparedPairLoadReceipt.sourceSignerCertificateSha256);
-                            if (preparedPairLoadReceipt.legacyIdentity) {
-                                gameSourceIdentity = GameSourceIdentity.legacyTransport(gameSourceIdentity);
-                            }
-                            InstalledPreparationReuse.requireMatch(installed, new InstalledPreparationReuse.Receipt(gameSourceIdentity, preparedPairLoadReceipt.gameVersionCode, preparedPairLoadReceipt.signingCertificateSha256, preparedPairLoadReceipt.gameHashes), strCurrentLocalCertificateSha256);
-                            stage = PreparationDiagnostics.Stage.EXTRACTION;
-                            if (!listCapture.equals(InstalledExtractionGuard.capture(installedGame.snapshot.files))) {
-                                throw new IOException("Installed game bytes changed during receipt validation; select it again");
-                            }
-                            requireUnchangedInstallation(installedGame);
-                            stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
-                            writeBytes(new File(this.root, "current"), preparedPairLoadReceipt.id.getBytes(StandardCharsets.US_ASCII));
-                            return preparedPairLoadReceipt;
-                        }
-                    } catch (Exception unused2) {
+                        preparedPairLoadReceipt = loadReceipt(file.getName());
+                    } catch (Exception unreadableReceipt) {
                         continue;
+                    }
+
+                    if (InstalledPreparationReuse.sameApkSet(listCapture, preparedPairLoadReceipt.gameHashes)) {
+                        validatePrepared(preparedPairLoadReceipt);
+                        GameSourceIdentity gameSourceIdentity = new GameSourceIdentity(preparedPairLoadReceipt.gamePackage, preparedPairLoadReceipt.sourceSignerCertificateSha256);
+                        if (preparedPairLoadReceipt.legacyIdentity) {
+                            gameSourceIdentity = GameSourceIdentity.legacyTransport(gameSourceIdentity);
+                        }
+                        InstalledPreparationReuse.requireMatch(installed, new InstalledPreparationReuse.Receipt(gameSourceIdentity, preparedPairLoadReceipt.gameVersionCode, preparedPairLoadReceipt.signingCertificateSha256, preparedPairLoadReceipt.gameHashes), strCurrentLocalCertificateSha256);
+                        stage = PreparationDiagnostics.Stage.EXTRACTION;
+                        if (!listCapture.equals(InstalledExtractionGuard.capture(installedGame.snapshot.files))) {
+                            throw new IOException("Installed game bytes changed during receipt validation; select it again");
+                        }
+                        requireUnchangedInstallation(installedGame);
+                        stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
+                        writeBytes(new File(this.root, "current"), preparedPairLoadReceipt.id.getBytes(StandardCharsets.US_ASCII));
+                        return preparedPairLoadReceipt;
                     }
                 }
             }
@@ -814,29 +816,31 @@ public final class GamePreparationService {
                     if (fileArrListFiles != null) {
                         for (File file2 : fileArrListFiles) {
                             if (file2.isDirectory() && !file2.equals(file) && new File(file2, "receipt.properties").isFile()) {
+                                PreparedPair preparedPairLoadReceipt;
                                 try {
-                                    PreparedPair preparedPairLoadReceipt = loadReceipt(file2.getName());
-                                    ArrayList arrayList2 = new ArrayList(preparedPairLoadReceipt.gameHashes);
-                                    Collections.sort(arrayList2);
-                                    if (arrayList2.equals(arrayList)) {
-                                        validatePrepared(preparedPairLoadReceipt);
-                                        stage = PreparationDiagnostics.Stage.EXTRACTION;
-                                        ArrayList arrayList3 = new ArrayList();
-                                        for (int i = 0; i < preparedPairLoadReceipt.originals.size(); i++) {
-                                            File file3 = new File(file, "recovered-" + i + ".apk");
-                                            ApkArchive.copyToNewFile(new FileInputStream((File) preparedPairLoadReceipt.originals.get(i)), file3, 2147483647L);
-                                            arrayList3.add(file3);
-                                        }
-                                        Iterator<File> it2 = list.iterator();
-                                        while (it2.hasNext()) {
-                                            it2.next().delete();
-                                        }
-                                        zArr[0] = preparedPairLoadReceipt.completeInstalledSet;
-                                        installedSourceProofArr[0] = preparedPairLoadReceipt.installedSourceProof;
-                                        return arrayList3;
-                                    }
-                                } catch (Exception unused) {
+                                    preparedPairLoadReceipt = loadReceipt(file2.getName());
+                                } catch (Exception unreadableReceipt) {
                                     continue;
+                                }
+
+                                ArrayList arrayList2 = new ArrayList(preparedPairLoadReceipt.gameHashes);
+                                Collections.sort(arrayList2);
+                                if (arrayList2.equals(arrayList)) {
+                                    validatePrepared(preparedPairLoadReceipt);
+                                    stage = PreparationDiagnostics.Stage.EXTRACTION;
+                                    ArrayList arrayList3 = new ArrayList();
+                                    for (int i = 0; i < preparedPairLoadReceipt.originals.size(); i++) {
+                                        File file3 = new File(file, "recovered-" + i + ".apk");
+                                        ApkArchive.copyToNewFile(new FileInputStream((File) preparedPairLoadReceipt.originals.get(i)), file3, 2147483647L);
+                                        arrayList3.add(file3);
+                                    }
+                                    Iterator<File> it2 = list.iterator();
+                                    while (it2.hasNext()) {
+                                        it2.next().delete();
+                                    }
+                                    zArr[0] = preparedPairLoadReceipt.completeInstalledSet;
+                                    installedSourceProofArr[0] = preparedPairLoadReceipt.installedSourceProof;
+                                    return arrayList3;
                                 }
                             }
                         }
@@ -880,18 +884,20 @@ public final class GamePreparationService {
         if (fileArrListFiles != null) {
             for (File file : fileArrListFiles) {
                 if (file.isDirectory() && new File(file, "receipt.properties").isFile()) {
+                    PreparedPair preparedPairLoadReceipt;
                     try {
-                        PreparedPair preparedPairLoadReceipt = loadReceipt(file.getName());
-                        if (preparedPairLoadReceipt.legacyIdentity && gameSourceIdentity.originIdentity.equals(preparedPairLoadReceipt.originIdentity)) {
-                            ArrayList arrayList2 = new ArrayList(preparedPairLoadReceipt.gameHashes);
-                            Collections.sort(arrayList2);
-                            if (arrayList2.equals(arrayList)) {
-                                validatePrepared(preparedPairLoadReceipt);
-                                return GameSourceIdentity.legacyTransport(gameSourceIdentity);
-                            }
-                        }
-                    } catch (Exception unused) {
+                        preparedPairLoadReceipt = loadReceipt(file.getName());
+                    } catch (Exception unreadableReceipt) {
                         continue;
+                    }
+
+                    if (preparedPairLoadReceipt.legacyIdentity && gameSourceIdentity.originIdentity.equals(preparedPairLoadReceipt.originIdentity)) {
+                        ArrayList arrayList2 = new ArrayList(preparedPairLoadReceipt.gameHashes);
+                        Collections.sort(arrayList2);
+                        if (arrayList2.equals(arrayList)) {
+                            validatePrepared(preparedPairLoadReceipt);
+                            return GameSourceIdentity.legacyTransport(gameSourceIdentity);
+                        }
                     }
                 }
             }
