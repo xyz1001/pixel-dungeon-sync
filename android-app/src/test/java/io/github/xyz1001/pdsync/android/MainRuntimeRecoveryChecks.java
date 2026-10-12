@@ -160,6 +160,21 @@ public final class MainRuntimeRecoveryChecks {
         String report = BridgeDiagnostics.report(failure, 36, "test", 13, "game", "helper", "authority");
         check(report.contains("IPC_CALL_FAILED") && report.contains("android.content.ContentProviderClient.call"), "diagnostic retains safe stage/origin");
         for (String privateValue : List.of("private-value", "private-message", "secret@example", "secret-path")) check(!report.contains(privateValue), "diagnostic redacts " + privateValue);
+        for (String archiveStage : List.of("ARCHIVE_DESCRIPTOR_STAT", "ARCHIVE_DESCRIPTOR_FLAGS",
+                "ARCHIVE_DESCRIPTOR_READ", "ARCHIVE_DESCRIPTOR_WRITE",
+                "ARCHIVE_DESCRIPTOR_RECHECK", "EXTRACT_ARCHIVE")) {
+            Throwable detail = BridgeDiagnostics.helperFileDetail(archiveStage, "ANDROID_ERRNO", 13);
+            check(detail != null, "new archive phase accepted: " + archiveStage);
+            String archiveReport = BridgeDiagnostics.report(new BridgeDiagnostics.Failure(
+                    BridgeDiagnostics.Stage.RESTORE, "SAVE_IO_ERROR", "private archive path", detail),
+                    26, "test", 20, "game", "helper", "authority");
+            check(archiveReport.contains("helper_file_stage=" + archiveStage), "precise archive phase retained");
+            check(archiveReport.contains("helper_file_error=ANDROID_ERRNO")
+                    && archiveReport.contains("helper_file_errno=13"), "bounded archive errno retained");
+            check(!archiveReport.contains("private archive path"), "archive failure message redacted");
+        }
+        check(BridgeDiagnostics.helperFileDetail("private/path", "IO", -1) == null, "unknown archive stage rejected");
+        check(BridgeDiagnostics.helperFileDetail("ARCHIVE_DESCRIPTOR_FLAGS", "IO", 4096) == null, "invalid archive errno rejected");
         equal("UNKNOWN_BRIDGE_FAILURE", new BridgeDiagnostics.Failure(null, "untrusted-code", "", null).code, "unknown codes constrained");
         equal("", BridgeDiagnostics.remoteOrigins("java.lang.Exception", "Remote stack trace:\nat android.content.ContentProviderClient.call(secret)"), "remote origin only from RemoteException");
         equal("android.content.ContentProviderClient.call", BridgeDiagnostics.remoteOrigins("android.os.RemoteException", "Remote stack trace:\n at android.content.ContentProviderClient.call(secret)\n at evil.private.Method(secret)"), "remote origin allowlist");

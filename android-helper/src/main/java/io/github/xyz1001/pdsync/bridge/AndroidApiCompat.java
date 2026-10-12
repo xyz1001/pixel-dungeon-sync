@@ -9,8 +9,12 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStat;
+import java.io.ByteArrayInputStream;
+import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.function.Consumer;
 
 /** Platform access that differs between Android 8 (API 26) and newer releases. */
 final class AndroidApiCompat {
@@ -41,16 +45,81 @@ final class AndroidApiCompat {
     }
 
     static int descriptorAccessMode(ParcelFileDescriptor descriptor) throws IOException, ErrnoException {
-        if (Build.VERSION.SDK_INT >= 30) return Api30.descriptorFlags(descriptor) & OsConstants.O_ACCMODE;
-        // No public fcntl API exists before API30. Read the kernel's flags for
-        // this already-owned descriptor; never reopen the caller's file by path
-        // or assume a readable descriptor is read-only. Inaccessible/malformed
-        // proc data fails closed before any save mutation.
-        try (FileInputStream input = new FileInputStream("/proc/self/fdinfo/" + descriptor.getFd())) {
-            return DescriptorFlags.read(input) & OsConstants.O_ACCMODE;
-        } catch (SecurityException error) {
-            throw new IOException("Cannot verify archive descriptor access mode", error);
+        return descriptorAccessMode(descriptor, stage -> { });
+    }
+
+    static int descriptorAccessMode(ParcelFileDescriptor descriptor, Consumer<FileFailureDetails.Stage> stage)
+            throws IOException, ErrnoException {
+        try {
+            return checkedDescriptorAccessMode(descriptor, stage);
+        } catch (SecurityException denied) {
+            // Preserve the exact probe stage through provider cleanup, retaining
+            // the cause so the redacted diagnostic classifies ACCESS_DENIED.
+            throw new IOException("Cannot verify archive descriptor access mode", denied);
         }
+    }
+
+    private static int checkedDescriptorAccessMode(ParcelFileDescriptor descriptor, Consumer<FileFailureDetails.Stage> stage)
+            throws IOException, ErrnoException {
+        stage.accept(FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_FLAGS);
+        Integer flags = Build.VERSION.SDK_INT >= 30
+                ? Integer.valueOf(Api30.descriptorFlags(descriptor)) : legacyDescriptorFlags(descriptor);
+        if (flags != null && (flags & OsConstants.O_ACCMODE) != OsConstants.O_RDONLY)
+            return flags & OsConstants.O_ACCMODE;
+        // Public Os.pread/pwrite exist from API21; public fcntlInt only from API30.
+        // The caller must first fstat and validate a bounded, caller-owned regular
+        // file. Prove readability on this exact descriptor: O_PATH also makes
+        // pwrite fail with EBADF and must never count as read-only. A positioned
+        // one-byte read accepts EOF but does not change the shared file offset.
+        FileDescriptor fd = descriptor.getFileDescriptor();
+        byte[] probe = new byte[1];
+        stage.accept(FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_READ);
+        int read = Os.pread(fd, probe, 0, 1, 0L);
+        if (read < 0 || read > 1) throw new IOException("Cannot verify archive descriptor readability");
+        if (flags != null) return OsConstants.O_RDONLY;
+        stage.accept(FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_WRITE);
+        try {
+            // Only unavailable proc data needs this fallback. This protocol uses
+            // caller-created private local archives, not arbitrary pseudo-files.
+            // A nonempty backing array ensures the API26 Java/JNI path reaches
+            // the syscall; byteCount is strictly zero and the offset is fixed.
+            // No bytes can be written, including when given a writable archive.
+            if (Os.pwrite(fd, probe, 0, 0, 0L) != 0)
+                throw new IOException("Cannot verify archive descriptor access mode");
+        } catch (ErrnoException error) {
+            if (error.errno == OsConstants.EBADF) return OsConstants.O_RDONLY;
+            throw error; // EACCES, EPERM, EINVAL and every other error fail closed.
+        }
+        return OsConstants.O_RDWR; // Writable; the caller must reject it.
+    }
+
+    private static Integer legacyDescriptorFlags(ParcelFileDescriptor descriptor) throws IOException {
+        // Retain the stronger kernel flags when proc is accessible. On OEMs that
+        // hide fdinfo, fall back without reopening the caller's archive by path.
+        final InputStream input;
+        try {
+            input = new FileInputStream("/proc/self/fdinfo/" + descriptor.getFd());
+        } catch (IOException | SecurityException unavailable) {
+            return null;
+        }
+        try (InputStream owned = input) {
+            return readLegacyDescriptorFlags(owned);
+        }
+    }
+
+    private static Integer readLegacyDescriptorFlags(InputStream input) throws IOException {
+        byte[] data = new byte[4097];
+        int size = 0;
+        try {
+            int count;
+            while (size < data.length && (count = input.read(data, size, data.length - size)) != -1)
+                size += count;
+        } catch (IOException | SecurityException unavailable) {
+            return null;
+        }
+        // Parsing is outside the fallback catch: readable malformed/oversize
+        // data must fail closed, never be replaced by the weaker probe result.
+        return DescriptorFlags.read(new ByteArrayInputStream(data, 0, size));
     }
 
     static String statIdentity(StructStat stat) {

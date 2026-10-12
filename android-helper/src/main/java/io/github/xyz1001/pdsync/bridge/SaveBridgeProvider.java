@@ -306,17 +306,24 @@ public final class SaveBridgeProvider extends ContentProvider {
                 this.stage = FileFailureDetails.Stage.READ_ARCHIVE;
                 session.handle.validate(); this.guard.requireQuiescent();
                 File incoming = mkdir(new File(session.handle.file(), "incoming"));
+                this.stage = FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_STAT;
                 StructStat descriptorBefore = Os.fstat(descriptor.getFileDescriptor());
-                int access = AndroidApiCompat.descriptorAccessMode(descriptor);
                 if (!OsConstants.S_ISREG(descriptorBefore.st_mode) || descriptorBefore.st_nlink != 1
-                        || descriptorBefore.st_uid != callerUid || access != OsConstants.O_RDONLY
+                        || descriptorBefore.st_uid != callerUid
                         || descriptorBefore.st_size < 0 || descriptorBefore.st_size > SaveArchive.MAX_BYTES)
                     throw new BridgeFailure("UNSAFE_ARCHIVE_DESCRIPTOR", "Restore archive must be a bounded, read-only regular file owned by the main app");
+                if (AndroidApiCompat.descriptorAccessMode(descriptor, phase -> this.stage = phase) != OsConstants.O_RDONLY)
+                    throw new BridgeFailure("UNSAFE_ARCHIVE_DESCRIPTOR", "Restore archive must be read-only");
+                this.stage = FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_RECHECK;
+                if (!SafeSaveTree.identity(descriptorBefore).equals(SafeSaveTree.identity(Os.fstat(descriptor.getFileDescriptor()))))
+                    throw new BridgeFailure("ARCHIVE_CHANGED", "Restore archive changed while checking access");
+                this.stage = FileFailureDetails.Stage.EXTRACT_ARCHIVE;
                 Os.lseek(descriptor.getFileDescriptor(), 0, OsConstants.SEEK_SET);
                 SaveArchive.Inventory requested;
                 try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(descriptor.getFileDescriptor()))) {
                     requested = SaveArchive.extract(input, incoming);
                 }
+                this.stage = FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_RECHECK;
                 if (!SafeSaveTree.identity(descriptorBefore).equals(SafeSaveTree.identity(Os.fstat(descriptor.getFileDescriptor()))))
                     throw new BridgeFailure("ARCHIVE_CHANGED", "Restore archive changed while reading");
                 session.handle.validate(); this.stage = FileFailureDetails.Stage.CAPTURE;

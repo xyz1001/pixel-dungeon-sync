@@ -36,6 +36,12 @@ public final class BridgeDiagnostics {
     public enum FileStage {
         HELPER_WORKSPACE,
         READ_ARCHIVE,
+        ARCHIVE_DESCRIPTOR_STAT,
+        ARCHIVE_DESCRIPTOR_FLAGS,
+        ARCHIVE_DESCRIPTOR_READ,
+        ARCHIVE_DESCRIPTOR_WRITE,
+        ARCHIVE_DESCRIPTOR_RECHECK,
+        EXTRACT_ARCHIVE,
         CAPTURE,
         WRITE_BACKUP,
         WRITE_JOURNAL,

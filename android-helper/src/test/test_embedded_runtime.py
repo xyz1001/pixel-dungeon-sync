@@ -196,7 +196,7 @@ class EmbeddedRuntimeTests(unittest.TestCase):
             stubs = embedded_stubs(root / 'compile-stubs', 36)
             driver = write_java(root / 'driver', 'io.github.xyz1001.pdsync.bridge.EmbeddedRuntimeTests', DRIVER)
             classes = root / 'classes'
-            production = ['AndroidApiCompat', 'DescriptorFlags', 'BridgeFailure', 'MainCallerPolicy', 'MainCallerAuthenticator', 'GameBinding', 'GameGuard', 'BridgeMetadata']
+            production = ['AndroidApiCompat', 'FileFailureDetails', 'DescriptorFlags', 'BridgeFailure', 'MainCallerPolicy', 'MainCallerAuthenticator', 'GameBinding', 'GameGuard', 'BridgeMetadata']
             subprocess.run(compile_cmd + ['-d', str(classes)] + list(map(str, stubs))
                            + [str(PRODUCTION / (name + '.java')) for name in production] + [str(driver)], check=True)
             shutil.rmtree(classes / 'android')
