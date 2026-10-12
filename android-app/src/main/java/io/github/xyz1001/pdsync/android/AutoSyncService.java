@@ -46,7 +46,9 @@ public final class AutoSyncService extends Service {
         return null;
     }
 
-    public static String arm(Context context) {
+    public static String arm(Context context) { return arm(context, null); }
+
+    public static String arm(Context context, String controlledToken) {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         try {
             if (!SyncRuntime.automaticAllowed(context, SyncRuntime.connection(context))) {
@@ -59,10 +61,12 @@ public final class AutoSyncService extends Service {
             }
             if (isActive(sharedPreferences) && !sharedPreferences.getString("token", "").isEmpty()) {
                 String string = sharedPreferences.getString("token", "");
+                if (controlledToken != null && !controlledToken.equals(string))
+                    throw new IllegalStateException("上一轮退出监听尚未结束，本次身份连续性不作推断。");
                 startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string));
                 return string;
             }
-            String string2 = UUID.randomUUID().toString();
+            String string2 = controlledToken == null ? UUID.randomUUID().toString() : controlledToken;
             if (!sharedPreferences.edit().putString("token", string2).putString("state", "ARMED").putLong("startedAt", System.currentTimeMillis()).putString("gameSelection", strSelectionToken).putString("gameNamespace", strCurrentNamespace).putBoolean("departed", false).putBoolean("foregroundSeen", false).putString("result", "等待本次游戏退出后检查自动上传。").commit()) {
                 throw new IllegalStateException("无法保存自动同步会话，本次不会后台上传。");
             }
@@ -76,6 +80,7 @@ public final class AutoSyncService extends Service {
     public static void cancelForConnectionChange(Context context) {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         if (isActive(sharedPreferences)) {
+            cancelEvidence(context, sharedPreferences.getString("token", ""));
             sharedPreferences.edit().putString("state", "CANCELLED").putString("result", "连接设置已变更，旧连接的本次监听已停止。此前已提交的上传仍可能完成；下次启动游戏使用新设置。").commit();
             context.stopService(new Intent(context, (Class<?>) AutoSyncService.class));
         }
@@ -197,6 +202,7 @@ public final class AutoSyncService extends Service {
                 this.returned = false;
             }
             BridgeClient.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
+            this.facade.observeControlledSession(this.token, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
             AutoSyncPolicy.Step stepObserve = this.policy.observe(observationObserveLifecycle.reliable, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
                 finish("BLOCKED", "多次无法可靠观察游戏状态，已停止本次监听。请返回首页检查助手或手动同步。");
@@ -298,6 +304,7 @@ public final class AutoSyncService extends Service {
             return;
         }
         this.stopped = true;
+        cancelEvidence(this, this.token);
         String str3 = this.token;
         if (str3 == null || str3.equals(this.prefs.getString("token", ""))) {
             this.prefs.edit().putString("state", str).putString("result", str2).commit();
@@ -315,8 +322,15 @@ public final class AutoSyncService extends Service {
         finish("TIMEOUT", sb.toString());
     }
 
+    private static void cancelEvidence(Context context, String token) {
+        if (token == null || token.isEmpty()) return;
+        try { AndroidSyncFacade.cancelControlledSession(new java.io.File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), token); }
+        catch (Exception ignored) { /* No evidence is persisted; expiry and process death also invalidate it. */ }
+    }
+
     @Override // android.app.Service
     public void onDestroy() {
+        cancelEvidence(this, this.token);
         this.stopped = true;
         this.executor.shutdownNow();
         super.onDestroy();

@@ -83,6 +83,18 @@ class AndroidSyncFacade internal constructor(
    }
   }
  }
+ /** Freeze only already-known identities before Android starts the selected game. */
+ fun beginControlledSession():String=locked {
+  requireNoRecovery();controlledSessions.cancel(base)
+  freshExport {replaceMirror(it)}
+  val snapshot=capture(mirror);val sidecar=(DirectoryMetadataStore(mirror).read() as? SidecarRead.Valid)?.value
+  val runs=sidecar?.runs?.filterValues {it.runUUID!=null}.orEmpty()
+  // Stale/unknown metadata is not re-confirmed by starting the game.
+  val known=runs.filter {(slot,run)->runContentHashes(snapshot.manifest.files)[slot]==run.contentSha256}
+  controlledSessions.begin(base,workspace,verifiedTarget(),snapshot.manifest.files,sidecar?.runs.orEmpty(),Snapshots.verify(snapshot,adapter).filterKeys {name->name.substringBefore('/') in known})
+ }
+ fun observeControlledSession(token:String,reliable:Boolean,foreground:Boolean) {controlledSessions.observe(base,workspace,token,reliable,foreground)}
+ fun cancelControlledSession(token:String) {controlledSessions.cancel(base,token)}
  fun inspect()=locked { inspectLocked() }
  private fun inspectLocked():Inspection {
   if(anyUnresolvedRestore()) return Inspection(owner,null,"BLOCKED","A game restore needs verification or recovery. Upload is blocked until it is resolved.",currentFiles().size,emptyList(),false,false,true,SyncBlockReason.RESTORE_RECOVERY_REQUIRED)
@@ -199,8 +211,8 @@ class AndroidSyncFacade internal constructor(
 
  private fun verifiedTarget():AndroidGameTarget {
   val target=bridge.targetGame()
-  if(target.identity!=identity)throw AndroidTargetChangedException("Selected game identity or cloud binding changed. Reopen that game and compare again.")
-  if(pinnedTarget!=null && pinnedTarget!=target)throw AndroidTargetChangedException("The selected installed APK changed during this sync session. Reopen the game selection and compare again.")
+  if(target.identity!=identity){controlledSessions.cancel(base);throw AndroidTargetChangedException("Selected game identity or cloud binding changed. Reopen that game and compare again.")}
+  if(pinnedTarget!=null && pinnedTarget!=target){controlledSessions.cancel(base);throw AndroidTargetChangedException("The selected installed APK changed during this sync session. Reopen the game selection and compare again.")}
   if(pinnedTarget==null)pinnedTarget=target
   return target
  }
@@ -268,13 +280,22 @@ class AndroidSyncFacade internal constructor(
  private fun replaceMirror(exported:Path) {
   // A fresh verified helper export with identical complete bytes is a filesystem no-op.
   // Do not replace directory identities/timestamps or the directory metadata sidecar.
-  if(currentFiles()==capture(exported).manifest.files)return
+  val before=currentFiles();val snapshot=capture(exported)
+  val metadata=DirectoryMetadataStore(mirror);val old=(metadata.read() as? SidecarRead.Valid)?.value
+  val continued=controlledSessions.consume(base,workspace,verifiedTarget(),before,old?.runs.orEmpty(),snapshot.manifest.files,Snapshots.verify(snapshot,adapter))
+  if(before==snapshot.manifest.files)return
   Files.walk(mirror).use {paths->paths.sorted(Comparator.reverseOrder()).forEach {p->if(p!=mirror){val name=mirror.relativize(p).toString().replace('\\','/');if(adapter.includes(name)&&!isDirectoryMetadata(name))Files.delete(p)}}}
   copySaveFiles(exported,mirror)
+  if(old!=null && continued.isNotEmpty()) {
+   val observed=metadata.observe(snapshot.manifest.files,initialImport=false,persist=false)
+   metadata.write(old.copy(currentContentSha256=observed.contentSha256,runs=observed.runs+continued))
+  }
  }
  private fun copySaveFiles(source:Path,destination:Path) {val snapshot=capture(source);Snapshots.verify(snapshot,adapter).forEach {(name,bytes)->val path=SafePaths.checked(destination.resolve(name));Files.createDirectories(path.parent);Files.write(path,bytes,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);Files.setLastModifiedTime(path,Files.getLastModifiedTime(source.resolve(name),LinkOption.NOFOLLOW_LINKS))};require(capture(destination).manifest.files==snapshot.manifest.files){"Staging copy failed content verification."}}
  private fun <T> locked(action:()->T):T=synchronized(this) {FileChannel.open(SafePaths.checked(base.resolve("android-facade.lock")),StandardOpenOption.CREATE,StandardOpenOption.WRITE).use {channel->val lock=try {channel.tryLock()}catch(_:OverlappingFileLockException){null};checkNotNull(lock){"Another Android sync operation is running. Wait for it to finish."};lock.use {action()}}}
  companion object {
+  private val controlledSessions=AndroidControlledSessions()
+  @JvmStatic fun cancelControlledSession(root:Path,token:String){controlledSessions.cancel(SafePaths.checked(root),token)}
   @JvmStatic fun hasUnresolvedRestore(root:Path):Boolean {val base=SafePaths.checked(root);if(Files.exists(base.resolve("android-restore.json"),LinkOption.NOFOLLOW_LINKS))return true;val dir=SafePaths.checked(base.resolve("restore-journals"));if(!Files.exists(dir,LinkOption.NOFOLLOW_LINKS))return false;require(Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)){"Restore recovery storage is damaged."};return Files.list(dir).use {it.anyMatch {p->p.fileName.toString().endsWith(".json")}}}
   private fun automaticEligible(c:OnboardingComparison):Boolean {
    if(c.observedTips.size>1)return false

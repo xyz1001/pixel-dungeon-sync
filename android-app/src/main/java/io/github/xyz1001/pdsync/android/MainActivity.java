@@ -102,6 +102,8 @@ public final class MainActivity extends Activity {
     private boolean draftLoaded;
     private EditText endpointInput;
     private AndroidSyncFacade facade;
+    private AndroidSyncFacade controlledLaunchFacade;
+    private String controlledLaunchToken;
     private LinearLayout footer;
     private SyncHistory history;
     private int historyPage;
@@ -3813,6 +3815,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$launchGame$138$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ Intent m48xf90bdc3d() throws Exception {
+        cancelControlledLaunch();
         if (hasAnyRestoreJournal()) {
             throw new IOException("存在未完成恢复。请先检查恢复记录，再启动游戏。");
         }
@@ -3823,6 +3826,17 @@ public final class MainActivity extends Activity {
         new BridgeClient(this).targetGame();
         Intent launchIntentForPackage = getPackageManager().getLaunchIntentForPackage(this.prepared.gamePackage);
         if (launchIntentForPackage != null) {
+            if (this.connection != null && SyncRuntime.automaticAllowed(this, this.connection)) {
+                synchronized (SyncRuntime.OPERATION_LOCK) {
+                    try {
+                        this.controlledLaunchFacade = SyncRuntime.facade(this, this.connection);
+                        this.controlledLaunchToken = this.controlledLaunchFacade.beginControlledSession();
+                    } catch (Exception unavailableEvidence) {
+                        // Optional identity evidence must not prevent playing a valid installed game.
+                        cancelControlledLaunch();
+                    }
+                }
+            }
             return launchIntentForPackage;
         }
         throw new IOException("游戏启动入口不可用，请完成安装。");
@@ -3833,17 +3847,27 @@ public final class MainActivity extends Activity {
         this.inspection = null;
         this.cloudVerified = false;
         if (this.connection == null || !z || SyncRuntime.isAutoUploadPaused(this)) {
+            cancelControlledLaunch();
             this.notice = "游戏已请求启动。自动上传暂停，请先完成存档比较。";
         } else {
             SyncRuntime.setConnection(this.connection);
             try {
-                AutoSyncService.arm(this);
+                AutoSyncService.arm(this, this.controlledLaunchToken);
                 this.notice = "已开启本次退出后无冲突自动上传。";
             } catch (RuntimeException unused) {
+                cancelControlledLaunch();
                 this.notice = "系统未允许后台监听，退出游戏后请返回主页检查。";
             }
         }
-        startActivity(intent);
+        try { startActivity(intent); }
+        catch (RuntimeException failure) { cancelControlledLaunch(); throw failure; }
+    }
+
+    private void cancelControlledLaunch() {
+        if (this.controlledLaunchFacade != null && this.controlledLaunchToken != null)
+            this.controlledLaunchFacade.cancelControlledSession(this.controlledLaunchToken);
+        this.controlledLaunchFacade = null;
+        this.controlledLaunchToken = null;
     }
 
     private boolean hasAnyRestoreJournal() throws IOException {
