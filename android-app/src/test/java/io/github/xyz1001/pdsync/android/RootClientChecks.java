@@ -59,7 +59,7 @@ public final class RootClientChecks {
     public static void main(String[] args)throws Exception {
         SelectedRootGame game=selection();Path dir=Files.createTempDirectory("root-client-host-");
         String[] rootCodes={"ROOT_AUTH_REQUIRED","ROOT_UNAVAILABLE","ROOT_DENIED_OR_EXITED","ROOT_TIMEOUT",
-                "ROOT_CANCELLED","ROOT_INVALID_REPLY","ROOT_PIPE_FAILED","ROOT_DIAGNOSTIC_LIMIT","ROOT_TARGET_CHANGED",
+                "ROOT_RUNNER_TIMEOUT","ROOT_CANCELLED","ROOT_INVALID_REPLY","ROOT_PIPE_FAILED","ROOT_DIAGNOSTIC_LIMIT","ROOT_TARGET_CHANGED",
                 "ROOT_BINDING_MISMATCH","ROOT_ACCESS_FAILED","ROOT_SAVE_NOT_READY","ROOT_UNEXPECTED_ARCHIVE",
                 "ROOT_EXPORT_MISMATCH","ROOT_EXPORT_FAILED","ROOT_ARCHIVE_INCOMPLETE","ROOT_RESTORE_UNSUPPORTED",
                 "ROOT_RECOVERY_UNSUPPORTED","ROOT_UNSUPPORTED","ROOT_NOT_ROOT","ROOT_INVALID_REQUEST","ROOT_UNSAFE_PATH",
@@ -76,17 +76,18 @@ public final class RootClientChecks {
         rejects(store::load,"Invalid root selection");store.save(game);
         rejects(()->new SelectedRootGame(game.gamePackage,"Game","1",1,10,11,0,10123,game.dataDir,
                 Collections.singletonList(A),Collections.singletonList(B),B,game.apkHashes,false),"provenance");
-        byte[] valid=reply(okay(game));FakeProcess success=new FakeProcess(valid,0);AtomicInteger launches=new AtomicInteger();
+        RootProtocol.Request request=new RootProtocol.Request(RootProtocol.Command.PROBE,game.binding());
+        byte[] valid=reply(okay(game).withRequest(request,RootProtocol.Outcome.READ_ONLY));FakeProcess success=new FakeProcess(valid,0);AtomicInteger launches=new AtomicInteger();
         RootProcessTransport transport=new RootProcessTransport("/data/app/self/base.apk",cmd->{
             launches.incrementAndGet();check(cmd.length==3&&cmd[0].equals("su"),"fixed su args");
             check(!cmd[2].contains(game.gamePackage)&&!cmd[2].contains(game.dataDir),"no target shell interpolation");return success;},1000);
-        RootProtocol.Request request=new RootProtocol.Request(RootProtocol.Command.PROBE,game.binding());
         check(transport.exchange(request,null).status==RootProtocol.Status.OK,"valid response");
         check(RootProtocol.readRequest(new ByteArrayInputStream(success.written.toByteArray())).binding.matchesInstalled(game.binding()),"binary target binding");
         check(success.destroyed,"process closed");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->{throw new IOException("missing su");},100).exchange(request,null),"ROOT_UNAVAILABLE");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(new byte[0],1),100).exchange(request,null),"ROOT_DENIED_OR_EXITED");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(Arrays.copyOf(valid,valid.length-2),0),100).exchange(request,null),"ROOT_INVALID_REPLY");
+        rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(new byte[0],124),100).exchange(request,null),"ROOT_RUNNER_TIMEOUT");
         byte[] trailing=Arrays.copyOf(valid,valid.length+1);
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(trailing,0),100).exchange(request,null),"ROOT_INVALID_REPLY");
         FakeProcess blocked=new FakeProcess(new BlockingInput());long start=System.nanoTime();
@@ -110,7 +111,7 @@ public final class RootClientChecks {
         check(!active.isAlive()&&cancelled.destroyed&&cancelError.get()!=null,"close kills active process");
         AtomicInteger calls=new AtomicInteger(),verifies=new AtomicInteger();
         AndroidGameIdentity identity=new AndroidGameIdentity(game.gamePackage,game.gameLabel,game.originIdentity,game.namespaceId);
-        RootGameBridge unauthorized=new RootGameBridge(game,identity,g->verifies.incrementAndGet(),(r,o)->{calls.incrementAndGet();return okayUnchecked(gamet());},()->false,dir.toFile());
+        RootGameBridge unauthorized=new RootGameBridge(game,identity,g->verifies.incrementAndGet(),(r,o)->{calls.incrementAndGet();return okayUnchecked(gamet()).withRequest(r,RootProtocol.Outcome.READ_ONLY);},()->false,dir.toFile());
         check(unauthorized.mode()==GameAccessBackend.Mode.ROOT_DIRECT,"root mode");
         unauthorized.targetGame();check(calls.get()==0,"target/readiness render never requests root");
         rejects(unauthorized::inspectReady,"Root 游戏选择");check(calls.get()==0,"authorization gates transport");
@@ -119,30 +120,30 @@ public final class RootClientChecks {
         AtomicInteger restartedCalls=new AtomicInteger();
         RootGameBridge restarted=new RootGameBridge(store.load(),identity,g->{},(r,o)->{
             restartedCalls.incrementAndGet();return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "EMPTY_DIRECTORY",0,0,DirectoryMetadataKt.contentSha256(Collections.emptyMap()),"ABSENT",true,null);
+                    "EMPTY_DIRECTORY",0,0,DirectoryMetadataKt.contentSha256(Collections.emptyMap()),"ABSENT",true,null).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->{try{return game.matches(store.load());}catch(IOException invalid){return false;}},dir.toFile());
         restarted.targetGame();check(restartedCalls.get()==0,"restart construction/target is passive");
         restarted.inspectReady();check(restartedCalls.get()==1,"explicit post-restart inspect needs no redundant manual probe");
 
         check(!unauthorized.capabilities().restoreSupported&&!unauthorized.capabilities().interruptedBackupRecovery,"readonly caps");
-        rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),"尚未实现");
+        rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),"尚未提供");
         try{unauthorized.restoreFrom(dir,Collections.emptyMap());}catch(BridgeDiagnostics.Failure failure){
             check(failure.code.equals("ROOT_RESTORE_UNSUPPORTED")&&failure.stage==BridgeDiagnostics.Stage.RESTORE,"restore stage/code preserved");}
-        rejects(unauthorized::recoverInterruptedBackup,"尚未实现");check(calls.get()==1,"unsupported write never launches root");
-        RootGameBridge changed=new RootGameBridge(game,identity,g->{if(verifies.incrementAndGet()>0)throw new IOException("changed");},(r,o)->{calls.incrementAndGet();return okayUnchecked(game);},()->true,dir.toFile());
+        rejects(unauthorized::recoverInterruptedBackup,"尚未提供");check(calls.get()==1,"unsupported write never launches root");
+        RootGameBridge changed=new RootGameBridge(game,identity,g->{if(verifies.incrementAndGet()>0)throw new IOException("changed");},(r,o)->{calls.incrementAndGet();return okayUnchecked(game).withRequest(r,RootProtocol.Outcome.READ_ONLY);},()->true,dir.toFile());
         rejects(changed::targetGame,"ROOT_TARGET_CHANGED");check(calls.get()==1,"target change blocks transport");
         String emptyFingerprint=DirectoryMetadataKt.contentSha256(Collections.emptyMap());
         RootGameBridge wrongBinding=new RootGameBridge(game,identity,g->{},(r,o)->new RootProtocol.Response(
-                RootProtocol.Status.OK,A,"EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,null),()->true,dir.toFile());
-        rejects(wrongBinding::inspectReady,"ROOT_BINDING_MISMATCH");
+                RootProtocol.Status.OK,A,"EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,null).withRequest(r,RootProtocol.Outcome.READ_ONLY),()->true,dir.toFile());
+        rejects(wrongBinding::inspectReady,"ROOT_REPLY_MISMATCH");
         RootGameBridge unknown=new RootGameBridge(game,identity,g->{},(r,o)->new RootProtocol.Response(
-                RootProtocol.Status.OK,game.binding().fingerprint(),"EMPTY_DIRECTORY",0,0,emptyFingerprint,"UNKNOWN",false,null),()->true,dir.toFile());
+                RootProtocol.Status.OK,game.binding().fingerprint(),"EMPTY_DIRECTORY",0,0,emptyFingerprint,"UNKNOWN",false,null).withRequest(r,RootProtocol.Outcome.READ_ONLY),()->true,dir.toFile());
         rejects(unknown::inspectReady,"ROOT_UNRELIABLE");check(!unknown.observeLifecycle().reliable,"unknown lifecycle truthful");
         byte[] emptyArchive=new byte[22];emptyArchive[0]=0x50;emptyArchive[1]=0x4b;emptyArchive[2]=5;emptyArchive[3]=6;
         AtomicInteger exportChecks=new AtomicInteger();
         RootGameBridge emptyExporter=new RootGameBridge(game,identity,g->exportChecks.incrementAndGet(),(r,o)->{
             o.write(emptyArchive);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive);
+                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         Path emptyDestination=Files.createDirectory(dir.resolve("empty-destination"));
         emptyExporter.exportTo(emptyDestination);check(exportChecks.get()==4,"PM target before/after transport and archive");
@@ -154,29 +155,29 @@ public final class RootClientChecks {
         String saveFingerprint=DirectoryMetadataKt.contentSha256(Collections.singletonMap("game0/game.dat",saveHash));
         RootGameBridge exporter=new RootGameBridge(game,identity,g->{},(r,o)->{
             o.write(archiveBytes);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "ALLOWLISTED_FILES_PRESENT",1,save.length,saveFingerprint,"CACHED",true,archiveBytes);
+                    "ALLOWLISTED_FILES_PRESENT",1,save.length,saveFingerprint,"CACHED",true,archiveBytes).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         Path nonempty=Files.createDirectory(dir.resolve("nonempty-destination"));exporter.exportTo(nonempty);
         check(Arrays.equals(Files.readAllBytes(nonempty.resolve("game0/game.dat")),save),"nonempty export preserves all bytes");
         RootGameBridge badFingerprint=new RootGameBridge(game,identity,g->{},(r,o)->{
             o.write(archiveBytes);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "ALLOWLISTED_FILES_PRESENT",1,save.length,A,"CACHED",true,archiveBytes);
+                    "ALLOWLISTED_FILES_PRESENT",1,save.length,A,"CACHED",true,archiveBytes).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         rejects(()->badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint"))),"ROOT_EXPORT_MISMATCH");
         try{badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint-stage")));}
         catch(BridgeDiagnostics.Failure failure){check(failure.code.equals("ROOT_EXPORT_MISMATCH")&&failure.stage==BridgeDiagnostics.Stage.EXPORT,"export stage/code preserved");}
         AtomicInteger authorizationReads=new AtomicInteger();
-        RootGameBridge revoked=new RootGameBridge(game,identity,g->{},(r,o)->okayUnchecked(game),()->authorizationReads.incrementAndGet()==1,dir.toFile());
+        RootGameBridge revoked=new RootGameBridge(game,identity,g->{},(r,o)->okayUnchecked(game).withRequest(r,RootProtocol.Outcome.READ_ONLY),()->authorizationReads.incrementAndGet()==1,dir.toFile());
         rejects(revoked::inspectReady,"ROOT_CANCELLED");
         AtomicInteger changedChecks=new AtomicInteger();
         RootGameBridge changedAfter=new RootGameBridge(game,identity,g->{if(changedChecks.incrementAndGet()==3)throw new IOException("target changed");},(r,o)->{
             o.write(emptyArchive);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive);
+                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         rejects(()->changedAfter.exportTo(Files.createDirectory(dir.resolve("changed-after"))),"ROOT_TARGET_CHANGED");
         RootGameBridge truncatedArchive=new RootGameBridge(game,identity,g->{},(r,o)->{
             o.write(new byte[22]);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive);
+                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         rejects(()->truncatedArchive.exportTo(Files.createDirectory(dir.resolve("bad-archive"))),"ROOT_EXPORT_FAILED");
         Path empty=Files.createTempFile(dir,"empty-",".zip");byte[] emptyZip=new byte[22];emptyZip[0]=0x50;emptyZip[1]=0x4b;emptyZip[2]=5;emptyZip[3]=6;Files.write(empty,emptyZip);

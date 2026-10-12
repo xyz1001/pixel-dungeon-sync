@@ -74,6 +74,7 @@ public final class RootHostTests {
     private static void intAt(byte[] bytes, int at, int value) { for (int i = 0; i < 4; i++) bytes[at+i] = (byte) (value >>> (24-8*i)); }
     private static void protocol() throws Exception {
         for (RootProtocol.Command command : RootProtocol.Command.values()) {
+            if(command==RootProtocol.Command.RESTORE)continue; // Restore requires a separately streamed, integrity-bound archive.
             RootProtocol.Request decoded = RootProtocol.readRequest(new ByteArrayInputStream(wire(request(command))));
             check(decoded.command == command && decoded.binding.fingerprint().equals(binding().fingerprint()), "command roundtrip");
         }
@@ -96,7 +97,7 @@ public final class RootHostTests {
         byte[] invalidUtf = valid.clone(); invalidUtf[17] = (byte) 0xff;
         bad(() -> RootProtocol.readRequest(new ByteArrayInputStream(invalidUtf)), "malformed UTF8");
         ByteArrayOutputStream duplicate = new ByteArrayOutputStream(); DataOutputStream data = new DataOutputStream(duplicate);
-        data.writeByte(1); RootProtocol.writeString(data, binding().packageName); data.writeInt(0); data.writeInt(UID);
+        data.writeByte(1); RootProtocol.writeString(data, "11111111111111111111111111111111"); RootProtocol.writeString(data, binding().packageName); data.writeInt(0); data.writeInt(UID);
         RootProtocol.writeString(data, binding().dataDir); RootProtocol.writeString(data, HASH); data.writeInt(2);
         for (int i = 0; i < 2; i++) { RootProtocol.writeString(data, APK); RootProtocol.writeString(data, HASH); }
         bad(() -> RootProtocol.readRequest(new ByteArrayInputStream(frame(duplicate.toByteArray()))), "duplicate APK fields");
@@ -289,11 +290,20 @@ public final class RootHostTests {
     }
     private static final class FakeRuntime implements RootRuntime {
         final FakeFs fs = new FakeFs(); int euid, pmCalls, observeCalls;
-        RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport;
+        RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
+        int guardOpens, guardChecks, guardRevalidates, guardCloses;
         FakeRuntime() throws IOException { installed = binding(); fs.file("rankings.dat","synthetic"); }
         public int effectiveUid() { return euid; }
         public RootBinding installed(RootBinding request) throws IOException {
             pmCalls++; return changeBinding && pmCalls > 1 ? binding("com.example.game",0,UID,request.dataDir,repeat('b',64)) : installed;
+        }
+        public ReadGuard openReadGuard(RootBinding binding) {
+            guardOpens++;
+            return new ReadGuard() {
+                public void requireClear()throws IOException {guardChecks++;if(pending)throw new RootFailure(RootProtocol.Status.RECOVERY_REQUIRED);}
+                public void revalidate()throws IOException {guardRevalidates++;if(guardChanged)throw new RootFailure(RootProtocol.Status.CHANGED);}
+                public void close(){guardCloses++;}
+            };
         }
         public RootFileSystem fileSystem() { return fs; }
         public RootUidState.Observation observe(int uid) {
@@ -313,7 +323,12 @@ public final class RootHostTests {
             check(runtime.fs.operations==0 && runtime.pmCalls==0,"unsupported never touches target");
         }
         for (RootProtocol.Command command : new RootProtocol.Command[]{RootProtocol.Command.PROBE,RootProtocol.Command.INSPECT,RootProtocol.Command.EXPORT,RootProtocol.Command.OBSERVE}) {
-            FakeRuntime runtime=new FakeRuntime(); RootProtocol.Response response=new RootService(runtime).execute(request(command));
+            FakeRuntime runtime=new FakeRuntime(); RootProtocol.Request requested=request(command);
+            RootProtocol.Response response=new RootService(runtime).execute(requested);
+            RootProtocol.requireReplyMatches(requested,response);
+            check(response.outcome==RootProtocol.Outcome.READ_ONLY,"typed read-only outcome");
+            check(runtime.guardOpens==(command==RootProtocol.Command.PROBE?0:1),"read interlock opened only for content/lifecycle reads");
+            check(runtime.guardCloses==runtime.guardOpens,"read guard closed on completion");
             check(response.status==RootProtocol.Status.OK,"read command success " + command);
             check(runtime.pmCalls==2,"PM binding checked before and after " + command);
             check(response.bindingFingerprint.equals(binding().fingerprint()),"response identity echo");
@@ -334,6 +349,20 @@ public final class RootHostTests {
         check(active.fs.operations==0,"foreground reads no saves");
         FakeRuntime lateRoot=new FakeRuntime(); lateRoot.mutateAfterExport=true;
         check(new RootService(lateRoot).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.CHANGED,"late root replacement after final lifecycle call");
+        FakeRuntime pending=new FakeRuntime();pending.pending=true;
+        check(new RootService(pending).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.RECOVERY_REQUIRED,"pending root transaction blocks export");
+        check(pending.guardCloses==1&&pending.fs.operations==0,"pending read closes guard without touching saves");
+        RootProtocol.Response probePending=new RootService(pending).execute(request(RootProtocol.Command.PROBE));
+        check(probePending.status==RootProtocol.Status.OK,"exact-target probe remains possible while recovery pending");
+        FakeRuntime changedGuard=new FakeRuntime();changedGuard.guardChanged=true;
+        check(new RootService(changedGuard).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.CHANGED,"late workspace state invalidates read");
+        check(changedGuard.guardCloses==1,"changed guard closed");
+        RootProtocol.Request requested=request(RootProtocol.Command.INSPECT);
+        RootProtocol.RequestFrame malformed=RootProtocol.readRequestFrame(new ByteArrayInputStream(Arrays.copyOf(wire(requested),wire(requested).length+1)));
+        FakeRuntime untouched=new FakeRuntime();RootProtocol.Response refused=new RootService(untouched).execute(malformed);
+        check(refused.status==RootProtocol.Status.INVALID_REQUEST&&untouched.pmCalls==0,"trailing read frame rejected before PM or saves");
+        RootProtocol.requireReplyMatches(requested,refused);
+        check(refused.diagnosticStage==RootProtocol.DiagnosticStage.ARCHIVE_READ&&refused.diagnosticCategory==RootProtocol.DiagnosticCategory.MALFORMED,"framing failure safe diagnostics");
         FakeRuntime inspect=new FakeRuntime(); inspect.unreliable=true;
         RootProtocol.Response result=new RootService(inspect).execute(request(RootProtocol.Command.INSPECT));
         check(result.status==RootProtocol.Status.OK && !result.reliable,"inspection does not fabricate lifecycle verification");

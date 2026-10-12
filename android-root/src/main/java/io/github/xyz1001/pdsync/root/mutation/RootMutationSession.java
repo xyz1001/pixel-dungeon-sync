@@ -380,6 +380,32 @@ public final class RootMutationSession implements AutoCloseable {
             return f;
         } catch (MutationOs.Failure e) { if (e.error == MutationOs.Error.MISSING) return null; throw e; }
     }
+    /**
+     * Explicit-recovery cleanup of never-published private journal copies only. This is not invoked on
+     * read paths or implicitly during open/close. The fixed journal and all other names stay untouched.
+     * Invalid matching entries fail closed and remain available for diagnosis; their payload is never
+     * treated as a journal or used to decide the live save state.
+     */
+    public synchronized int cleanupJournalTemporaries() throws IOException {
+        mutating(); int removed = 0;
+        for (String name : os.children(workspace, SaveArchive.MAX_ENTRIES)) {
+            if (!name.matches("journal-[0-9a-f]{32}")) continue;
+            revalidate(); Stat before = os.childStat(workspace, name);
+            if (!before.regular() || before.uid != 0 || before.gid != 0 || (before.mode & 07777) != 0600
+                    || before.links != 1 || before.device != originalData.device
+                    || before.size < 0 || before.size > MAX_JOURNAL) fail(Code.UNSAFE);
+            try (MutationOs.Handle pinned = os.openRegular(workspace, name, false)) {
+                same(before, os.stat(pinned)); revalidate();
+                same(before, os.childStat(workspace, name)); same(before, os.stat(pinned));
+                os.unlink(workspace, name);
+                for (PrivateFile file : privateFiles) {
+                    if (file.parent == workspace && file.name.equals(name) && sameInode(file.expected, before)) file.removed = true;
+                }
+                removed++; os.sync(workspace); revalidate();
+            }
+        }
+        return removed;
+    }
     /** Atomic replacement is confined to the private fixed journal; expected bytes bind the old receipt. */
     public synchronized PrivateFile replaceJournal(PrivateFile expected, byte[] expectedBytes, byte[] replacement) throws IOException {
         mutating(); requireBytes(replacement, MAX_JOURNAL);

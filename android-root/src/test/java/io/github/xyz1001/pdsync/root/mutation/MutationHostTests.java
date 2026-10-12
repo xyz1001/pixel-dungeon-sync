@@ -30,7 +30,7 @@ public final class MutationHostTests {
     public static void main(String[] args) throws Exception {
         gateBeforeTouches(); validateRoots(); workspaceOwnership(); locks(); privateCopiesAndBounds(); preflightRequired();
         hardlinkNoReplace(); quarantineAndRollback(); preserveUnknownMove(); preserveSameInodeEdit(); revalidateOriginalNames();
-        privateCleanupExact(); journalReplacement(); noArchiveMetadata(); lowLevelNoReplaceDirectories(); adversarialEntries(); publishRace(); foreignCapabilities(); fakeArchiveStream();
+        privateCleanupExact(); journalReplacement(); cleanupCrashedJournalTemporary(); preserveInvalidJournalTemporary(); noArchiveMetadata(); lowLevelNoReplaceDirectories(); adversarialEntries(); publishRace(); foreignCapabilities(); fakeArchiveStream();
         System.out.println("MutationHostTests: " + assertions + " assertions passed (in-memory fake OS only; no Android/root/device execution)");
     }
     private static void gateBeforeTouches() throws Exception {
@@ -208,6 +208,63 @@ public final class MutationHostTests {
             }
         }
         try (RootMutationSession s = open(os); PrivateFile receipt = s.readJournal()) { check(Arrays.equals(s.readPrivate(receipt, 100), bytes("committed"))); }
+    }
+    private static void cleanupCrashedJournalTemporary() throws Exception {
+        FakeMutationOs os = new FakeMutationOs(); String temporary;
+        try (RootMutationSession s = open(os); PrivateFile first = s.replaceJournal(null, null, bytes("prepared"))) {
+            os.beforeRename = () -> { throw new IllegalStateException("Simulated process crash before journal rename"); };
+            try { s.replaceJournal(first, bytes("prepared"), bytes("committed")); throw new AssertionError("Expected simulated crash"); }
+            catch (IllegalStateException expected) { check(expected.getMessage().contains("Simulated process crash")); }
+            temporary = os.workspace().children.keySet().stream().filter(x -> x.matches("journal-[0-9a-f]{32}")).findFirst().orElseThrow();
+            check(Arrays.equals(os.workspace().children.get(temporary).bytes, bytes("committed")));
+            check(Arrays.equals(s.readPrivate(first, 100), bytes("prepared")));
+        }
+        try (RootMutationReadGuard guard = RootMutationReadGuard.open(os, binding())) {
+            try { guard.requireClear(); throw new AssertionError("Expected pending journal temporary"); }
+            catch (RootMutationReadGuard.Failure e) { check(e.code == RootMutationReadGuard.Code.RECOVERY_PENDING); }
+        }
+        try (RootMutationSession recovery = open(os); PrivateFile journal = recovery.readJournal()) {
+            check(recovery.cleanupJournalTemporaries() == 1);
+            check(!os.workspace().children.containsKey(temporary));
+            check(Arrays.equals(recovery.readPrivate(journal, 100), bytes("prepared")));
+            check(recovery.cleanupJournalTemporaries() == 0);
+        }
+        FakeMutationOs firstWrite = new FakeMutationOs();
+        try (RootMutationSession s = open(firstWrite)) {
+            firstWrite.beforeRename = () -> { throw new IllegalStateException("Simulated first journal crash"); };
+            try { s.replaceJournal(null, null, bytes("prepared")); throw new AssertionError("Expected simulated first crash"); }
+            catch (IllegalStateException expected) { check(s.readJournal() == null); }
+        }
+        try (RootMutationReadGuard guard = RootMutationReadGuard.open(firstWrite, binding())) {
+            try { guard.requireClear(); throw new AssertionError("Expected temporary-only pending state"); }
+            catch (RootMutationReadGuard.Failure e) { check(e.code == RootMutationReadGuard.Code.RECOVERY_PENDING); }
+        }
+        try (RootMutationSession recovery = open(firstWrite)) { check(recovery.cleanupJournalTemporaries() == 1); }
+        try (RootMutationReadGuard guard = RootMutationReadGuard.open(firstWrite, binding())) { guard.requireClear(); check(true); }
+    }
+    private static void preserveInvalidJournalTemporary() throws Exception {
+        for (int kind = 0; kind < 8; kind++) {
+            FakeMutationOs os = new FakeMutationOs();
+            try (RootMutationSession s = open(os)) {
+                String name = "journal-" + "c".repeat(32);
+                FakeMutationOs.Node bad = os.file(os.workspace(), name, "never authoritative"); bad.uid = 0; bad.gid = 0;
+                if (kind == 0) bad.uid = 10001;
+                if (kind == 1) bad.gid = 10001;
+                if (kind == 2) bad.mode = Stat.REGULAR | 0644;
+                if (kind == 3) bad.links = 2;
+                if (kind == 4) bad.device = 2;
+                if (kind == 5) bad.mode = Stat.SYMLINK | 0600;
+                if (kind == 6) bad.mode = Stat.DIRECTORY | 0600;
+                if (kind == 7) bad.bytes = new byte[RootMutationSession.MAX_JOURNAL + 1];
+                code(RootMutationSession.Code.UNSAFE, s::cleanupJournalTemporaries);
+                check(os.workspace().children.get(name) == bad);
+            }
+        }
+        FakeMutationOs os = new FakeMutationOs();
+        try (RootMutationSession s = open(os)) {
+            FakeMutationOs.Node unknown = os.file(os.workspace(), "journal-not-generated", "preserve"); unknown.uid = 0; unknown.gid = 0;
+            check(s.cleanupJournalTemporaries() == 0); check(os.workspace().children.get("journal-not-generated") == unknown);
+        }
     }
     private static void noArchiveMetadata() throws Exception {
         check(LocalAttributes.class.getConstructors().length == 0);

@@ -16,5 +16,11 @@ CP="$SDK/platforms/android-36/android.jar:$CORE:$(find "$RUNTIME" -maxdepth 1 -n
   "$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveArchive.java" \
   "$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveDirectoryPolicy.java" \
   "$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/BridgeFailure.java" \
-  "$HERE/java/io/github/xyz1001/pdsync/android/RootClientChecks.java"
+  "$HERE/java/io/github/xyz1001/pdsync/android/RootClientChecks.java" \
+  "$HERE/java/io/github/xyz1001/pdsync/android/RootRestoreClientChecks.java" \
+  "$HERE/java/io/github/xyz1001/pdsync/android/RootAutomaticCapabilityChecks.java"
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootClientChecks
+
+"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootRestoreClientChecks
+
+"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootAutomaticCapabilityChecks

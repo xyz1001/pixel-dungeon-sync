@@ -73,9 +73,10 @@ back the known prefix in reverse; it never resumes an uncommitted forward restor
 
 `COMMITTED` and `ROLLED_BACK` are durable terminal markers. Cleanup failures are
 distinct from uncertain mutation outcomes. Cleanup never changes live saves,
-retains a verified finalized backup under local retention policy, and removes
-the exact transaction journal last. Retention and user-directed recovery choices
-remain outside the engine.
+reclaims a verified finalized backup according to adapter policy, and removes
+the exact transaction journal last. The Android adapter reclaims successful private
+backups rather than accumulating an arbitrary fixed-count limit. Interrupted or
+conflicting operations retain their recoverable data.
 
 `RestoreJournalCodec` is a deterministic strict-schema local format with a 16 MiB
 bound. It rejects corruption, trailing data, duplicate/unsorted paths, malformed

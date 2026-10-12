@@ -125,6 +125,22 @@ final class AndroidRootFileSystem implements RootFileSystem {
         // Final "/." is a real directory; the only followed symlink is our own pinned /proc descriptor.
         return SaveDirectoryPolicy.content(new File(((Pinned) directory).path() + "/."));
     }
+    /** A quick pinned metadata fence for an already fully hashed, system-owned installed APK. */
+    String apkMetadata(String path) throws IOException {
+        if(!RootBinding.safeApkPath(path))throw unsafe(null);
+        File file=new File(path);
+        try(Pinned parent=trustedParent(file.getParent())) {
+            Stat before=childStat(parent,file.getName());
+            if(!before.regular() || before.links!=1 || (before.uid!=0&&before.uid!=1000)
+                    || (before.mode&0022)!=0 || before.size<0 || before.size>MAX_APK_BYTES)throw unsafe(null);
+            try(RegularFile opened=openFile(parent,file.getName())) {
+                if(!before.identity().equals(opened.stat().identity())
+                        || !before.identity().equals(childStat(parent,file.getName()).identity()))
+                    throw new RootFailure(RootProtocol.Status.CHANGED);
+                return before.identity();
+            }
+        }
+    }
     String apkHash(String path, long[] aggregateBytes) throws IOException {
         if (!RootBinding.safeApkPath(path)) throw unsafe(null);
         File file = new File(path);

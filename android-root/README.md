@@ -1,6 +1,7 @@
 # Optional root direct-save source module
 
-This is an independent, **read-only** Android `app_process` job and a pure-host test suite.
+This is an optional Android `app_process` file-access backend with host-testable
+read, export, transactional restore and recovery paths.
 The established embedded bridge is unchanged. Nothing here has been executed under
 Android root or on a phone. SDK compilation and injected host tests are not runtime
 verification or evidence that a particular root manager/SELinux policy permits it.
@@ -11,13 +12,16 @@ Entry point: `io.github.xyz1001.pdsync.root.RootRunner`, with **no arguments**.
 A normal-UID caller starts it explicitly after root authorization, sends exactly one
 `RootProtocol.Request`, closes stdin, receives exactly one reply, and waits for EOF.
 The runner verifies actual `Os.geteuid() == 0` before PM or target filesystem access.
-It exits after the job, including framework/Binder threads, and has an unconditional
-60-second process watchdog. There is no socket, daemon, network access, credential
-input, target-app launch, force-stop, arbitrary shell command, or writable save API.
+It exits after the job, including framework/Binder threads, with a monotonic
+25-second probe/observe, 50-second inspect/export, or 120-second restore/recovery
+watchdog. There is no socket, daemon, network access, credential input, target-app
+launch, force-stop or caller-defined shell command. Cancelling the normal-UID `su`
+client does not prove its root child has exited; an uncertain outcome retains the
+outer restore journal, and the private transaction lock and watchdog bound recovery.
 
-Commands are `PROBE`, `INSPECT`, `EXPORT`, and `OBSERVE`. `RESTORE` and `RECOVER`
-return `UNSUPPORTED` without touching the target. Pure restore research, if present
-in a separate subpackage, does not enable either command or provide an Android writer.
+Commands are `PROBE`, `INSPECT`, `EXPORT`, `OBSERVE`, `RESTORE` and `RECOVER`.
+Only the latter two construct the mutation adapter. The implementation capability
+is distinct from actual authorization, native/kernel availability and device validation.
 
 `RootBinding` contains the caller-selected package, Android user, application UID,
 PM `dataDir`, source identity SHA-256, and exact installed base/split APK path/hash set.
@@ -74,7 +78,8 @@ storage returns `MISSING_DIRECTORY` and means to launch the game first; it does 
 mean a root manager denied authorization. `INSPECT` can report stable content while
 lifecycle state is unknown or busy. Its OK status alone is not export readiness.
 `EXPORT` additionally requires reliable CACHED or ABSENT observations around scans.
-Restore/recovery capability is always false.
+Restore/recovery additionally require the native no-replace primitive and local
+filesystem/attribute preflight. A successful read probe does not prove these work.
 
 ## UID lifecycle observation
 
@@ -99,39 +104,81 @@ Reference sources:
 - [API36 getUidState output](https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android16-release/services/core/java/com/android/server/am/ActivityManagerShellCommand.java)
 - [API36 process states](https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android16-release/core/java/android/app/ProcessStateEnum.aidl)
 
-## Wire v1
+## Transactional restore and recovery
 
-All integers are Java DataInput/DataOutput big-endian; strings are a signed 32-bit
-UTF-8 byte length followed by strict UTF-8 bytes, maximum 2048 bytes. No Java object
-serialization is used. All extra/trailing fields and trailing frames are rejected.
+The root job reuses the existing shared `SaveArchive` validator and pure
+`restore/RootRestoreTransaction` state machine. The entire bounded incoming ZIP,
+expected-current hash map, requested final fingerprint and outer frame EOF are
+verified before changing live saves. Only recognized transferable entries are
+considered; runtime markers and unknown files are not copied or deleted.
 
-Envelope: magic `0x50445231`, version `1`, signed 32-bit payload length.
-Request maximum is 65536 bytes; response maximum is 64 MiB + 8192 bytes.
+The adapter pins the selected game's data and files directories, and keeps a
+UID-0/0700 workspace beside `files`. It serializes jobs with a nonblocking lock,
+creates a separate verified durable original backup, stages validated bytes, and
+preserves owner/group/mode/SELinux attributes learned locally. Archive data cannot
+supply those attributes. Each top-level publication uses the single native
+`renameat2(RENAME_NOREPLACE)` primitive. Unsupported kernels and cross-mount moves
+return explicit errors; there is no overwrite-rename fallback.
 
-Request payload:
-1. unsigned command byte: PROBE=1, INSPECT=2, EXPORT=3, OBSERVE=4, RESTORE=5, RECOVER=6
-2. package string; user int; UID int; PM dataDir string; source SHA-256 string
-3. APK count int (1–64); sorted path string and SHA-256 string for each APK
+A write-ahead journal and inode receipt admit only the recorded layout or its one
+permitted adjacent move after interruption. Recovery rolls back that known prefix.
+Unexpected new files, substituted inodes or conflicting destinations are preserved
+and reported rather than overwritten. Verified successful cleanup reclaims the
+private backup, staging and displaced copies; no fixed number-of-restores limit is
+imposed. Cleanup failures retain a resumable terminal receipt.
 
-Response payload:
-1. unsigned status byte (explicit numeric codes in `RootProtocol.Status`)
-2. fixed detail string equal to the status enum name; binding fingerprint string
-3. content-state string; file count int; expanded byte count long; content fingerprint string
-4. observation-state string; reliability byte (0 or 1)
-5. archive byte count int, then exactly that many ZIP bytes (EXPORT OK only)
+Read/inspect/export/observe operations hold a read guard against an existing
+workspace and reject pending recovery or concurrent mutation. The guard creates no
+workspace during ordinary reads. PROBE remains available to authorize recovery.
 
-Errors contain fixed diagnostic codes, never exception strings, raw save content,
-credentials, or target paths. The normal caller must validate binding/command/status,
-stage the streamed archive privately, verify ZIP contents and fingerprint, and only
-then accept the export. Receiving bytes before EOF is not success.
+Both the start and final boundary hash the complete installed APK set. Intermediate
+transaction checks use a one-job PM and APK inode/device/owner/mode/size/time stamp,
+so the same APK is not rehashed for every moved file. The metadata cache is never
+persisted or accepted in place of the final full hash. Foreground, active background
+or unknown lifecycle states refuse mutation; reliably CACHED/ABSENT states plus
+stable scans permit a normal game exit without force-stopping it. Repeated checks
+cannot prevent every external new launch; detected interference retains backups.
+
+## Wire v2
+
+`RootProtocol` is the authoritative field/enum definition. Integer fields use Java
+DataInput/DataOutput big-endian encoding, and strings are bounded strict UTF-8.
+No Java serialization is used. The fixed envelope has magic `0x50445231`, version
+`2`, and a bounded payload length. Extra fields, frames and trailing bytes fail.
+
+Every request has a fresh 32-hex request ID, one of the six fixed commands, and an
+exact `RootBinding`. Restore adds expected-current and desired SHA-256 inventory
+fingerprints and a bounded streamed ZIP. A response echoes the request ID, command,
+binding, expected and desired fingerprints and reports a typed outcome. The main
+client checks these echoes, EOF, exact inventory, file count and expanded bytes
+before accepting success. Recovery success alone does not claim the requested
+forward restore was applied.
+
+Errors contain fixed diagnostic stage/category codes and bounded errno, never raw
+exception strings, credentials, save contents or target paths. No unbounded archive
+request buffer or arbitrary operation argument is accepted.
 
 ## Verification
 
-Run `android-root/src/test/run-host-tests.sh`. It compiles only platform-independent
-classes, shared helper sources, and injected test fixtures. It never starts the runner,
+Run the host suites from the repository:
+
+- `bash android-root/src/test/run-host-tests.sh`
+- `bash android-root/src/test/run-installed-stamp-tests.sh`
+- `bash android-root/src/test/run-mutation-tests.sh`
+- `bash android-root/src/test/run-restore-host-tests.sh`
+- `bash android-root/src/test/run-adapter-tests.sh`
+- `bash android-app/src/test/run-root-client-tests.sh`
+- `bash android-app/src/test/run-root-ui-tests.sh`
+- `bash android-app/src/test/run-root-auto-policy-tests.sh`
+
+These compile platform-independent classes, shared helper sources and injected
+fixtures. It never starts the runner,
 `su`, `app_process`, `cmd`, ADB, or a device session. It covers protocol framing,
 identity/path rejection, filesystem types/ownership/modes/hardlinks, shared marker
-policy, races, limits, lifecycle parsing, root gating, and unsupported write commands.
+policy, races, limits, lifecycle parsing, root gating, and read/restore protocol failures. Mutation suites inject interruptions, unsupported
+kernels, replaced targets, incomplete archives and unknown concurrent entries.
+`tools/android-root-native/README.md` documents the small official-input cross-build
+and separate host syscall/JNI tests; passing them is not Android root execution.
 
 Android-only sources are compile-checked with SDK36, with API27 timestamp access
 isolated behind an API-level branch and Linux O_CLOEXEC/O_DIRECTORY constants used
