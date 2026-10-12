@@ -39,6 +39,9 @@ public final class MainRuntimeRecoveryChecks {
         bridgeTransport();
         readinessAndDiagnostics();
         packageTrust();
+        connectionPersistence();
+        endpointPolicy();
+        legacyConnection();
         System.out.println("Main runtime host regression checks passed: " + assertions + " assertions.");
         System.out.println("Boundary: pure Java only; Android service lifecycle, Binder, permissions and device behavior are not executed.");
     }
@@ -158,6 +161,160 @@ public final class MainRuntimeRecoveryChecks {
         equal("UNKNOWN_BRIDGE_FAILURE", new BridgeDiagnostics.Failure(null, "untrusted-code", "", null).code, "unknown codes constrained");
         equal("", BridgeDiagnostics.remoteOrigins("java.lang.Exception", "Remote stack trace:\nat android.content.ContentProviderClient.call(secret)"), "remote origin only from RemoteException");
         equal("android.content.ContentProviderClient.call", BridgeDiagnostics.remoteOrigins("android.os.RemoteException", "Remote stack trace:\n at android.content.ContentProviderClient.call(secret)\n at evil.private.Method(secret)"), "remote origin allowlist");
+    }
+
+
+    static void connectionPersistence() throws Exception {
+        Path root = Files.createTempDirectory("pdsync-connection-check-");
+        try {
+            WebDavConnectionFile store = new WebDavConnectionFile(root.toFile());
+            check(!store.exists(), "absent configuration reported absent");
+            equal(null, store.load(), "absent configuration loads as null, not corrupt");
+            equal(null, store.loadOrMigrate(() -> null), "absent legacy configuration is not an error");
+            WebDavConnectionFile.Value old = new WebDavConnectionFile.Value("https://dav.example.test/path", "old-user", "old-password", "profile");
+            store.save(old);
+            equal("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(root.resolve(WebDavConnectionFile.FILE_NAME))), "saved credentials are owner-only");
+            sameConnection(old, store.load());
+            byte[] original = Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME));
+            WebDavConnectionFile.Value updated = new WebDavConnectionFile.Value("https://dav.example.test/next", "", "", "new-profile");
+            AtomicInteger saved = new AtomicInteger();
+            fails(IOException.class, () -> ConnectionUpdatePolicy.apply(true, false, () -> { throw new IOException("failed test"); }, () -> { saved.incrementAndGet(); store.save(updated); }));
+            equal(0, saved.get(), "failed connection test never saves");
+            check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "failed test preserves original bytes");
+            ConnectionUpdatePolicy.apply(false, false, () -> {}, () -> { saved.incrementAndGet(); store.save(updated); });
+            equal(0, saved.get(), "non-saving or cancelled edit does not persist");
+            ConnectionUpdatePolicy.apply(true, true, () -> {}, () -> { saved.incrementAndGet(); store.save(updated); });
+            equal(0, saved.get(), "temporary test never persists");
+            for (int mode = 0; mode < 4; mode++) {
+                final int failureMode = mode;
+                final byte[][] suppliedBytes = new byte[1][];
+                WebDavConnectionFile broken = new WebDavConnectionFile(root.toFile(), new WebDavConnectionFile.FileWriter() {
+                    public void writeAndSync(Path file, byte[] bytes) throws IOException {
+                        suppliedBytes[0] = bytes;
+                        equal("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(file)), "temporary credentials private before write");
+                        Files.write(file, bytes);
+                        if (failureMode == 0) throw new IOException("disk full");
+                        if (failureMode == 2) throw new SecurityException("write denied");
+                        if (failureMode == 3) throw new AssertionError("fatal write");
+                    }
+                    public void replace(Path from, Path to) throws IOException {
+                        throw new java.nio.file.AtomicMoveNotSupportedException(from.toString(), to.toString(), "simulated unsupported filesystem");
+                    }
+                });
+                if (mode == 3) fails(AssertionError.class, () -> broken.save(updated));
+                else fails(IOException.class, () -> broken.save(updated));
+                check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "failed save preserves exact old bytes");
+                check(suppliedBytes[0] != null, "writer exercised");
+                check(Arrays.equals(new byte[suppliedBytes[0].length], suppliedBytes[0]), "serialized credential buffer wiped after failure");
+                try (java.util.stream.Stream<Path> children = Files.list(root)) {
+                    equal(1L, children.count(), "failed save cleans credential temporary file");
+                }
+            }
+            WebDavConnectionFile.Value temporary = new WebDavConnectionFile.Value("http://127.0.0.1:8765/dav", "", "", "test");
+            fails(IOException.class, () -> store.save(temporary));
+            check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "loopback test cannot overwrite saved HTTPS");
+            ConnectionUpdatePolicy.apply(true, false, () -> {}, () -> store.save(updated));
+            sameConnection(updated, store.load());
+            check(!updated.toString().contains(updated.endpoint), "connection string hides endpoint and credentials");
+            store.forget();
+            equal(null, store.load(), "forget removes saved config");
+            sameConnection(old, store.loadOrMigrate(() -> old));
+            sameConnection(old, store.loadOrMigrate(() -> { throw new AssertionError("new file takes precedence"); }));
+
+            Path config = root.resolve(WebDavConnectionFile.FILE_NAME);
+            byte[][] malformed = {
+                    new byte[]{(byte)0xff},
+                    "version=2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "version=1\nendpoint=https://example.test\nprofile=test\nusername=\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "version=1\nendpoint=http://127.0.0.1\nprofile=test\nusername=\npassword=\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    new byte[65537]
+            };
+            for (byte[] invalid : malformed) {
+                Files.write(config, invalid);
+                fails(IOException.class, () -> store.loadOrMigrate(() -> { throw new AssertionError("corrupt current file must not silently migrate"); }));
+                check(Arrays.equals(invalid, Files.readAllBytes(config)), "invalid configuration preserved for recovery");
+            }
+            Files.delete(config);
+            Files.createDirectory(config);
+            fails(IOException.class, store::load);
+            Files.delete(config);
+            Path outside = root.resolve("outside");
+            Files.writeString(outside, "private content");
+            Files.createSymbolicLink(config, outside);
+            fails(IOException.class, store::load);
+            equal("private content", Files.readString(outside), "symlink read never alters target");
+            store.forget();
+            check(Files.exists(outside), "forget only unlinks configuration symlink");
+        } finally { deleteTree(root); }
+    }
+
+    static void sameConnection(WebDavConnectionFile.Value expected, WebDavConnectionFile.Value actual) {
+        check(actual != null, "connection exists");
+        equal(expected.endpoint, actual.endpoint, "endpoint round trip");
+        equal(expected.username, actual.username, "username round trip including empty");
+        equal(expected.password, actual.password, "password round trip including empty");
+        equal(expected.profile, actual.profile, "profile round trip");
+    }
+    static void deleteTree(Path root) throws Exception {
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
+        }
+    }
+    static void endpointPolicy() throws Exception {
+        for (String valid : List.of("https://example.test", "HTTPS://example.test:443/a%20b", "http://127.0.0.1", "http://127.0.0.1:65535/a")) {
+            ConnectionEndpointPolicy.validate(valid, "", ""); assertions++;
+        }
+        for (String invalid : List.of("http://localhost", "http://127.1", "http://2130706433", "http://127.0.0.2", "http://[::1]", "http://127.0.0.1.example.test", "http://127.0.0.1:0", "http://127.0.0.1:65536", "https://user:pass@example.test", "https://example.test/?secret=x", "https://example.test/#fragment", "https://example.test/a//b", "https://example.test/../b", "https://example.test/%2e%2e", "https://example.test/%2f", "https://example.test/%5c", "https://example.test/%252e", "https://example.test/%00", "https://example.test/\\path")) {
+            fails(IOException.class, () -> ConnectionEndpointPolicy.validate(invalid, "", ""));
+        }
+        fails(IOException.class, () -> ConnectionEndpointPolicy.validate("http://127.0.0.1", "name", ""));
+        fails(IOException.class, () -> ConnectionEndpointPolicy.validate("http://127.0.0.1", "", "password"));
+        fails(IOException.class, () -> ConnectionEndpointPolicy.validate("https://example.test", "user:name", ""));
+        fails(IOException.class, () -> ConnectionEndpointPolicy.validate("https://example.test", "", "secret\nheader"));
+        fails(IOException.class, () -> new WebDavConnectionFile.Value("https://example.test", "", "", "../bad").validate());
+    }
+
+    static void legacyConnection() throws Exception {
+        Path root = Files.createTempDirectory("pdsync-legacy-check-");
+        Path old = root.resolve("webdav.enc");
+        javax.crypto.SecretKey key = new javax.crypto.spec.SecretKeySpec(new byte[16], "AES"); // Synthetic test input only.
+        try {
+            equal(null, LegacyWebDavConnectionFile.read(old.toFile(), () -> key), "missing legacy file is normal");
+            Files.write(root.resolve("webdav.enc.new"), new byte[]{1});
+            fails(IOException.class, () -> LegacyWebDavConnectionFile.read(old.toFile(), () -> key));
+            check(Files.exists(root.resolve("webdav.enc.new")), "interrupted legacy write preserved");
+            Files.delete(root.resolve("webdav.enc.new"));
+            byte[] plain = "synthetic-test-value".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] iv = new byte[12];
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key, new javax.crypto.spec.GCMParameterSpec(128, iv));
+            cipher.updateAAD("pdsync:main:webdav:v1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] encrypted = cipher.doFinal(plain);
+            try (java.io.DataOutputStream output = new java.io.DataOutputStream(Files.newOutputStream(old))) {
+                output.writeInt(1); output.writeInt(iv.length); output.write(iv); output.writeInt(encrypted.length); output.write(encrypted);
+            }
+            byte[] valid = Files.readAllBytes(old);
+            check(Arrays.equals(plain, LegacyWebDavConnectionFile.read(old.toFile(), () -> key)), "legacy AES-GCM round trip");
+            Files.copy(old, root.resolve("webdav.enc.bak"));
+            Files.write(old, new byte[]{0});
+            check(Arrays.equals(plain, LegacyWebDavConnectionFile.read(old.toFile(), () -> key)), "AtomicFile backup has precedence");
+            Files.delete(root.resolve("webdav.enc.bak"));
+            Files.write(old, valid);
+            fails(IOException.class, () -> LegacyWebDavConnectionFile.read(old.toFile(), () -> { throw new IOException("missing key"); }));
+            check(Arrays.equals(valid, Files.readAllBytes(old)), "failed decryption does not destroy original");
+            byte[] trailing = Arrays.copyOf(valid, valid.length + 1);
+            Files.write(old, trailing);
+            fails(IOException.class, () -> LegacyWebDavConnectionFile.read(old.toFile(), () -> key));
+            Files.write(old, new byte[]{0});
+            long descriptorsBefore = descriptorCount();
+            for (int i = 0; i < 64; i++) fails(IOException.class, () -> LegacyWebDavConnectionFile.read(old.toFile(), () -> key));
+            long descriptorsAfter = descriptorCount();
+            if (descriptorsBefore >= 0 && descriptorsAfter >= 0) check(descriptorsAfter <= descriptorsBefore + 2, "invalid legacy reads close descriptors on failure");
+        } finally { deleteTree(root); }
+    }
+    static long descriptorCount() throws Exception {
+        if (!Files.isDirectory(Path.of("/proc/self/fd"))) return -1;
+        try (java.util.stream.Stream<Path> paths = Files.list(Path.of("/proc/self/fd"))) { return paths.count(); }
     }
 
     static void packageTrust() throws Exception {
