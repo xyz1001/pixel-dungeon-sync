@@ -250,6 +250,16 @@ public final class SaveArchive {
     
     public static void write(File root, Inventory inventory, OutputStream output) throws IOException {
         if (inventory.hashes.size() > MAX_FILES || inventory.bytes < 0 || inventory.bytes > MAX_BYTES) throw new IOException("Invalid save inventory");
+        if (inventory.hashes.isEmpty()) {
+            // Android 8 rejects a ZipOutputStream with no entries. Preserve stream ownership,
+            // byte limits and inventory validation while emitting the canonical empty EOCD.
+            try (OutputStream limited = new LimitedOutputStream(output, MAX_BYTES)) {
+                if (inventory.bytes != 0) throw new IOException("Staging content size changed");
+                byte[] empty = new byte[22];empty[0]=0x50;empty[1]=0x4b;empty[2]=0x05;empty[3]=0x06;
+                limited.write(empty);
+            }
+            return;
+        }
         long total = 0;
         try (ZipOutputStream zip = new ZipOutputStream(new LimitedOutputStream(output, MAX_BYTES))) {
             byte[] buffer = new byte[32768];

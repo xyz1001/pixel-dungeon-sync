@@ -36,16 +36,23 @@ internal fun safePath(name: String): Boolean = name.length <= 1024 && name.split
  !Regex("""(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?""").matches(part)
 }
 object Snapshots {
+ // Android 8 libcore rejects closing ZipOutputStream without entries. A zero-entry ZIP is
+ // exactly this 22-byte end-of-central-directory record, with all counts/offsets zero.
+ private fun archive(files: Map<String,ByteArray>): ByteArray {
+  if (files.isEmpty()) return ByteArray(22).also { it[0]=0x50; it[1]=0x4b; it[2]=0x05; it[3]=0x06 }
+  val output=java.io.ByteArrayOutputStream()
+  ZipOutputStream(output).use { zip -> files.forEach { (name,bytes) ->
+   zip.putNextEntry(ZipEntry(name));zip.write(bytes);zip.closeEntry()
+  } }
+  return output.toByteArray()
+ }
+
  /** Assemble a planned complete file set; run the same archive and metadata validation as downloads. */
  fun fromFiles(files: Map<String,ByteArray>,adapter: GameAdapter,profile: String,version: String,
   directoryMetadata: DirectorySnapshotMetadata? = null, metadata: SnapshotMetadata? = null): Snapshot {
   require(files.size<=MAX_SNAPSHOT_FILES && files.values.sumOf { it.size.toLong() }<=MAX_SNAPSHOT_BYTES)
-  val output=java.io.ByteArrayOutputStream()
-  ZipOutputStream(output).use { zip -> files.toSortedMap().forEach { (name,bytes) ->
-   require(safePath(name)&&adapter.includes(name)&&!isDirectoryMetadata(name))
-   zip.putNextEntry(ZipEntry(name));zip.write(bytes);zip.closeEntry()
-  } }
-  val archive=output.toByteArray()
+  files.keys.forEach { name -> require(safePath(name)&&adapter.includes(name)&&!isDirectoryMetadata(name)) }
+  val archive=archive(files.toSortedMap())
   val snapshot=Snapshot(Manifest(game=adapter.id,profile=profile,version=version,id=UUID.randomUUID().toString(),parent=null,
    sha256=hash(archive),files=files.mapValues { hash(it.value) },metadata=metadata,directoryMetadata=directoryMetadata,
    saveVersions=if(adapter.id==Shattered.id)ShatteredVersions.detect(files) else null),archive)
@@ -77,9 +84,7 @@ object Snapshots {
    }
   } }
   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { require("$it/game.dat" in files) { "Incomplete run: $it" } }
-  val output = java.io.ByteArrayOutputStream()
-  ZipOutputStream(output).use { z -> files.forEach { (name, bytes) -> z.putNextEntry(ZipEntry(name)); z.write(bytes); z.closeEntry() } }
-  val zip = output.toByteArray(); require(zip.size <= MAX_SNAPSHOT_BYTES)
+  val zip = archive(files); require(zip.size <= MAX_SNAPSHOT_BYTES)
   return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) },
    metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(files.keys) }), zip)
  }

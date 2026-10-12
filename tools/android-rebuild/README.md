@@ -119,3 +119,26 @@ Official SDK repository: https://dl.google.com/android/repository/repository2-1.
 - `build-tools_r36_linux.zip`: 63,737,259 bytes; SHA1 `b0b6376977657e8ad9b969bacf4093601da2c6fb`; SHA256 `5d9ac77fb6ff43d9da518a337b4fcf8f9097113df531d99ccefe80ef7ce8250b`
 
 Both archive sizes and official SHA1 checksums were verified before extraction. Total download: 129,615,669 bytes. No emulator image was downloaded.
+
+## Empty ZIP compatibility regression (Android 8)
+
+Android 8's libcore `ZipOutputStream.finish()` throws `ZipException("No entries")`
+for zero-entry archives. On first inspection, the main app captures its still-empty
+mirror before copying a valid, nonempty helper export, so this also affects users
+who already have game saves. Both core archive entry points, the main restore
+writer, and the helper export writer emit the canonical 22-byte ZIP EOCD for an
+empty file set, without adding fake save entries. Nonempty archives keep their
+existing ZIP writer and validation rules.
+
+Run `tools/android-rebuild/test-android-empty-zip.sh` with JDK 17+ and the usual
+Gradle dependencies available. `GRADLE_BIN`, `JAVA_BIN`, `GRADLE_USER_HOME`, and
+`PDSYNC_EMPTY_ZIP_TEST_OUTPUT` may select existing local tools/caches and an output
+directory; pass `--offline` when using a populated cache. The script builds a
+small test-only JVM agent using bundled JDK ASM, verifies that a plain empty ZIP
+writer actually throws Android's exception, and runs production codecs plus
+core/facade/onboarding/security tests under that behavior. It includes a fresh
+empty mirror with three real-format synthetic slots and an empty loopback DAV,
+asserting `LOCAL_ONLY` and read-only HTTP requests. This is host emulation of the
+specific libcore behavior, not a real-device runtime test.
+
+Upstream source: https://android.googlesource.com/platform/libcore/+/android-8.0.0_r1/ojluni/src/main/java/java/util/zip/ZipOutputStream.java

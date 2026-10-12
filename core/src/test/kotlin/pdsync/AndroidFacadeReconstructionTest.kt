@@ -97,6 +97,37 @@ class AndroidFacadeReconstructionTest {
         assertEquals("UPLOADED", it.facade.autoUpload().status)
     }
 
+    @Test fun freshEmptyMirrorWithThreeLocalSlotsAndEmptyDavComparesWithoutAnyPut() {
+        val slots=(1..3).associate { slot -> "game$slot/game.dat" to fixture(slot).getValue("game1/game.dat") }
+        val bridge=FakeBridge(slots)
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            server.dispatcher=object:okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request:okhttp3.mockwebserver.RecordedRequest)=when(request.method) {
+                    "PROPFIND" -> okhttp3.mockwebserver.MockResponse().setResponseCode(207)
+                        .setBody("""<d:multistatus xmlns:d="DAV:"></d:multistatus>""")
+                    "GET" -> okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                    else -> okhttp3.mockwebserver.MockResponse().setResponseCode(405)
+                }
+            }
+            server.start()
+            val dav=AppendOnlyWebDav(server.url("/dav/").toString(),identity.namespace,"hero","","")
+            val root=temp.resolve("three-slot-workspace")
+            val facade=AndroidSyncFacade(root,connection,bridge,identity,dav,0)
+            // previewLocal does not initialize the mirror; Step 3 must capture that empty mirror.
+            assertEquals(3,facade.previewLocal().fileCount)
+            repeat(2) {
+                val comparison=facade.inspect()
+                assertEquals("LOCAL_ONLY",comparison.kind);assertEquals(3,comparison.localFileCount)
+                assertTrue(comparison.remoteVersions.isEmpty())
+                assertEquals(slots.mapValues { hash(it.value) },facade.historyPresentation(comparison).currentFiles)
+            }
+            assertEquals(0,bridge.restores)
+            assertTrue(server.requestCount>0)
+            repeat(server.requestCount) { assertTrue(server.takeRequest().method in setOf("GET","PROPFIND")) }
+            assertEquals(slots.mapValues { hash(it.value) },readFiles(mirror(root)).mapValues { hash(it.value) })
+        }
+    }
+
     @Test fun inspectThenRenderThenUploadUsesOneImmutableObservation() {
         val bridge = FakeBridge(); val store = MemoryAppendStore(); val rig = rig(bridge, store)
         val inspection = rig.facade.inspect(); assertEquals("LOCAL_ONLY", inspection.kind)

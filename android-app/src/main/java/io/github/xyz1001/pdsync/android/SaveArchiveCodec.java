@@ -36,35 +36,45 @@ public final class SaveArchiveCodec {
     public static void writeRestoreArchive(Path root,File archive) throws IOException {
         if(!Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS)) throw new IOException("恢复目录必须是真实目录。");
         Set<String> aliases=new HashSet<>(),names=new HashSet<>(); long total=0;
-        try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(archive.toPath(),StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS));
+        try(OutputStream output=Files.newOutputStream(archive.toPath(),StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS);
             Stream<Path> walk=Files.walk(root)) {
-            Iterator<Path> paths=walk.sorted().iterator();
-            while(paths.hasNext()) {
-                Path file=paths.next(); if(file.equals(root)) continue;
-                BasicFileAttributes before=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
-                if(before.isSymbolicLink()) throw new IOException("恢复目录包含符号链接，已拒绝。");
-                if(before.isDirectory()) continue;
-                if(!before.isRegularFile()) throw new IOException("恢复目录条目类型无效。");
-                String name=root.relativize(file).toString().replace(File.separatorChar,'/'); validateName(name);
-                if(!aliases.add(name.toLowerCase(Locale.ROOT)) || names.size()>=MAX_FILES) throw new IOException("存档存在重复名称或文件数量超出限制。");
-                names.add(name);
-                long millis=before.lastModifiedTime().toMillis();
-                if(millis<0 || millis/1000>2147483647L) throw new IOException("存档时间超出安全 ZIP 时间范围。");
-                ZipEntry entry=new ZipEntry(name); entry.setLastModifiedTime(FileTime.fromMillis(millis/1000*1000)); zip.putNextEntry(entry);
-                long size=0;
-                try(InputStream input=Files.newInputStream(file,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)) {
-                    byte[] buffer=new byte[8192]; int n;
-                    while((n=input.read(buffer))!=-1) {
-                        total+=n;size+=n;
-                        if(total>MAX_BYTES || size>before.size()) throw new IOException("存档超过 64 MiB 安全限制或在读取时改变。");
-                        zip.write(buffer,0,n);
+            // Delay ZIP stream creation: Android 8 rejects finish() when there are no entries.
+            ZipOutputStream zip=null;
+            try {
+                Iterator<Path> paths=walk.sorted().iterator();
+                while(paths.hasNext()) {
+                    Path file=paths.next(); if(file.equals(root)) continue;
+                    BasicFileAttributes before=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+                    if(before.isSymbolicLink()) throw new IOException("恢复目录包含符号链接，已拒绝。");
+                    if(before.isDirectory()) continue;
+                    if(!before.isRegularFile()) throw new IOException("恢复目录条目类型无效。");
+                    String name=root.relativize(file).toString().replace(File.separatorChar,'/'); validateName(name);
+                    if(!aliases.add(name.toLowerCase(Locale.ROOT)) || names.size()>=MAX_FILES) throw new IOException("存档存在重复名称或文件数量超出限制。");
+                    names.add(name);
+                    long millis=before.lastModifiedTime().toMillis();
+                    if(millis<0 || millis/1000>2147483647L) throw new IOException("存档时间超出安全 ZIP 时间范围。");
+                    if(zip==null) zip=new ZipOutputStream(output);
+                    ZipEntry entry=new ZipEntry(name); entry.setLastModifiedTime(FileTime.fromMillis(millis/1000*1000)); zip.putNextEntry(entry);
+                    long size=0;
+                    try(InputStream input=Files.newInputStream(file,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)) {
+                        byte[] buffer=new byte[8192]; int n;
+                        while((n=input.read(buffer))!=-1) {
+                            total+=n;size+=n;
+                            if(total>MAX_BYTES || size>before.size()) throw new IOException("存档超过 64 MiB 安全限制或在读取时改变。");
+                            zip.write(buffer,0,n);
+                        }
                     }
+                    BasicFileAttributes after=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+                    if(size!=before.size() || !after.isRegularFile() || !Objects.equals(before.fileKey(),after.fileKey()) || after.size()!=before.size() || !after.lastModifiedTime().equals(before.lastModifiedTime())) throw new IOException("恢复目录在读取时改变。");
+                    zip.closeEntry();
                 }
-                BasicFileAttributes after=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
-                if(size!=before.size() || !after.isRegularFile() || !Objects.equals(before.fileKey(),after.fileKey()) || after.size()!=before.size() || !after.lastModifiedTime().equals(before.lastModifiedTime())) throw new IOException("恢复目录在读取时改变。");
-                zip.closeEntry();
-            }
-            requireCompleteRuns(names);
+                requireCompleteRuns(names);
+                if(zip==null) {
+                    // Standards-valid empty ZIP EOCD; no placeholder save files or directories.
+                    byte[] empty=new byte[22];empty[0]=0x50;empty[1]=0x4b;empty[2]=0x05;empty[3]=0x06;
+                    output.write(empty);
+                }
+            } finally { if(zip!=null) zip.close(); }
         }
         if(archive.length()>MAX_BYTES) throw new IOException("存档压缩包超过安全限制。");
     }
