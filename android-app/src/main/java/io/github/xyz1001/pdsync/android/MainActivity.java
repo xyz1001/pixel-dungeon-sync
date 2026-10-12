@@ -1118,31 +1118,30 @@ public final class MainActivity extends Activity {
             if (this.tops == null) {
                 return;
             }
+            // Use laid-out cards, never column-edge percentages or row-height estimates.
+            Map<String, HistoryArrowGeometry.Box> bounds = new LinkedHashMap<>();
+            for (Map.Entry<String, View> entry : this.views.entrySet()) {
+                View card = entry.getValue();
+                bounds.put(entry.getKey(), new HistoryArrowGeometry.Box(
+                        card.getLeft(), card.getTop(), card.getRight(), card.getBottom()));
+            }
+            List<HistoryArrowGeometry.Box> cards = new ArrayList<>(bounds.values());
             this.paint.setStrokeWidth(MainActivity.this.dp(2));
             this.paint.setStyle(Paint.Style.STROKE);
             for (HistoryEdge historyEdge : this.model.getEdges()) {
-                HistoryNode historyNode = this.nodes.get(historyEdge.getFromId());
-                HistoryNode historyNode2 = this.nodes.get(historyEdge.getToId());
-                if (historyNode != null && historyNode2 != null) {
-                    float width = getWidth() * (historyNode.getColumn() == 0 ? 0.45f : 0.55f);
-                    float width2 = getWidth() * (historyNode2.getColumn() != 0 ? 0.55f : 0.45f);
-                    float f = this.tops[historyNode.getRow()] + (this.heights[historyNode.getRow()] / 2.0f);
-                    float f2 = this.tops[historyNode2.getRow()] + (this.heights[historyNode2.getRow()] / 2.0f);
-                    this.paint.setColor(historyEdge.getDashed() ? -4879047 : -9004921);
-                    this.paint.setPathEffect(historyEdge.getDashed() ? new DashPathEffect(new float[]{MainActivity.this.dp(6), MainActivity.this.dp(4)}, 0.0f) : null);
-                    canvas.drawLine(width, f, width2, f2, this.paint);
-                    this.paint.setPathEffect(null);
-                    float f3 = width2 - width;
-                    float f4 = f2 - f;
-                    float fHypot = (float) Math.hypot(f3, f4);
-                    if (fHypot >= 1.0f) {
-                        float f5 = f3 / fHypot;
-                        float f6 = f4 / fHypot;
-                        float f7 = (width + width2) / 2.0f;
-                        float f8 = (f + f2) / 2.0f;
-                        canvas.drawLine((f7 - (MainActivity.this.dp(7) * f5)) - (MainActivity.this.dp(4) * f6), (f8 - (MainActivity.this.dp(7) * f6)) + (MainActivity.this.dp(4) * f5), f7, f8, this.paint);
-                        canvas.drawLine((f7 - (MainActivity.this.dp(7) * f5)) + (MainActivity.this.dp(4) * f6), (f8 - (f6 * MainActivity.this.dp(7))) - (f5 * MainActivity.this.dp(4)), f7, f8, this.paint);
-                    }
+                HistoryArrowGeometry.Box from = bounds.get(historyEdge.getFromId());
+                HistoryArrowGeometry.Box to = bounds.get(historyEdge.getToId());
+                if (from == null || to == null) continue;
+                HistoryArrowGeometry.Arrow arrow = HistoryArrowGeometry.between(from, to, cards,
+                        MainActivity.this.dp(7), MainActivity.this.dp(4), MainActivity.this.dp(1));
+                if (arrow == null) continue;
+                this.paint.setColor(historyEdge.getDashed() ? -4879047 : -9004921);
+                this.paint.setPathEffect(historyEdge.getDashed() ? new DashPathEffect(new float[]{MainActivity.this.dp(6), MainActivity.this.dp(4)}, 0.0f) : null);
+                canvas.drawLine(arrow.startX, arrow.startY, arrow.endX, arrow.endY, this.paint);
+                this.paint.setPathEffect(null);
+                if (arrow.hasHead) {
+                    canvas.drawLine(arrow.leftX, arrow.leftY, arrow.tipX, arrow.tipY, this.paint);
+                    canvas.drawLine(arrow.rightX, arrow.rightY, arrow.tipX, arrow.tipY, this.paint);
                 }
             }
         }
