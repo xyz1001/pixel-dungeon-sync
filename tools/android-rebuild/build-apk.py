@@ -3,6 +3,7 @@
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from apksig_compat import build_compat_jar
 
 SCRIPT=Path(__file__).resolve()
 REPO=next((p for p in SCRIPT.parents if (p/'settings.gradle.kts').is_file()), SCRIPT.parent.parent/'source')
@@ -54,7 +55,9 @@ def main():
         rebuilt=REPO/'core/build/libs/core.jar'
         core=(a.core or (rebuilt if rebuilt.exists() else RUNTIME/'core.jar')).resolve()
         deps=[core]+[RUNTIME/n for n in DEPS]
-        if not a.no_apksig: deps.append(BT/'lib/apksigner.jar')
+        if not a.no_apksig:
+            override=os.environ.get('PDSYNC_APKSIG_JAR')
+            deps.append(Path(override).resolve() if override else BT/'lib/apksigner.jar')
     for f in [ANDROID,BT/'aapt2',BT/'lib/d8.jar',BT/'zipalign',BT/'lib/apksigner.jar']+deps:
         if not f.exists(): p.error(f'Required input missing: {f}')
     work=(a.work_dir or ROOT/'build-scripts/out'/out.stem).resolve()
@@ -83,6 +86,9 @@ def main():
     sdk=manifest.find('uses-sdk')
     if sdk is None: sdk=ET.SubElement(manifest,'uses-sdk')
     min_sdk=int(sdk.get(ANDROID_NS+'minSdkVersion',a.min_sdk)); target_sdk=int(sdk.get(ANDROID_NS+'targetSdkVersion',a.target_sdk))
+    if not a.standalone and not a.no_apksig and min_sdk < 28 and not os.environ.get('PDSYNC_APKSIG_JAR'):
+        deps[-1]=build_compat_jar(BT/'lib/apksigner.jar', ROOT/'generated-deps/apksigner-api26.jar',
+                                SDK/'platforms/android-26/android.jar', java)
     sdk.set(ANDROID_NS+'minSdkVersion',str(min_sdk)); sdk.set(ANDROID_NS+'targetSdkVersion',str(target_sdk))
     if a.version_code is not None: manifest.set(ANDROID_NS+'versionCode',str(a.version_code))
     if a.version_name is not None: manifest.set(ANDROID_NS+'versionName',a.version_name)
