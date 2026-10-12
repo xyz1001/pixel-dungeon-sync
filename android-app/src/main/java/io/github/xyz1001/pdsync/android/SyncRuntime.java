@@ -20,6 +20,9 @@ final class SyncRuntime {
     private static final String PREFS = "sync-presentation-v2";
     private static volatile SecureConnectionStore.Connection connection;
     private static volatile GamePreparationService.PreparedPair selected;
+    private static volatile String rootAuthorizationToken;
+    private static RootGameBridge rootBackend;
+    private static String rootBackendToken;
 
     SyncRuntime() {
     }
@@ -56,18 +59,133 @@ final class SyncRuntime {
         return selected;
     }
 
+    /** Local selection only. Loading/rendering this never launches a privileged process. */
+    static SelectedRootGame rootGame(Context context) throws Exception {
+        return new RootSelectionStore(context.getFilesDir()).load();
+    }
+
+    static boolean rootMode(Context context) throws Exception { return rootGame(context) != null; }
+
+    static void setRootGame(Context context, SelectedRootGame game) throws Exception {
+        synchronized (OPERATION_LOCK) {
+            requireBackendSwitchAllowed(context);
+            requireFreshBackendComparison(context);
+            new RootTargetResolver(context).requireUnchanged(game);
+            AutoSyncService.cancelForConnectionChange(context);
+            rootAuthorizationToken = null;
+            closeRootBackend();
+            new RootSelectionStore(context.getFilesDir()).save(game);
+        }
+    }
+
+    static void useEmbeddedBackend(Context context) throws Exception {
+        synchronized (OPERATION_LOCK) {
+            requireBackendSwitchAllowed(context);
+            requireFreshBackendComparison(context);
+            AutoSyncService.cancelForConnectionChange(context);
+            rootAuthorizationToken = null;
+            closeRootBackend();
+            new RootSelectionStore(context.getFilesDir()).clear();
+        }
+    }
+
+    private static void requireFreshBackendComparison(Context context) throws IOException {
+        if (!prefs(context).edit().putBoolean("backendComparisonRequired", true).commit())
+            throw new IOException("无法保存后端切换状态，已停止切换。");
+    }
+
+    private static void requireBackendSwitchAllowed(Context context) throws Exception {
+        if (new InstallCoordinator(context).hasActiveRequest())
+            throw new IOException("系统安装或卸载请求尚未结束，不能切换存档后端。");
+        if (AndroidSyncFacade.hasUnresolvedRestore(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath()))
+            throw new IOException("存在未完成恢复，请先在原后端处理恢复记录，不能切换存档后端。");
+    }
+
+    /** Authorization is intentionally memory-only and bound to this exact selection. */
+    static boolean rootAuthorized(Context context) {
+        try {
+            SelectedRootGame game = rootGame(context);
+            return game != null && rootAuthorizationToken != null && rootAuthorizationToken.equals(game.selectionToken());
+        } catch (Exception invalid) { return false; }
+    }
+
+    /** Must be reached only from an explicit user authorization action. */
+    static String probeRootAuthorization(Context context) throws Exception {
+        synchronized (OPERATION_LOCK) {
+            SelectedRootGame game = rootGame(context);
+            if (game == null) throw new IOException("请先选择 Root 游戏。");
+            requireBackendSwitchAllowed(context);
+            rootAuthorizationToken = null;
+            String result;
+            try (RootGameBridge probe = new RootGameBridge(context, game, rootIdentity(context, game))) {
+                result = probe.probeAuthorization();
+            }
+            SelectedRootGame current = rootGame(context);
+            if (current == null || !current.matches(game)) throw new IOException("Root 选择已变化，请重新授权。");
+            rootAuthorizationToken = game.selectionToken();
+            return result;
+        }
+    }
+
+    static synchronized GameAccessBackend backend(Context context) throws Exception {
+        SelectedRootGame root = rootGame(context);
+        if (root != null) {
+            String token = root.selectionToken() + ":" + currentNamespace(context);
+            if (rootBackend == null || !token.equals(rootBackendToken)) {
+                closeRootBackend();
+                rootBackend = (RootGameBridge) GameAccessBackends.forRootGame(context, root, rootIdentity(context, root));
+                rootBackendToken = token;
+            }
+            return rootBackend;
+        }
+        closeRootBackend();
+        GamePreparationService.PreparedPair prepared = requirePreparedGame(context);
+        return GameAccessBackends.forPreparedGame(context, prepared, gameIdentity(context, prepared));
+    }
+
+    private static synchronized void closeRootBackend() {
+        if (rootBackend != null) rootBackend.close();
+        rootBackend = null; rootBackendToken = null;
+    }
+
+    static String currentSelectionToken(Context context) throws Exception {
+        SelectedRootGame root = rootGame(context);
+        return root == null ? selectionToken(requirePreparedGame(context)) : root.selectionToken();
+    }
+
+    static String currentGamePackage(Context context) throws Exception {
+        SelectedRootGame root = rootGame(context);
+        return root == null ? requirePreparedGame(context).gamePackage : root.gamePackage;
+    }
+
+    static AndroidGameIdentity currentGameIdentity(Context context) throws Exception {
+        SelectedRootGame root = rootGame(context);
+        return root == null ? gameIdentity(context, requirePreparedGame(context)) : rootIdentity(context, root);
+    }
+
+    private static String currentOrigin(Context context) throws Exception {
+        SelectedRootGame root = rootGame(context);
+        return root == null ? requirePreparedGame(context).originIdentity : root.originIdentity;
+    }
+
+    private static AndroidGameIdentity rootIdentity(Context context, SelectedRootGame root) {
+        String namespace = prefs(context).getString("namespace." + root.originIdentity, null);
+        if (namespace == null) namespace = AndroidGameIdentity.defaultNamespace(root.originIdentity);
+        return new AndroidGameIdentity(root.gamePackage, root.gameLabel, root.originIdentity, namespace);
+    }
+
     static String selectionToken(GamePreparationService.PreparedPair preparedPair) {
         return preparedPair.originIdentity + ":" + preparedPair.sourceApkSetSha256 + ":" + (preparedPair.embeddedBridge() ? preparedPair.bridgeMode + ":" + preparedPair.runtimeDexSha256 : preparedPair.sharedUid);
     }
 
     static String currentNamespace(Context context) throws Exception {
-        GamePreparationService.PreparedPair preparedPairRequirePreparedGame = requirePreparedGame(context);
-        String string = prefs(context).getString("namespace." + preparedPairRequirePreparedGame.originIdentity, null);
-        return string == null ? AndroidGameIdentity.defaultNamespace(preparedPairRequirePreparedGame.originIdentity) : string;
+        String origin = currentOrigin(context);
+        String string = prefs(context).getString("namespace." + origin, null);
+        return string == null ? AndroidGameIdentity.defaultNamespace(origin) : string;
     }
 
     static void setNamespace(Context context, String str) throws Exception {
-        GamePreparationService.PreparedPair preparedPairRequirePreparedGame = requirePreparedGame(context);
+        String origin = currentOrigin(context);
         if (AndroidSyncFacade.hasUnresolvedRestore(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath())) {
             throw new IOException("存在未完成恢复，先处理恢复记录后再关联云端档案。");
         }
@@ -76,11 +194,12 @@ final class SyncRuntime {
             throw new IOException("云端游戏标识格式无效。");
         }
         AutoSyncService.cancelForConnectionChange(context);
+        closeRootBackend();
         SharedPreferences.Editor editorEdit = prefs(context).edit();
         if (strTrim.isEmpty()) {
-            editorEdit.remove("namespace." + preparedPairRequirePreparedGame.originIdentity);
+            editorEdit.remove("namespace." + origin);
         } else {
-            editorEdit.putString("namespace." + preparedPairRequirePreparedGame.originIdentity, strTrim);
+            editorEdit.putString("namespace." + origin, strTrim);
         }
         if (!editorEdit.commit()) {
             throw new IOException("无法保存云端关联，未继续同步。");
@@ -100,9 +219,8 @@ final class SyncRuntime {
             throw new IllegalStateException("WebDAV 连接尚未配置，未上传存档。");
         }
         connection2.validate();
-        GamePreparationService.PreparedPair preparedPairRequirePreparedGame = requirePreparedGame(context);
-        AndroidGameIdentity androidGameIdentityGameIdentity = gameIdentity(context, preparedPairRequirePreparedGame);
-        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile), GameAccessBackends.forPreparedGame(context, preparedPairRequirePreparedGame, androidGameIdentityGameIdentity), androidGameIdentityGameIdentity);
+        AndroidGameIdentity androidGameIdentityGameIdentity = currentGameIdentity(context);
+        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile), backend(context), androidGameIdentityGameIdentity);
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -110,14 +228,15 @@ final class SyncRuntime {
     }
 
     private static String scope(Context context, SecureConnectionStore.Connection connection2) throws Exception {
-        GamePreparationService.PreparedPair preparedPairRequirePreparedGame = requirePreparedGame(context);
+        String origin = currentOrigin(context);
         if (connection2 == null) {
             throw new IOException("No configured connection");
         }
-        return PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest((preparedPairRequirePreparedGame.originIdentity + "\n" + currentNamespace(context) + "\n" + connection2.endpoint + "\n" + connection2.username + "\n" + connection2.profile).getBytes(StandardCharsets.UTF_8)));
+        return PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest((origin + "\n" + currentNamespace(context) + "\n" + connection2.endpoint + "\n" + connection2.username + "\n" + connection2.profile).getBytes(StandardCharsets.UTF_8)));
     }
 
     static OnboardingProgress onboardingProgress(Context context, SecureConnectionStore.Connection connection2) {
+        if (prefs(context).getBoolean("backendComparisonRequired", false)) return OnboardingProgress.PENDING;
         try {
             return OnboardingProgress.valueOf(prefs(context).getString("onboarding." + scope(context, connection2), "PENDING"));
         } catch (Exception unused) {
@@ -127,7 +246,8 @@ final class SyncRuntime {
 
     static void setOnboardingProgress(Context context, SecureConnectionStore.Connection connection2, OnboardingProgress onboardingProgress) {
         try {
-            if (prefs(context).edit().putString("onboarding." + scope(context, connection2), onboardingProgress.name()).commit()) {
+            if (prefs(context).edit().putString("onboarding." + scope(context, connection2), onboardingProgress.name())
+                    .putBoolean("backendComparisonRequired", false).commit()) {
             } else {
                 throw new IOException("无法保存配置进度。");
             }
@@ -154,7 +274,8 @@ final class SyncRuntime {
             return false;
         }
         try {
-            if (!requirePreparedGame(context).embeddedBridge()) return false;
+            // Root automatic observation is not enabled until actual Android lifecycle acceptance.
+            if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false;
         } catch (Exception unavailablePreparation) {
             return false;
         }

@@ -11,7 +11,11 @@ public final class GameAccessBackends {
     public static GameAccessBackend forPreparedGame(Context context,
             GamePreparationService.PreparedPair prepared, AndroidGameIdentity identity) {
         // This is construction, not a trust/readiness check. BridgeClient retains those checks.
-        // Root access has no selection path here until its own verified preparation exists.
+        // This path remains unchanged for all existing retained preparations.
         return new BridgeClient(context, prepared, identity);
+    }
+    public static GameAccessBackend forRootGame(Context context, SelectedRootGame selected,
+            AndroidGameIdentity identity) throws Exception {
+        return new RootGameBridge(context, selected, identity);
     }
 }

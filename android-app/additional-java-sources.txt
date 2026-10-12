@@ -1,0 +1,6 @@
+# Main-only root process and the independently shared archive/layout utilities.
+# No helper manifest, Provider implementation or resources are imported.
+android-root/src/main/java
+android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveArchive.java
+android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveDirectoryPolicy.java
+android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/BridgeFailure.java
