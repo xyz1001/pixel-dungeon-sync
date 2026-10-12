@@ -273,16 +273,23 @@ final class SyncRuntime {
         }
     }
 
+    static boolean backendSupportsAutomatic(GameAccessBackend.Mode mode, GameAccessBackend.Capabilities capabilities) {
+        return mode != null && mode != GameAccessBackend.Mode.LEGACY_HELPER_BRIDGE && capabilities != null
+                && capabilities.exportSupported && capabilities.lifecycleObservation;
+    }
+
     static boolean automaticAllowed(Context context, SecureConnectionStore.Connection connection2) {
         if (isAutoUploadPaused(context) || connection2 == null) {
             return false;
         }
         try {
-            // Root automatic observation is not enabled until actual Android lifecycle acceptance.
-            if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false;
-        } catch (Exception unavailablePreparation) {
+            GameAccessBackend access = backend(context); // Construction and capabilities never invoke su.
+            if (!backendSupportsAutomatic(access.mode(), access.capabilities())) return false;
+            boolean pending = AndroidSyncFacade.hasUnresolvedRestore(
+                    new File(context.getFilesDir().getCanonicalFile(), "sync").toPath());
+            return OnboardingGate.allowsAutomatic(onboardingProgress(context, connection2), pending, true);
+        } catch (Exception unavailableSelection) {
             return false;
         }
-        return OnboardingGate.allowsAutomatic(onboardingProgress(context, connection2), false, true);
     }
 }

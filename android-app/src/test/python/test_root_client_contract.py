@@ -34,7 +34,9 @@ class RootClientContract(unittest.TestCase):
         self.assertIn('hasUnresolvedRestore', text)
         self.assertIn('new InstallCoordinator(context).hasActiveRequest()', text)
         self.assertIn('"namespace." + root.originIdentity', text)
-        self.assertIn('if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false', text)
+        self.assertIn('backendSupportsAutomatic(access.mode(), access.capabilities())', text)
+        self.assertIn('capabilities.exportSupported && capabilities.lifecycleObservation', text)
+        self.assertIn('mode != GameAccessBackend.Mode.LEGACY_HELPER_BRIDGE', text)
 
     def test_root_opt_in_never_probes_from_lookup(self):
         runtime = (BASE / 'SyncRuntime.java').read_text()
