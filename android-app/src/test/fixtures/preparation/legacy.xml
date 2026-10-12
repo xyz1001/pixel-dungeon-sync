@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.legacy" android:versionCode="123">
+<uses-sdk android:minSdkVersion="36"/><application android:hasCode="false" android:isSplitRequired="true"/>
+</manifest>

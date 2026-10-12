@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.game" android:versionCode="123" android:versionName="test" android:requiredSplitTypes="config.abi">
+<uses-sdk android:minSdkVersion="36" android:targetSdkVersion="36"/><application android:hasCode="false"/>
+</manifest>
