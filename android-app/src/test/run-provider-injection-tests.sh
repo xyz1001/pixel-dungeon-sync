@@ -25,6 +25,9 @@ done
 echo "AAPT2 independently parsed injected manifest: $OUT/injected-manifest.txt"
 "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$OUT/fixtures/base.apk" --file AndroidManifest.xml > "$OUT/original-manifest.txt"
 "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$OUT/no-code-injected-fixture.apk" --file AndroidManifest.xml > "$OUT/no-code-manifest.txt"
+for fixture in "$OUT"/sdk-*-patched.apk; do
+    "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$fixture" --file AndroidManifest.xml > "${fixture%.apk}.txt"
+done
 python3 - "$OUT" <<'PY'
 import copy, pathlib, re, sys
 out = pathlib.Path(sys.argv[1])
@@ -76,5 +79,20 @@ assert original == injected, 'Existing manifest tree changed beyond declared mig
 no_code = tree(out / 'no-code-manifest.txt')
 no_code_app = next(n for n in no_code['children'] if n['tag']=='application')
 assert next(v for k,v in no_code_app['attrs'].items() if ':hasCode(' in k) == 'true'
+for name, minimum, target, maximum in (
+    ('sdk-old',26,29,36), ('sdk-26',26,28,36), ('sdk-new',29,35,36),
+    ('sdk-no-min',26,28,36), ('sdk-no-target',26,19,36), ('sdk-absent',26,1,None),
+    ('sdk-split-old',26,29,36),
+):
+    root = tree(out / (name+'-patched.txt'))
+    nodes = [n for n in root['children'] if n['tag']=='uses-sdk']
+    assert len(nodes)==1, name
+    sdk = nodes[0]['attrs']
+    def value(attr): return next((v for k,v in sdk.items() if ':'+attr+'(' in k), None)
+    assert value('minSdkVersion') == str(minimum), (name,sdk)
+    assert value('targetSdkVersion') == str(target), (name,sdk)
+    assert value('maxSdkVersion') == (None if maximum is None else str(maximum)), (name,sdk)
+    if name == 'sdk-absent': assert root['children'].index(nodes[0]) < next(i for i,n in enumerate(root['children']) if n['tag']=='application')
+print('Independent AAPT2 SDK-floor checks passed: old/missing minima raised, 26+ never lowered, explicit and implicit targets/maxima retained, split compatible')
 print('Independent AAPT2 tree comparison passed: original application/components/launcher/settings retained; exact new provider/activity/query and nine string bindings')
 PY

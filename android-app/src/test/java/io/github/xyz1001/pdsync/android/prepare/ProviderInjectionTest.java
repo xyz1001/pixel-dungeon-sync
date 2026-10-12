@@ -77,6 +77,16 @@ public final class ProviderInjectionTest {
                 rejects(() -> BinaryManifestPatch.patchProvider(ApkArchive.manifest(fixtures.resolve(conflict + ".apk").toFile()), binding), conflict);
             BinaryManifestPatch.verifyProviderManifest(BinaryManifestPatch.patchProvider(ApkArchive.manifest(fixtures.resolve("existing-query.apk").toFile()), binding), binding); checks++;
 
+            for (String sdkFixture : new String[]{"sdk-old", "sdk-26", "sdk-new", "sdk-no-min", "sdk-no-target", "sdk-absent", "sdk-split-old"}) {
+                File sdkSource = fixtures.resolve(sdkFixture + ".apk").toFile();
+                byte[] sdkManifest = ApkArchive.manifest(sdkSource);
+                byte[] sdkPatched = sdkFixture.startsWith("sdk-split") ? BinaryManifestPatch.patchProviderSplit(sdkManifest)
+                        : BinaryManifestPatch.patchProvider(sdkManifest, binding);
+                check(BinaryManifestPatch.inspect(sdkPatched).minSdkVersion == Math.max(26, BinaryManifestPatch.inspect(sdkManifest).minSdkVersion), "runtime minimum SDK floor: " + sdkFixture);
+                Map<String, byte[]> sdkEntries = entries(sdkSource); sdkEntries.put("AndroidManifest.xml", sdkPatched);
+                archive(Path.of(args[3], sdkFixture + "-patched.apk"), sdkEntries);
+            }
+
             Map<String, byte[]> sourceEntries = new LinkedHashMap<>();
             sourceEntries.put("AndroidManifest.xml", originalManifest); sourceEntries.put("classes.dex", gameDex);
             sourceEntries.put("classes2.dex", gameDex); sourceEntries.put("lib/arm64-v8a/libgame.so", new byte[]{1,2,3,4,5,6});

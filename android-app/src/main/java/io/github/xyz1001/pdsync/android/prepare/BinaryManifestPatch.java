@@ -25,6 +25,7 @@ import java.util.function.ToLongFunction;
 public final class BinaryManifestPatch {
     private static final Map<String, Long> ANDROID_IDS;
     public static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
+    public static final int BRIDGE_MIN_SDK = 26;
     public static final String MAIN_APP_PACKAGE = "io.github.xyz1001.pdsync.android";
     public static final String BRIDGE_PROVIDER = "io.github.xyz1001.pdsync.bridge.SaveBridgeProvider";
     public static final String BRIDGE_ACTIVATION = "io.github.xyz1001.pdsync.bridge.ActivationActivity";
@@ -59,6 +60,7 @@ public final class BinaryManifestPatch {
         linkedHashMap.put("value", 16842788L);
         linkedHashMap.put("resource", 16842789L);
         linkedHashMap.put("minSdkVersion", 16843276L);
+        linkedHashMap.put("targetSdkVersion", 16843376L);
         linkedHashMap.put("versionCode", 16843291L);
         linkedHashMap.put("versionName", 16843292L);
         linkedHashMap.put("targetSandboxVersion", 16844108L);
@@ -204,6 +206,7 @@ public final class BinaryManifestPatch {
         Node application = document.singleChild(document.root, "application", true);
         rejectBridgeConflicts(document, application, before.packageName, binding);
         removeSharedIdentity(document);
+        ensureBridgeMinSdk(document);
         addMainAppQuery(document);
         if (!boolValue(application.find(ANDROID_NS, "hasCode"), true)) document.setBool(application, "hasCode", true);
         Node provider = document.appendElement(application, "provider");
@@ -234,15 +237,26 @@ public final class BinaryManifestPatch {
         return result;
     }
 
-    /** Splits receive only the shared-identity/sandbox migration, never runtime code or components. */
+    /** Splits receive only shared-identity/sandbox and minimum-SDK migration, never runtime code or components. */
     public static byte[] patchProviderSplit(byte[] bytes) throws IOException {
         Document document = new Document(bytes);
         ManifestInfo before = new ManifestInfo(document);
         require(!before.splitName.isEmpty(), "Expected a split APK manifest");
         removeSharedIdentity(document);
+        ensureBridgeMinSdk(document);
         byte[] result = document.encode();
         requireManifestIdentityUnchanged(before, inspect(result));
         return result;
+    }
+
+    private static void ensureBridgeMinSdk(Document document) throws IOException {
+        Node sdk = document.singleChild(document.root, "uses-sdk", false);
+        int originalMin = sdk == null ? 1 : boundedInt(sdk.find(ANDROID_NS, "minSdkVersion"), 1);
+        if (originalMin >= BRIDGE_MIN_SDK) return;
+        if (sdk == null) sdk = document.prependElement(document.root, "uses-sdk");
+        // Android defaults an omitted target to minSdk. Keep its prior effective value when raising min.
+        if (sdk.find(ANDROID_NS, "targetSdkVersion") == null) document.setInt(sdk, "targetSdkVersion", originalMin);
+        document.setInt(sdk, "minSdkVersion", BRIDGE_MIN_SDK);
     }
 
     private static void addMainAppQuery(Document document) throws IOException {
@@ -309,7 +323,7 @@ public final class BinaryManifestPatch {
         ManifestInfo info = new ManifestInfo(document);
         require(binding.gamePackage.equals(info.packageName) && binding.gameVersionCode == info.versionCode
                 && (info.versionNameResource || binding.gameVersionName.equals(info.versionName)) && info.splitName.isEmpty() && info.sharedUserId == null && !info.hasSharedUserMaxSdkVersion
-                && info.targetSandboxVersion == 1 && document.root.find(ANDROID_NS, "sharedUserLabel") == null,
+                && info.minSdkVersion >= BRIDGE_MIN_SDK && info.targetSandboxVersion == 1 && document.root.find(ANDROID_NS, "sharedUserLabel") == null,
                 "Embedded bridge manifest identity failed");
         Node application = document.singleChild(document.root, "application", true);
         require(boolValue(application.find(ANDROID_NS, "hasCode"), true), "Bridge application has no code");
@@ -355,7 +369,7 @@ public final class BinaryManifestPatch {
                 && before.isSplitRequired == after.isSplitRequired && before.playSplitsRequired == after.playSplitsRequired
                 && before.usesSplits.equals(after.usesSplits) && before.splitTypes.equals(after.splitTypes)
                 && before.requiredSplitTypes.equals(after.requiredSplitTypes) && before.applicationLabel.equals(after.applicationLabel)
-                && before.minSdkVersion == after.minSdkVersion, "Game manifest identity changed during injection");
+                && Math.max(before.minSdkVersion, BRIDGE_MIN_SDK) == after.minSdkVersion, "Game manifest identity changed during injection");
     }
 
     private static void requireHexDigest(String value, String label) throws IOException {
@@ -679,6 +693,16 @@ public final class BinaryManifestPatch {
         void setBool(Node node, String name, boolean value) throws IOException {
             setInt(node, name, value ? -1 : 0);
             node.find(ANDROID_NS, name).bytes[15] = 18;
+        }
+
+        Node prependElement(Node parent, String name) throws IOException {
+            require(parent.part >= 0, "Cannot prepend to a newly added element");
+            Node node = new Node(this, parent, name);
+            int before = parent.part + 1;
+            List<Node> elements = appendedElements.get(before);
+            if (elements == null) { elements = new ArrayList<>(); appendedElements.put(before, elements); }
+            elements.add(0, node);
+            return node;
         }
 
         Node appendElement(Node parent, String name) throws IOException {
