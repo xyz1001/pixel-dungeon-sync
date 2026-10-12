@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reproducible SDK-only Java Android build; never downloads or deploys."""
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, zipfile
+import argparse, hashlib, json, os, re, shutil, struct, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from apksig_compat import build_compat_jar
@@ -63,11 +63,49 @@ def collect_java_sources(module, generated, repo=REPO):
             sources.add(entry.resolve())
     return sorted(sources)
 
+def native_library_inputs(mappings):
+    """Validate explicit ELF/ABI inputs; never discover or load arbitrary native code."""
+    supported={'armeabi-v7a':(1,40), 'arm64-v8a':(2,183), 'x86':(1,3), 'x86_64':(2,62)}
+    result={}
+    for mapping in mappings:
+        name, separator, value=mapping.partition('=')
+        parts=name.split('/')
+        if not separator or len(parts)!=2 or parts[0] not in supported or not re.fullmatch(r'lib[A-Za-z0-9_]+\.so',parts[1]):
+            raise ValueError('Expected native library ABI/libNAME.so=FILE')
+        if name in result: raise ValueError('Duplicate native library: '+name)
+        source=Path(value).resolve()
+        if not source.is_file() or source.stat().st_size<52 or source.stat().st_size>16*1024*1024:
+            raise ValueError('Missing or oversized native library: '+name)
+        data=source.read_bytes()
+        elf_class,machine=supported[parts[0]]
+        if data[:4]!=b'\x7fELF' or data[4]!=elf_class or data[5]!=1 or data[6]!=1:
+            raise ValueError('Native library ELF class/encoding mismatch: '+name)
+        if struct.unpack_from('<HHI',data,16)!=(3,machine,1):
+            raise ValueError('Native library ELF type/machine mismatch: '+name)
+        # All loadable segments must support Android's 16 KiB page-size devices.
+        phoff=struct.unpack_from('<I' if elf_class==1 else '<Q',data,28 if elf_class==1 else 32)[0]
+        phentsize,phnum=struct.unpack_from('<HH',data,42 if elf_class==1 else 54)
+        if not phnum or phentsize!=(32 if elf_class==1 else 56) or phoff+phentsize*phnum>len(data):
+            raise ValueError('Invalid native ELF program headers: '+name)
+        loads=0
+        for index in range(phnum):
+            offset=phoff+index*phentsize
+            if struct.unpack_from('<I',data,offset)[0]!=1: continue
+            loads+=1
+            if elf_class==1: fileoff,vaddr=struct.unpack_from('<II',data,offset+4); alignment=struct.unpack_from('<I',data,offset+28)[0]
+            else: fileoff,vaddr=struct.unpack_from('<QQ',data,offset+8); alignment=struct.unpack_from('<Q',data,offset+48)[0]
+            if alignment<16384 or alignment&(alignment-1) or fileoff%16384!=vaddr%16384:
+                raise ValueError('Native ELF does not support 16 KiB pages: '+name)
+        if not loads: raise ValueError('Native ELF has no loadable segments: '+name)
+        result[name]=(source,data)
+    return result
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--module',required=True,type=Path,help='Directory with manifest, Java source, optional res/assets')
     p.add_argument('--out',required=True,type=Path)
     p.add_argument('--asset',action='append',default=[],help='Build-time asset NAME=FILE; does not modify source')
+    p.add_argument('--native-library',action='append',default=[],help='Main-only explicit ABI/libNAME.so=FILE input; no game injection')
     p.add_argument('--core',type=Path,help='Rebuilt core.jar; defaults to rebuilt source/core then preserved cache')
     p.add_argument('--standalone',action='store_true',help='Do not package core/Kotlin/OkHttp/apksig (helper)')
     p.add_argument('--no-apksig',action='store_true',help='Omit app runtime APK signing implementation')
@@ -85,6 +123,9 @@ def main():
     if KEY == module or PASSWORD == module or module in KEY.parents or module in PASSWORD.parents: p.error('Signing secrets must remain outside the selected module')
     if ROOT/'test-signing' in module.parents or module==ROOT/'test-signing': p.error('Signing directory cannot be a module')
     if ROOT/'test-signing' in out.parents or out in (KEY,PASSWORD): p.error('APK cannot overwrite signing material')
+    try: native_inputs=native_library_inputs(a.native_library)
+    except ValueError as error: p.error(str(error))
+    if a.standalone and native_inputs: p.error('Standalone game bridge cannot include root native libraries')
     java=os.environ.get('JAVA_BIN','java')
     deps=[]
     if not a.standalone:
@@ -116,6 +157,10 @@ def main():
         app=ET.SubElement(manifest,'application',{ANDROID_NS+'label':a.label,ANDROID_NS+'theme':'@android:style/Theme.Material.Light.NoActionBar'})
         act=ET.SubElement(app,'activity',{ANDROID_NS+'name':a.main_class,ANDROID_NS+'exported':'true'})
         filt=ET.SubElement(act,'intent-filter'); ET.SubElement(filt,'action',{ANDROID_NS+'name':'android.intent.action.MAIN'}); ET.SubElement(filt,'category',{ANDROID_NS+'name':'android.intent.category.LAUNCHER'})
+    if native_inputs:
+        app=manifest.find('application')
+        if app is None: p.error('Native libraries require an application manifest')
+        app.set(ANDROID_NS+'extractNativeLibs','true')
     if a.application_id: manifest.set('package',a.application_id)
     package=manifest.attrib.get('package',DEFAULT_PACKAGE)
     if not re.fullmatch(r'[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+',package): p.error('Invalid package')
@@ -160,6 +205,10 @@ def main():
         if f in (KEY,PASSWORD): p.error('Signing secret cannot be an asset')
         entries['assets/'+name]=(f.read_bytes(),zipfile.ZIP_DEFLATED)
         asset_inputs[name]={'path':str(f),'sha256':sha(f)}
+    for name,(_,data) in native_inputs.items():
+        archive_name='lib/'+name
+        if archive_name in entries: p.error('Native library would replace an existing packaged entry')
+        entries[archive_name]=(data,zipfile.ZIP_STORED)
     # Keep runtime resources (notably OkHttp publicsuffix data and service metadata).
     for jar in deps:
         with zipfile.ZipFile(jar) as z:
@@ -180,7 +229,7 @@ def main():
         if any(x in n.lower() for x in secret_patterns) or b'-----BEGIN PRIVATE KEY-----' in data or b'-----BEGIN RSA PRIVATE KEY-----' in data: raise RuntimeError('Refusing to package signing secret: '+n)
     with zipfile.ZipFile(work/'unsigned.apk','w') as z:
         for n,(data,comp) in sorted(entries.items()): zip_write(z,n,data,comp)
-    run([BT/'zipalign','-f','-p','4',work/'unsigned.apk',work/'aligned.apk'])
+    run([BT/'zipalign','-f','-P','16','4',work/'unsigned.apk',work/'aligned.apk'])
     out.parent.mkdir(parents=True,exist_ok=True)
     signer_digest=None
     if a.unsigned: shutil.copyfile(work/'aligned.apk',out)
@@ -194,10 +243,10 @@ def main():
         print(verified.stdout,end='')
         match=re.search(r'certificate SHA-256 digest: ([a-f0-9]+)',verified.stdout)
         signer_digest=match.group(1) if match else None
-    run([BT/'zipalign','-c','-p','4',out])
+    run([BT/'zipalign','-c','-P','16','4',out])
     badging=run([BT/'aapt2','dump','badging',out],capture_output=True,text=True).stdout
     (out.with_suffix('.badging.txt')).write_text(badging)
-    report={'apk':str(out),'package':package,'sha256':sha(out),'size':out.stat().st_size,'signed':not a.unsigned,'signer_sha256':signer_digest,'min_sdk':min_sdk,'target_sdk':target_sdk,'compile_sdk':36,'java_source_target':17, 'java_release_api_fence':False,'sdk_build_tools':'36.0.0','input_sources':{str(f):sha(f) for f in java_sources},'input_manifest':str(source_manifest) if source_manifest else None,'dependency_sha256':{str(f):sha(f) for f in deps},'android_jar_sha256':sha(ANDROID),'device_tested':False,'injected_assets':asset_inputs,'input_assets':{str(f):sha(f) for f in sorted(assets.rglob('*')) if f.is_file()} if assets else {},'input_resources':{str(f):sha(f) for f in sorted(res.rglob('*')) if f.is_file()} if res else {},'source_fidelity':'Source build only; equivalence to lost source must be assessed separately.'}
+    report={'apk':str(out),'package':package,'sha256':sha(out),'size':out.stat().st_size,'signed':not a.unsigned,'signer_sha256':signer_digest,'min_sdk':min_sdk,'target_sdk':target_sdk,'compile_sdk':36,'java_source_target':17, 'java_release_api_fence':False,'sdk_build_tools':'36.0.0','input_sources':{str(f):sha(f) for f in java_sources},'input_manifest':str(source_manifest) if source_manifest else None,'dependency_sha256':{str(f):sha(f) for f in deps},'android_jar_sha256':sha(ANDROID),'device_tested':False,'native_library_sha256':{name:{'path':str(source),'sha256':sha(source)} for name,(source,_) in native_inputs.items()},'injected_assets':asset_inputs,'input_assets':{str(f):sha(f) for f in sorted(assets.rglob('*')) if f.is_file()} if assets else {},'input_resources':{str(f):sha(f) for f in sorted(res.rglob('*')) if f.is_file()} if res else {},'source_fidelity':'Source build only; equivalence to lost source must be assessed separately.'}
     out.with_suffix('.build.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:report[k] for k in ('apk','package','size','sha256','signed','signer_sha256')},indent=2))
 if __name__=='__main__': main()

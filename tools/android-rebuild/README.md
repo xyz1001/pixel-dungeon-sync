@@ -66,6 +66,22 @@ Run the offline source-selection regression with:
 python3 tools/android-rebuild/tests/test_java_sources.py
 ```
 
+## Main-only native library inputs
+
+`--native-library ABI/libNAME.so=FILE` may be repeated to package explicitly built
+main-app native libraries. Supported ABIs are `arm64-v8a`, `armeabi-v7a`, `x86` and
+`x86_64`. The builder verifies the ELF class/machine, shared-library type and every
+load segment's 16 KiB page alignment before packaging. It records source hashes,
+stores native entries without ZIP compression, applies 16 KiB ZIP alignment and
+sets `extractNativeLibs=true` so the main app's PackageManager native directory is
+available to its separate process. Actual linker/SELinux loading needs device tests.
+
+Native inputs are rejected for `--standalone` game-bridge builds. They are never
+appended to a prepared game's original native payloads or bundled into the injected
+bridge DEX. Native sources are compiled separately; the APK builder does not download,
+execute or silently discover a library. Run the metadata-only packaging tests with
+`python3 tools/android-rebuild/tests/test_native_libraries.py`.
+
 ## User-device final signing (recommended)
 
 This optional split workflow keeps the main-app signing key durable on the user's Windows device while the cloud builds the unsigned APK. It does not require changing or rebuilding an already delivered, correctly signed APK. Build-host signing above remains supported when the retained signing material is intentionally available on that host.
