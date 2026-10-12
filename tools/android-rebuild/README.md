@@ -46,6 +46,26 @@ Build output includes `.build.json`, `.badging.txt` and, for signed APKs, `.veri
 
 The installed cloud Java runtime exposes javac but lacks `ct.sym`, so application compilation uses `-source 17 -target 17` rather than `--release 17`. This proves JVM17 bytecode compatibility, not a Java17 API fence. D8 uses the selected module manifest's minimum SDK. Android device/runtime testing remains required.
 
+## Explicit Java source sharing
+
+A module may declare repository-relative Java files or source directories in
+`additional-java-sources.txt`, one path per line. Blank lines and `#` comments
+are ignored. Only Java sources from those explicit inputs are compiled; another
+module's manifest, resources, assets and dependencies are never imported.
+Entries must exist inside the repository and must not use globs, parent traversal,
+absolute paths or symlinks. Duplicate source paths are compiled once. Every
+selected source remains recorded in the build output's `input_sources` hashes.
+
+This supports a main-app-only runtime sharing narrowly selected archive/layout
+utilities without including the root runtime in the injected game bridge. The
+`android-helper` build reads only its own source declaration, if present.
+
+Run the offline source-selection regression with:
+
+```sh
+python3 tools/android-rebuild/tests/test_java_sources.py
+```
+
 ## User-device final signing (recommended)
 
 This optional split workflow keeps the main-app signing key durable on the user's Windows device while the cloud builds the unsigned APK. It does not require changing or rebuilding an already delivered, correctly signed APK. Build-host signing above remains supported when the retained signing material is intentionally available on that host.

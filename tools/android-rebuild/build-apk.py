@@ -27,6 +27,42 @@ def zip_write(z,name,data,compression=zipfile.ZIP_DEFLATED):
     if name.startswith('/') or '..' in Path(name).parts: raise ValueError('Unsafe archive path')
     zi=zipfile.ZipInfo(name,(1980,1,1,0,0,0)); zi.compress_type=compression; zi.external_attr=0o644<<16
     z.writestr(zi,data)
+def collect_java_sources(module, generated, repo=REPO):
+    """Resolve explicit source sharing without packaging another module wholesale.
+
+    Additional inputs are repository-relative Java files/directories declared in
+    the selected module's additional-java-sources.txt. No globs or external paths.
+    """
+    module=Path(module).resolve(); repo=Path(repo).resolve()
+    src=next((f for f in [module/'src/main/java',module/'src',module/'java'] if f.is_dir()),module)
+    sources=set(src.rglob('*.java')) | set(Path(generated).rglob('*.java'))
+    declared=module/'additional-java-sources.txt'
+    if not declared.exists() and not declared.is_symlink(): return sorted(sources)
+    if declared.is_symlink() or not declared.is_file(): raise ValueError('Unsafe additional Java source declaration')
+    for line in declared.read_text(encoding='utf-8').splitlines():
+        name=line.strip()
+        if not name or name.startswith('#'): continue
+        relative=Path(name)
+        if relative.is_absolute() or '..' in relative.parts or any(c in name for c in '*?[]\\'):
+            raise ValueError('Additional Java source must be an explicit repository-relative path: '+name)
+        candidate=repo/relative
+        if not candidate.exists(): raise ValueError('Additional Java source is missing: '+name)
+        for part in [candidate, *candidate.parents]:
+            if part==repo: break
+            if part.is_symlink(): raise ValueError('Additional Java source path contains a symlink: '+name)
+        resolved=candidate.resolve()
+        if repo not in resolved.parents: raise ValueError('Additional Java source escapes repository: '+name)
+        entries=sorted(candidate.rglob('*.java')) if candidate.is_dir() else [candidate]
+        if not entries: raise ValueError('Additional Java source directory is empty: '+name)
+        for entry in entries:
+            if entry.suffix!='.java' or not entry.is_file() or entry.is_symlink() or repo not in entry.resolve().parents:
+                raise ValueError('Additional source is not a repository Java file: '+name)
+            # A recursive directory may contain a symlinked subdirectory on some hosts.
+            if any(p.is_symlink() for p in entry.parents if p!=repo and repo in p.parents):
+                raise ValueError('Additional Java source path contains a symlink: '+name)
+            sources.add(entry.resolve())
+    return sorted(sources)
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--module',required=True,type=Path,help='Directory with manifest, Java source, optional res/assets')
@@ -103,8 +139,8 @@ def main():
         run([BT/'aapt2','compile','--dir',res,'-o',work/'compiled-res.zip']); link+=['-R',work/'compiled-res.zip']
     if assets: link+=['-A',assets]
     run(link)
-    src=next((f for f in [module/'src/main/java',module/'src',module/'java'] if f.is_dir()),module)
-    java_sources=sorted(set(src.rglob('*.java'))|set((work/'generated').rglob('*.java')))
+    try: java_sources=collect_java_sources(module,work/'generated')
+    except ValueError as error: p.error(str(error))
     if not java_sources: p.error('No Java sources found')
     classes=work/'classes'
     run([java,'com.sun.tools.javac.Main','-source','17','-target','17','-encoding','UTF-8','-classpath',os.pathsep.join(map(str,[ANDROID]+deps)),'-d',classes,*java_sources])
