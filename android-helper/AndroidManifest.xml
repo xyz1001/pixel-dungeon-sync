@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="io.github.xyz1001.pdsync.shared"
+    android:versionCode="6"
+    android:versionName="0.3.0-test"
+    android:compileSdkVersion="36"
+    android:compileSdkVersionCodename="16"
+    package="io.github.xyz1001.pdsync.bridge"
+    platformBuildVersionCode="36"
+    platformBuildVersionName="16">
+    <uses-sdk
+        android:minSdkVersion="36"
+        android:targetSdkVersion="36"/>
+    <queries>
+        <package android:name="io.github.xyz1001.pdsync.android"/>
+        <package android:name="io.github.xyz1001.pdsync.UNBOUND_GAME"/>
+    </queries>
+    <application
+        android:label="像素地牢存档助手 · 测试版"
+        android:hasCode="true"
+        android:debuggable="false"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.EXPECTED_MAIN_CERT_SHA256"
+            android:resource="@string/expected_main_cert_sha256"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_GAME_PACKAGE"
+            android:value="io.github.xyz1001.pdsync.UNBOUND_GAME"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_SHARED_USER_ID"
+            android:value="UNBOUND"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_ORIGIN_IDENTITY"
+            android:value="UNBOUND"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_NAMESPACE_ID"
+            android:value="UNBOUND"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_SOURCE_APK_SHA256"
+            android:value="UNBOUND"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_GAME_VERSION_CODE"
+            android:value="UNBOUND"/>
+        <meta-data
+            android:name="io.github.xyz1001.pdsync.BOUND_GAME_VERSION_NAME"
+            android:value="UNBOUND"/>
+        <provider
+            android:name="io.github.xyz1001.pdsync.bridge.SaveBridgeProvider"
+            android:permission="io.github.xyz1001.pdsync.android.ACCESS_BRIDGE"
+            android:exported="true"
+            android:authorities="io.github.xyz1001.pdsync.bridge.saves"
+            android:grantUriPermissions="false"/>
+        <activity
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:name="io.github.xyz1001.pdsync.bridge.ActivationActivity"
+            android:permission="io.github.xyz1001.pdsync.android.ACCESS_BRIDGE"
+            android:exported="true"/>
+        <service
+            android:name="io.github.xyz1001.pdsync.bridge.VisibilityService"
+            android:permission="io.github.xyz1001.pdsync.android.ACCESS_BRIDGE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.xyz1001.pdsync.BRIDGE_DISCOVERY"/>
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
