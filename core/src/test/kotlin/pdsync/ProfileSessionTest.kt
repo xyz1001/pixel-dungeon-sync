@@ -51,6 +51,14 @@ class ProfileSessionTest {
   listOf("http://evil.test", "https://example.test/?token=x", "https://example.test/#x").forEach { assertFails { AppConfig(endpoint = it).validated() } }
   assertFails { AppConfig(profile = "../demo").validated() }; assertNull(AppConfig(version = "manually-forged").validated().version)
  }
+ @Test fun api26Utf8DecoderPreservesUnicodeAndPlusWithoutRelaxingEndpointChecks() {
+  val encoded = "https://example.test/%E5%AD%98%E6%A1%A3+a%2Bb"
+  assertEquals(encoded, AppConfig(endpoint = encoded).validated().endpoint)
+  assertEquals("https://example.test/%E5%AD%98%E6%A1%A3+a+b", AppConfig(endpoint = "https://example.test/存档+a+b").validated().endpoint)
+  listOf("%2e", "%2e%2e", "%2F", "%5c", "%252e", "%00", "%ZZ", "%").forEach { segment ->
+   assertFailsWith<IllegalArgumentException>(segment) { AppConfig(endpoint = "https://example.test/dav/$segment").validated() }
+  }
+ }
  @Test fun unsafeAndOverlappingRootsRejected() {
   val save = root()
   assertFails { session(save, save.resolve("state")) }

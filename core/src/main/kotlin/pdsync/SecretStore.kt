@@ -4,7 +4,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.file.Files
-import java.nio.file.Path
+import java.nio.file.Paths
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Locale
@@ -76,7 +76,7 @@ internal class ProcessSecretCommandRunner(private val timeoutMillis: Long = 15_0
   var stdout: ByteArray? = null
   var stderr: ByteArray? = null
   fun readBounded(stream: InputStream): ByteArray = stream.use {
-   val bytes = it.readNBytes(16 * 1024 + 1)
+   val bytes = it.readUpTo(16 * 1024 + 1)
    if (bytes.size > 16 * 1024) { bytes.fill(0); process.destroyForcibly(); error("Credential output exceeded limit") }
    bytes
   }
@@ -139,13 +139,13 @@ class SystemSecretStore internal constructor(
    // Fixed OS locations, never a helper from the working directory or an arbitrary PATH entry.
    val candidates = when (platform) {
     SecretPlatform.WINDOWS -> listOfNotNull(System.getenv("SystemRoot")?.let {
-     runCatching { Path.of(it).takeIf { root -> root.isAbsolute }?.resolve("System32/WindowsPowerShell/v1.0/powershell.exe")?.toString() }.getOrNull()
+     runCatching { Paths.get(it).takeIf { root -> root.isAbsolute }?.resolve("System32/WindowsPowerShell/v1.0/powershell.exe")?.toString() }.getOrNull()
     })
     SecretPlatform.MACOS -> listOf("/usr/bin/security")
     SecretPlatform.LINUX -> listOf("/usr/bin/secret-tool", "/bin/secret-tool")
     SecretPlatform.UNSUPPORTED -> emptyList()
    }
-   val executable = candidates.firstOrNull { runCatching { Files.isRegularFile(Path.of(it)) && Files.isExecutable(Path.of(it)) }.getOrDefault(false) }
+   val executable = candidates.firstOrNull { runCatching { Files.isRegularFile(Paths.get(it)) && Files.isExecutable(Paths.get(it)) }.getOrDefault(false) }
    return SystemSecretStore(platform, ProcessSecretCommandRunner(), executable)
   }
 

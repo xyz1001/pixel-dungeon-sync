@@ -247,7 +247,7 @@ class AppendOnlyWebDav(
   // Refuse percent-encoded traversal/separators and ambiguous double-encoding, even on siblings.
   val rawPath = uri.rawPath ?: ""
   require(rawPath.split('/').none { raw ->
-   val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8) } catch (_: Exception) { throw IllegalArgumentException("Malformed WebDAV href") }
+   val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException("Malformed WebDAV href") }
    decoded == "." || decoded == ".." || decoded.any { it == '/' || it == '\\' || it == '%' || it.isISOControl() }
   }) { "Unsafe WebDAV href" }
   return uri

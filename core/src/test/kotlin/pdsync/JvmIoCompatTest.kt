@@ -1,6 +1,7 @@
 package pdsync
 
 import java.io.InputStream
+import java.io.IOException
 import kotlin.test.*
 import org.junit.jupiter.api.Test
 
@@ -25,5 +26,33 @@ class JvmIoCompatTest {
   }
   assertContentEquals(byteArrayOf(0, 1, 2), stream.readUpTo(3))
   assertEquals(3, stream.read())
+ }
+ @Test fun handlesShortReadsAndLeavesBytesBeyondTheLimitUnread() {
+  val source = ByteArray(20_000) { (it % 251).toByte() }
+  val stream = object : InputStream() {
+   var position = 0
+   var closed = false
+   override fun read(): Int = if (position < source.size) source[position++].toInt() and 255 else -1
+   override fun read(b: ByteArray, off: Int, len: Int): Int {
+    if (position == source.size) return -1
+    val count = minOf(len, 7, source.size - position)
+    source.copyInto(b, off, position, position + count); position += count
+    return count
+   }
+   override fun close() { closed = true }
+  }
+  assertContentEquals(source.copyOfRange(0, 16_384), stream.readUpTo(16_384))
+  assertEquals(16_384, stream.position); assertFalse(stream.closed)
+  assertContentEquals(source.copyOfRange(16_384, source.size), stream.readUpTo(10_000))
+  assertContentEquals(byteArrayOf(), stream.readUpTo(1))
+ }
+ @Test fun hugeLimitDoesNotAllocateTheLimitUpFrontAndReadFailuresPropagate() {
+  assertContentEquals(byteArrayOf(1, 2), byteArrayOf(1, 2).inputStream().readUpTo(Int.MAX_VALUE))
+  val failure = IOException("synthetic read failure")
+  val stream = object : InputStream() {
+   override fun read(): Int = throw failure
+  }
+  assertContentEquals(byteArrayOf(), stream.readUpTo(0))
+  assertSame(failure, assertFailsWith<IOException> { stream.readUpTo(1) })
  }
 }

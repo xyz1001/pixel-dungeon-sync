@@ -1,11 +1,11 @@
 package pdsync
 
-import java.nio.file.Path
+import java.nio.file.Paths
 
 /** Read-only diagnostic entry point: no saves, credentials, cloud access, launches or process changes. */
 fun main(args: Array<String>) {
  require(args.size == 1) { "Usage: pdsync.ProcessCheckKt <game.jar>" }
- val target = ShatteredVersions.target(Path.of(args.single()))
+ val target = ShatteredVersions.target(Paths.get(args.single()))
  println("Identified game target: ${target.trusted}")
  val inventory = JvmProcessInventory().snapshot()
  val status = GameProcessDetector(target).status()

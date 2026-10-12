@@ -3,7 +3,7 @@ package pdsync
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
-/** Bounded InputStream.readNBytes equivalent available on the Android runtime. */
+/** Bounded InputStream.readNBytes equivalent using APIs present before Android 8 / API 26. */
 internal fun InputStream.readUpTo(limit: Int): ByteArray {
  require(limit >= 0) { "Read limit must not be negative" }
  if (limit == 0) return byteArrayOf()

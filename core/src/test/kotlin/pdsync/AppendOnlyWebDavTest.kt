@@ -63,6 +63,17 @@ class AppendOnlyWebDavTest {
   assertTrue(request.body.readUtf8().contains("resourcetype")); assertNull(request.getHeader("If-Match"))
  }
 
+ @Test fun api26Utf8DecoderKeepsUnicodeAndPlusInTheConfiguredCollection() = MockWebServer().use { server ->
+  val base = "/%E5%AD%98%E6%A1%A3+a%2Bb/"
+  val collection = base + "shattered/hero/"
+  server.enqueue(listing(entry(collection, collection = true), entry(collection + name())))
+  server.start()
+  val dav = AppendOnlyWebDav(server.url(base).toString(), "shattered", "hero", "player", "test-secret")
+  assertEquals(listOf(id), dav.listCommits().ids)
+  val request = server.takeRequest()
+  assertEquals("PROPFIND", request.method); assertEquals(collection, request.path)
+ }
+
  @Test fun followsExplicitSameCollectionNextPageAndNeverCopiesCursorToObjectGet() = MockWebServer().use { server ->
   server.enqueue(listing(entry(folder + name())).setHeader("Link", "<$folder?cursor=private-token>; rel=\"next\""))
   server.enqueue(listing(entry(folder + name(id2))))

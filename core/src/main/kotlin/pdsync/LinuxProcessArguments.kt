@@ -5,6 +5,7 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * Linux-only fallback for a kernel/JDK-identified Java executable whose JDK argv is absent.
@@ -18,14 +19,14 @@ internal object LinuxProcessArguments {
  private const val MAX_ARGUMENT_LENGTH = 32_768
 
  fun read(pid: Long): List<String>? = read(pid) { path, limit ->
-  Files.newInputStream(path).use { it.readNBytes(limit + 1) }
+  Files.newInputStream(path).use { it.readUpTo(limit + 1) }
  }
 
  /** The reader is injectable for denied reads, malformed bytes and PID-reuse races. */
  internal fun read(pid: Long, reader: (Path, Int) -> ByteArray): List<String>? {
   return try {
   if (pid <= 0) return null
-  val base = Path.of("/proc", pid.toString())
+  val base = Paths.get("/proc", pid.toString())
   val before = identity(pid, reader(base.resolve("stat"), MAX_STAT_BYTES)) ?: return null
   val bytes = reader(base.resolve("cmdline"), MAX_BYTES)
   val arguments = decode(bytes) ?: return null

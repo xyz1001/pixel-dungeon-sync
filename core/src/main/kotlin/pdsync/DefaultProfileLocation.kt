@@ -3,6 +3,7 @@ package pdsync
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /** Old saveRoot is not silently reused; the new explicit selection is persisted independently. */
 class DefaultProfileLocation(
@@ -12,7 +13,7 @@ class DefaultProfileLocation(
  private val versions: ProfileVersions = ShatteredProfileVersions
 ) {
  fun resolve(): Path {
-  val raw = Path.of(paths.resolve(context))
+  val raw = Paths.get(paths.resolve(context))
   require(raw.none { it.toString() == "." || it.toString() == ".." }) { "默认存档路径包含 . 或 ..；为避免与游戏访问不同目录，请使用不含这些片段的系统路径。" }
   return raw.toAbsolutePath()
  }
@@ -26,7 +27,7 @@ class DefaultProfileLocation(
  /** Called only after the discovery page explicitly says Continue prepares this empty default target. */
  fun prepareDefaultDirectory(): Path {
   val root = SafePaths.checked(resolve())
-  require(root.parent != null && root != Path.of(context.userHome ?: "").toAbsolutePath().normalize()) { "默认目录无效" }
+  require(root.parent != null && root != Paths.get(context.userHome ?: "").toAbsolutePath().normalize()) { "默认目录无效" }
   if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return requireDirectory()
   // Check every ancestor before and after creating only the adapter's exact default path.
   Files.createDirectories(root)
@@ -36,10 +37,10 @@ class DefaultProfileLocation(
   AppendProfileSession(config.copy(saveRoot = selected(config).toString()), stateRoot, adapter, versions)
  fun selected(config: AppConfig): Path = config.selectedSaveRoot?.let { requireSelected(it,false) } ?: requireDirectory()
  fun requireSelected(value: String, create: Boolean): Path {
-  val raw=Path.of(value)
+  val raw=Paths.get(value)
   require(value.isNotBlank() && raw.isAbsolute && raw.none { it.toString() in setOf(".","..") }) { "请输入完整的存档目录路径" }
   val root=SafePaths.checked(raw)
-  require(root.parent!=null && root!=Path.of(context.userHome.orEmpty()).toAbsolutePath().normalize()) { "请选择专用存档目录" }
+  require(root.parent!=null && root!=Paths.get(context.userHome.orEmpty()).toAbsolutePath().normalize()) { "请选择专用存档目录" }
   if(create)Files.createDirectories(root)
   require(Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS)) { "目录尚不存在；点击下一步可创建空目录" }
   return root

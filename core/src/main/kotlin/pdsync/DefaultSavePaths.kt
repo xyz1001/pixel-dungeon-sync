@@ -14,7 +14,7 @@ data class SavePathContext(
 /**
  * A per-game path policy. Resolution is lexical: it neither creates nor inspects a directory.
  * The result uses forward slashes, also accepted by Windows, to make foreign-platform tests
- * independent of the host's Path provider. Convert with Path.of only on the runtime platform.
+ * independent of the host's Path provider. Convert with Paths.get only on the runtime platform.
  */
 fun interface GameSavePaths {
  fun resolve(context: SavePathContext): String

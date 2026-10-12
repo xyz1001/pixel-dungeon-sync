@@ -29,7 +29,7 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
    val limit = if(path.endsWith(".zip")) MAX_SNAPSHOT_BYTES else MAX_MANIFEST_BYTES
    val body = r.body
    require(body == null || body.contentLength() <= limit) { "Remote response too large" }
-   val data = body?.byteStream()?.readNBytes(limit + 1) ?: byteArrayOf()
+   val data = body?.byteStream()?.readUpTo(limit + 1) ?: byteArrayOf()
    require(data.size <= limit) { "Remote response too large" }
    return data to r.header("ETag")
   }

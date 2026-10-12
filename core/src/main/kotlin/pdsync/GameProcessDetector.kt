@@ -8,6 +8,7 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipFile
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.Locale
 
 /** Stopped is scoped to the current OS account's selected trusted JAR and visible local processes. */
@@ -75,7 +76,7 @@ class JvmProcessInventory @JvmOverloads constructor(
       }
      }
      val cwd = if (platform == GameProcessPlatform.LINUX && isJavaExecutable(command, platform)) {
-      try { Files.readSymbolicLink(Path.of("/proc", process.pid().toString(), "cwd")).toString() }
+      try { Files.readSymbolicLink(Paths.get("/proc", process.pid().toString(), "cwd")).toString() }
       catch (_: Exception) { null }
      } else null
      // A process exiting during inspection is harmless. An unreadable live process is not.
@@ -240,7 +241,7 @@ private enum class GameProcessJarIdentity { SHATTERED, OTHER, UNIDENTIFIED }
 /** Static bounded manifest inspection only. No game code, signatures, or services are loaded. */
 private fun inspectGameProcessJarIdentity(value: String): GameProcessJarIdentity {
  return try {
-  val path = Path.of(value)
+  val path = Paths.get(value)
   val before = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
   if (!before.isRegularFile || before.size() > 256L * 1024 * 1024) return GameProcessJarIdentity.UNIDENTIFIED
   var bytes: ByteArray? = null
@@ -251,7 +252,7 @@ private fun inspectGameProcessJarIdentity(value: String): GameProcessJarIdentity
     if (++count > 50_000 || entry.name.length > 4096) return GameProcessJarIdentity.UNIDENTIFIED
     if (entry.name.equals("META-INF/MANIFEST.MF", ignoreCase = true)) {
      if (bytes != null || entry.isDirectory || entry.size > 64 * 1024) return GameProcessJarIdentity.UNIDENTIFIED
-     bytes = zip.getInputStream(entry).use { it.readNBytes(64 * 1024 + 1) }
+     bytes = zip.getInputStream(entry).use { it.readUpTo(64 * 1024 + 1) }
     }
    }
   }
@@ -299,11 +300,11 @@ internal fun resolveGameProcessPath(value: String, cwd: String?, platform: GameP
   }
   val normalized = (if (full.startsWith("//")) "//" else "") + parts.joinToString("/")
   val canonical = if (GameProcessPlatform.current() == GameProcessPlatform.WINDOWS)
-   Path.of(normalized).toRealPath().toString().replace('\\', '/') else normalized
+   Paths.get(normalized).toRealPath().toString().replace('\\', '/') else normalized
   canonical.lowercase(Locale.ROOT)
  } else {
-  val path = Path.of(value)
-  val absolute = if (path.isAbsolute) path else cwd?.let { Path.of(it).takeIf(Path::isAbsolute)?.resolve(path) } ?: return null
+  val path = Paths.get(value)
+  val absolute = if (path.isAbsolute) path else cwd?.let { Paths.get(it).takeIf(Path::isAbsolute)?.resolve(path) } ?: return null
   absolute.toRealPath().toString()
  }
  } catch (_: Exception) { null }

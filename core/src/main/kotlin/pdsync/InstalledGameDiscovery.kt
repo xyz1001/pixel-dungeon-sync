@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.Locale
 
@@ -120,7 +121,7 @@ class ShatteredInstallationDiscovery internal constructor(
    if (candidate.target == null) incomplete = true
   }
   if (configuredTarget.isNotBlank()) {
-   try { add(Path.of(configuredTarget), "已配置的游戏 JAR") }
+   try { add(Paths.get(configuredTarget), "已配置的游戏 JAR") }
    catch (e: IllegalArgumentException) {
     report("已配置的游戏路径无效：${e.message}")
    }
@@ -135,8 +136,8 @@ class ShatteredInstallationDiscovery internal constructor(
      incomplete = true; report("目录检查达到有界扫描上限；未搜索整个磁盘。"); break
     }
     try {
-     val base = strictPath(Path.of(root.path))
-     val relative = Path.of(slot)
+     val base = strictPath(Paths.get(root.path))
+     val relative = Paths.get(slot)
      require(!relative.isAbsolute && relative.none { it.toString() == "." || it.toString() == ".." }) { "安装目录槽位必须是相对路径且不含 . 或 .." }
      val directory = strictPath(base.resolve(relative))
      require(directory.startsWith(base)) { "安装目录槽位不能离开候选根目录" }
@@ -173,7 +174,7 @@ class ShatteredInstallationDiscovery internal constructor(
   var path: String? = null
   return try {
    path = ShatteredDefaultSavePaths.resolve(context)
-   val checked = strictPath(Path.of(path))
+   val checked = strictPath(Paths.get(path))
    val available = attributes(checked)?.isDirectory == true
    DefaultSaveDiscovery(checked.toString(), available, if (available) null else "未找到默认存档目录。")
   } catch (e: Exception) {

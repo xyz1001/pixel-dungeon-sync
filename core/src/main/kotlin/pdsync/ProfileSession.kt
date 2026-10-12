@@ -57,7 +57,7 @@ private fun validateRawEndpoint(endpoint: String) {
  val rawPath = uri.rawPath ?: ""
  require("//" !in rawPath) { "服务地址包含不明确的路径" }
  rawPath.split('/').forEach { raw ->
-  val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8) } catch (_: Exception) { throw IllegalArgumentException("服务地址编码无效") }
+  val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException("服务地址编码无效") }
   require(decoded != "." && decoded != ".." && decoded.none { it == '/' || it == '\\' || it == '%' || it.isISOControl() }) { "服务地址不能包含路径跳转或编码分隔符" }
  }
 }
