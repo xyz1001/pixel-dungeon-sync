@@ -154,7 +154,7 @@ public final class PreparationDiagnostics {
         return null;
     }
 
-    public static String report(Failure failure) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    public static String report(Failure failure) {
         StringBuilder sb = new StringBuilder("PD Sync preparation diagnostic v1\n");
         sb.append("stage=");
         sb.append(failure.stage.name());
@@ -340,7 +340,7 @@ public final class PreparationDiagnostics {
         }
     }
 
-    private static void appendPlatformCode(StringBuilder sb, Throwable th) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    private static void appendPlatformCode(StringBuilder sb, Throwable th) {
         if ("android.security.KeyStoreException".equals(th.getClass().getName())) {
             try {
                 Object objInvoke = th.getClass().getMethod("getNumericErrorCode").invoke(th);
