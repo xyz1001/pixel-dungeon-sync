@@ -285,6 +285,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         try (ParcelFileDescriptor descriptor = (ParcelFileDescriptor) value;
              RestoreSession session = newRestoreSession()) {
             boolean[] mutated = {false};
+            boolean journalWritten = false;
             String backupId = null;
             SafeSaveTree tree = null;
             Map<String,String> currentHashes = null;
@@ -320,6 +321,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                 syncDirectory(this.backups); tree.unchanged(captured, true);
                 this.stage = FileFailureDetails.Stage.WRITE_JOURNAL;
                 writePending(backupId, captured.inventory.fingerprint());
+                journalWritten = true;
                 currentHashes = new TreeMap<>(captured.inventory.hashes);
                 replace(tree, incoming, requested, session.handle, "removed", true, currentHashes, mutated);
                 this.stage = FileFailureDetails.Stage.FINALIZE;
@@ -327,8 +329,10 @@ public final class SaveBridgeProvider extends ContentProvider {
                 Bundle result = describe(requested); describeFinalizedBackup(result, backupId); return result;
             } catch (IOException | ErrnoException error) {
                 rememberFailure(error);
-                if (session.committed || (backupId != null && !pendingPresent() && finalizedMarkerValid(backupId)))
+                if (session.committed || (backupId != null && !pendingPresent() && finalizedMarkerValid(backupId))) {
+                    session.committed = true;
                     throw new BridgeFailure("RESTORE_COMMITTED_CLEANUP_PENDING", "Save was verified and committed; retained temporary backup cleanup will retry", error);
+                }
                 if (pendingPresent() && !mutated[0]) {
                     Properties journal = readPending();
                     if (backupId == null || !backupId.equals(journal.getProperty("backupId")) || !this.pending.delete())
@@ -349,7 +353,8 @@ public final class SaveBridgeProvider extends ContentProvider {
                 }
                 deleteUnusedBackup(backupId); throw error;
             } finally {
-                if (!pendingPresent() && !session.committed) deleteUnusedBackup(backupId);
+                // Once a journal was written, retain its backup across uncertain fsync outcomes.
+                if (!journalWritten && !pendingPresent() && !session.committed) deleteUnusedBackup(backupId);
             }
         }
     }

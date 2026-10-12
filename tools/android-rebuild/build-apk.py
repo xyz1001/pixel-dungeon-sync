@@ -47,7 +47,7 @@ def main():
     if not module.is_dir(): p.error('Module directory does not exist')
     if KEY == module or PASSWORD == module or module in KEY.parents or module in PASSWORD.parents: p.error('Signing secrets must remain outside the selected module')
     if ROOT/'test-signing' in module.parents or module==ROOT/'test-signing': p.error('Signing directory cannot be a module')
-    if ROOT/'test-signing' in out.parents: p.error('APK cannot be written to signing directory')
+    if ROOT/'test-signing' in out.parents or out in (KEY,PASSWORD): p.error('APK cannot overwrite signing material')
     java=os.environ.get('JAVA_BIN','java')
     deps=[]
     if not a.standalone:
@@ -58,7 +58,7 @@ def main():
     for f in [ANDROID,BT/'aapt2',BT/'lib/d8.jar',BT/'zipalign',BT/'lib/apksigner.jar']+deps:
         if not f.exists(): p.error(f'Required input missing: {f}')
     work=(a.work_dir or ROOT/'build-scripts/out'/out.stem).resolve()
-    if work==module or work in module.parents or work==ROOT or ROOT/'test-signing' in work.parents:
+    if work==module or work in module.parents or module in work.parents or work==ROOT or ROOT/'test-signing' in work.parents or work in KEY.parents or work in PASSWORD.parents:
         p.error('Unsafe work directory')
     work.mkdir(parents=True,exist_ok=True)
     # Clear only our explicitly named intermediates. Source and output are never removed.
