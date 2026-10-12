@@ -424,6 +424,15 @@ class AppendProfileSession(
   }
  }
 
+ /** Advance only repository ancestry after proving every intervening commit is a semantic no-op.
+  * The caller must inspect again; no save, sidecar, pending plan or remote content is written. */
+ fun advanceUnchangedBaseline(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): Boolean = local.locked {
+  val graph = revalidateComparison(comparison, store, stopped)
+  val tip = unchangedDescendantTip(graph, comparison.baselineId, repository.pending() != null) ?: return@locked false
+  repository.setBaseline(tip.id, graph)
+  true
+ }
+
  /** Explicit association of equal bytes with an exact verified tip, never hash-based ancestry. */
  fun adoptOnboardingRemote(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendCommit = local.locked {
   var graph = revalidateComparison(comparison, store, stopped)
