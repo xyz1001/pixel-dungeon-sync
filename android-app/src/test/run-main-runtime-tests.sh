@@ -8,7 +8,7 @@ JAVA=${JAVA_BIN:-java}
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-main-runtime.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -d "$OUT" \
-  "$SRC"/{BridgeTransport,BridgeDiagnostics,BridgeReadiness,InstallationReadiness,HelperActivationPolicy,PackageTrust,ApkSetIdentity,WebDavConnectionFile,LegacyWebDavConnectionFile,ConnectionEndpointPolicy,ConnectionUpdatePolicy,AutoSyncPolicy,AutoSyncMessages}.java \
+  "$SRC"/{BridgeTransport,BridgeDiagnostics,BridgeReadiness,InstallationReadiness,HelperActivationPolicy,PackageTrust,ApkSetIdentity,WebDavConnectionFile,LegacyWebDavConnectionFile,ConnectionEndpointPolicy,ConnectionUpdatePolicy,AutoSyncPolicy,AutoSyncMessages,AndroidCompat,InstallProgressPolicy,SystemConfirmationToken,InstallResultReceiver}.java \
   $(find "$HERE/fixtures/runtime-stubs" -name '*.java' | sort) \
   "$HERE/java/io/github/xyz1001/pdsync/android/MainRuntimeRecoveryChecks.java"
 "$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.MainRuntimeRecoveryChecks

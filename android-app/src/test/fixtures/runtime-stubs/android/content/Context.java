@@ -6,4 +6,6 @@ public abstract class Context {
  public abstract PackageManager getPackageManager();
  public abstract String getPackageName();
  public abstract File getFilesDir();
+ public SharedPreferences getSharedPreferences(String name,int mode) { throw new AssertionError("Unconfigured test preferences"); }
+ public void sendBroadcast(Intent intent) { throw new AssertionError("Unconfigured test broadcast"); }
 }

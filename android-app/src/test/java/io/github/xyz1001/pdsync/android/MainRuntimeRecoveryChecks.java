@@ -43,6 +43,7 @@ public final class MainRuntimeRecoveryChecks {
         endpointPolicy();
         legacyConnection();
         autoSyncPolicy();
+        installConfirmation();
         System.out.println("Main runtime host regression checks passed: " + assertions + " assertions.");
         System.out.println("Boundary: pure Java only; Android service lifecycle, Binder, permissions and device behavior are not executed.");
     }
@@ -360,6 +361,109 @@ public final class MainRuntimeRecoveryChecks {
         equal("TARGET_CHANGED", AutoSyncMessages.bridgeReasonCode("TARGET_IDENTITY", "INSTALLED_APK_SET_MISMATCH"), "changed installed bytes are not transient network issue");
         equal("TARGET_UNVERIFIED", AutoSyncMessages.bridgeReasonCode("PACKAGE_TRUST", "unknown"), "unverified identity reason");
         equal("SAVE_NOT_STABLE", AutoSyncMessages.bridgeReasonCode("SAVE_READINESS", "PROCESS_STATE_UNKNOWN"), "unknown running state remains unsafe");
+    }
+
+
+    static void installConfirmation() throws Exception {
+        for (boolean first : new boolean[]{false,true}) for (boolean second : new boolean[]{false,true}) {
+            equal(first && !second, InstallProgressPolicy.mayResetExpiredConfirmation(first, second), "reset needs user acknowledgement and expired token");
+            equal(first && !second, InstallProgressPolicy.requiresRebindAfterLegacyRecovery(first, second), "legacy recovery completion requires rebind");
+            equal(!first || second, InstallProgressPolicy.uninstallSettled(first, second), "still-installed package needs terminal result");
+        }
+        for (boolean uninstall : new boolean[]{false,true}) {
+            check(!InstallProgressPolicy.acceptsCallback(uninstall,7,7,null,null), "empty request cannot receive callback");
+            check(!InstallProgressPolicy.acceptsCallback(uninstall,7,7,"", ""), "empty nonce rejected");
+            check(!InstallProgressPolicy.acceptsCallback(uninstall,7,7,"expected","other"), "mismatched nonce rejected");
+            check(InstallProgressPolicy.acceptsCallback(uninstall,7,7,"expected","expected"), "matching callback accepted");
+        }
+        check(!InstallProgressPolicy.acceptsCallback(false,7,8,"nonce","nonce"), "install session must match");
+        check(!InstallProgressPolicy.acceptsCallback(false,-1,-1,"nonce","nonce"), "install session must exist");
+        check(InstallProgressPolicy.acceptsCallback(true,-1,-2,"nonce","nonce"), "uninstall callback has no installer session");
+        equal(33554432 | 134217728, AndroidCompat.mutableCallbackFlags(), "mutable update-current callback flags retained");
+        android.os.Bundle bundle = new android.os.Bundle();
+        android.os.ParcelFileDescriptor descriptor = new android.os.ParcelFileDescriptor();
+        bundle.put("fd",descriptor);
+        check(AndroidCompat.descriptor(bundle,"fd") == descriptor, "descriptor type checked");
+        bundle.put("fd",new android.content.Intent());
+        equal(null,AndroidCompat.descriptor(bundle,"fd"),"non-descriptor parcelable rejected");
+
+        ConfirmationContext context = new ConfirmationContext();
+        android.app.PendingIntent.reset();
+        android.content.Intent confirmation = new android.content.Intent("system-confirm").setPackage("system-installer").putExtra("session-secret","do-not-serialize");
+        String retained = SystemConfirmationToken.retain(context,"nonce",confirmation);
+        equal(1,android.app.PendingIntent.created,"retaining confirmation creates one token");
+        equal(0,android.app.PendingIntent.sent,"retaining confirmation never launches it");
+        check(!new String(java.util.Base64.getDecoder().decode(retained),java.nio.charset.StandardCharsets.UTF_8).contains("do-not-serialize"),"stored filter excludes extras");
+        android.app.PendingIntent found = SystemConfirmationToken.find(context,"nonce",retained);
+        check(found != null && found.intent == confirmation,"find recovers original system token with extras");
+        equal(603979776,android.app.PendingIntent.lastFlags,"find uses immutable NO_CREATE token lookup");
+        equal(null,SystemConfirmationToken.find(context,"wrong-nonce",retained),"wrong nonce cannot recover token");
+        equal(1,android.app.PendingIntent.created,"lookups do not recreate confirmation");
+        SystemConfirmationToken.cancel(context,"nonce",retained);
+        equal(null,SystemConfirmationToken.find(context,"nonce",retained),"cancel removes live system token");
+        retained = SystemConfirmationToken.retain(context,"nonce",confirmation);
+        android.app.PendingIntent.loseSystemTokens();
+        equal(null,SystemConfirmationToken.find(context,"nonce",retained),"stale in-memory cache never replays lost system token");
+        equal(2,android.app.PendingIntent.created,"lost token lookup does not rebuild incomplete Intent");
+        equal(null,SystemConfirmationToken.find(context,null,retained),"null nonce rejected");
+        equal(null,SystemConfirmationToken.find(context,"",retained),"empty nonce rejected");
+        equal(null,SystemConfirmationToken.find(context,"nonce",null),"missing retained filter rejected");
+
+        android.app.PendingIntent.reset();
+        InstallResultReceiver receiver = new InstallResultReceiver();
+        for (android.content.Intent rejected : List.of(callback("wrong", "nonce", 7, -1),callback("nonce", "wrong", 7, -1),callback("nonce", "nonce", 8, -1))) {
+            receiver.onReceive(context,rejected);
+            equal(0,context.prefs.commits,"uncorrelated result never updates checkpoint");
+            equal(0,context.broadcasts,"uncorrelated result never announces installation");
+        }
+        android.content.Intent pending = callback("nonce","nonce",7,-1).putExtra("android.intent.extra.INTENT",confirmation);
+        receiver.onReceive(context,pending);
+        equal("PENDING_CONFIRMATION",context.prefs.getString("state",null),"receiver stores pending confirmation");
+        check(context.prefs.getString("confirmation",null)!=null,"receiver retains opaque system token identity");
+        equal(0,android.app.PendingIntent.sent,"receiver never silently opens or approves system confirmation");
+        equal(1,context.broadcasts,"committed checkpoint gets internal change broadcast");
+        equal(context.getPackageName(),context.lastBroadcast.getPackage(),"change broadcast limited to this app");
+        receiver.onReceive(context,callback("nonce","nonce",7,0).putExtra("android.content.pm.extra.PACKAGE_NAME","untrusted-extra-package"));
+        equal("RESULT",context.prefs.getString("state",null),"success status remains unverified result for coordinator reconciliation");
+        equal("pending-game",context.prefs.getString("package",null),"callback cannot change checkpoint target package");
+        equal(null,context.prefs.getString("confirmation",null),"terminal result clears confirmation");
+        equal(0,android.app.PendingIntent.sent,"terminal callback never installs or opens UI");
+        ConfirmationContext noToken = new ConfirmationContext();
+        receiver.onReceive(noToken,callback("nonce","nonce",7,-1));
+        equal("RESULT",noToken.prefs.getString("state",null),"missing system Intent is not treated as successful installation");
+        ConfirmationContext failedCommit = new ConfirmationContext(); failedCommit.prefs.commitSucceeds=false;
+        receiver.onReceive(failedCommit,callback("nonce","nonce",7,0));
+        equal(0,failedCommit.broadcasts,"failed checkpoint persistence never announces success");
+        System.out.println("Confirmation checks use host test doubles; Android PendingIntent persistence and system install UI remain device-only checks.");
+    }
+    static android.content.Intent callback(String actionNonce,String extraNonce,int session,int status) {
+        return new android.content.Intent("io.github.xyz1001.pdsync.android.INSTALL_CHANGED."+actionNonce)
+                .putExtra("requestNonce",extraNonce).putExtra("android.content.pm.extra.SESSION_ID",session).putExtra("android.content.pm.extra.STATUS",status);
+    }
+    static final class ConfirmationContext extends android.content.Context {
+        final MemoryPreferences prefs = new MemoryPreferences();
+        int broadcasts; android.content.Intent lastBroadcast;
+        public android.content.pm.PackageManager getPackageManager() { throw new AssertionError("Receiver must not inspect or install packages"); }
+        public String getPackageName() { return "io.github.xyz1001.pdsync.android"; }
+        public java.io.File getFilesDir() { throw new AssertionError("No receiver filesystem operations expected"); }
+        public android.content.SharedPreferences getSharedPreferences(String name,int mode) { equal("install-checkpoint-v1",name,"correct checkpoint namespace"); return prefs; }
+        public void sendBroadcast(android.content.Intent intent) { broadcasts++;lastBroadcast=intent; }
+    }
+    static final class MemoryPreferences implements android.content.SharedPreferences {
+        final java.util.Map<String,Object> values=new java.util.HashMap<>();
+        int commits; boolean commitSucceeds=true;
+        MemoryPreferences() { values.put("nonce","nonce");values.put("session",7);values.put("operation","install");values.put("package","pending-game"); }
+        public String getString(String key,String fallback) { return (String)values.getOrDefault(key,fallback); }
+        public int getInt(String key,int fallback) { return (Integer)values.getOrDefault(key,fallback); }
+        public Editor edit() {
+            return new Editor() {
+                final java.util.Map<String,Object> updates=new java.util.HashMap<>();
+                public Editor putString(String key,String value) { updates.put(key,value);return this; }
+                public Editor putInt(String key,int value) { updates.put(key,value);return this; }
+                public Editor remove(String key) { updates.put(key,null);return this; }
+                public boolean commit() { commits++;if(!commitSucceeds)return false;updates.forEach((k,v)->{if(v==null)values.remove(k);else values.put(k,v);});return true; }
+            };
+        }
     }
 
     static void packageTrust() throws Exception {
