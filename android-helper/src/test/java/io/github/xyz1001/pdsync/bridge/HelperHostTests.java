@@ -60,6 +60,57 @@ public final class HelperHostTests {
         Files.createSymbolicLink(root.resolve("rankings.dat"),root.resolve("profileInstalled"));
         denied(()->SaveDirectoryPolicy.content(root.toFile()),"linked included entry");
     }
+    static SaveDirectoryPolicy.RootEntry entry(SaveDirectoryPolicy.Content content, String name) {
+        return content.rootEntries.stream().filter(e -> e.name.equals(name)).findFirst().orElseThrow();
+    }
+    static void layoutDiagnosticTests(Path base) throws Exception {
+        Path root=dir(base,"layout-diagnostics"), outside=dir(base,"private-outside-diagnostics");
+        Files.writeString(outside.resolve("private-secret-file"),"private-secret-content");
+        Files.createDirectory(root.resolve("game1"));
+        Files.writeString(root.resolve("game1").resolve("private-nested-name"),"private-save-content");
+        Files.writeString(root.resolve("settings.xml"),"private-settings-content");
+        Files.writeString(root.resolve("profileInstalled"),"runtime marker");
+        Files.createSymbolicLink(root.resolve("unknown-link"),outside);
+        Files.createSymbolicLink(root.resolve("dangling-link"),outside.resolve("missing"));
+        SaveDirectoryPolicy.Content content=SaveDirectoryPolicy.content(root.toFile());
+        check(content.includedEntries==1 && content.excludedEntries==2 && content.unrecognizedEntries==2,"complete root counts");
+        check(!content.transferable() && !content.rootEntriesTruncated && content.rootEntries.size()==5,"unknown layout remains blocked with diagnostics");
+        check(entry(content,"game1").type==SaveDirectoryPolicy.EntryType.DIRECTORY,"included directory nofollow type");
+        check(entry(content,"settings.xml").classification==SaveDirectoryPolicy.Classification.EXCLUDED,"settings basename classified without reading content");
+        check(entry(content,"profileInstalled").classification==SaveDirectoryPolicy.Classification.EXCLUDED,"exact regular marker excluded");
+        for(String name:List.of("unknown-link","dangling-link"))
+            check(entry(content,name).type==SaveDirectoryPolicy.EntryType.SYMLINK,"link target never followed: "+name);
+        check(content.rootEntries.stream().noneMatch(e->e.name.contains("private")),"no root path, nested name, link target or file contents");
+        Files.delete(root.resolve("profileInstalled")); Files.createDirectory(root.resolve("profileInstalled"));
+        content=SaveDirectoryPolicy.content(root.toFile());
+        check(entry(content,"profileInstalled").type==SaveDirectoryPolicy.EntryType.DIRECTORY && entry(content,"profileInstalled").classification==SaveDirectoryPolicy.Classification.UNRECOGNIZED,"marker directory remains unknown");
+        Files.delete(root.resolve("profileInstalled")); Files.createSymbolicLink(root.resolve("profileInstalled"),outside.resolve("private-secret-file"));
+        content=SaveDirectoryPolicy.content(root.toFile());
+        check(entry(content,"profileInstalled").type==SaveDirectoryPolicy.EntryType.SYMLINK && entry(content,"profileInstalled").classification==SaveDirectoryPolicy.Classification.UNRECOGNIZED,"marker symlink remains unknown");
+        for(String name:List.of("ProfileInstalled","profileInstalled.extra","profileInstalled2")) Files.writeString(root.resolve(name),"marker lookalike");
+        content=SaveDirectoryPolicy.content(root.toFile());
+        for(String name:List.of("ProfileInstalled","profileInstalled.extra","profileInstalled2"))
+            check(entry(content,name).classification==SaveDirectoryPolicy.Classification.UNRECOGNIZED,"marker exactness: "+name);
+        Files.writeString(root.resolve("unsafe\nsecret-name"),"private-secret-content");
+        Files.writeString(root.resolve("x".repeat(97)),"private-secret-content");
+        content=SaveDirectoryPolicy.content(root.toFile());
+        check(content.rootEntriesTruncated && content.unrecognizedEntries==8,"omitted names retain policy counts");
+        check(content.rootEntries.stream().noneMatch(e->e.name.contains("secret") || e.name.length()>96),"unsafe/long names omitted rather than partially disclosed");
+        Path many=dir(base,"layout-many");
+        for(int i=0;i<65;i++) Files.writeString(many.resolve("entry"+i),"");
+        content=SaveDirectoryPolicy.content(many.toFile());
+        check(content.rootEntries.size()==64 && content.unrecognizedEntries==65 && content.rootEntriesTruncated,"diagnostic count truncation does not truncate classification");
+        Path bytes=dir(base,"layout-bytes");
+        for(int i=0;i<64;i++) Files.writeString(bytes.resolve("a".repeat(90)+i),"");
+        content=SaveDirectoryPolicy.content(bytes.toFile());
+        int total=0;
+        for(SaveDirectoryPolicy.RootEntry e:content.rootEntries) total+=e.name.length()+e.type.name().length()+e.classification.name().length();
+        check(total<=SaveDirectoryPolicy.MAX_DIAGNOSTIC_BYTES && content.rootEntries.size()<64 && content.rootEntriesTruncated,"diagnostic total ASCII bytes bounded");
+        check(content.unrecognizedEntries==64,"byte truncation keeps complete root counts");
+        for(int i=65;i<=SaveArchive.MAX_ENTRIES;i++) Files.writeString(many.resolve("entry"+i),"");
+        try { SaveDirectoryPolicy.content(many.toFile()); throw new AssertionError("oversize root accepted"); }
+        catch(BridgeFailure expected) { check("SAVE_TOO_LARGE".equals(expected.code),"original scan size rejection preserved"); }
+    }
     static void identityTests(Path base) throws Exception {
         String origin="1".repeat(64), main="io.github.xyz1001.pdsync.android";
         String game="test.pixel.game", helper="io.github.xyz1001.pdsync.bridge.g"+origin.substring(0,32), shared="io.github.xyz1001.pdsync.shared.g"+origin.substring(0,32);
@@ -188,7 +239,7 @@ public final class HelperHostTests {
     }
     public static void main(String[] args) throws Exception {
         Path base=Files.createTempDirectory("pdsync-helper-host-");
-        archiveTests(base); policyTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
+        archiveTests(base); policyTests(base); layoutDiagnosticTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
         System.out.println("PASS: "+assertions+" helper host security assertions; no Android runtime executed.");
     }
 }

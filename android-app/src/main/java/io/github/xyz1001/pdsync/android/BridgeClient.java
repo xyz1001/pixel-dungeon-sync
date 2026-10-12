@@ -63,6 +63,11 @@ public final class BridgeClient implements AndroidGameBridge {
         public Failure(BridgeDiagnostics.Stage stage, String str, String str2, Throwable th, BridgeDiagnostics.TransportInfo transportInfo) {
             super(stage, str, str2, th, transportInfo);
         }
+
+        Failure(BridgeDiagnostics.Stage stage, String code, String message, Throwable cause,
+                BridgeDiagnostics.TransportInfo transport, BridgeSaveLayout saveLayout) {
+            super(stage, code, message, cause, transport, saveLayout);
+        }
     }
 
     
@@ -99,7 +104,7 @@ public final class BridgeClient implements AndroidGameBridge {
             closeRejectedReply(reply,error);
             if(error.transport!=null) transport=error.transport;
             if(transport==null) throw error;
-            Failure enriched=new Failure(error.stage,error.code,error.getMessage(),error.getCause(),transport.withSnapshots(before,snapshotProvider()));
+            Failure enriched=new Failure(error.stage,error.code,error.getMessage(),error.getCause(),transport.withSnapshots(before,snapshotProvider()),error.saveLayout);
             for(Throwable suppressed:error.getSuppressed()) enriched.addSuppressed(suppressed);
             throw enriched;
         } catch(Exception error) {
@@ -253,7 +258,9 @@ public final class BridgeClient implements AndroidGameBridge {
             }
             String strFailureCode = BridgeReadiness.failureCode(bundleCall.getBoolean("ready", false), bundleCall.getBoolean("firstLaunchNeeded", false), bundleCall.containsKey("transferReady") ? Boolean.valueOf(bundleCall.getBoolean("transferReady", false)) : null);
             if (strFailureCode != null) {
-                throw helperFailure(strFailureCode);
+                Failure readiness = helperFailure(strFailureCode);
+                throw new Failure(readiness.stage, readiness.code, readiness.getMessage(), readiness.getCause(),
+                        readiness.transport, BridgeSaveLayout.fromReply(bundleCall));
             }
             return "游戏、存档桥和存档目录已验证；可开始稳定性检查。";
         } catch (Failure e) {

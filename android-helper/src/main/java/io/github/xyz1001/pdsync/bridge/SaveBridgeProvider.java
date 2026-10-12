@@ -949,6 +949,20 @@ public final class SaveBridgeProvider extends ContentProvider {
         bundle.putInt("includedRootEntries", content.includedEntries);
         bundle.putInt("excludedRootEntries", content.excludedEntries);
         bundle.putInt("unrecognizedRootEntries", content.unrecognizedEntries);
+        bundle.putInt("saveLayoutDiagnosticVersion", 1);
+        String[] names = new String[content.rootEntries.size()];
+        String[] types = new String[names.length];
+        String[] classifications = new String[names.length];
+        for (int i = 0; i < names.length; i++) {
+            SaveDirectoryPolicy.RootEntry entry = content.rootEntries.get(i);
+            names[i] = entry.name;
+            types[i] = entry.type.name();
+            classifications[i] = entry.classification.name();
+        }
+        bundle.putStringArray("rootEntryNames", names);
+        bundle.putStringArray("rootEntryTypes", types);
+        bundle.putStringArray("rootEntryClassifications", classifications);
+        bundle.putBoolean("rootEntriesTruncated", content.rootEntriesTruncated);
     }
 
     

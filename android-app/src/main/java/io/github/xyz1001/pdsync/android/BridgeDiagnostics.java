@@ -148,13 +148,20 @@ public final class BridgeDiagnostics {
         public final String code;
         public final Stage stage;
         public final TransportInfo transport;
+        final BridgeSaveLayout saveLayout;
 
         public Failure(Stage stage, String str, String str2, Throwable th) {
             this(stage, str, str2, th, null);
         }
 
         public Failure(Stage stage, String str, String str2, Throwable th, TransportInfo transportInfo) {
+            this(stage, str, str2, th, transportInfo, null);
+        }
+
+        Failure(Stage stage, String str, String str2, Throwable th, TransportInfo transportInfo,
+                BridgeSaveLayout saveLayout) {
             super(str2, th);
+            this.saveLayout = saveLayout;
             this.stage = stage == null ? Stage.PROTOCOL_REPLY : stage;
             this.code = BridgeDiagnostics.CODES.contains(str) ? str : "UNKNOWN_BRIDGE_FAILURE";
             this.transport = transportInfo;
@@ -303,6 +310,9 @@ public final class BridgeDiagnostics {
             sb.append(transportInfo.close.name());
             appendSnapshot(sb, "before_acquire", transportInfo.before);
             appendSnapshot(sb, "after_failure", transportInfo.after);
+        }
+        if (failureFind != null && failureFind.saveLayout != null) {
+            failureFind.saveLayout.appendTo(sb);
         }
         Set setNewSetFromMap = Collections.newSetFromMap(new IdentityHashMap());
         int i2 = 0;

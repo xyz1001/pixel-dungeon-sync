@@ -382,6 +382,8 @@ public final class MainActivity extends Activity {
             this.diagnosticReport = BridgeDiagnostics.report(exc2, i, str2, j, str3, str4, preparedPair3 != null ? preparedPair3.authority : null);
             if (preparedPair3 != null && preparedPair3.embeddedBridge())
                 this.diagnosticReport += "\nbridge_mode=embedded-v1\nprovider_auth=current_main_certificate\nsignature_permission_required=false";
+            if (BridgeDiagnostics.find(exc).saveLayout != null)
+                this.diagnosticReport += "\nprivacy=Relative entry names and file types only; no file contents or absolute paths. Review names before sharing.";
         } else {
             exc2 = exc;
             this.diagnosticReport = "";
