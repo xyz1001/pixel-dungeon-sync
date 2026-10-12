@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.oldgame" android:versionCode="123" android:versionName="test">
+<uses-sdk android:minSdkVersion="26" android:targetSdkVersion="26"/><application android:hasCode="false"/>
+</manifest>

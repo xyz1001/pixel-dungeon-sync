@@ -1,6 +1,7 @@
 package io.github.xyz1001.pdsync.android.prepare;
 
 import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import com.android.apksig.ApkSigner;
 import com.android.apksig.ApkVerifier;
 import io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics;
@@ -10,6 +11,8 @@ import java.io.RandomAccessFile;
 import java.math.BigInteger;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
+import java.security.interfaces.RSAKey;
+import java.security.interfaces.RSAPublicKey;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,7 +37,9 @@ final class LocalApkSigner {
         if (!(entry instanceof KeyStore.PrivateKeyEntry)) {
             throw new IOException("Local signing identity is not a usable private key");
         }
-        return (KeyStore.PrivateKeyEntry) entry;
+        KeyStore.PrivateKeyEntry identity = (KeyStore.PrivateKeyEntry) entry;
+        signingCertificate(identity);
+        return identity;
     }
 
     static synchronized KeyStore.PrivateKeyEntry createAfterExplicitConsent(boolean z) throws Exception {
@@ -46,9 +51,9 @@ final class LocalApkSigner {
             if (existing() != null) {
                 throw new IOException("Refusing to overwrite an existing signing identity");
             }
-            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore");
+            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore");
             long jCurrentTimeMillis = System.currentTimeMillis();
-            keyPairGenerator.initialize(new KeyGenParameterSpec.Builder("pdsync.local.game-and-bridge.v1", 12).setKeySize(3072).setDigests("SHA-256", "SHA-512").setSignaturePaddings("PKCS1", "PSS").setCertificateSubject(new X500Principal("CN=PD Sync Device Local APK Signing")).setCertificateSerialNumber(BigInteger.ONE).setCertificateNotBefore(new Date(Math.max(0L, jCurrentTimeMillis - 86400000))).setCertificateNotAfter(new Date(jCurrentTimeMillis + 948672000000L)).setUserAuthenticationRequired(false).build());
+            keyPairGenerator.initialize(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY).setKeySize(3072).setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512).setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS).setCertificateSubject(new X500Principal("CN=PD Sync Device Local APK Signing")).setCertificateSerialNumber(BigInteger.ONE).setCertificateNotBefore(new Date(Math.max(0L, jCurrentTimeMillis - 86400000))).setCertificateNotAfter(new Date(jCurrentTimeMillis + 948672000000L)).setUserAuthenticationRequired(false).build());
             keyPairGenerator.generateKeyPair();
             privateKeyEntryExisting = existing();
             if (privateKeyEntryExisting == null) {
@@ -61,7 +66,24 @@ final class LocalApkSigner {
     }
 
     static String fingerprint(KeyStore.PrivateKeyEntry privateKeyEntry) throws Exception {
-        return ApkArchive.sha256(privateKeyEntry.getCertificate().getEncoded());
+        return ApkArchive.sha256(signingCertificate(privateKeyEntry).getEncoded());
+    }
+
+    private static X509Certificate signingCertificate(KeyStore.PrivateKeyEntry identity) throws IOException {
+        // AndroidKeyStore RSA private keys expose only their public modulus through
+        // RSAKey (available since API 23); private key material is never exported.
+        if (identity == null || !(identity.getPrivateKey() instanceof RSAKey)
+                || !"RSA".equals(identity.getPrivateKey().getAlgorithm())
+                || !(identity.getCertificate() instanceof X509Certificate)
+                || !(identity.getCertificate().getPublicKey() instanceof RSAPublicKey)) {
+            throw new IOException("Local signing identity is not a usable RSA/X.509 key pair");
+        }
+        RSAKey privateKey = (RSAKey) identity.getPrivateKey();
+        RSAPublicKey publicKey = (RSAPublicKey) identity.getCertificate().getPublicKey();
+        if (!privateKey.getModulus().equals(publicKey.getModulus())) {
+            throw new IOException("Local signing certificate differs from its private key");
+        }
+        return (X509Certificate) identity.getCertificate();
     }
 
     static void sign(File file, File file2, KeyStore.PrivateKeyEntry privateKeyEntry) throws Exception {
@@ -69,7 +91,7 @@ final class LocalApkSigner {
             throw new IOException("Signed output already exists");
         }
         try {
-            new ApkSigner.Builder((List<ApkSigner.SignerConfig>) Collections.singletonList(new ApkSigner.SignerConfig.Builder("device-local", privateKeyEntry.getPrivateKey(), (List<X509Certificate>) Collections.singletonList((X509Certificate) privateKeyEntry.getCertificate())).build())).setInputApk(file).setOutputApk(file2).setMinSdkVersion(36).setV1SigningEnabled(false).setV2SigningEnabled(true).setV3SigningEnabled(true).setV4SigningEnabled(false).setOtherSignersSignaturesPreserved(false).setDebuggableApkPermitted(true).setAlignmentPreserved(false).setLibraryPageAlignmentBytes(16384).setCreatedBy("PD Sync device-local preparation").build().sign();
+            new ApkSigner.Builder((List<ApkSigner.SignerConfig>) Collections.singletonList(new ApkSigner.SignerConfig.Builder("device-local", privateKeyEntry.getPrivateKey(), (List<X509Certificate>) Collections.singletonList(signingCertificate(privateKeyEntry))).build())).setInputApk(file).setOutputApk(file2).setMinSdkVersion(PreparationPlatform.MIN_SUPPORTED_SDK).setV1SigningEnabled(false).setV2SigningEnabled(true).setV3SigningEnabled(true).setV4SigningEnabled(false).setOtherSignersSignaturesPreserved(false).setDebuggableApkPermitted(true).setAlignmentPreserved(false).setLibraryPageAlignmentBytes(16384).setCreatedBy("PD Sync device-local preparation").build().sign();
             verify(file2, fingerprint(privateKeyEntry));
             try (RandomAccessFile randomAccessFile = new RandomAccessFile(file2, "rw")) { randomAccessFile.getFD().sync(); }
         } catch (Throwable th) {
@@ -83,6 +105,11 @@ final class LocalApkSigner {
     }
 
     static List<String> sourceCertificates(File file, InstalledSourceProof installedSourceProof) throws Exception {
+        return sourceCertificates(file, installedSourceProof, PreparationPlatform.currentApi());
+    }
+
+    static List<String> sourceCertificates(File file, InstalledSourceProof installedSourceProof, int api) throws Exception {
+        PreparationPlatform.requireSupportedApi(api);
         if (installedSourceProof != null) {
             try {
                 installedSourceProof.validateFile(file);
@@ -90,7 +117,7 @@ final class LocalApkSigner {
                 throw PreparationDiagnostics.failure(PreparationDiagnostics.Stage.SOURCE_SIGNATURE_SET, e);
             }
         }
-        ApkVerifier.Result resultVerify = new ApkVerifier.Builder(file).setMinCheckedPlatformVersion(36).setMaxCheckedPlatformVersion(36).build().verify();
+        ApkVerifier.Result resultVerify = new ApkVerifier.Builder(file).setMinCheckedPlatformVersion(api).setMaxCheckedPlatformVersion(api).build().verify();
         if (!resultVerify.isVerified()) {
             if (installedSourceProof != null && missingInstalledSignaturesOnly(resultVerify.getAllErrors())) {
                 InstalledUnsignedContainer.requireAbsentSigningBlock(file);
@@ -133,9 +160,14 @@ final class LocalApkSigner {
     }
 
     static void verify(File file, String str) throws Exception {
+        verify(file, str, PreparationPlatform.currentApi());
+    }
+
+    static void verify(File file, String str, int api) throws Exception {
         try {
+            PreparationPlatform.requireSupportedApi(api);
             ApkZipAlignment.verify(file);
-            ApkVerifier.Result resultVerify = new ApkVerifier.Builder(file).setMinCheckedPlatformVersion(36).setMaxCheckedPlatformVersion(36).build().verify();
+            ApkVerifier.Result resultVerify = new ApkVerifier.Builder(file).setMinCheckedPlatformVersion(api).setMaxCheckedPlatformVersion(api).build().verify();
             if (!resultVerify.isVerified()) {
                 throw verificationFailure(resultVerify);
             }

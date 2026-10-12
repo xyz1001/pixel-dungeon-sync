@@ -181,7 +181,7 @@ public final class PreparationDiagnostics {
         } else {
             sb.append("source=UNKNOWN\n");
         }
-        sb.append("signing_configuration=AndroidKeyStore; RSA-3072; APK-v2/v3; Android-API-36\n");
+        sb.append("signing_configuration=AndroidKeyStore; RSA-3072; APK-v2/v3; Android-API-26..36; verification=device-API\n");
         Set setNewSetFromMap = Collections.newSetFromMap(new IdentityHashMap());
         Throwable cause = failure.getCause();
         int i = 0;
@@ -325,7 +325,7 @@ public final class PreparationDiagnostics {
         if (strBoundedMessage.contains("limit") || strBoundedMessage.contains("too large")) {
             return "TECHNICAL_SIZE_LIMIT";
         }
-        return strBoundedMessage.contains("android 16/api 36 only") ? "RUNTIME_API_UNSUPPORTED" : "MESSAGE_OMITTED";
+        return strBoundedMessage.contains("apk preparation supports android api 26 through 36") ? "RUNTIME_API_UNSUPPORTED" : "MESSAGE_OMITTED";
     }
 
     private static void appendCryptoHints(StringBuilder sb, String str) {

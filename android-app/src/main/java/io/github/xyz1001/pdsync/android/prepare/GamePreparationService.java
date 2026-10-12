@@ -43,8 +43,8 @@ import java.util.function.Function;
 public final class GamePreparationService {
     public static final String GAME_PACKAGE = "com.shatteredpixel.shatteredpixeldungeon";
     public static final String HELPER_PACKAGE = "io.github.xyz1001.pdsync.bridge";
-    public static final int MAX_VERIFIED_SDK = 36;
-    public static final int MIN_SUPPORTED_SDK = 36;
+    public static final int MAX_VERIFIED_SDK = PreparationPlatform.MAX_VERIFIED_SDK;
+    public static final int MIN_SUPPORTED_SDK = PreparationPlatform.MIN_SUPPORTED_SDK;
     public static final String SHARED_UID = "io.github.xyz1001.pdsync.shared";
     private final Context context;
     private final PackageManager packages;
@@ -76,7 +76,7 @@ public final class GamePreparationService {
             this.packageName = str;
             this.versionName = packageInfo.versionName == null ? "" : packageInfo.versionName;
             this.sharedUserId = packageInfo.sharedUserId;
-            this.versionCode = packageInfo.getLongVersionCode();
+            this.versionCode = PreparationPlatform.versionCode(packageInfo);
             ApplicationInfo applicationInfo = packageInfo.applicationInfo;
             if (applicationInfo == null || applicationInfo.sourceDir == null) {
                 throw new IOException("Installed package does not expose a base APK");
@@ -266,7 +266,7 @@ public final class GamePreparationService {
         try {
             PackageInfo packageInfo = this.packages.getPackageInfo(this.context.getPackageName(), 0);
             str2 = packageInfo.versionName;
-            longVersionCode = packageInfo.getLongVersionCode();
+            longVersionCode = PreparationPlatform.versionCode(packageInfo);
         } catch (PackageManager.NameNotFoundException | RuntimeException unused) {
             longVersionCode = -1;
         }
@@ -279,7 +279,7 @@ public final class GamePreparationService {
             info = installed(packageName);
             return info == null ? null : new InstalledGame(info, packages);
         } catch (Exception e) {
-            throw PreparationDiagnostics.failure(PreparationDiagnostics.Stage.EXTRACTION, e, diagnosticMetadata(PreparationDiagnostics.Source.INSTALLED_BASE_AND_SPLITS, packageName, info == null ? -1 : info.getLongVersionCode(), -1));
+            throw PreparationDiagnostics.failure(PreparationDiagnostics.Stage.EXTRACTION, e, diagnosticMetadata(PreparationDiagnostics.Source.INSTALLED_BASE_AND_SPLITS, packageName, info == null ? -1 : PreparationPlatform.versionCode(info), -1));
         }
     }
 
@@ -980,12 +980,12 @@ public final class GamePreparationService {
 
     private InstallCompatibility.Decision decision(String str, String str2, String str3, long j) throws Exception {
         PackageInfo packageInfoInstalled = installed(str);
-        return InstallCompatibility.decide(packageInfoInstalled != null, packageInfoInstalled != null && matches(packageInfoInstalled, str2), packageInfoInstalled != null && str3.equals(packageInfoInstalled.sharedUserId), packageInfoInstalled == null ? 0L : packageInfoInstalled.getLongVersionCode(), j);
+        return InstallCompatibility.decide(packageInfoInstalled != null, packageInfoInstalled != null && matches(packageInfoInstalled, str2), packageInfoInstalled != null && str3.equals(packageInfoInstalled.sharedUserId), packageInfoInstalled == null ? 0L : PreparationPlatform.versionCode(packageInfoInstalled), j);
     }
 
     private PackageInfo installed(String str) {
         try {
-            return this.packages.getPackageInfo(str, 134217728);
+            return this.packages.getPackageInfo(str, PreparationPlatform.signingFlags());
         } catch (PackageManager.NameNotFoundException unused) {
             return null;
         }
@@ -997,11 +997,8 @@ public final class GamePreparationService {
     }
 
     public static List<String> certificates(PackageInfo packageInfo) throws IOException {
-        if (packageInfo.signingInfo == null || packageInfo.signingInfo.getApkContentsSigners() == null) {
-            throw new IOException("Installed signer information unavailable; check package visibility");
-        }
         ArrayList arrayList = new ArrayList();
-        for (Signature signature : packageInfo.signingInfo.getApkContentsSigners()) {
+        for (Signature signature : PreparationPlatform.currentSignatures(packageInfo)) {
             arrayList.add(ApkArchive.sha256(signature.toByteArray()));
         }
         if (arrayList.isEmpty()) {
@@ -1040,9 +1037,7 @@ public final class GamePreparationService {
     }
 
     private static void requireSupportedRuntime() throws IOException {
-        if (Build.VERSION.SDK_INT != 36) {
-            throw new IOException("This test build supports Android 16/API 36 only");
-        }
+        PreparationPlatform.currentApi();
     }
 
     public static String originalName(int i) {

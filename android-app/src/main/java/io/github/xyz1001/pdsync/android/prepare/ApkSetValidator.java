@@ -77,6 +77,11 @@ public final class ApkSetValidator {
     }
 
     public static ValidatedSet validate(List<SourceApk> list, boolean z) throws IOException {
+        return validate(list, z, PreparationPlatform.currentApi());
+    }
+
+    static ValidatedSet validate(List<SourceApk> list, boolean z, int api) throws IOException {
+        PreparationPlatform.requireSupportedApi(api);
         if (list == null || list.isEmpty() || list.size() > 256) {
             throw new IOException("Invalid APK set size");
         }
@@ -87,8 +92,8 @@ public final class ApkSetValidator {
             if (manifestInfo.versionCode < 0) {
                 throw new IOException("Unsupported negative combined Android version code");
             }
-            if (manifestInfo.minSdkVersion > 36) {
-                throw new IOException("APK requires Android API " + manifestInfo.minSdkVersion + "; this test supports Android 16/API 36");
+            if (manifestInfo.minSdkVersion > api) {
+                throw new IOException("APK requires Android API " + manifestInfo.minSdkVersion + "; this device runs Android API " + api);
             }
             String strNormalized = normalized(manifestInfo.splitName);
             if (strNormalized.isEmpty()) {
