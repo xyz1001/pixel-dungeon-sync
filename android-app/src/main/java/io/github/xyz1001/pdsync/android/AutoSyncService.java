@@ -11,7 +11,6 @@ import android.content.SharedPreferences;
 import android.graphics.drawable.Icon;
 import android.os.IBinder;
 import io.github.xyz1001.pdsync.android.AutoSyncPolicy;
-import io.github.xyz1001.pdsync.android.BridgeClient;
 import io.github.xyz1001.pdsync.android.SecureConnectionStore;
 import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
 import java.util.UUID;
@@ -28,7 +27,7 @@ public final class AutoSyncService extends Service {
     public static final String PREFS = "auto-sync-session-v1";
     private static final String RETURN = "pdsync.RETURN";
     private static final String STOP = "pdsync.STOP";
-    private BridgeClient bridge;
+    private GameAccessBackend bridge;
     private SecureConnectionStore.Connection connection;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private AndroidSyncFacade facade;
@@ -182,7 +181,7 @@ public final class AutoSyncService extends Service {
             if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
                 throw new IllegalStateException("Game selection changed");
             }
-            this.bridge = new BridgeClient(this, preparedPairRequirePreparedGame, SyncRuntime.gameIdentity(this, preparedPairRequirePreparedGame));
+            this.bridge = GameAccessBackends.forPreparedGame(this, preparedPairRequirePreparedGame, SyncRuntime.gameIdentity(this, preparedPairRequirePreparedGame));
             this.facade = SyncRuntime.facade(this, this.connection);
             poll();
         } catch (Exception unused) {
@@ -202,7 +201,7 @@ public final class AutoSyncService extends Service {
                 this.returned = false;
             }
             AndroidSyncFacade.ControlledObservation controlledObservation = this.facade.beginControlledObservation(this.token);
-            BridgeClient.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
+            GameAccessBackend.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
             this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
             AutoSyncPolicy.Step stepObserve = this.policy.observe(observationObserveLifecycle.reliable, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {

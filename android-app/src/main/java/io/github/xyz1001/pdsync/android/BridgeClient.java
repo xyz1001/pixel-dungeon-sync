@@ -19,12 +19,12 @@ import java.util.Map;
 import pdsync.DirectoryMetadataKt;
 import pdsync.ReasonedSyncFailure;
 import pdsync.SyncBlockReason;
-import pdsync.android.app.AndroidGameBridge;
 import pdsync.android.app.AndroidGameIdentity;
 import pdsync.android.app.AndroidGameTarget;
 
 
-public final class BridgeClient implements AndroidGameBridge {
+public final class BridgeClient implements GameAccessBackend {
+    private static final Capabilities CAPABILITIES = new Capabilities(true, true, true, true);
     private static final long MAX_BYTES = 67108864;
     private static final int MAX_FILES = 4096;
     private final Context context;
@@ -228,28 +228,30 @@ public final class BridgeClient implements AndroidGameBridge {
         return new Failure(stage, str, str3, th);
     }
 
-    public static final class Observation {
-        public final boolean foreground;
-        public final boolean processPresent;
-        public final boolean ready;
-        public final boolean reliable;
-
-        Observation(Bundle bundle) {
-            this.reliable = bundle.getBoolean("observationReliable", false);
-            this.foreground = bundle.getBoolean("gameForeground", false);
-            this.processPresent = bundle.getBoolean("gameProcessPresent", false);
-            this.ready = bundle.getBoolean("ready", false);
-        }
+    @Override
+    public Mode mode() {
+        return selected.embeddedBridge() ? Mode.EMBEDDED_BRIDGE : Mode.LEGACY_HELPER_BRIDGE;
     }
 
+    @Override
+    public Capabilities capabilities() {
+        return CAPABILITIES;
+    }
+
+    @Override
     public Observation observeLifecycle() {
         try {
-            return new Observation(exchange("inspect", null));
+            Bundle reply = exchange("inspect", null);
+            return new Observation(reply.getBoolean("gameForeground", false),
+                    reply.getBoolean("gameProcessPresent", false),
+                    reply.getBoolean("ready", false),
+                    reply.getBoolean("observationReliable", false));
         } catch (Exception unused) {
-            return new Observation(new Bundle());
+            return Observation.unknown();
         }
     }
 
+    @Override
     public String inspectReady() {
         try {
             Bundle bundleCall = call("inspect", null);
@@ -270,6 +272,7 @@ public final class BridgeClient implements AndroidGameBridge {
         }
     }
 
+    @Override
     public String recoverInterruptedBackup() {
         try {
             return "存档桥已恢复并验证中断前备份（" + call("recover", null).getInt("fileCount", 0) + " 个文件）。";

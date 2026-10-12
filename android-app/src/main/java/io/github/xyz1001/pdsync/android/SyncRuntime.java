@@ -102,7 +102,7 @@ final class SyncRuntime {
         connection2.validate();
         GamePreparationService.PreparedPair preparedPairRequirePreparedGame = requirePreparedGame(context);
         AndroidGameIdentity androidGameIdentityGameIdentity = gameIdentity(context, preparedPairRequirePreparedGame);
-        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile), new BridgeClient(context, preparedPairRequirePreparedGame, androidGameIdentityGameIdentity), androidGameIdentityGameIdentity);
+        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile), GameAccessBackends.forPreparedGame(context, preparedPairRequirePreparedGame, androidGameIdentityGameIdentity), androidGameIdentityGameIdentity);
     }
 
     private static SharedPreferences prefs(Context context) {
