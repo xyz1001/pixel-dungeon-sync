@@ -12,7 +12,6 @@ import android.graphics.drawable.Icon;
 import android.os.IBinder;
 import io.github.xyz1001.pdsync.android.AutoSyncPolicy;
 import io.github.xyz1001.pdsync.android.SecureConnectionStore;
-import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -53,7 +52,7 @@ public final class AutoSyncService extends Service {
             if (!SyncRuntime.automaticAllowed(context, SyncRuntime.connection(context))) {
                 throw new IllegalStateException("自动上传暂停，请先完成存档选择。");
             }
-            String strSelectionToken = SyncRuntime.selectionToken(SyncRuntime.requirePreparedGame(context));
+            String strSelectionToken = SyncRuntime.currentSelectionToken(context);
             String strCurrentNamespace = SyncRuntime.currentNamespace(context);
             if (isActive(sharedPreferences) && (!strSelectionToken.equals(sharedPreferences.getString("gameSelection", "")) || !strCurrentNamespace.equals(sharedPreferences.getString("gameNamespace", "")))) {
                 cancelForConnectionChange(context);
@@ -175,13 +174,14 @@ public final class AutoSyncService extends Service {
     /* synthetic */ void m1x57256bb9() {
         try {
             this.connection = SyncRuntime.connection(this);
-            GamePreparationService.PreparedPair preparedPairRequirePreparedGame = SyncRuntime.requirePreparedGame(this);
-            this.selectedGameToken = SyncRuntime.selectionToken(preparedPairRequirePreparedGame);
+            this.selectedGameToken = SyncRuntime.currentSelectionToken(this);
             this.selectedNamespace = SyncRuntime.currentNamespace(this);
             if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
                 throw new IllegalStateException("Game selection changed");
             }
-            this.bridge = GameAccessBackends.forPreparedGame(this, preparedPairRequirePreparedGame, SyncRuntime.gameIdentity(this, preparedPairRequirePreparedGame));
+            this.bridge = SyncRuntime.backend(this);
+            if (!this.bridge.capabilities().lifecycleObservation)
+                throw new IllegalStateException("Selected access backend cannot observe lifecycle");
             this.facade = SyncRuntime.facade(this, this.connection);
             poll();
         } catch (Exception unused) {
@@ -280,7 +280,7 @@ public final class AutoSyncService extends Service {
     private boolean currentGameAndPolicy() {
         try {
             String str = this.selectedGameToken;
-            if (str != null && str.equals(SyncRuntime.selectionToken(SyncRuntime.requirePreparedGame(this))) && this.selectedNamespace.equals(SyncRuntime.currentNamespace(this))) {
+            if (str != null && str.equals(SyncRuntime.currentSelectionToken(this)) && this.selectedNamespace.equals(SyncRuntime.currentNamespace(this))) {
                 if (SyncRuntime.automaticAllowed(this, this.connection)) {
                     return true;
                 }

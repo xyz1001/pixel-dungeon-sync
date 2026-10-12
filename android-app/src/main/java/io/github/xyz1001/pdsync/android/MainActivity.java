@@ -112,11 +112,13 @@ public final class MainActivity extends Activity {
     private EditText passwordInput;
     private GamePreparationService preparation;
     private GamePreparationService.PreparedPair prepared;
+    private SelectedRootGame rootGame;
+    private GameAccessBackend.Capabilities accessCapabilities;
     private boolean previewAttempted;
     private boolean readinessRefreshPending;
     private boolean receiverRegistered;
     private SyncPage renderedPage;
-    private boolean resumed;
+    private volatile boolean resumed;
     private LinearLayout root;
     private ScrollView scroll;
     private SecureConnectionStore secrets;
@@ -375,7 +377,7 @@ public final class MainActivity extends Activity {
             long j = jVersionCode;
             int i = Build.VERSION.SDK_INT;
             GamePreparationService.PreparedPair preparedPair = this.prepared;
-            String str3 = preparedPair == null ? null : preparedPair.gamePackage;
+            String str3 = selectedGamePackage();
             GamePreparationService.PreparedPair preparedPair2 = this.prepared;
             String str4 = preparedPair2 == null ? null : preparedPair2.bridgeHostPackage;
             GamePreparationService.PreparedPair preparedPair3 = this.prepared;
@@ -396,7 +398,7 @@ public final class MainActivity extends Activity {
                 // Reporting must preserve the original comparison failure if metadata is unavailable.
             }
             this.diagnosticReport = SyncInspectionDiagnostics.report(syncFailure, Build.VERSION.SDK_INT,
-                    appVersion, appVersionCode, getPackageName(), this.prepared == null ? null : this.prepared.gamePackage);
+                    appVersion, appVersionCode, getPackageName(), selectedGamePackage());
             exc2 = exc;
         } else {
             exc2 = exc;
@@ -428,7 +430,170 @@ public final class MainActivity extends Activity {
     }
 
     private boolean readyForSaves() {
+        if (this.rootGame != null && !SyncRuntime.rootAuthorized(this)) return false;
         return this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canContinue();
+    }
+
+    private boolean restoreSupported() {
+        return this.rootGame == null || (this.accessCapabilities != null && this.accessCapabilities.restoreSupported);
+    }
+
+    private boolean backupRecoverySupported() {
+        return this.rootGame == null || (this.accessCapabilities != null && this.accessCapabilities.interruptedBackupRecovery);
+    }
+
+    private boolean allowRestoreAction() {
+        if (restoreSupported()) return true;
+        this.notice = "当前 Root 后端仅支持读取和上传，恢复及合并写入尚不可用。现有游戏存档保持不变。";
+        render();
+        return false;
+    }
+
+    private void requireRestoreSupport() throws Exception {
+        if (!SyncRuntime.backend(this).capabilities().restoreSupported)
+            throw new IOException("当前存档访问方式不支持恢复或合并写入。");
+    }
+
+    private String selectedGamePackage() {
+        return this.rootGame != null ? this.rootGame.gamePackage : this.prepared == null ? null : this.prepared.gamePackage;
+    }
+
+    private String selectedGameLabel() {
+        return this.rootGame != null ? this.rootGame.gameLabel + " " + this.rootGame.gameVersionName
+                : this.prepared == null ? "尚未选择游戏" : this.prepared.gameLabel + " " + this.prepared.gameVersionName;
+    }
+
+    /** Metadata-only refresh. Root is requested solely by an explicit foreground action. */
+    private void readRootReadiness() throws Exception {
+        this.prepared = null;
+        this.accessCapabilities = null;
+        this.selectedNamespace = SyncRuntime.currentNamespace(this);
+        boolean pending = hasAnyRestoreJournal();
+        this.readinessState = InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.NOT_CHECKED,
+                false, this.installer.hasActiveRequest(), pending, InstallationReadiness.AccessStatus.NOT_CHECKED);
+        GameAccessBackend backend = SyncRuntime.backend(this);
+        this.accessCapabilities = backend.capabilities();
+        backend.targetGame();
+        this.readinessState = InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
+                true, this.installer.hasActiveRequest(), pending, InstallationReadiness.AccessStatus.NOT_CHECKED);
+    }
+
+    private void checkRootAccess() throws Exception {
+        if (!this.resumed) throw new IOException("请返回应用前台，再明确检查 Root 存档访问。");
+        readInstallationReadiness();
+        if (this.rootGame == null) throw new IOException("所选访问方式已变化，请重新检查。");
+        if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
+            throw new IOException("请先处理未完成恢复或系统安装请求。");
+        SyncRuntime.backend(this).inspectReady();
+        this.bridgeAccessCode = "READY";
+        this.readinessState = InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
+                true, false, false, InstallationReadiness.AccessStatus.READY);
+    }
+
+    private void requestRootAuthorization() {
+        if (this.rootGame == null || !this.resumed || this.busy) return;
+        final SelectedRootGame chosen = this.rootGame;
+        confirm("授权并检查 Root 访问？", "目标：" + chosen.gameLabel + "\n" + chosen.gamePackage
+                + "\n\n会通过设备上的 Root 管理器请求超级用户权限，并只读检查所选游戏的私有存档。请选择你信任的授权范围；是否长期保留权限由 Root 管理器决定。"
+                + "不会替换 APK、重签名或卸载游戏。设备是否具备可用 Root 尚需本次检查。",
+                "授权并检查", () -> work("正在请求 Root 并检查所选游戏存档…", () -> {
+                    if (!this.resumed || !chosen.matches(SyncRuntime.rootGame(this)))
+                        throw new IOException("请在应用前台重新确认所选游戏。");
+                    if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
+                        throw new IOException("请先处理未完成恢复或系统安装请求。");
+                    SyncRuntime.probeRootAuthorization(this);
+                    checkRootAccess();
+                    return null;
+                }, ignored -> {
+                    if (!this.resumed) {
+                        this.readinessState = this.readinessState.withAccessCode("NOT_CHECKED");
+                        this.notice = "请返回前台后再次检查存档。";
+                    } else {
+                        this.readinessRefreshPending = false;
+                        this.notice = "本次 Root 存档访问检查通过，可以手动预览存档。";
+                    }
+                }));
+    }
+
+    private void launchSelectedRootGame() {
+        if (this.rootGame == null) return;
+        final SelectedRootGame chosen = this.rootGame;
+        work("正在核对所选游戏启动入口…", () -> {
+            if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
+                throw new IOException("请先处理未完成恢复或系统安装请求。");
+            if (!chosen.matches(SyncRuntime.rootGame(this))) throw new IOException("所选游戏已变化，请重新选择。");
+            SyncRuntime.backend(this).targetGame();
+            Intent launch = getPackageManager().getLaunchIntentForPackage(chosen.gamePackage);
+            if (launch == null) throw new IOException("所选游戏没有可用的启动入口。");
+            cancelControlledLaunch();
+            AutoSyncService.cancelForConnectionChange(this);
+            return launch;
+        }, launch -> {
+            this.readinessState = this.readinessState.withAccessCode("NOT_CHECKED");
+            this.localPreview = null;
+            this.inspection = null;
+            this.history = null;
+            this.cloudVerified = false;
+            this.notice = "游戏已请求启动。正常退出后请手动授权并检查 Root 存档访问。";
+            startActivity(launch);
+        });
+    }
+
+    private void chooseRootInstalled() {
+        work("正在只读列出已安装应用…", () -> {
+            if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
+                throw new IOException("请先处理未完成恢复或系统安装请求，再切换访问方式。");
+            return this.preparation.listInstalledGames();
+        }, games -> {
+            if (games.isEmpty()) { this.notice = "未发现可选择的已安装应用。Root 模式不接受待安装 APK。"; return; }
+            String[] labels = new String[games.size()];
+            for (int i = 0; i < games.size(); i++) {
+                GamePreparationService.InstalledGame game = games.get(i);
+                labels[i] = game.label + " " + game.versionName + "\n" + game.packageName;
+            }
+            new AlertDialog.Builder(this).setTitle("Root 模式：选择已安装游戏")
+                    .setItems(labels, (dialog, index) -> selectRootGame(games.get(index).packageName))
+                    .setNegativeButton("取消", null).show();
+        });
+    }
+
+    private void selectRootGame(String packageName) {
+        work("正在核对已安装游戏身份，不更改游戏…", () -> {
+            SelectedRootGame chosen = new RootTargetResolver(this).selectInstalled(packageName);
+            SyncRuntime.setRootGame(this, chosen);
+            cancelControlledLaunch();
+            resetAccessSelection();
+            readInstallationReadiness();
+            return null;
+        }, ignored -> this.notice = "已选择 Root 模式。尚未请求 Root；请明确授权后检查存档。");
+    }
+
+    private void switchToEmbedded() {
+        work("正在切换为内置存档桥…", () -> {
+            SyncRuntime.useEmbeddedBackend(this);
+            cancelControlledLaunch();
+            resetAccessSelection();
+            readInstallationReadiness();
+            return null;
+        }, ignored -> this.notice = this.readinessState.statusDescription());
+    }
+
+    private void resetAccessSelection() {
+        this.rootGame = null;
+        this.accessCapabilities = null;
+        this.prepared = null;
+        this.facade = null;
+        this.history = null;
+        this.inspection = null;
+        this.localPreview = null;
+        this.previewAttempted = false;
+        this.cloudVerified = false;
+        this.selected = null;
+        this.confirmedAction = null;
+        this.confirmationMerge = null;
+        this.progress = OnboardingProgress.PENDING;
+        this.onboardingActive = true;
+        this.page = SyncPage.DISCOVERY;
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -492,7 +657,7 @@ public final class MainActivity extends Activity {
         if (connection != null) {
             this.progress = SyncRuntime.onboardingProgress(this, connection);
         }
-        if (z && readyForSaves() && this.connection != null) {
+        if (z && this.rootGame == null && readyForSaves() && this.connection != null) {
             try {
                 this.facade = null;
                 readComparison();
@@ -514,7 +679,7 @@ public final class MainActivity extends Activity {
         boolean z2 = false;
         if (!z) {
             this.notice = this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).statusDescription();
-            if (this.page == SyncPage.HOME && readyForSaves() && this.connection != null) {
+            if (this.rootGame == null && this.page == SyncPage.HOME && readyForSaves() && this.connection != null) {
                 refreshComparison(SyncPage.HOME, false);
                 return;
             }
@@ -547,6 +712,12 @@ public final class MainActivity extends Activity {
         this.bridgeAccessCode = "NOT_CHECKED";
         this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
         this.installer.reconcile();
+        this.rootGame = SyncRuntime.rootGame(this);
+        if (this.rootGame != null) {
+            readRootReadiness();
+            return;
+        }
+        this.accessCapabilities = null;
         this.prepared = this.preparation.reloadPrepared();
         if (this.prepared == null) {
             this.readinessState = InstallationReadiness.noSelection();
@@ -876,21 +1047,18 @@ public final class MainActivity extends Activity {
         String str2;
         String str3;
         AndroidSyncFacade.Inspection inspection;
-        TextView textViewLabel = label((this.progress == OnboardingProgress.COMPLETE ? SyncRuntime.isAutoUploadPaused(this) ? "自动上传已暂停" : AutoSyncService.status(this) : "自动上传暂停，请先选择上传或恢复。") + "\n本机：" + Build.MODEL, 14, -13474224);
+        TextView textViewLabel = label((this.rootGame != null ? "Root 模式 · 仅手动检查与上传，自动上传未开放" : this.progress == OnboardingProgress.COMPLETE ? SyncRuntime.isAutoUploadPaused(this) ? "自动上传已暂停" : AutoSyncService.status(this) : "自动上传暂停，请先选择上传或恢复。") + "\n本机：" + Build.MODEL, 14, -13474224);
         textViewLabel.setPadding(dp(12), dp(12), dp(12), dp(12));
         textViewLabel.setBackgroundColor(-1839130);
         this.body.addView(textViewLabel);
-        if (this.prepared == null) {
-            str = "尚未选择游戏";
-        } else {
-            str = this.prepared.gameLabel + " " + this.prepared.gameVersionName;
-        }
+        str = selectedGameLabel();
         text(str);
         if (!readyForSaves()) {
-            button("检查游戏与内置存档桥状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
+            button(this.rootGame != null ? "授权并检查 Root 存档访问" : "检查游戏与内置存档桥状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m106x5451cefa();
+                    if (MainActivity.this.rootGame != null) MainActivity.this.requestRootAuthorization();
+                    else MainActivity.this.m106x5451cefa();
                 }
             });
         }
@@ -909,7 +1077,8 @@ public final class MainActivity extends Activity {
                 MainActivity.this.requestUpload();
             }
         }, true).setEnabled(readyForSaves());
-        addButton(linearLayoutRow, "恢复", this::requestRestore, true).setEnabled(readyForSaves() && this.connection != null);
+        addButton(linearLayoutRow, "恢复", this::requestRestore, true).setEnabled(restoreSupported() && readyForSaves() && this.connection != null);
+        if (!restoreSupported()) text("Root 恢复与合并写入尚未开放。");
         Button button = button("存档名称与单局身份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda7
             @Override // java.lang.Runnable
             public final void run() {
@@ -1169,9 +1338,35 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void renderRootDiscovery() {
+        heading("1 / 4  选择游戏 · Root");
+        text(selectedGameLabel() + "\n" + this.rootGame.gamePackage);
+        text(this.readinessState.installationDescription());
+        text(this.readinessState.accessDescription());
+        text("直接访问现有安装，不准备、重签名、安装或卸载游戏。需要设备已有可用 Root；选择此模式本身不代表已获授权。");
+        if (!restoreSupported()) text("当前仅开放只读预览和手动上传；恢复、合并写入与中断备份恢复尚未开放。");
+        text("自动上传暂未开放；每次回到应用需手动检查。应用重启后必须重新明确授权。");
+        button("授权 Root 并检查存档", this::requestRootAuthorization)
+                .setEnabled(!this.installer.hasActiveRequest() && !this.readinessState.restorePending);
+        button("启动所选游戏", this::launchSelectedRootGame)
+                .setEnabled(this.readinessState.identityVerified && !this.installer.hasActiveRequest() && !this.readinessState.restorePending);
+        button("更换 Root 游戏…", this::chooseRootInstalled)
+                .setEnabled(!this.installer.hasActiveRequest() && !this.readinessState.restorePending);
+        button("切换为内置存档桥", this::switchToEmbedded)
+                .setEnabled(!this.installer.hasActiveRequest() && !this.readinessState.restorePending);
+        if (this.readinessState.restorePending) {
+            text("有未完成恢复，不能切换游戏或访问方式。请先核对恢复记录。");
+            button("查看恢复记录", () -> navigate(SyncPage.SETTINGS));
+        }
+        foot("下一步", this::m103x3c55a874).setEnabled(readyForSaves());
+    }
+
     private void renderDiscovery() {
+        if (this.rootGame != null) { renderRootDiscovery(); return; }
         InstallationReadiness installationReadinessWithSystemRequest = this.readinessState.withSystemRequest(this.installer.hasActiveRequest());
         heading("1 / 4  选择游戏");
+        button("可选：使用 Root 读取已安装游戏", this::chooseRootInstalled)
+                .setEnabled(!this.installer.hasActiveRequest() && !this.readinessState.restorePending);
         text(installationReadinessWithSystemRequest.installationDescription());
         if (this.prepared != null) {
             text(installationReadinessWithSystemRequest.accessDescription());
@@ -1394,6 +1589,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void pickApks() {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.installer.hasActiveRequest()) {
             this.notice = "请先完成或取消当前系统安装。";
             render();
@@ -1412,6 +1608,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void chooseInstalled() {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         work("正在读取可选择的已安装应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda46
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
@@ -1457,6 +1654,7 @@ public final class MainActivity extends Activity {
     }
 
     private void requestPrepare(final String str, final List<Uri> list) {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         work("正在检查本机签名密钥…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda121
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
@@ -1472,6 +1670,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$requestPrepare$30$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ String m138x3dde23b5(List list, String str) throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行游戏准备、安装或内置桥激活。");
         this.installer.assertCanPrepare();
         try {
             return this.preparation.currentLocalCertificateSha256();
@@ -1518,6 +1717,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$prepare$33$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ GamePreparationService.PreparedPair m58lambda$prepare$33$iogithubxyz1001pdsyncandroidMainActivity(List list, String str, boolean z) throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行游戏准备、安装或内置桥激活。");
         this.installer.assertCanPrepare();
         PreparationDiagnostics.Stage stage = PreparationDiagnostics.Stage.EXTRACTION;
         try (InputStream runtimeDex = getAssets().open("bridge-runtime.dex")) {
@@ -1587,6 +1787,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void continueInstallation() {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.installer.hasConfirmation()) {
             openInstallConfirmation();
         } else {
@@ -1606,6 +1807,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$continueInstallation$35$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ InstallNext m32xc4841ad1() throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行安装或卸载。请先明确切换访问方式。");
         this.installer.reconcile();
         if (this.installer.hasActiveRequest()) {
             throw new IOException("系统请求仍在处理中。请完成系统确认，或取消当前安装会话后再试。");
@@ -1657,6 +1859,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$continueInstallation$36$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ Object m33x39fe4112(InstallNext installNext) throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行安装或卸载。请先明确切换访问方式。");
         this.installer.requestUninstall(installNext.name, installNext.receipt);
         return null;
     }
@@ -1686,6 +1889,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$continueInstallation$39$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ Object m36x9a6cb3d5(InstallNext installNext) throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行安装或卸载。请先明确切换访问方式。");
         this.installer.requestInstall(installNext.name);
         return null;
     }
@@ -1744,8 +1948,9 @@ public final class MainActivity extends Activity {
     private void renderPath() {
         heading("2 / 4  设置存档路径");
         text("存档目录");
-        text(this.prepared == null ? "尚未选择游戏" : this.prepared.gamePackage + " / files");
-        text("Android 由游戏内置存档桥在游戏自身 UID 中访问私有存档目录。同步主程序使用独立 UID，连接前核对本机签名、完整 APK、来源绑定及主程序证书。系统文件选择器不能替代这项访问。");
+        text(selectedGamePackage() == null ? "尚未选择游戏" : selectedGamePackage() + " / files");
+        if (this.rootGame != null) text("Root 模式按已核对的用户、UID 与安装身份读取私有存档；不会修改游戏 APK。只有明确授权后点击检查才会访问存档。");
+        else text("Android 由游戏内置存档桥在游戏自身 UID 中访问私有存档目录。同步主程序使用独立 UID，连接前核对本机签名、完整 APK、来源绑定及主程序证书。系统文件选择器不能替代这项访问。");
         if (this.localPreview == null) {
             text("尚未完成本机存档预览，请检查存档。");
         } else {
@@ -1783,7 +1988,7 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m110xcdd09dd8();
             }
         }, readyForSaves() && this.localPreview != null);
-        if (this.localPreview != null || this.previewAttempted || this.busy || !readyForSaves()) {
+        if (this.rootGame != null || this.localPreview != null || this.previewAttempted || this.busy || !readyForSaves()) {
             return;
         }
         this.body.post(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda90
@@ -1799,7 +2004,7 @@ public final class MainActivity extends Activity {
         if (readyForSaves()) {
             previewPath();
         } else {
-            refreshReadiness();
+            if (this.rootGame != null) requestRootAuthorization(); else refreshReadiness();
         }
     }
 
@@ -1816,7 +2021,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderPath$48$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m111x434ac419() {
-        if (this.page != SyncPage.PATH || this.previewAttempted || this.busy || !this.resumed) {
+        if (this.rootGame != null || this.page != SyncPage.PATH || this.previewAttempted || this.busy || !this.resumed) {
             return;
         }
         previewPath();
@@ -1824,7 +2029,7 @@ public final class MainActivity extends Activity {
 
     private void previewPath() {
         if (!readyForSaves()) {
-            refreshReadiness();
+            if (this.rootGame != null) requestRootAuthorization(); else refreshReadiness();
             return;
         }
         this.previewAttempted = true;
@@ -1851,7 +2056,7 @@ public final class MainActivity extends Activity {
             }
         }).createTemporaryDirectory("save-preview-");
         try {
-            new BridgeClient(this).exportTo(temporaryDirectoryCreateTemporaryDirectory.path());
+            SyncRuntime.backend(this).exportTo(temporaryDirectoryCreateTemporaryDirectory.path());
             SaveSummary saveSummary = SaveSummary.Companion.read(temporaryDirectoryCreateTemporaryDirectory.path());
             temporaryDirectoryCreateTemporaryDirectory.path();
             if (temporaryDirectoryCreateTemporaryDirectory != null) {
@@ -2219,6 +2424,7 @@ public final class MainActivity extends Activity {
     /* synthetic */ Boolean m66x99ceaa21(boolean z, SyncPage syncPage) throws Exception {
         if (z) {
             readInstallationReadiness();
+            if (this.rootGame != null && SyncRuntime.rootAuthorized(this)) checkRootAccess();
         }
         if (!readyForSaves()) {
             return false;
@@ -2317,7 +2523,7 @@ public final class MainActivity extends Activity {
         if (inspection2 == null || !inspection2.getCanAdoptRemote()) {
             AndroidSyncFacade.Inspection inspection3 = this.inspection;
             if (inspection3 != null && !inspection3.getRemoteVersions().isEmpty()) {
-                foot("恢复所选云端存档", this::requestRestore).setEnabled((this.selected == null || kind() == OnboardingKind.BLOCKED) ? false : true);
+                foot("恢复所选云端存档", this::requestRestore).setEnabled(restoreSupported() && this.selected != null && kind() != OnboardingKind.BLOCKED);
             }
         } else {
             foot("完成", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda139
@@ -2425,7 +2631,7 @@ public final class MainActivity extends Activity {
             this.progress = OnboardingProgress.COMPLETE;
             this.onboardingActive = false;
             this.page = SyncPage.HOME;
-            this.notice = SyncRuntime.isAutoUploadPaused(this)
+            this.notice = this.rootGame != null ? "本机进度已保留，配置完成。Root 模式请手动检查和上传。" : SyncRuntime.isAutoUploadPaused(this)
                     ? "本机进度已保留，配置完成。自动上传仍按设置暂停。"
                     : "本机进度已保留，配置完成。启动游戏并正常退出后会尝试无冲突自动上传。";
         });
@@ -2554,6 +2760,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void requestRestore() {
+        if (!allowRestoreAction()) return;
         if (this.connection == null) {
             navigate(SyncPage.CONNECTION);
             return;
@@ -2594,11 +2801,13 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$requestRestore$73$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m141x92df934d(AndroidSyncFacade.Inspection inspection, String str) throws Exception {
+        requireRestoreSupport();
         return sync().restoreSelected(inspection, str, false);
     }
 
     /* renamed from: lambda$requestRestore$74$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m142x859b98e(AndroidSyncFacade.Inspection inspection, String str) throws Exception {
+        requireRestoreSupport();
         return sync().restoreSelected(inspection, str, true);
     }
 
@@ -2648,8 +2857,9 @@ public final class MainActivity extends Activity {
             public final void run() {
                 MainActivity.this.m87x12f15700();
             }
-        }).setEnabled(z);
-        foot("合并", this::previewMerge);
+        }).setEnabled(z && restoreSupported());
+        foot("合并", this::previewMerge).setEnabled(restoreSupported());
+        if (!restoreSupported()) text("当前 Root 后端不能恢复或合并写入；可以保留双方或手动上传本机。");
     }
 
     /* renamed from: lambda$renderConflict$76$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -2664,6 +2874,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderConflict$80$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m87x12f15700() {
+        if (!allowRestoreAction()) return;
         final String str = this.selected;
         if (str == null) {
             return;
@@ -2679,6 +2890,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderConflict$78$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m85x84f7e729(AndroidSyncFacade.Inspection inspection, String str) throws Exception {
+        requireRestoreSupport();
         return sync().resolveConflict(inspection, str);
     }
 
@@ -2694,6 +2906,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void previewMerge() {
+        if (!allowRestoreAction()) return;
         final AndroidSyncFacade.Inspection inspection = this.inspection;
         if (inspection == null) {
             refreshComparison(SyncPage.COMPARISON);
@@ -2740,6 +2953,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$previewMerge$82$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m61xf9a4e77a(AndroidSyncFacade.Inspection inspection) throws Exception {
+        requireRestoreSupport();
         return sync().mergeConflict(inspection);
     }
 
@@ -2942,7 +3156,9 @@ public final class MainActivity extends Activity {
         heading("设置");
         Switch r0 = new Switch(this);
         r0.setText("自动上传");
-        r0.setChecked(!SyncRuntime.isAutoUploadPaused(this));
+        r0.setChecked(this.rootGame == null && !SyncRuntime.isAutoUploadPaused(this));
+        r0.setEnabled(this.rootGame == null);
+        if (this.rootGame != null) text("Root 模式自动上传尚未开放；手动检查与上传需要本次前台授权。");
         this.body.addView(r0);
         r0.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda74
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
@@ -2950,11 +3166,7 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m128x5965f8ae(compoundButton, z);
             }
         });
-        if (this.prepared == null) {
-            str = "尚未选择游戏";
-        } else {
-            str = this.prepared.gameLabel + " " + this.prepared.gameVersionName + "\n" + this.prepared.gamePackage;
-        }
+        str = selectedGameLabel() + (selectedGamePackage() == null ? "" : "\n" + selectedGamePackage());
         text(str);
         button("更换游戏…", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda78
             @Override // java.lang.Runnable
@@ -2980,11 +3192,11 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m132x2f4e91b2();
             }
         });
-        if (this.prepared == null) {
+        if (selectedGamePackage() == null) {
             string = "存档位置尚未确认";
         } else {
             StringBuilder sb = new StringBuilder("存档位置：");
-            sb.append(this.prepared.gamePackage);
+            sb.append(selectedGamePackage());
             sb.append(" / files\n同步空间：");
             sb.append(this.selectedNamespace);
             sb.append("\n档案：");
@@ -2994,7 +3206,7 @@ public final class MainActivity extends Activity {
         }
         text(string);
         text("不同游戏来源默认使用不同同步空间，避免改版混档。只有经过识别的相同来源才沿用已有空间。");
-        if (this.prepared != null) {
+        if (selectedGamePackage() != null) {
             button("高级：关联同一游戏的 PC 档案", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda82
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -3017,7 +3229,7 @@ public final class MainActivity extends Activity {
                 public final void run() {
                     MainActivity.this.m135x8fbd0475();
                 }
-            });
+            }).setEnabled(restoreSupported());
             button("保留备份并放弃未完成操作", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda85
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -3030,7 +3242,8 @@ public final class MainActivity extends Activity {
             public final void run() {
                 MainActivity.this.m116x9e9ac3b0();
             }
-        });
+        }).setEnabled(backupRecoverySupported());
+        if (!backupRecoverySupported()) text("当前 Root 后端尚不支持中断备份恢复。");
         AndroidSyncFacade.Inspection inspection2 = this.inspection;
         if (inspection2 != null && inspection2.isRetryablePending()) {
             button("检查并归档中断的待上传操作", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda75
@@ -3117,6 +3330,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$96$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m134x1a42de34() throws Exception {
+        requireRestoreSupport();
         return sync().recoverRestore();
     }
 
@@ -3157,6 +3371,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$104$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m116x9e9ac3b0() {
+        if (!backupRecoverySupported()) { this.notice = "当前 Root 后端尚不支持中断备份恢复。"; render(); return; }
         showConfirmation("恢复中断前的原存档", "仅用于存档桥提示需要恢复的情况。将用存档桥保留的原始备份恢复中断前存档。请先正常退出游戏，恢复时不要重新进入游戏。完成后仍须检查主程序的未完成恢复记录。", "恢复原始备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda16
             @Override // java.lang.Runnable
             public final void run() {
@@ -3182,7 +3397,9 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$101$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ String m113x3e2c50ed() throws Exception {
-        String strRecoverInterruptedBackup = new BridgeClient(this).recoverInterruptedBackup();
+        GameAccessBackend backend = SyncRuntime.backend(this);
+        if (!backend.capabilities().interruptedBackupRecovery) throw new IOException("当前访问方式不支持中断备份恢复。");
+        String strRecoverInterruptedBackup = backend.recoverInterruptedBackup();
         readInstallationReadiness();
         return strRecoverInterruptedBackup;
     }
@@ -3599,6 +3816,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void activateHelper() {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.prepared == null || !this.prepared.embeddedBridge() || !HelperActivationPolicy.canOffer(this.readinessState.withSystemRequest(this.installer.hasActiveRequest()), this.bridgeAccessCode, false)) {
             return;
         }
@@ -3617,6 +3835,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$activateHelper$134$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ ActivationNext m12xbb2f51f5() throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行游戏准备、安装或内置桥激活。");
         this.installer.reconcile();
         if (this.installer.hasActiveRequest()) {
             throw new IOException("请先完成或取消当前系统安装请求。");
@@ -3661,6 +3880,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void launchGameForInitialization() {
+        if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
             this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
             work("正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
@@ -3679,6 +3899,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$launchGameForInitialization$136$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ Intent m50xa7c297e0() throws Exception {
+        if (SyncRuntime.rootMode(this)) throw new IOException("Root 模式不执行游戏准备、安装或内置桥激活。");
         this.installer.reconcile();
         if (this.installer.hasActiveRequest()) {
             throw new IOException("请先完成或取消当前系统安装请求。");
@@ -3747,12 +3968,13 @@ public final class MainActivity extends Activity {
         if (hasAnyRestoreJournal()) {
             throw new IOException("存在未完成恢复。请先检查恢复记录，再启动游戏。");
         }
-        if (this.prepared == null) {
+        if (selectedGamePackage() == null) {
             throw new IOException("请先选择游戏。");
         }
-        new BridgeClient(this).inspectReady();
-        new BridgeClient(this).targetGame();
-        Intent launchIntentForPackage = getPackageManager().getLaunchIntentForPackage(this.prepared.gamePackage);
+        GameAccessBackend backend = SyncRuntime.backend(this);
+        backend.inspectReady();
+        backend.targetGame();
+        Intent launchIntentForPackage = getPackageManager().getLaunchIntentForPackage(SyncRuntime.currentGamePackage(this));
         if (launchIntentForPackage != null) {
             if (this.connection != null && SyncRuntime.automaticAllowed(this, this.connection)) {
                 synchronized (SyncRuntime.OPERATION_LOCK) {
@@ -3774,9 +3996,10 @@ public final class MainActivity extends Activity {
     /* synthetic */ void m49x6e86027e(boolean z, Intent intent) throws Exception {
         this.inspection = null;
         this.cloudVerified = false;
-        if (this.connection == null || !z || SyncRuntime.isAutoUploadPaused(this)) {
+        if (this.rootGame != null || this.connection == null || !z || SyncRuntime.isAutoUploadPaused(this)) {
             cancelControlledLaunch();
-            this.notice = "游戏已请求启动。自动上传暂停，请先完成存档比较。";
+            this.notice = this.rootGame != null ? "游戏已请求启动。Root 模式自动上传未开放；退出后请手动检查。"
+                    : "游戏已请求启动。自动上传暂停，请先完成存档比较。";
         } else {
             SyncRuntime.setConnection(this.connection);
             try {

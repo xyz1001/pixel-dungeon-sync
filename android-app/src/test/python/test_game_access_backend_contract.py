@@ -39,11 +39,12 @@ class GameAccessBackendContract(unittest.TestCase):
 
     def test_facade_and_observer_depend_on_the_factory_boundary(self):
         facade = body(RUNTIME, 'static AndroidSyncFacade facade(')
-        self.assertIn('GameAccessBackends.forPreparedGame(context, preparedPairRequirePreparedGame, androidGameIdentityGameIdentity)', facade)
+        self.assertIn('backend(context)', facade)
+        self.assertIn('GameAccessBackends.forPreparedGame(context, prepared, gameIdentity(context, prepared))', body(RUNTIME, 'GameAccessBackend backend('))
         self.assertNotIn('new BridgeClient(', facade)
         self.assertIn('private GameAccessBackend bridge;', SERVICE)
         self.assertIn('GameAccessBackend.Observation observationObserveLifecycle', SERVICE)
-        self.assertIn('GameAccessBackends.forPreparedGame(this, preparedPairRequirePreparedGame, SyncRuntime.gameIdentity(this, preparedPairRequirePreparedGame))', SERVICE)
+        self.assertIn('this.bridge = SyncRuntime.backend(this)', SERVICE)
         self.assertNotIn('new BridgeClient(', SERVICE)
 
     def test_metadata_does_not_replace_existing_readiness_or_automatic_gates(self):
@@ -52,7 +53,7 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertIn('BridgeReadiness.failureCode(', readiness)
         self.assertNotIn('capabilities()', readiness)
         automatic = body(RUNTIME, 'static boolean automaticAllowed(')
-        self.assertIn('if (!requirePreparedGame(context).embeddedBridge()) return false;', automatic)
+        self.assertIn('if (rootMode(context) || !requirePreparedGame(context).embeddedBridge()) return false;', automatic)
         self.assertIn('OnboardingGate.allowsAutomatic(', automatic)
         self.assertNotIn('capabilities()', automatic)
         self.assertIn('call("recover", null)', body(CLIENT, 'public String recoverInterruptedBackup()'))

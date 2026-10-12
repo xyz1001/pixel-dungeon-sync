@@ -7,6 +7,7 @@ public final class InstallationReadiness {
     public final PackageStatus helper;
     public final boolean identityVerified;
     public final boolean embeddedBridge;
+    public final boolean rootDirect;
     public final boolean restorePending;
     public final boolean systemRequestActive;
 
@@ -34,18 +35,22 @@ public final class InstallationReadiness {
     }
 
     public InstallationReadiness(PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
-        this(false, packageStatus, packageStatus2, z, z2, z3, accessStatus);
+        this(false, false, packageStatus, packageStatus2, z, z2, z3, accessStatus);
     }
 
-    private InstallationReadiness(boolean embedded, PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
+    private InstallationReadiness(boolean embedded, boolean root, PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
         if (packageStatus == null || packageStatus == PackageStatus.NOT_APPLICABLE || packageStatus2 == null || accessStatus == null) {
             throw new IllegalArgumentException("Readiness states are required");
         }
         this.embeddedBridge = embedded;
-        if (embedded != (packageStatus2 == PackageStatus.NOT_APPLICABLE)) throw new IllegalArgumentException("Bridge mode must match package states");
+        this.rootDirect = root;
+        if (embedded && root) throw new IllegalArgumentException("One access mode is required");
+        if (root && packageStatus != PackageStatus.NOT_SELECTED && packageStatus != PackageStatus.NOT_CHECKED
+                && packageStatus != PackageStatus.VERIFIED) throw new IllegalArgumentException("Root requires an existing installed game");
+        if ((embedded || root) != (packageStatus2 == PackageStatus.NOT_APPLICABLE)) throw new IllegalArgumentException("Bridge mode must match package states");
         this.game = packageStatus;
         this.helper = packageStatus2;
-        boolean z4 = z && packageStatus == PackageStatus.VERIFIED && (embedded || packageStatus2 == PackageStatus.VERIFIED);
+        boolean z4 = z && packageStatus == PackageStatus.VERIFIED && (embedded || root || packageStatus2 == PackageStatus.VERIFIED);
         this.identityVerified = z4;
         this.systemRequestActive = z2;
         this.restorePending = z3;
@@ -56,7 +61,11 @@ public final class InstallationReadiness {
     }
 
     public static InstallationReadiness embedded(PackageStatus game, boolean identityVerified, boolean systemRequestActive, boolean restorePending, AccessStatus access) {
-        return new InstallationReadiness(true, game, PackageStatus.NOT_APPLICABLE, identityVerified, systemRequestActive, restorePending, access);
+        return new InstallationReadiness(true, false, game, PackageStatus.NOT_APPLICABLE, identityVerified, systemRequestActive, restorePending, access);
+    }
+
+    public static InstallationReadiness rootDirect(PackageStatus game, boolean identityVerified, boolean systemRequestActive, boolean restorePending, AccessStatus access) {
+        return new InstallationReadiness(false, true, game, PackageStatus.NOT_APPLICABLE, identityVerified, systemRequestActive, restorePending, access);
     }
 
     public static InstallationReadiness noSelection() {
@@ -69,11 +78,11 @@ public final class InstallationReadiness {
     }
 
     public InstallationReadiness withSystemRequest(boolean z) {
-        return new InstallationReadiness(this.embeddedBridge, this.game, this.helper, this.identityVerified, z, this.restorePending, this.access);
+        return new InstallationReadiness(this.embeddedBridge, this.rootDirect, this.game, this.helper, this.identityVerified, z, this.restorePending, this.access);
     }
 
     public InstallationReadiness withAccessCode(String str) {
-        return new InstallationReadiness(this.embeddedBridge, this.game, this.helper, this.identityVerified, this.systemRequestActive, this.restorePending, classify(str));
+        return new InstallationReadiness(this.embeddedBridge, this.rootDirect, this.game, this.helper, this.identityVerified, this.systemRequestActive, this.restorePending, classify(str));
     }
 
     public boolean installationVerified() {
@@ -81,26 +90,26 @@ public final class InstallationReadiness {
     }
 
     public boolean canContinue() {
-        return this.identityVerified && !this.systemRequestActive && this.access == AccessStatus.READY;
+        return this.identityVerified && !this.systemRequestActive && (!this.rootDirect || !this.restorePending) && this.access == AccessStatus.READY;
     }
 
     public boolean canInitializeGame() {
-        return this.identityVerified && !this.systemRequestActive && !this.restorePending && this.access == AccessStatus.FIRST_LAUNCH_NEEDED;
+        return !this.rootDirect && this.identityVerified && !this.systemRequestActive && !this.restorePending && this.access == AccessStatus.FIRST_LAUNCH_NEEDED;
     }
 
     public boolean canContinueInstallation() {
-        if (!this.systemRequestActive && checked(this.game) && (this.embeddedBridge || checked(this.helper))) {
+        if (!this.rootDirect && !this.systemRequestActive && checked(this.game) && (this.embeddedBridge || checked(this.helper))) {
             return needsInstall(this.game) || needsInstall(this.helper);
         }
         return false;
     }
 
     public boolean requiresGameUninstall() {
-        return this.game == PackageStatus.REQUIRES_UNINSTALL;
+        return !this.rootDirect && this.game == PackageStatus.REQUIRES_UNINSTALL;
     }
 
     public boolean requiresHelperUninstall() {
-        return this.helper == PackageStatus.REQUIRES_UNINSTALL;
+        return !this.rootDirect && this.helper == PackageStatus.REQUIRES_UNINSTALL;
     }
 
     private static boolean needsInstall(PackageStatus packageStatus) {
@@ -118,6 +127,10 @@ public final class InstallationReadiness {
         if (this.systemRequestActive) {
             return "系统安装或卸载请求尚未结束，请完成或取消当前系统确认。";
         }
+        if (this.rootDirect) {
+            return this.identityVerified ? "Root 模式：已核对所选已安装游戏的身份；尚不代表 Root 权限或存档可访问。"
+                    : "Root 模式：所选已安装游戏的身份尚未核对。不会准备、签名、安装或卸载游戏。";
+        }
         if (this.identityVerified) {
             return this.embeddedBridge ? "游戏内置存档桥已验证：本机签名、完整 APK、来源绑定与独立 UID 已核对。" : "旧版游戏与助手已核对，仅用于保留的恢复流程。";
         }
@@ -133,6 +146,26 @@ public final class InstallationReadiness {
     public String accessDescription() {
         if (this.systemRequestActive) {
             return "系统请求结束后会重新核验安装和存档访问。";
+        }
+        if (this.rootDirect && this.restorePending) {
+            return "检测到未完成恢复。不能切换游戏或访问方式，请先核对恢复记录。";
+        }
+        if (this.rootDirect && this.access == AccessStatus.NOT_CHECKED) {
+            return "Root 存档访问尚未检查。请保持应用在前台，明确授权后再检查；返回应用不会自动请求 Root。";
+        }
+        if (this.rootDirect && this.access == AccessStatus.READY) {
+            return "本次 Root 存档访问检查通过。后续操作仍会重新核验游戏身份与存档状态。";
+        }
+        if (this.rootDirect) {
+            switch (this.access) {
+                case FIRST_LAUNCH_NEEDED: return "所选游戏尚无可读取的存档目录；请先正常游玩并退出，再手动检查。";
+                case GAME_BUSY: return "游戏仍运行、存档变化或进程状态不明确。正常退出后再手动检查。";
+                case UNRECOGNIZED_LAYOUT: return "Root 已连接，但尚不能识别存档布局；未把它当成空存档。";
+                case SECURITY_ERROR: return "Root 权限或所选游戏身份尚未通过验证，请查看诊断并重新授权检查。";
+                case IPC_ERROR: return "尚未完成 Root 请求；可能未安装、被拒绝、超时或回复无效。请查看诊断。";
+                case RECOVERY_NEEDED: return "有未完成恢复，请先核对恢复记录，暂时不要启动游戏。";
+                default: return "Root 存档访问检查未完成，请查看诊断并明确重新检查。";
+            }
         }
         if (!this.identityVerified && this.access == AccessStatus.NOT_CHECKED) {
             return "通过完整安装与身份核验后，才能检查存档访问。";
@@ -192,6 +225,12 @@ public final class InstallationReadiness {
         }
         str.hashCode();
         switch (str) {
+            case "ROOT_UNAVAILABLE":
+            case "ROOT_DENIED_OR_EXITED":
+            case "ROOT_TIMEOUT":
+            case "ROOT_CANCELLED":
+            case "ROOT_INVALID_REPLY":
+            case "ROOT_PIPE_FAILED":
             case "NO_PROVIDER_REPLY":
             case "INVALID_PROTOCOL":
             case "IPC_CLOSE_FAILED":
@@ -207,6 +246,11 @@ public final class InstallationReadiness {
             case "RESTORE_ROLLED_BACK":
             case "RESTORE_VERIFY_FAILED":
                 return AccessStatus.RECOVERY_NEEDED;
+            case "ROOT_AUTH_REQUIRED":
+            case "ROOT_TARGET_CHANGED":
+            case "ROOT_BINDING_MISMATCH":
+            case "ROOT_NOT_ROOT":
+            case "ROOT_UNSAFE_PATH":
             case "IPC_SECURITY_REJECTED":
             case "UNEXPECTED_SHARED_UID":
             case "UID_MISMATCH":
@@ -221,6 +265,9 @@ public final class InstallationReadiness {
             case "SYNC_BUSY":
             case "OPERATION_BUSY":
                 return AccessStatus.SYNC_BUSY;
+            case "ROOT_UNRELIABLE":
+            case "ROOT_BUSY":
+            case "ROOT_CHANGED":
             case "GAME_FOREGROUND":
             case "GAME_SAVE_RACE":
             case "SAVE_CHANGED":
@@ -230,8 +277,10 @@ public final class InstallationReadiness {
                 return AccessStatus.GAME_BUSY;
             case "READY":
                 return AccessStatus.READY;
+            case "ROOT_UNRECOGNIZED_LAYOUT":
             case "UNRECOGNIZED_SAVE_LAYOUT":
                 return AccessStatus.UNRECOGNIZED_LAYOUT;
+            case "ROOT_MISSING_DIRECTORY":
             case "FIRST_LAUNCH_NEEDED":
                 return AccessStatus.FIRST_LAUNCH_NEEDED;
             default:
