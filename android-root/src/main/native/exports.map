@@ -1,0 +1,4 @@
+PDSYNC_ROOT_ATOMIC_1 {
+  global: Java_io_github_xyz1001_pdsync_root_RootAtomicRename_nativeRenameNoReplace;
+  local: *;
+};

@@ -1,0 +1,90 @@
+{
+  "format_version": 1,
+  "clang_version": "19.1.7",
+  "debian_version": "1:19.1.7-3+b1",
+  "android_sysroot_revision": "f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f",
+  "api": 26,
+  "download_bytes": 18341146,
+  "existing_llvm": {
+    "path": "/usr/lib/x86_64-linux-gnu/libLLVM.so.19.1",
+    "bytes": 129673080,
+    "sha256": "3523f50f635d2a1ea47518a392451f2854b92823ceaf1345fb806099dd1a3b8a"
+  },
+  "artifacts": [
+    {
+      "kind": "debian-package",
+      "file": "clang-19_19.1.7-3+b1_amd64.deb",
+      "url": "https://deb.debian.org/debian/pool/main/l/llvm-toolchain-19/clang-19_19.1.7-3+b1_amd64.deb",
+      "bytes": 116584,
+      "sha256": "bbb74458d782b7792b61b0eed92746df5e6d033778c045cf8c2b3835b7c4efc4"
+    },
+    {
+      "kind": "debian-package",
+      "file": "libclang-cpp19_19.1.7-3+b1_amd64.deb",
+      "url": "https://deb.debian.org/debian/pool/main/l/llvm-toolchain-19/libclang-cpp19_19.1.7-3+b1_amd64.deb",
+      "bytes": 13191148,
+      "sha256": "a7d2b6df51050834f6ea5c0d5e34869c2298b0bcdaa91eff17ba3db2cd545c47"
+    },
+    {
+      "kind": "debian-package",
+      "file": "lld-19_19.1.7-3+b1_amd64.deb",
+      "url": "https://deb.debian.org/debian/pool/main/l/llvm-toolchain-19/lld-19_19.1.7-3+b1_amd64.deb",
+      "bytes": 1374952,
+      "sha256": "756a805e8811d527dd2b5417f016c9342b8631fa9c1ddcd56265c13ae33bf3a4"
+    },
+    {
+      "kind": "debian-package",
+      "file": "libclang-common-19-dev_19.1.7-3+b1_amd64.deb",
+      "url": "https://deb.debian.org/debian/pool/main/l/llvm-toolchain-19/libclang-common-19-dev_19.1.7-3+b1_amd64.deb",
+      "bytes": 739932,
+      "sha256": "4018e40e2d4144fe38c45822e68cca63c1bf6c7872c3073ebb262ad4b2f9b8bc"
+    },
+    {
+      "kind": "android-headers",
+      "file": "android-headers.tar.gz",
+      "url": "https://android.googlesource.com/platform/prebuilts/ndk/+archive/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/include.tar.gz",
+      "bytes": 1966302,
+      "sha256": "e9bb87e776003ecf8da57604103ca992b40db4c00f9f767450067d7aae78785e"
+    },
+    {
+      "kind": "android-libc-stub",
+      "triple": "aarch64-linux-android",
+      "file": "aarch64-linux-android-libc.so.b64",
+      "url": "https://android.googlesource.com/platform/prebuilts/ndk/+/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/lib/aarch64-linux-android/26/libc.so?format=TEXT",
+      "bytes": 277696,
+      "sha256": "cd6680f2253f1657eb3f379405f6e97ace6cbfdfa160da6a0dbefc736ea9a45b",
+      "decoded_bytes": 208272,
+      "decoded_sha256": "abfc3e17c2babb61a88aa4a5f399505dffe19a24d7a57d8460406413e1c77edf"
+    },
+    {
+      "kind": "android-libc-stub",
+      "triple": "arm-linux-androideabi",
+      "file": "arm-linux-androideabi-libc.so.b64",
+      "url": "https://android.googlesource.com/platform/prebuilts/ndk/+/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/lib/arm-linux-androideabi/26/libc.so?format=TEXT",
+      "bytes": 187904,
+      "sha256": "6f7b6fcfc0227f4a78d590156aa14a9cfbf51e24759f0fbe432e6c8346d9ed5e",
+      "decoded_bytes": 140928,
+      "decoded_sha256": "77ad5475625ba2cfb12943cffbbac77078247b970bc5a68f9203c5411b001e41"
+    },
+    {
+      "kind": "android-libc-stub",
+      "triple": "i686-linux-android",
+      "file": "i686-linux-android-libc.so.b64",
+      "url": "https://android.googlesource.com/platform/prebuilts/ndk/+/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/lib/i686-linux-android/26/libc.so?format=TEXT",
+      "bytes": 242552,
+      "sha256": "8c5b5f8aab22319452116aae21eb81f8035aa05f1d4e6a93b51bca0004126708",
+      "decoded_bytes": 181912,
+      "decoded_sha256": "5c9bf6d2b8d3bb06897de74be65bca865b85a00e901052f61f3e5c7cb0523358"
+    },
+    {
+      "kind": "android-libc-stub",
+      "triple": "x86_64-linux-android",
+      "file": "x86_64-linux-android-libc.so.b64",
+      "url": "https://android.googlesource.com/platform/prebuilts/ndk/+/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/lib/x86_64-linux-android/26/libc.so?format=TEXT",
+      "bytes": 244076,
+      "sha256": "cdace3ab7f441495243dfbb16a484b81bf42c250d20e840768bcbad4b07fd96a",
+      "decoded_bytes": 183056,
+      "decoded_sha256": "a838ab3f9026b4678f3336eea1456b411345a0acab6cae58b8b0c6a47a8f4a13"
+    }
+  ]
+}
