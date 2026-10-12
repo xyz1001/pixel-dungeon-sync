@@ -150,6 +150,18 @@ class AndroidSyncFacade internal constructor(
     commit!=null -> session.restoreCloudHistory(snapshotId,store,allowUniqueReplacement,comparison.localFiles,mirrorStopped)
     else -> session.restoreHistory(snapshotId,mirrorStopped)}
   }
+  if(result==null) {
+   // Historical restore only stages a frozen plan in core. Publish its first attempt here,
+   // after the helper has applied and verified the actual game files and cleared recovery.
+   // A fresh comparison binds the post-restore fingerprint; never reuse the pre-restore one.
+   // Failure leaves that exact plan available for explicit retry, without restoring again.
+   requireNoRecovery();checkActualUnchanged(snapshot.manifest.files)
+   val restored=session.compareOnboarding(store,mirrorStopped)
+   require(restored.retryablePending && restored.pendingCommit?.let {it.kind=="restore" && it.snapshot.files==snapshot.manifest.files}==true) {
+    restored.blocker ?: "The frozen historical restore plan could not be verified. Compare again before retrying."
+   }
+   return@locked pushResult(session.onboardingUpload(restored,store,mirrorStopped),"Selected version restored, verified in the game and published.")
+  }
   val published=result as? OnboardingRestoreResult.Published
   if(published?.result is AppendPushResult.Diverged)pushResult(published.result)
   else OperationResult(if(session.hasPending())"Selected version restored and verified in the game. A restore revision is pending; Upload publishes it." else "Selected version restored and verified in the game.",false,session.hasPending(),snapshotId)
