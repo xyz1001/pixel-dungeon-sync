@@ -11,6 +11,8 @@ import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -64,6 +66,83 @@ public final class ApkArchive {
         return manifestInfoInspect;
     }
 
+    /** Exact, separately recorded additional payload; this never authorizes arbitrary ZIP additions. */
+    public static final class InjectedDex {
+        public final String name, sha256;
+        public InjectedDex(String name, String sha256) throws IOException {
+            if (name == null || !PayloadInventory.isDexEntry(name) || sha256 == null || !sha256.matches("[0-9a-f]{64}"))
+                throw new IOException("Invalid injected DEX receipt");
+            this.name = name; this.sha256 = sha256;
+        }
+    }
+
+    public static void validateBridgeRuntime(List<File> completeSourceApks, File runtimeDex) throws IOException {
+        PayloadInventory.requireNoClassCollisions(completeSourceApks, runtimeDex);
+    }
+
+    public static void validateBridgeRuntime(List<File> completeSourceApks, File runtimeDex,
+            BinaryManifestPatch.BridgeBinding binding) throws IOException {
+        PayloadInventory.requireNoClassCollisions(completeSourceApks, runtimeDex);
+        for (File source : completeSourceApks) BinaryManifestPatch.validateProviderSource(manifest(source), binding);
+    }
+
+    /** Only the base APK receives code. Call validateBridgeRuntime on the complete set before this. */
+    public static InjectedDex injectProvider(File source, File output, File runtimeDex,
+            BinaryManifestPatch.BridgeBinding binding) throws IOException {
+        if (binding == null) throw new IOException("Missing bridge binding");
+        validateSource(source);
+        byte[] runtime = PayloadInventory.readRuntime(runtimeDex);
+        PayloadInventory.requireNoClassCollisions(Collections.singletonList(source), runtime);
+        if (binding.includeActivationActivity && !PayloadInventory.classNames(runtime).contains(
+                "L" + BinaryManifestPatch.BRIDGE_ACTIVATION.replace('.', '/') + ";"))
+            throw new IOException("Bridge DEX has no ActivationActivity");
+        InjectedDex injected = new InjectedDex(nextDexName(entryHashes(source)), sha256(runtime));
+        byte[] replacement = BinaryManifestPatch.patchProvider(manifest(source), binding);
+        rewriteManifest(source, output, replacement, injected.name, runtime);
+        try { verifyProviderPayload(source, output, binding, injected); }
+        catch (IOException failure) { output.delete(); throw failure; }
+        return injected;
+    }
+
+    public static void patchProviderSplit(File source, File output) throws IOException {
+        validateSource(source);
+        rewriteManifest(source, output, BinaryManifestPatch.patchProviderSplit(manifest(source)));
+        verifyProviderSplitPayload(source, output);
+    }
+
+    public static int verifyProviderSplitPayload(File source, File output) throws IOException {
+        int count = verifyProtectedPayload(source, output);
+        if (!Arrays.equals(BinaryManifestPatch.patchProviderSplit(manifest(source)), manifest(output)))
+            throw new IOException("Split manifest differs from exact permitted bridge migration");
+        return count;
+    }
+
+    public static int verifyProviderPayload(File source, File output, BinaryManifestPatch.BridgeBinding binding,
+            InjectedDex injected) throws IOException {
+        if (injected == null) throw new IOException("Missing exact injected DEX receipt");
+        Map<String, String> original = protectedEntries(entryHashes(source));
+        if (original.containsKey(injected.name) || !nextDexName(original).equals(injected.name))
+            throw new IOException("Injected DEX is not the next unused source DEX entry");
+        Map<String, String> expected = new TreeMap<>(original);
+        expected.put(injected.name, injected.sha256);
+        if (!expected.equals(protectedEntries(entryHashes(output))))
+            throw new IOException("APK payload differs from original entries plus the exact declared bridge DEX");
+        if (!Arrays.equals(BinaryManifestPatch.patchProvider(manifest(source), binding), manifest(output)))
+            throw new IOException("Manifest differs from exact permitted embedded bridge patch");
+        return original.size();
+    }
+
+    private static String nextDexName(Map<String, String> entries) throws IOException {
+        int count = 0;
+        for (String name : entries.keySet()) if (PayloadInventory.isDexEntry(name)) count++;
+        // Filling a pre-existing gap could make previously ignored source code load. Fail safely instead.
+        for (int index = 1; index <= count; index++) {
+            String name = index == 1 ? "classes.dex" : "classes" + index + ".dex";
+            if (!entries.containsKey(name)) throw new IOException("Source APK has a non-contiguous DEX entry sequence");
+        }
+        return count == 0 ? "classes.dex" : "classes" + (count + 1) + ".dex";
+    }
+
     public static void patchGame(File file, File file2, String str) throws IOException {
         validateSource(file);
         rewriteManifest(file, file2, BinaryManifestPatch.patchGame(manifest(file), str));
@@ -77,8 +156,14 @@ public final class ApkArchive {
     }
 
     private static void rewriteManifest(File source, File output, byte[] manifest) throws IOException {
-        entryHashes(source);
-        if (output.exists() || source.getCanonicalFile().equals(output.getCanonicalFile())) throw new IOException("Output must be a new file");
+        rewriteManifest(source, output, manifest, null, null);
+    }
+
+    private static void rewriteManifest(File source, File output, byte[] manifest, String addedName, byte[] addedBytes) throws IOException {
+        Map<String, String> sourceEntries = entryHashes(source);
+        if ((addedName == null) != (addedBytes == null) || addedName != null && sourceEntries.containsKey(addedName))
+            throw new IOException("Invalid/duplicate added APK payload");
+        if (source.getCanonicalFile().equals(output.getCanonicalFile()) || !output.createNewFile()) throw new IOException("Output must be a new file");
         try (ZipFile input = new ZipFile(source); FileOutputStream file = new FileOutputStream(output); ZipOutputStream zip = new ZipOutputStream(file)) {
             Enumeration<? extends ZipEntry> entries = input.entries();
             while (entries.hasMoreElements()) {
@@ -95,6 +180,11 @@ public final class ApkArchive {
                 if (replacement != null) zip.write(replacement);
                 else try (InputStream data = input.getInputStream(original)) { copyLimited(data, zip, MAX_ENTRY_BYTES); }
                 zip.closeEntry();
+            }
+            if (addedName != null) {
+                ZipEntry entry = new ZipEntry(addedName);
+                entry.setTime(0); entry.setMethod(ZipEntry.DEFLATED);
+                zip.putNextEntry(entry); zip.write(addedBytes); zip.closeEntry();
             }
             zip.finish(); zip.flush(); file.getFD().sync();
         } catch (Throwable failure) { output.delete(); throw failure; }
