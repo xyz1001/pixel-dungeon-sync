@@ -98,6 +98,51 @@ public final class HelperHostTests {
         denied(()->MainCallerPolicy.requirePinnedSigner("",new byte[][]{certificate}),"missing certificate pin");
         denied(()->MainCallerPolicy.requirePinnedSigner(SaveArchive.sha256(certificate),new byte[][]{certificate,certificate}),"multiple signers rejected");
     }
+    static void embeddedIdentityTests(Path base) throws Exception {
+        String game="test.embedded.game", origin="5".repeat(64);
+        Map<String,String> metadata=new HashMap<>();
+        String[] values={"embedded-v1",game,origin,"android-"+origin,"6".repeat(64),"19","v19",MainCallerPolicy.MAIN_SIGNER_SHA256,"1"};
+        for(int i=0;i<values.length;i++) metadata.put(GameBinding.PREFIX+GameBinding.EMBEDDED_METADATA_NAMES[i],values[i]);
+        GameBinding binding=new GameBinding(metadata,game);
+        check(binding.embedded && binding.helperPackage.equals(game) && binding.sharedUserId.isEmpty(),"embedded runtime has no helper or shared UID requirement");
+        check(binding.authority.equals("io.github.xyz1001.pdsync.embedded.g"+origin.substring(0,32)+".files"),"embedded authority contract");
+        check(binding.bridgeProcessName().equals(game+":pdsync_bridge"),"dedicated bridge process");
+        binding.validateInstalled(game,null,null,19,"v19",42,42,new String[]{game},false); assertions++;
+        denied(()->binding.validateInstalled(game,null,null,19,"v19",42,43,new String[]{game},true),"embedded UID mismatch");
+        denied(()->binding.validateInstalled(game,null,null,19,"v19",42,42,new String[]{game,"evil.pkg"},true),"additional game UID package");
+        denied(()->binding.validateInstalled(game,null,null,19,"v19",42,42,null,true),"unobservable game UID packages");
+        denied(()->binding.validateInstalled(game,null,null,20,"v19",42,42,new String[]{game},true),"embedded wrong version");
+        denied(()->binding.validateInstalled(game,null,null,19,"other",42,42,new String[]{game},true),"embedded wrong version name");
+        check(binding.isHelperProcess(game+":pdsync_bridge",new String[]{game}),"own process recognized");
+        check(!binding.isHelperProcess(game,new String[]{game}),"main game process cannot masquerade as bridge");
+        check(!binding.isGameProcess(game+":pdsync_bridge",new String[]{game}),"duplicate bridge name is ambiguous");
+        check(binding.isGameProcess(game,new String[]{game}),"main game process observed");
+        check(binding.isGameProcess(game+":remote",new String[]{game}),"secondary game process observed");
+        check(binding.isGameProcess("custom.named.process",new String[]{game}),"explicitly named game process observed by ownership");
+        check(!binding.isGameProcess("custom.named.process",new String[]{"evil.pkg"}),"foreign package rejected");
+        check(!binding.isGameProcess(game,new String[]{game,"evil.pkg"}),"ambiguous package process rejected");
+        Path own=dir(base,"embedded-game-data"),foreign=dir(base,"embedded-foreign-data");
+        Path alias=base.resolve("embedded-data-alias"); Files.createSymbolicLink(alias,own);
+        check(binding.saveRoot(alias.toString(),own.toString()).equals(own.resolve("files").toFile()),"canonical own files root");
+        denied(()->binding.saveRoot(own.toString(),foreign.toString()),"embedded foreign data directory rejected");
+        denied(()->binding.saveRoot("relative",own.toString()),"embedded relative data directory rejected");
+        denied(()->new GameBinding(metadata,"test.different.game"),"embedded context package must match binding");
+        for(String key:GameBinding.EMBEDDED_METADATA_NAMES) {
+            Map<String,String> missing=new HashMap<>(metadata); missing.remove(GameBinding.PREFIX+key);
+            denied(()->new GameBinding(missing,game),"required embedded metadata "+key);
+        }
+        for(String[] changed:new String[][]{{"BRIDGE_MODE","embedded-v2"},{"BRIDGE_RUNTIME_VERSION","2"},
+                {"MAIN_APP_CERT_SHA256","0".repeat(64)},{"BOUND_GAME_PACKAGE",MainCallerPolicy.MAIN},
+                {"BOUND_NAMESPACE_ID","android-other"},{"BOUND_ORIGIN_IDENTITY","bad"},
+                {"BOUND_SOURCE_APK_SHA256","bad"},{"BOUND_GAME_VERSION_CODE","9223372036854775808"}}) {
+            Map<String,String> invalid=new HashMap<>(metadata); invalid.put(GameBinding.PREFIX+changed[0],changed[1]);
+            denied(()->new GameBinding(invalid,game),"invalid embedded metadata "+changed[0]);
+        }
+        MainCallerPolicy.requireIdentity(MainCallerPolicy.MAIN,10,42,10,new String[]{MainCallerPolicy.MAIN}); assertions++;
+        denied(()->MainCallerPolicy.requireIdentity(MainCallerPolicy.MAIN,42,42,42,new String[]{MainCallerPolicy.MAIN}),"own game UID cannot call bridge");
+        denied(()->MainCallerPolicy.requireIdentity("evil.pkg",10,42,10,new String[]{MainCallerPolicy.MAIN}),"claimed package cannot override Binder identity");
+        denied(()->MainCallerPolicy.requireIdentity(MainCallerPolicy.MAIN,10,42,11,new String[]{MainCallerPolicy.MAIN}),"installed main UID must equal Binder UID");
+    }
     static void workspaceTests(Path base) throws Exception {
         Path parent=dir(base,"game-data"),area=dir(base,"helper-data");
         long uid=((Number)Files.getAttribute(parent,"unix:uid")).longValue();
@@ -143,7 +188,7 @@ public final class HelperHostTests {
     }
     public static void main(String[] args) throws Exception {
         Path base=Files.createTempDirectory("pdsync-helper-host-");
-        archiveTests(base); policyTests(base); identityTests(base); workspaceTests(base);
+        archiveTests(base); policyTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
         System.out.println("PASS: "+assertions+" helper host security assertions; no Android runtime executed.");
     }
 }

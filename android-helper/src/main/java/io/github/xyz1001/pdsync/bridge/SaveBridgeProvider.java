@@ -1,6 +1,9 @@
 package io.github.xyz1001.pdsync.bridge;
 
 import android.content.ContentProvider;
+import android.content.ContentProviderOperation;
+import android.content.ContentProviderResult;
+import android.content.OperationApplicationException;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -8,6 +11,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.system.ErrnoException;
@@ -35,6 +39,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttribute;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -49,6 +54,7 @@ import java.util.UUID;
 public final class SaveBridgeProvider extends ContentProvider {
     private static final Object LOCK = new Object();
     public static final String PERMISSION = "io.github.xyz1001.pdsync.android.ACCESS_BRIDGE";
+    private File workspaceBase;
     private File area;
     private File backups;
     private GameGuard guard;
@@ -59,7 +65,14 @@ public final class SaveBridgeProvider extends ContentProvider {
     @Override // android.content.ContentProvider
     public boolean onCreate() {
         this.guard = new GameGuard(getContext());
-        this.area = new File(getContext().getFilesDir(), "save-bridge-v1");
+        try {
+            this.workspaceBase = this.guard.binding().embedded
+                    ? getContext().getNoBackupFilesDir() : getContext().getFilesDir();
+        } catch (BridgeFailure error) {
+            // Keep initialization inert; authenticated calls report the invalid binding.
+            this.workspaceBase = getContext().getNoBackupFilesDir();
+        }
+        this.area = new File(this.workspaceBase, "save-bridge-v1");
         this.backups = new File(this.area, "backups");
         this.pending = new File(this.area, "pending.properties");
         return true;
@@ -71,7 +84,6 @@ public final class SaveBridgeProvider extends ContentProvider {
         if (callingUid == Process.myUid()) {
             throw new SecurityException("Shared-UID callers are never authorized");
         }
-        context.enforceCallingPermission("io.github.xyz1001.pdsync.android.ACCESS_BRIDGE", "Main-app signature permission required");
         MainCallerAuthenticator.authenticateProvider(context, getCallingPackage(), callingUid);
         return callingUid;
     }
@@ -89,6 +101,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                 this.primaryFailure = null;
                 try {
                     try {
+                        this.guard.installedGame();
                         prepareArea();
                         if ("inspect".equals(str)) {
                             noExtras(bundle);
@@ -127,9 +140,9 @@ public final class SaveBridgeProvider extends ContentProvider {
     }
 
     private void prepareArea() throws IOException {
-        SafeSaveTree.checkDirectory(getContext().getFilesDir());
+        SafeSaveTree.checkDirectory(this.workspaceBase);
         if (!this.backups.isDirectory() && !this.backups.mkdirs()) {
-            throw new IOException("Cannot create helper-private workspace");
+            throw new IOException("Cannot create bridge-private workspace");
         }
         SafeSaveTree.checkDirectory(this.area);
         SafeSaveTree.checkDirectory(this.backups);
@@ -143,7 +156,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         }
         File[] fileArrListFiles = this.area.listFiles();
         if (fileArrListFiles == null) {
-            throw new IOException("Cannot inspect helper-private workspace");
+            throw new IOException("Cannot inspect bridge-private workspace");
         }
         for (File file : fileArrListFiles) {
             if (file.getName().startsWith("work-")) {
@@ -912,6 +925,11 @@ public final class SaveBridgeProvider extends ContentProvider {
 
     private void describeBinding(Bundle bundle) throws IOException {
         GameBinding gameBindingBinding = this.guard.binding();
+        bundle.putString("bridgeMode", gameBindingBinding.embedded ? GameBinding.EMBEDDED_MODE : "legacy-helper");
+        bundle.putString("bridgeRuntimeVersion", gameBindingBinding.runtimeVersion);
+        bundle.putString("providerPackage", gameBindingBinding.helperPackage);
+        bundle.putBoolean("gameApplicationRunsInBridgeProcess", gameBindingBinding.embedded);
+        bundle.putBoolean("launchExclusionGuaranteed", false);
         bundle.putString("gamePackage", gameBindingBinding.gamePackage);
         bundle.putString("helperPackage", gameBindingBinding.helperPackage);
         bundle.putString("sharedUserId", gameBindingBinding.sharedUserId);
@@ -1009,4 +1027,41 @@ public final class SaveBridgeProvider extends ContentProvider {
         authenticate();
         throw new FileNotFoundException("Use call");
     }
+    @Override
+    public int bulkInsert(Uri uri, ContentValues[] values) {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
+    @Override
+    public ContentProviderResult[] applyBatch(ArrayList<ContentProviderOperation> operations)
+            throws OperationApplicationException {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
+    @Override
+    public Uri canonicalize(Uri uri) {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
+    @Override
+    public Uri uncanonicalize(Uri uri) {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
+    @Override
+    public boolean refresh(Uri uri, Bundle extras, CancellationSignal cancellationSignal) {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
+    @Override
+    public String[] getStreamTypes(Uri uri, String filter) {
+        authenticate();
+        throw new UnsupportedOperationException("Use call");
+    }
+
 }

@@ -10,6 +10,12 @@ import java.util.Map;
 public final class GameBinding {
     private static final String LEGACY_ORIGIN = "32cd68da7bd2cdb467330cf33ca7c0e9b18eaae94ecf0b4b944313def1732f89";
     public static final String[] METADATA_NAMES = {"BOUND_GAME_PACKAGE", "BOUND_SHARED_USER_ID", "BOUND_ORIGIN_IDENTITY", "BOUND_NAMESPACE_ID", "BOUND_SOURCE_APK_SHA256", "BOUND_GAME_VERSION_CODE", "BOUND_GAME_VERSION_NAME"};
+    public static final String EMBEDDED_MODE = "embedded-v1";
+    public static final String RUNTIME_VERSION = "1";
+    public static final String BRIDGE_PROCESS_SUFFIX = ":pdsync_bridge";
+    public static final String[] EMBEDDED_METADATA_NAMES = {"BRIDGE_MODE", "BOUND_GAME_PACKAGE", "BOUND_ORIGIN_IDENTITY", "BOUND_NAMESPACE_ID", "BOUND_SOURCE_APK_SHA256", "BOUND_GAME_VERSION_CODE", "BOUND_GAME_VERSION_NAME", "MAIN_APP_CERT_SHA256", "BRIDGE_RUNTIME_VERSION"};
+    public final boolean embedded;
+    public final String runtimeVersion;
     public static final String PREFIX = "io.github.xyz1001.pdsync.";
     public final String authority;
     public final String gamePackage;
@@ -22,6 +28,11 @@ public final class GameBinding {
     public final String sourceApkSha256;
 
     public GameBinding(Map<String, String> map, String str) throws IOException {
+        String mode = map == null ? null : map.get(PREFIX + "BRIDGE_MODE");
+        this.embedded = EMBEDDED_MODE.equals(mode);
+        if (mode != null && !embedded) throw invalid();
+        this.runtimeVersion = embedded ? value(map, "BRIDGE_RUNTIME_VERSION") : "legacy";
+        if (embedded && !RUNTIME_VERSION.equals(runtimeVersion)) throw invalid();
         String str2;
         String strValue = value(map, "BOUND_GAME_PACKAGE");
         this.gamePackage = strValue;
@@ -29,7 +40,7 @@ public final class GameBinding {
         this.originIdentity = strValue2;
         String strValue3 = value(map, "BOUND_NAMESPACE_ID");
         this.namespaceId = strValue3;
-        String strValue4 = value(map, "BOUND_SHARED_USER_ID");
+        String strValue4 = embedded ? "" : value(map, "BOUND_SHARED_USER_ID");
         this.sharedUserId = strValue4;
         String strValue5 = value(map, "BOUND_SOURCE_APK_SHA256");
         this.sourceApkSha256 = strValue5;
@@ -40,6 +51,13 @@ public final class GameBinding {
             if (strValue3.equals("android-" + strValue2) && strValue7.matches("0|[1-9][0-9]{0,18}") && strValue6.length() <= 1024) {
                 try {
                     this.gameVersionCode = Long.parseLong(strValue7);
+                    if (embedded) {
+                        if (!gamePackage.equals(str) || MainCallerPolicy.MAIN.equals(str)
+                                || !MainCallerPolicy.MAIN_SIGNER_SHA256.equals(value(map, "MAIN_APP_CERT_SHA256"))) throw invalid();
+                        this.helperPackage = str; // The bridge is a component of the selected game.
+                        this.authority = "io.github.xyz1001.pdsync.embedded.g" + originIdentity.substring(0, 32) + ".files";
+                        return;
+                    }
                     String str3 = "io.github.xyz1001.pdsync.bridge";
                     boolean zEquals = "io.github.xyz1001.pdsync.bridge".equals(str);
                     if (zEquals && (!"32cd68da7bd2cdb467330cf33ca7c0e9b18eaae94ecf0b4b944313def1732f89".equals(strValue2) || !"com.shatteredpixel.shatteredpixeldungeon".equals(strValue))) {
@@ -84,7 +102,7 @@ public final class GameBinding {
     }
 
     private static BridgeFailure invalid() {
-        return new BridgeFailure("INVALID_GAME_BINDING", "Helper is not bound to a valid selected game; prepare the matching helper again");
+        return new BridgeFailure("INVALID_GAME_BINDING", "Bridge is not bound to a valid selected game; prepare the selected APK again");
     }
 
     public static boolean validPackage(String str) {
@@ -98,6 +116,12 @@ public final class GameBinding {
                 str4 = "";
             }
             if (str5.equals(str4)) {
+                if (embedded) {
+                    if (i < 0 || i != i2) throw new BridgeFailure("UID_MISMATCH", "Embedded bridge must run as its selected game");
+                    if (strArr == null || strArr.length != 1 || !gamePackage.equals(strArr[0]))
+                        throw new BridgeFailure("UNEXPECTED_SHARED_UID", "Embedded game UID must contain only the selected game");
+                    return;
+                }
                 if (i != i2 || !this.sharedUserId.equals(str2) || !this.sharedUserId.equals(str3)) {
                     throw new BridgeFailure("UID_MISMATCH", "Selected game and helper are not in their bound shared UID group");
                 }
@@ -111,18 +135,25 @@ public final class GameBinding {
                 return;
             }
         }
-        throw new BridgeFailure("GAME_BINDING_MISMATCH", "Installed game differs from the selected APK; prepare its matching helper again");
+        throw new BridgeFailure("GAME_BINDING_MISMATCH", "Installed game differs from the selected APK; prepare the selected APK again");
     }
 
     
     
     public boolean isGameProcess(String name, String[] packages) {
-        return name != null && (gamePackage.equals(name) || name.startsWith(gamePackage + ":"))
-                && packages != null && packages.length == 1 && gamePackage.equals(packages[0]);
+        if (name == null || name.isEmpty() || packages == null || packages.length != 1 || !gamePackage.equals(packages[0])) return false;
+        // Android permits explicitly named processes outside the package-name prefix.
+        // The installed UID and pkgList establish ownership, not a guessed name.
+        return embedded ? !bridgeProcessName().equals(name)
+                : gamePackage.equals(name) || name.startsWith(gamePackage + ":");
     }
 
     public boolean isHelperProcess(String str, String[] strArr) {
-        return this.helperPackage.equals(str) && strArr != null && strArr.length == 1 && this.helperPackage.equals(strArr[0]);
+        return bridgeProcessName().equals(str) && strArr != null && strArr.length == 1 && this.helperPackage.equals(strArr[0]);
+    }
+
+    public String bridgeProcessName() {
+        return embedded ? gamePackage + BRIDGE_PROCESS_SUFFIX : helperPackage;
     }
 
     static boolean blocksTransfer(int importance) throws BridgeFailure {
@@ -141,6 +172,11 @@ public final class GameBinding {
         }
         File canonicalFile = new File(str).getCanonicalFile();
         File canonicalFile2 = new File(str2).getCanonicalFile();
+        if (embedded) {
+            if (!canonicalFile.equals(canonicalFile2))
+                throw new BridgeFailure("SAVE_ROOT_UNKNOWN", "Embedded bridge must use its own game data directory");
+            return new File(canonicalFile2, "files");
+        }
         if (canonicalFile.toPath().startsWith(canonicalFile2.toPath()) || canonicalFile2.toPath().startsWith(canonicalFile.toPath())) {
             throw new BridgeFailure("SAVE_ROOT_UNKNOWN", "Game and helper private directories are not isolated");
         }
