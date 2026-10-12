@@ -424,6 +424,16 @@ class AppendProfileSession(
   }
  }
 
+ /** Complete an explicit keep-local onboarding choice while ordinary local progress is still
+  * based on the unique verified cloud tip. No baseline, sidecar, plan or remote write occurs. */
+ fun confirmLocalProgressReady(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean) = local.locked {
+  revalidateComparison(comparison, store, stopped)
+  require(comparison.kind == OnboardingKind.DIFFERENT && comparison.baselineLineage == OnboardingLineage.SAME_TIP &&
+   comparison.baselineId != null && comparison.observedTips.singleOrNull() == comparison.baselineId) {
+   "当前比较不是同一已验证云端基线上的本地进度，请重新比较并明确选择"
+  }
+ }
+
  /** Advance only repository ancestry after proving every intervening commit is a semantic no-op.
   * The caller must inspect again; no save, sidecar, pending plan or remote content is written. */
  fun advanceUnchangedBaseline(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): Boolean = local.locked {
