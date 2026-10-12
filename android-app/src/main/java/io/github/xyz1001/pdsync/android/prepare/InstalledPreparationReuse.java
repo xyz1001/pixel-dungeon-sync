@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 final class InstalledPreparationReuse {
@@ -31,8 +32,14 @@ final class InstalledPreparationReuse {
         final String localCertificate;
         final GameSourceIdentity source;
         final long versionCode;
+        final boolean embeddedBridge;
 
         Receipt(GameSourceIdentity gameSourceIdentity, long j, String str, List<String> list) {
+            this(gameSourceIdentity, j, str, list, false);
+        }
+
+        Receipt(GameSourceIdentity gameSourceIdentity, long j, String str, List<String> list, boolean embeddedBridge) {
+            this.embeddedBridge = embeddedBridge;
             this.source = gameSourceIdentity;
             this.versionCode = j;
             this.localCertificate = str;
@@ -65,6 +72,15 @@ final class InstalledPreparationReuse {
         return Collections.unmodifiableList(arrayList);
     }
 
+    /** New embedded preparations may accept a foreign re-signed or shared-UID game as a new source. */
+    static boolean requiresEmbeddedReceipt(List<String> certificates, String localCertificate) throws IOException {
+        if (localCertificate == null) return false;
+        if (!localCertificate.matches("[0-9a-f]{64}")) throw new IOException("Invalid local signing certificate");
+        if (certificates == null || !certificates.contains(localCertificate)) return false;
+        if (!Collections.singletonList(localCertificate).equals(certificates)) throw new IOException("Installed game does not have the exact current local signer");
+        return true;
+    }
+
     static boolean requiresReceipt(List<String> list, String str, String str2) throws IOException {
         boolean z = "io.github.xyz1001.pdsync.shared".equals(str) || (str != null && str.startsWith("io.github.xyz1001.pdsync.shared.g"));
         if (str2 == null) {
@@ -95,7 +111,7 @@ final class InstalledPreparationReuse {
         if (!requiresReceipt(installed.certificates, installed.sharedUid, str) || !Collections.singletonList(str).equals(installed.certificates) || !str.equals(receipt.localCertificate)) {
             throw new IOException("Installed game and retained receipt do not use the current local signer");
         }
-        if (!receipt.source.gamePackage.equals(installed.packageName) || receipt.versionCode != installed.versionCode || !receipt.source.sharedUid.equals(installed.sharedUid)) {
+        if (!receipt.source.gamePackage.equals(installed.packageName) || receipt.versionCode != installed.versionCode || !Objects.equals(receipt.embeddedBridge ? null : receipt.source.sharedUid, installed.sharedUid)) {
             throw new IOException("Installed game package, version or shared UID differs from its retained receipt");
         }
         if (!sameApkSet(installed.apkHashes, receipt.apkHashes)) {
