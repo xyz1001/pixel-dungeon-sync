@@ -75,13 +75,28 @@ public final class HelperHostTests {
         denied(()->binding.validateInstalled(game,shared,shared,17,"v17",42,42,new String[]{game,helper,"evil.pkg"},true),"third shared UID member");
         denied(()->binding.validateInstalled(game,shared,shared,17,"v17",42,43,new String[]{game,helper},true),"UID mismatch");
         denied(()->binding.validateInstalled(game,shared,shared,17,"v17",42,42,new String[]{game,helper},false),"signer mismatch");
+        denied(()->binding.validateInstalled(game,shared,shared,18,"v17",42,42,new String[]{game,helper},true),"version mismatch");
+        denied(()->binding.validateInstalled(game,shared,shared,(1L<<32)|17,"v17",42,42,new String[]{game,helper},true),"modern major version mismatch");
         denied(()->binding.saveRoot(base.toString(),base.resolve("child").toString()),"nested private roots");
+        Path gameData=dir(base,"canonical-game"),helperData=dir(base,"canonical-helper");
+        Path dataAlias=base.resolve("android-data-alias"); Files.createSymbolicLink(dataAlias,gameData);
+        check(binding.saveRoot(dataAlias.toString(),helperData.toString()).equals(gameData.resolve("files").toFile()),"Android data-directory alias canonicalized");
+        denied(()->binding.saveRoot(dataAlias.toString(),gameData.toString()),"aliased game and helper data roots rejected");
+        denied(()->binding.saveRoot("relative-game",helperData.toString()),"relative game data root rejected");
+        for(int importance:new int[]{100,125,130,150,200,230,325})
+            check(GameBinding.blocksTransfer(importance),"foreground/perceptible and API26/API36 top-sleeping blocked: "+importance);
+        for(int importance:new int[]{300,350,400,1000})
+            check(!GameBinding.blocksTransfer(importance),"background state still requires quiet hash observation: "+importance);
+        denied(()->GameBinding.blocksTransfer(0),"missing process importance fails closed");
+        denied(()->GameBinding.blocksTransfer(-1),"invalid process importance fails closed");
         MainCallerPolicy.requireIdentity(main,10,11,10,new String[]{main}); assertions++;
         denied(()->MainCallerPolicy.requireIdentity(main,11,11,11,new String[]{main}),"main shared UID refusal");
         denied(()->MainCallerPolicy.requireIdentity(main,10,11,10,new String[]{main,"evil.pkg"}),"main independent UID requirement");
         byte[] certificate="public-test-certificate".getBytes();
         MainCallerPolicy.requirePinnedSigner(SaveArchive.sha256(certificate),new byte[][]{certificate}); assertions++;
         denied(()->MainCallerPolicy.requirePinnedSigner("0".repeat(64),new byte[][]{certificate}),"wrong certificate pin");
+        denied(()->MainCallerPolicy.requirePinnedSigner("",new byte[][]{certificate}),"missing certificate pin");
+        denied(()->MainCallerPolicy.requirePinnedSigner(SaveArchive.sha256(certificate),new byte[][]{certificate,certificate}),"multiple signers rejected");
     }
     static void workspaceTests(Path base) throws Exception {
         Path parent=dir(base,"game-data"),area=dir(base,"helper-data");
@@ -101,10 +116,30 @@ public final class HelperHostTests {
         check(workspace.recorded(),"durable identity receipt");
         Path child=Files.createDirectory(handle.path.resolve("incoming")); Files.writeString(child.resolve("rankings.dat"),"data");
         handle.cleanup(); check(!Files.exists(handle.path)&&!workspace.recorded(),"exact workspace cleanup");
+        RestoreWorkspace.Handle linked=workspace.create();
+        Path outside=dir(base,"outside-cleanup"); Files.writeString(outside.resolve("keep.dat"),"keep");
+        Files.createSymbolicLink(linked.path.resolve("linked-directory"),outside);
+        linked.cleanup();
+        check(Files.readString(outside.resolve("keep.dat")).equals("keep"),"secure cleanup never follows linked directories");
+        check(!Files.exists(linked.path)&&!workspace.recorded(),"linked entry removed without following it");
         RestoreWorkspace.Handle swapped=workspace.create();
         Path moved=parent.resolve("retained-original"); Files.move(swapped.path,moved); Files.createDirectory(swapped.path);
         denied(swapped::cleanup,"inode substituted workspace");
         check(Files.exists(swapped.path)&&Files.exists(moved),"substituted and original directories retained after refusal");
+        Path otherArea=dir(base,"helper-other-mount-test");
+        RestoreWorkspace.Access crossDevice=new RestoreWorkspace.Access(){
+            public RestoreWorkspace.Stamp stat(Path path) throws IOException {
+                RestoreWorkspace.Stamp stamp=access.stat(path);
+                if(path.getFileName().toString().startsWith(".pdsync-restore-"))
+                    return new RestoreWorkspace.Stamp(stamp.dev+1,stamp.ino,stamp.type,stamp.uid,stamp.links,stamp.size,stamp.key);
+                return stamp;
+            }
+            public void sync(Path path) { }
+            public void validateBinding() { }
+        };
+        RestoreWorkspace crossMount=new RestoreWorkspace(parent.toFile(),otherArea.toFile(),"4".repeat(64),uid,crossDevice);
+        denied(crossMount::create,"restore staging on a different device rejected");
+        check(!crossMount.recorded(),"cross-device staging never authorized for mutation");
     }
     public static void main(String[] args) throws Exception {
         Path base=Files.createTempDirectory("pdsync-helper-host-");

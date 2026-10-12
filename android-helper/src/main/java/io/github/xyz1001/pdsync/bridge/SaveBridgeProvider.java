@@ -164,7 +164,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         bundleOk.putBoolean("ready", (observationObserve.gameForeground || pendingPresent()) ? false : true);
         describeBinding(bundleOk);
         bundleOk.putString("gameVersion", observationObserve.game.versionName);
-        bundleOk.putLong("gameVersionCode", observationObserve.game.getLongVersionCode());
+        bundleOk.putLong("gameVersionCode", AndroidApiCompat.versionCode(observationObserve.game));
         bundleOk.putBoolean("gameForeground", observationObserve.gameForeground);
         bundleOk.putBoolean("gameProcessPresent", observationObserve.gameProcessPresent);
         bundleOk.putBoolean("observationReliable", true);
@@ -294,7 +294,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                 session.handle.validate(); this.guard.requireQuiescent();
                 File incoming = mkdir(new File(session.handle.file(), "incoming"));
                 StructStat descriptorBefore = Os.fstat(descriptor.getFileDescriptor());
-                int access = Os.fcntlInt(descriptor.getFileDescriptor(), OsConstants.F_GETFL, 0) & OsConstants.O_ACCMODE;
+                int access = AndroidApiCompat.descriptorAccessMode(descriptor);
                 if (!OsConstants.S_ISREG(descriptorBefore.st_mode) || descriptorBefore.st_nlink != 1
                         || descriptorBefore.st_uid != callerUid || access != OsConstants.O_RDONLY
                         || descriptorBefore.st_size < 0 || descriptorBefore.st_size > SaveArchive.MAX_BYTES)
@@ -554,7 +554,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         properties.setProperty("fingerprint", str2);
         File file = new File(this.area, "pending.new");
         Files.deleteIfExists(file.toPath());
-        OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | OsConstants.O_CLOEXEC, 384));
+        OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 384));
         try {
             FileOutputStream fileOutputStream = new FileOutputStream(ownedDescriptor.fd);
             try {
@@ -585,7 +585,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         if (!file.exists()) {
             File file2 = new File(this.backups, str + ".finalizing");
             Files.deleteIfExists(file2.toPath());
-            OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file2.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | OsConstants.O_CLOEXEC, 384));
+            OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file2.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 384));
             try {
                 FileOutputStream fileOutputStream = new FileOutputStream(ownedDescriptor.fd);
                 try {
@@ -852,7 +852,7 @@ public final class SaveBridgeProvider extends ContentProvider {
 
     
     public static void syncDirectory(File file) throws ErrnoException {
-        OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file.getPath(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | OsConstants.O_CLOEXEC, 0));
+        OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file.getPath(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 0));
         try {
             if (!OsConstants.S_ISDIR(Os.fstat(ownedDescriptor.fd).st_mode)) {
                 throw new ErrnoException("Directory changed", OsConstants.ENOTDIR);

@@ -125,6 +125,16 @@ public final class GameBinding {
         return this.helperPackage.equals(str) && strArr != null && strArr.length == 1 && this.helperPackage.equals(strArr[0]);
     }
 
+    static boolean blocksTransfer(int importance) throws BridgeFailure {
+        if (importance <= 0) {
+            throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Game process importance is unknown");
+        }
+        // Includes foreground/service/visible/perceptible, plus both values of
+        // top-sleeping: 150 on API 26/27 and 325 on API 28+. Cached/background
+        // processes still require the repeated quiet/hash observation.
+        return importance <= 230 || importance == 325;
+    }
+
     public File saveRoot(String str, String str2) throws IOException {
         if (str == null || str2 == null || !new File(str).isAbsolute() || !new File(str2).isAbsolute()) {
             throw new BridgeFailure("SAVE_ROOT_UNKNOWN", "Android did not report separate private game and helper directories");

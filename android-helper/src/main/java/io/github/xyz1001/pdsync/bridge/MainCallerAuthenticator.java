@@ -5,7 +5,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
-import android.content.pm.SigningInfo;
 import android.content.res.Resources;
 import android.os.Process;
 
@@ -42,7 +41,7 @@ final class MainCallerAuthenticator {
     }
 
     private static PackageInfo currentMain(Context context) throws PackageManager.NameNotFoundException {
-        return context.getPackageManager().getPackageInfo("io.github.xyz1001.pdsync.android", 134217728);
+        return context.getPackageManager().getPackageInfo("io.github.xyz1001.pdsync.android", AndroidApiCompat.signingFlags());
     }
 
     private static void authenticate(Context context, String str, int i, PackageInfo packageInfo) throws PackageManager.NameNotFoundException {
@@ -51,8 +50,7 @@ final class MainCallerAuthenticator {
         ApplicationInfo applicationInfo = packageManager.getApplicationInfo(context.getPackageName(), 128);
         int i2 = applicationInfo.metaData == null ? 0 : applicationInfo.metaData.getInt("io.github.xyz1001.pdsync.EXPECTED_MAIN_CERT_SHA256", 0);
         String string = i2 == 0 ? "" : context.getString(i2);
-        SigningInfo signingInfo = packageInfo.signingInfo;
-        Signature[] apkContentsSigners = signingInfo == null ? null : signingInfo.getApkContentsSigners();
+        Signature[] apkContentsSigners = AndroidApiCompat.currentSigners(packageInfo);
         byte[][] bArr = apkContentsSigners == null ? null : new byte[apkContentsSigners.length][];
         if (apkContentsSigners != null) {
             for (int i3 = 0; i3 < apkContentsSigners.length; i3++) {

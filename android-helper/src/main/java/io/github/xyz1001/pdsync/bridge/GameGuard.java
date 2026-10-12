@@ -62,7 +62,7 @@ final class GameGuard {
         try {
             PackageManager packageManager = this.context.getPackageManager();
             GameBinding gameBindingBinding = binding();
-            PackageInfo packageInfo = packageManager.getPackageInfo(gameBindingBinding.gamePackage, 134217728);
+            PackageInfo packageInfo = packageManager.getPackageInfo(gameBindingBinding.gamePackage, 0);
             PackageInfo packageInfo2 = packageManager.getPackageInfo(this.context.getPackageName(), 0);
             if (packageInfo.applicationInfo == null || packageInfo2.applicationInfo == null || packageInfo2.applicationInfo.uid != Process.myUid()) {
                 throw new BridgeFailure("UID_MISMATCH", "Game and helper do not have the same installed UID");
@@ -71,7 +71,7 @@ final class GameGuard {
                 String str = packageInfo.packageName;
                 String str2 = packageInfo.sharedUserId;
                 String str3 = packageInfo2.sharedUserId;
-                long longVersionCode = packageInfo.getLongVersionCode();
+                long longVersionCode = AndroidApiCompat.versionCode(packageInfo);
                 String str4 = packageInfo.versionName;
                 int i = packageInfo.applicationInfo.uid;
                 int iMyUid = Process.myUid();
@@ -141,11 +141,7 @@ final class GameGuard {
                         if (!gameBindingBinding.isGameProcess(runningAppProcessInfo.processName, runningAppProcessInfo.pkgList)) {
                             throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "An unknown process is running in the shared UID");
                         }
-                        int i = runningAppProcessInfo.importance;
-                        if (i <= 0) {
-                            throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Game process importance is unknown");
-                        }
-                        if (i <= 230 || i == 325) {
+                        if (GameBinding.blocksTransfer(runningAppProcessInfo.importance)) {
                             z2 = true;
                         }
                         z3 = true;

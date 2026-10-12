@@ -162,7 +162,11 @@ final class SafeSaveTree {
                       Map<String,String> metadata, Set<String> names, long[] total, int[] count) throws IOException {
         File[] files = directory.listFiles();
         if (files == null) throw new BridgeFailure("SAVE_UNREADABLE", "Cannot list the private save directory");
-        Arrays.sort(files, Comparator.comparing(File::getName));
+        Arrays.sort(files, new Comparator<File>() {
+            @Override public int compare(File first, File second) {
+                return first.getName().compareTo(second.getName());
+            }
+        });
         for (File file : files) {
             String name = prefix.isEmpty() ? file.getName() : prefix + "/" + file.getName();
             if (!SaveArchive.included(name)) continue;
@@ -180,7 +184,7 @@ final class SafeSaveTree {
                 throw new BridgeFailure("SAVE_TOO_LARGE", "Save exceeds the file count or 64 MiB limit");
             FileDescriptor fd = null;
             try {
-                fd = Os.open(file.getPath(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | OsConstants.O_CLOEXEC, 0);
+                fd = Os.open(file.getPath(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 0);
                 StructStat opened = Os.fstat(fd); requireRegular(opened);
                 if (!identity(before).equals(identity(opened))) throw new BridgeFailure("SAVE_CHANGED", "Save file changed before opening");
                 File target = copy == null ? null : new File(copy, name);
@@ -239,7 +243,7 @@ final class SafeSaveTree {
     }
 
     static String identity(StructStat structStat) {
-        return structStat.st_dev + ":" + structStat.st_ino + ":" + structStat.st_mode + ":" + structStat.st_uid + ":" + structStat.st_nlink + ":" + structStat.st_size + ":" + structStat.st_mtim.tv_sec + ":" + structStat.st_mtim.tv_nsec + ":" + structStat.st_ctim.tv_sec + ":" + structStat.st_ctim.tv_nsec;
+        return AndroidApiCompat.statIdentity(structStat);
     }
 
     private static final class Sink extends OutputStream {
