@@ -5,9 +5,16 @@ import java.util.List;
 import android.content.Context;
 public final class GamePreparationService {
  public GamePreparationService(Context context) {}
- public void validatePrepared(PreparedPair pair) { throw new AssertionError("Legacy preparation must not be called by these checks"); }
+ public void validatePrepared(PreparedPair pair) {
+  if (!pair.embeddedBridge()) throw new AssertionError("Legacy preparation must not be called by these checks");
+  pair.validationCount++;
+  if (pair.invalidReceipt) throw new SecurityException("Receipt validation failed");
+ }
  public static final class PreparedPair {
-  public boolean legacyUnboundHelper, legacyIdentity;
+  public boolean legacyUnboundHelper, legacyIdentity, invalidReceipt;
+  public int validationCount;
+  public String bridgeMode, bridgeHostPackage, runtimeDexName, runtimeDexSha256, bridgeRuntimeVersion, mainAppCertSha256, namespaceId;
+  public boolean embeddedBridge() { return "embedded-v1".equals(bridgeMode); }
   public String gamePackage, helperPackage, sharedUid, authority, originIdentity, sourceApkSetSha256, signingCertificateSha256;
   public List<File> gameApks;
   public File helperApk;

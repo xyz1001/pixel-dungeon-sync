@@ -93,6 +93,10 @@ public final class PackageTrust {
         if (preparedPair == null) {
             throw new SecurityException("尚未选择并准备游戏。");
         }
+        if (preparedPair.embeddedBridge()) {
+            requireEmbeddedBridge(context, preparedPair, str);
+            return false;
+        }
         boolean z = preparedPair.legacyUnboundHelper;
         if (z) {
             if (!legacyRecoveryIdentityAllowed(legacyRecoveryMarkerPresent(context.getFilesDir()), preparedPair.legacyIdentity, preparedPair.legacyUnboundHelper, preparedPair.gamePackage, preparedPair.helperPackage, preparedPair.sharedUid, preparedPair.authority, preparedPair.originIdentity)) {
@@ -136,6 +140,57 @@ public final class PackageTrust {
             return false;
         }
         throw new SecurityException("助手绑定的游戏来源与当前选择不一致，请完成本次助手安装。");
+    }
+
+    private static void requireEmbeddedBridge(Context context, GamePreparationService.PreparedPair pair, String localSigner) throws Exception {
+        new GamePreparationService(context).validatePrepared(pair);
+        if (localSigner == null || !localSigner.matches("[a-fA-F0-9]{64}")
+                || !localSigner.equalsIgnoreCase(pair.signingCertificateSha256))
+            throw new SecurityException("本机签名或准备记录不一致，已停止连接。请保留现有游戏。");
+        PackageManager pm = context.getPackageManager();
+        PackageInfo game = installed(context, pair.gamePackage);
+        PackageInfo main = installed(context, context.getPackageName());
+        if (!signer(game).equalsIgnoreCase(localSigner)
+                || !apkSetSha256(installedApks(game)).equals(apkSetSha256(pair.gameApks)))
+            throw new SecurityException("已安装游戏的当前签名或完整 APK 内容与准备记录不一致。");
+        if (!"io.github.xyz1001.pdsync.android".equals(context.getPackageName())
+                || !signer(main).equalsIgnoreCase(pair.mainAppCertSha256)
+                || game.applicationInfo == null || main.applicationInfo == null
+                || game.applicationInfo.uid == main.applicationInfo.uid
+                || game.sharedUserId != null || main.sharedUserId != null
+                || !solePackage(pm.getPackagesForUid(game.applicationInfo.uid), pair.gamePackage)
+                || !solePackage(pm.getPackagesForUid(main.applicationInfo.uid), context.getPackageName()))
+            throw new SecurityException("游戏与同步主程序必须各自使用独立 UID，且主程序签名必须与绑定一致。");
+        String authority = "io.github.xyz1001.pdsync.embedded.g" + pair.originIdentity.substring(0, 32) + ".files";
+        ProviderInfo provider = pm.resolveContentProvider(pair.authority, 0);
+        if (!pair.gamePackage.equals(pair.bridgeHostPackage) || !authority.equals(pair.authority)
+                || provider == null || !pair.authority.equals(provider.authority)
+                || !pair.gamePackage.equals(provider.packageName)
+                || !"io.github.xyz1001.pdsync.bridge.SaveBridgeProvider".equals(provider.name)
+                || !(pair.gamePackage + ":pdsync_bridge").equals(provider.processName)
+                || !provider.enabled || provider.applicationInfo == null || !provider.applicationInfo.enabled
+                || provider.applicationInfo.uid != game.applicationInfo.uid
+                || !provider.exported || provider.grantUriPermissions
+                || !emptyPermission(provider.readPermission) || !emptyPermission(provider.writePermission))
+            throw new SecurityException("游戏内置存档桥的提供方、进程或权限不匹配。");
+        Bundle metadata = game.applicationInfo.metaData;
+        if (metadata == null || !"embedded-v1".equals(metadata.getString(META + "BRIDGE_MODE"))
+                || !"1".equals(pair.bridgeRuntimeVersion)
+                || !pair.bridgeRuntimeVersion.equals(metadata.getString(META + "BRIDGE_RUNTIME_VERSION"))
+                || !pair.gamePackage.equals(metadata.getString(META + "BOUND_GAME_PACKAGE"))
+                || !pair.originIdentity.equals(metadata.getString(META + "BOUND_ORIGIN_IDENTITY"))
+                || !pair.namespaceId.equals(metadata.getString(META + "BOUND_NAMESPACE_ID"))
+                || !pair.sourceApkSetSha256.equals(metadata.getString(META + "BOUND_SOURCE_APK_SHA256"))
+                || !pair.mainAppCertSha256.equals(metadata.getString(META + "MAIN_APP_CERT_SHA256")))
+            throw new SecurityException("游戏内置存档桥的运行时或来源绑定与准备记录不一致。");
+    }
+
+    private static boolean solePackage(String[] packages, String expected) {
+        return packages != null && packages.length == 1 && expected.equals(packages[0]);
+    }
+
+    private static boolean emptyPermission(String permission) {
+        return permission == null || permission.isEmpty();
     }
 
     static boolean legacyRecoveryIdentityAllowed(boolean z, boolean z2, boolean z3, String str, String str2, String str3, String str4, String str5) {

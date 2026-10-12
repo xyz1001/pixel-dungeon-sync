@@ -372,10 +372,12 @@ public final class MainActivity extends Activity {
             GamePreparationService.PreparedPair preparedPair = this.prepared;
             String str3 = preparedPair == null ? null : preparedPair.gamePackage;
             GamePreparationService.PreparedPair preparedPair2 = this.prepared;
-            String str4 = preparedPair2 == null ? null : preparedPair2.helperPackage;
+            String str4 = preparedPair2 == null ? null : preparedPair2.bridgeHostPackage;
             GamePreparationService.PreparedPair preparedPair3 = this.prepared;
             exc2 = exc;
             this.diagnosticReport = BridgeDiagnostics.report(exc2, i, str2, j, str3, str4, preparedPair3 != null ? preparedPair3.authority : null);
+            if (preparedPair3 != null && preparedPair3.embeddedBridge())
+                this.diagnosticReport += "\nbridge_mode=embedded-v1\nprovider_auth=current_main_certificate\nsignature_permission_required=false";
         } else {
             exc2 = exc;
             this.diagnosticReport = "";
@@ -530,21 +532,23 @@ public final class MainActivity extends Activity {
             this.readinessState = InstallationReadiness.noSelection();
             return;
         }
-        if (this.prepared.helperOnlyUpgrade) {
-            this.preparation.validateHelperUpdateGame(this.prepared);
-        }
         SyncRuntime.setPreparedGame(this, this.prepared);
         this.selectedNamespace = SyncRuntime.currentNamespace(this);
+        if (!this.prepared.embeddedBridge()) {
+            this.readinessState = new InstallationReadiness(InstallationReadiness.PackageStatus.NOT_CHECKED,
+                    InstallationReadiness.PackageStatus.NOT_CHECKED, false, this.installer.hasActiveRequest(),
+                    hasAnyRestoreJournal(), InstallationReadiness.AccessStatus.NOT_CHECKED);
+            this.notice = "已保留旧版准备记录。先处理未完成恢复，再重新准备带内置存档桥的游戏。";
+            return;
+        }
         try {
             InstallationReadiness.PackageStatus gameStatus = packageStatus(
                     this.installer.installedMatches(this.prepared.gamePackage, this.prepared.gameApks), this.prepared.gameStrategy);
-            InstallationReadiness.PackageStatus helperStatus = packageStatus(
-                    this.installer.installedMatches(this.prepared.helperPackage, Collections.singletonList(this.prepared.helperApk)), this.prepared.helperStrategy);
             boolean restorePending = hasAnyRestoreJournal();
             boolean targetVerified = false;
             String accessCode = "NOT_CHECKED";
             if (gameStatus == InstallationReadiness.PackageStatus.VERIFIED
-                    && helperStatus == InstallationReadiness.PackageStatus.VERIFIED && !this.installer.hasActiveRequest()) {
+                    && !this.installer.hasActiveRequest()) {
                 try {
                     BridgeClient bridge = new BridgeClient(this, this.prepared, null);
                     bridge.targetGame();
@@ -554,13 +558,13 @@ public final class MainActivity extends Activity {
                 } catch (Exception failure) {
                     Exception diagnostic = BridgeDiagnostics.code(failure) == null
                             ? new BridgeDiagnostics.Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST, "PACKAGE_TRUST_FAILED",
-                                    "游戏与助手身份未通过核验，请查看诊断。", failure)
+                                    "游戏与内置存档桥身份未通过核验，请查看诊断。", failure)
                             : failure;
                     accessCode = BridgeDiagnostics.code(diagnostic);
                     captureDiagnostic(diagnostic);
                 }
             }
-            this.readinessState = new InstallationReadiness(gameStatus, helperStatus, targetVerified,
+            this.readinessState = InstallationReadiness.embedded(gameStatus, targetVerified,
                     this.installer.hasActiveRequest(), restorePending, InstallationReadiness.classify(accessCode));
             this.bridgeAccessCode = accessCode;
         } catch (Exception failure) {
@@ -863,7 +867,7 @@ public final class MainActivity extends Activity {
         }
         text(str);
         if (!readyForSaves()) {
-            button("检查游戏与助手状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
+            button("检查游戏与内置存档桥状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
                 @Override // java.lang.Runnable
                 public final void run() {
                     MainActivity.this.m106x5451cefa();
@@ -1152,25 +1156,10 @@ public final class MainActivity extends Activity {
         if (this.prepared != null) {
             text(installationReadinessWithSystemRequest.accessDescription());
         }
-        GamePreparationService.PreparedPair preparedPair = this.prepared;
-        if (preparedPair != null && HelperActivationPolicy.canUpdate(installationReadinessWithSystemRequest, preparedPair.legacyUnboundHelper, this.prepared.helperVersionCode, 5L)) {
-            text("有新版存档助手可用。只更新助手，游戏 APK、现有存档和同步空间保持不变。");
-            button("更新存档助手", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda58
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.updateHelper();
-                }
-            });
-        }
-        GamePreparationService.PreparedPair preparedPair2 = this.prepared;
-        if (preparedPair2 != null && HelperActivationPolicy.canOffer(installationReadinessWithSystemRequest, this.bridgeAccessCode, preparedPair2.legacyUnboundHelper)) {
-            text("尚未连接到存档助手。可尝试打开助手页面后返回这里重新核验。旧版助手会先请求兼容更新，只更新助手，不重装游戏。");
-            button("启用存档助手", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda63
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.activateHelper();
-                }
-            });
+        if (this.prepared != null && this.prepared.embeddedBridge()
+                && HelperActivationPolicy.canOffer(installationReadinessWithSystemRequest, this.bridgeAccessCode, false)) {
+            text("内置存档桥暂未连接。可打开游戏中的存档桥页面，再返回这里重新核验。");
+            button("启用游戏内置存档桥", this::activateHelper);
         }
         if (installationReadinessWithSystemRequest.canInitializeGame()) {
             button("启动游戏一次", this::launchGameForInitialization);
@@ -1183,22 +1172,15 @@ public final class MainActivity extends Activity {
                 }
             });
         }
-        text("选择已安装游戏，或选择完整的一组 APK。应用会检查包身份、版本、分包与签名；只修改共享 UID 所需清单并在本机签名，不修改游戏代码与资源。");
+        text("选择已安装游戏，或选择完整的一组 APK。应用会核对包身份、版本、分包与签名，追加存档桥 DEX 与必要清单并在本机签名。原游戏 DEX 和资源逐项保留；只安装这一组游戏 APK。");
         button("从已安装应用中选择", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda66
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.chooseInstalled();
             }
         });
-        GamePreparationService.PreparedPair preparedPair3 = this.prepared;
-        if (preparedPair3 != null && preparedPair3.legacyUnboundHelper) {
-            text("检测到旧版助手。若有未完成恢复，请先在设置中处理；完成后沿用原游戏与本机签名升级。");
-            button("升级现有存档助手", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda67
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m92x8d10e054();
-                }
-            });
+        if (this.prepared != null && !this.prepared.embeddedBridge()) {
+            text("检测到旧版共享 UID 准备记录。它仅保留供恢复核对。请先处理未完成恢复，再从原始 APK 重新准备游戏；不再安装或升级独立助手。");
         }
         button(this.prepared == null ? "选择游戏…" : "更换游戏…", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda68
             @Override // java.lang.Runnable
@@ -1208,9 +1190,6 @@ public final class MainActivity extends Activity {
         });
         GamePreparationService.PreparedPair preparedPair4 = this.prepared;
         if (preparedPair4 != null) {
-            if (preparedPair4.helperOnlyUpgrade) {
-                text("当前准备仅用于同签名覆盖更新助手。游戏 APK 与存档保留；取消系统安装不会卸载游戏。");
-            }
             text(pairSummary(this.prepared));
             if (this.installer.hasActiveRequest() || installationReadinessWithSystemRequest.canContinueInstallation()) {
                 text("上次系统安装／卸载记录（单次请求）：\n" + this.installer.summary());
@@ -1256,10 +1235,8 @@ public final class MainActivity extends Activity {
         }
         if (installationReadinessWithSystemRequest.requiresGameUninstall()) {
             text("本次替换必须先卸载原游戏。卸载会不可逆地永久删除全部本地存档和战绩。\n\nAPK 备份不是存档备份，不能恢复已删除的存档。卸载前取消会保留原版；卸载后中断只能保留已准备好的安装包，不能找回存档。\n\n卸载和安装都仍需在 Android 系统界面单独确认。");
-        } else if (installationReadinessWithSystemRequest.requiresHelperUninstall()) {
-            text("现有助手不兼容。继续前会单独确认卸载助手；卸载会删除助手私有数据和回退备份。");
         }
-        text("本机签名私钥仅保留在主程序的 Android Keystore 中，不上传、不交给游戏或助手。清除数据或卸载主程序会失去密钥，之后可能必须再次卸载游戏。WebDAV 不备份密钥。");
+        text("本机签名私钥仅保留在主程序的 Android Keystore 中，不上传、不交给游戏。清除数据或卸载主程序会失去密钥，之后可能必须再次卸载游戏。WebDAV 不备份密钥。");
         LinearLayout linearLayoutRow = row();
         this.footer.addView(linearLayoutRow);
         addButton(linearLayoutRow, "重新检查状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda61
@@ -1478,7 +1455,7 @@ public final class MainActivity extends Activity {
     /* renamed from: lambda$requestPrepare$32$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m140x28d27037(final String str, final List list, String str2) throws Exception {
         if (str2 == null) {
-            confirm("在本机创建游戏签名密钥？", "需要生成一个仅存在本机 Android Keystore 的私钥，签署修改清单后的游戏和助手。主程序保持独立 UID。密钥不会上传，也不会发送给游戏或助手。\n\n卸载主程序或清除数据会失去密钥；将来可能需要再次卸载游戏。生成密钥和准备 APK 本身不会卸载任何应用。", "同意并准备", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda158
+            confirm("在本机创建游戏签名密钥？", "需要生成一个仅存在本机 Android Keystore 的私钥，签署追加存档桥后的游戏 APK。原游戏代码和资源保持原字节，主程序与游戏各自使用独立 UID。密钥不会上传，也不会发送给游戏。\n\n卸载主程序或清除数据会失去密钥；将来可能需要再次卸载游戏。生成密钥和准备 APK 本身不会卸载任何应用。", "同意并准备", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda158
                 @Override // java.lang.Runnable
                 public final void run() {
                     MainActivity.this.m139xb35849f6(str, list);
@@ -1510,24 +1487,17 @@ public final class MainActivity extends Activity {
     /* synthetic */ GamePreparationService.PreparedPair m58lambda$prepare$33$iogithubxyz1001pdsyncandroidMainActivity(List list, String str, boolean z) throws Exception {
         this.installer.assertCanPrepare();
         PreparationDiagnostics.Stage stage = PreparationDiagnostics.Stage.EXTRACTION;
-        try {
-            InputStream inputStreamOpen = getAssets().open("helper-unsigned.apk");
-            try {
-                GamePreparationService.PreparedPair preparedPairPrepareInstalledGame = list == null ? this.preparation.prepareInstalledGame(str, z, inputStreamOpen) : this.preparation.prepareSelectedApks(list, z, inputStreamOpen);
-                if (inputStreamOpen != null) {
-                    inputStreamOpen.close();
-                }
-                PreparationDiagnostics.Stage stage2 = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
-                this.installer.registerPrepared(preparedPairPrepareInstalledGame);
-                SyncRuntime.setPreparedGame(this, preparedPairPrepareInstalledGame);
-                this.selectedNamespace = SyncRuntime.currentNamespace(this);
-                SecureConnectionStore.Connection connection = this.connection;
-                if (connection != null) {
-                    SyncRuntime.setOnboardingProgress(this, connection, OnboardingProgress.PENDING);
-                }
-                return preparedPairPrepareInstalledGame;
-            } finally {
-            }
+        try (InputStream runtimeDex = getAssets().open("bridge-runtime.dex")) {
+            GamePreparationService.PreparedPair pair = list == null
+                    ? this.preparation.prepareInstalledGame(str, z, runtimeDex)
+                    : this.preparation.prepareSelectedApks(list, z, runtimeDex);
+            stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
+            this.installer.registerPrepared(pair);
+            SyncRuntime.setPreparedGame(this, pair);
+            this.selectedNamespace = SyncRuntime.currentNamespace(this);
+            SecureConnectionStore.Connection connection = this.connection;
+            if (connection != null) SyncRuntime.setOnboardingProgress(this, connection, OnboardingProgress.PENDING);
+            return pair;
         } catch (Exception e) {
             throw PreparationDiagnostics.failure(stage, e, this.preparation.diagnosticMetadata(list == null ? PreparationDiagnostics.Source.INSTALLED_BASE_AND_SPLITS : PreparationDiagnostics.Source.DOCUMENT_PICKER, str, -1L, list == null ? -1 : list.size()));
         }
@@ -1546,7 +1516,7 @@ public final class MainActivity extends Activity {
         this.onboardingActive = true;
         this.localPreview = null;
         this.page = SyncPage.DISCOVERY;
-        this.notice = "游戏和助手已完整暂存并复核，正在检查当前安装状态。";
+        this.notice = "带内置存档桥的游戏 APK 已完整暂存并复核，正在检查当前安装状态。";
         refreshReadiness();
     }
 
@@ -1565,8 +1535,7 @@ public final class MainActivity extends Activity {
         sb.append(preparedPair.protectedEntryCount);
         sb.append(" 个代码／资源条目已核对。\n游戏：");
         sb.append(InstallationReadiness.packageDescription(this.readinessState.game));
-        sb.append("\n助手：");
-        sb.append(InstallationReadiness.packageDescription(this.readinessState.helper));
+        sb.append(preparedPair.embeddedBridge() ? "\n存档桥：内置于游戏，随游戏安装" : "\n旧版准备记录：请重新准备内置存档桥游戏");
         sb.append("\n同步空间：");
         sb.append(this.selectedNamespace.isEmpty() ? preparedPair.namespaceId : this.selectedNamespace);
         return sb.toString();
@@ -1612,10 +1581,10 @@ public final class MainActivity extends Activity {
         installNext.pair = this.installer.freshPair();
         installNext.name = this.installer.nextPackage(installNext.pair);
         if (installNext.name != null) {
-            installNext.uninstall = (installNext.name.equals(installNext.pair.gamePackage) ? installNext.pair.gameStrategy : installNext.pair.helperStrategy) == GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL;
+            installNext.uninstall = installNext.pair.gameStrategy == GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL;
             if (installNext.uninstall) {
                 if (hasAnyRestoreJournal()) {
-                    throw new IOException("存在未完成存档恢复，请先处理恢复记录，不能卸载游戏或助手。");
+                    throw new IOException("存在未完成存档恢复，请先处理恢复记录，不能卸载游戏。");
                 }
                 installNext.receipt = this.installer.uninstallConsentReceipt(installNext.name, installNext.pair);
                 return installNext;
@@ -1629,11 +1598,11 @@ public final class MainActivity extends Activity {
         this.prepared = installNext.pair;
         SyncRuntime.setPreparedGame(this, installNext.pair);
         if (installNext.name == null) {
-            this.notice = "游戏与助手安装完成，签名、内容和共享 UID 已核对。";
+            this.notice = "游戏安装完成，本机签名、完整内容、内置存档桥及独立 UID 已核对。";
             refreshReadiness();
         } else {
             if (installNext.uninstall) {
-                confirm("卸载前请确认数据损失", installNext.name.equals(installNext.pair.gamePackage) ? "本次替换必须先卸载原游戏。卸载会不可逆地永久删除全部本地存档和战绩。\n\nAPK 备份不是存档备份，不能恢复已删除的存档。卸载前取消会保留原版；卸载后中断只能保留已准备好的安装包，不能找回存档。\n\n卸载和安装都仍需在 Android 系统界面单独确认。" : "现有存档助手与本机签名或共享 UID 不兼容。卸载助手会删除其私有数据和回退备份。游戏自身的数据不由此步骤删除；游戏若也需要卸载，会另行明确警告。\n\n助手和游戏安装包均已完整暂存并验证。取消会保留现有助手。", "我已理解，打开系统卸载", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda72
+                confirm("卸载前请确认数据损失", InstallCoordinator.LOSS_WARNING, "我已理解，打开系统卸载", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda72
                     @Override // java.lang.Runnable
                     public final void run() {
                         MainActivity.this.m35x24f28d94(installNext);
@@ -1642,7 +1611,7 @@ public final class MainActivity extends Activity {
                 return;
             }
             StringBuilder sb = new StringBuilder("安装");
-            sb.append(installNext.name.equals(installNext.pair.gamePackage) ? "游戏" : "存档助手");
+            sb.append("带内置存档桥的游戏");
             sb.append("？");
             confirm(sb.toString(), "接下来交给 Android 系统安装。安装包已使用本机密钥签名并验证；必须由你在系统界面明确确认。", "请求系统安装", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda73
                 @Override // java.lang.Runnable
@@ -1743,7 +1712,7 @@ public final class MainActivity extends Activity {
         heading("2 / 4  设置存档路径");
         text("存档目录");
         text(this.prepared == null ? "尚未选择游戏" : this.prepared.gamePackage + " / files");
-        text("Android 使用所选游戏的私有存档目录，由经过签名与共享 UID 验证的助手访问。系统文件选择器不能替代这项访问权限。");
+        text("Android 由游戏内置存档桥在游戏自身 UID 中访问私有存档目录。同步主程序使用独立 UID，连接前核对本机签名、完整 APK、来源绑定及主程序证书。系统文件选择器不能替代这项访问。");
         if (this.localPreview == null) {
             text("尚未完成本机存档预览，请检查存档。");
         } else {
@@ -1943,7 +1912,7 @@ public final class MainActivity extends Activity {
             }
         });
         text("密码可留空，匿名服务将账号和密码均留空。仅 127.0.0.1 本机 HTTP 测试必须匿名。测试会检查并准备本应用的同步目录。");
-        text("测试成功后点击下一步或保存，会将 HTTPS 连接及明文密码存入主程序私有文件，重启和覆盖更新后保留。测试和返回不保存；密码不交给游戏或助手。");
+        text("测试成功后点击下一步或保存，会将 HTTPS 连接及明文密码存入主程序私有文件，重启和覆盖更新后保留。测试和返回不保存；密码不交给游戏。");
         text("127.0.0.1 本机 HTTP 测试仅本次使用，不改动已保存连接；重启后恢复原连接。");
         if (!this.connectionLoadError.isEmpty()) {
             text(this.connectionLoadError);
@@ -2815,8 +2784,8 @@ public final class MainActivity extends Activity {
             this.progress = OnboardingProgress.PENDING;
             this.onboardingActive = true;
             this.page = SyncPage.DISCOVERY;
-            this.notice = str + " 旧版恢复记录已处理，请升级现有存档助手后继续。";
-            this.details = "已保留原有历史与待上传版本。升级沿用已验证的原游戏与签名，仍需 Android 系统确认。";
+            this.notice = str + " 旧版恢复记录已处理，请重新准备带内置存档桥的游戏后继续。";
+            this.details = "已保留原有历史与待上传版本。重新准备会核对原始 APK 与本机签名；若需更改游戏 UID，仍须先警告并由你确认卸载。";
             return;
         }
         OnboardingProgress onboardingProgress = SyncRuntime.onboardingProgress(this, this.connection);
@@ -3013,7 +2982,7 @@ public final class MainActivity extends Activity {
                 }
             });
         }
-        button("恢复助手保留的中断前备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda86
+        button("恢复存档桥保留的中断前备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda86
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m116x9e9ac3b0();
@@ -3145,7 +3114,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$104$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m116x9e9ac3b0() {
-        showConfirmation("恢复中断前的原存档", "仅用于助手提示需要恢复的情况。将用助手保留的原始备份恢复中断前存档。请先正常退出游戏，恢复时不要重新进入游戏。完成后仍须检查主程序的未完成恢复记录。", "恢复原始备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda16
+        showConfirmation("恢复中断前的原存档", "仅用于存档桥提示需要恢复的情况。将用存档桥保留的原始备份恢复中断前存档。请先正常退出游戏，恢复时不要重新进入游戏。完成后仍须检查主程序的未完成恢复记录。", "恢复原始备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda16
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m115x29209d6f();
@@ -3155,7 +3124,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$103$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m115x29209d6f() {
-        work("正在恢复助手中断前备份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda27
+        work("正在恢复存档桥中断前备份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda27
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m113x3e2c50ed();
@@ -3181,7 +3150,7 @@ public final class MainActivity extends Activity {
         this.history = null;
         this.cloudVerified = false;
         this.page = SyncPage.SETTINGS;
-        this.notice = "助手备份处理完成。" + this.readinessState.statusDescription();
+        this.notice = "存档桥备份处理完成。" + this.readinessState.statusDescription();
         if (this.diagnosticReport.isEmpty()) {
             this.details = safeText(str);
         }
@@ -3586,68 +3555,11 @@ public final class MainActivity extends Activity {
     }
 
     /* JADX INFO: Access modifiers changed from: private */
-    public void updateHelper() {
-        if (this.prepared == null || !HelperActivationPolicy.canUpdate(this.readinessState.withSystemRequest(this.installer.hasActiveRequest()), this.prepared.legacyUnboundHelper, this.prepared.helperVersionCode, 5L)) {
-            return;
-        }
-        work("正在准备助手兼容更新，保留游戏与存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda146
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m144xc3c21a89();
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda147
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m145x393c40ca((GamePreparationService.PreparedPair) obj);
-            }
-        });
-    }
-
-    /* renamed from: lambda$updateHelper$132$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ GamePreparationService.PreparedPair m144xc3c21a89() throws Exception {
-        this.installer.assertCanPrepare();
-        readInstallationReadiness();
-        GamePreparationService.PreparedPair preparedPair = this.prepared;
-        if (preparedPair == null || !HelperActivationPolicy.canUpdate(this.readinessState, preparedPair.legacyUnboundHelper, this.prepared.helperVersionCode, 5L)) {
-            throw new IOException("当前状态不允许更新助手，请先处理未完成操作并重新检查。");
-        }
-        GamePreparationService.PreparedPair preparedPairFreshPair = this.installer.freshPair();
-        if (this.installer.nextPackage(preparedPairFreshPair) != null) {
-            throw new IOException("现有安装发生变化，请重新检查后再更新助手。");
-        }
-        InputStream inputStreamOpen = getAssets().open("helper-unsigned.apk");
-        try {
-            GamePreparationService.PreparedPair preparedPairPrepareHelperUpdate = this.preparation.prepareHelperUpdate(preparedPairFreshPair, inputStreamOpen);
-            if (inputStreamOpen != null) {
-                inputStreamOpen.close();
-            }
-            this.installer.registerPrepared(preparedPairPrepareHelperUpdate);
-            return preparedPairPrepareHelperUpdate;
-        } finally {
-        }
-    }
-
-    /* renamed from: lambda$updateHelper$133$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m145x393c40ca(GamePreparationService.PreparedPair preparedPair) throws Exception {
-        this.prepared = preparedPair;
-        SyncRuntime.setPreparedGame(this, preparedPair);
-        this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
-        this.bridgeAccessCode = "NOT_CHECKED";
-        this.localPreview = null;
-        this.previewAttempted = false;
-        this.inspection = null;
-        this.history = null;
-        this.cloudVerified = false;
-        this.notice = "助手更新已准备好。点击“检查并继续安装”并在系统中确认，只覆盖助手，不重装游戏。";
-        readAfterHelperPreparation();
-    }
-
-    /* JADX INFO: Access modifiers changed from: private */
     public void activateHelper() {
-        if (this.prepared == null || !HelperActivationPolicy.canOffer(this.readinessState.withSystemRequest(this.installer.hasActiveRequest()), this.bridgeAccessCode, this.prepared.legacyUnboundHelper)) {
+        if (this.prepared == null || !this.prepared.embeddedBridge() || !HelperActivationPolicy.canOffer(this.readinessState.withSystemRequest(this.installer.hasActiveRequest()), this.bridgeAccessCode, false)) {
             return;
         }
-        work("正在核对助手激活入口，现有游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda21
+        work("正在核对游戏内置存档桥激活入口，现有游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda21
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m12xbb2f51f5();
@@ -3672,28 +3584,7 @@ public final class MainActivity extends Activity {
         }
         new BridgeClient(this, preparedPairFreshPair, null).targetGame();
         Intent intentInstalledIntent = HelperActivation.installedIntent(this, preparedPairFreshPair);
-        if (intentInstalledIntent != null) {
-            return new ActivationNext(preparedPairFreshPair, intentInstalledIntent);
-        }
-        this.installer.assertCanPrepare();
-        InputStream inputStreamOpen = getAssets().open("helper-unsigned.apk");
-        try {
-            GamePreparationService.PreparedPair preparedPairPrepareHelperUpdate = this.preparation.prepareHelperUpdate(preparedPairFreshPair, inputStreamOpen);
-            if (inputStreamOpen != null) {
-                inputStreamOpen.close();
-            }
-            this.installer.registerPrepared(preparedPairPrepareHelperUpdate);
-            return new ActivationNext(preparedPairPrepareHelperUpdate, null);
-        } catch (Throwable th) {
-            if (inputStreamOpen != null) {
-                try {
-                    inputStreamOpen.close();
-                } catch (Throwable th2) {
-                    th.addSuppressed(th2);
-                }
-            }
-            throw th;
-        }
+        return new ActivationNext(preparedPairFreshPair, intentInstalledIntent);
     }
 
     /* renamed from: lambda$activateHelper$135$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3707,18 +3598,15 @@ public final class MainActivity extends Activity {
         this.inspection = null;
         this.history = null;
         this.cloudVerified = false;
-        if (activationNext.launch == null) {
-            this.notice = "已准备同签名助手更新。点击“检查并继续安装”，仅覆盖助手；完成后再点“启用存档助手”。游戏与存档保持不变。";
-            readAfterHelperPreparation();
-        } else if (!this.resumed) {
-            this.notice = "已核对助手入口。返回前台后请再次点击启用。";
+        if (!this.resumed) {
+            this.notice = "已核对内置存档桥入口。返回前台后请再次点击启用。";
             this.readinessRefreshPending = true;
         } else {
-            this.notice = "即将打开助手页面，请点击页面中的“返回同步器”。返回后仍需重新检查存档访问。";
+            this.notice = "即将打开游戏内置存档桥页面，请点击页面中的“返回同步器”。返回后仍需重新检查存档访问。";
             try {
                 startActivityForResult(activationNext.launch, 8103);
             } catch (RuntimeException e) {
-                throw new BridgeClient.Failure(BridgeDiagnostics.Stage.HELPER_ACTIVATION, "ACTIVATION_LAUNCH_DENIED", "系统未打开助手激活页面。请保留现有安装并复制诊断，不需要卸载游戏。", e);
+                throw new BridgeClient.Failure(BridgeDiagnostics.Stage.HELPER_ACTIVATION, "ACTIVATION_LAUNCH_DENIED", "系统未打开内置存档桥激活页面。请保留现有安装并复制诊断，不需要卸载游戏。", e);
             }
         }
     }
@@ -3732,7 +3620,7 @@ public final class MainActivity extends Activity {
     public void launchGameForInitialization() {
         if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
             this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
-            work("正在核对首次启动所需的游戏与助手身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
+            work("正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m50xa7c297e0();
@@ -3897,7 +3785,7 @@ public final class MainActivity extends Activity {
             this.localPreview = null;
             this.previewAttempted = false;
             this.cloudVerified = false;
-            this.notice = i2 == -1 ? "助手页面已返回，正在重新核验连接与存档访问。" : "助手页面已关闭，正在重新检查；尚不能确认存档访问就绪。";
+            this.notice = i2 == -1 ? "游戏内置存档桥页面已返回，正在重新核验连接与存档访问。" : "游戏内置存档桥页面已关闭，正在重新检查；尚不能确认存档访问就绪。";
             requestReadinessRefresh();
             return;
         }

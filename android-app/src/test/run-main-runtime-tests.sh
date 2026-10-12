@@ -12,7 +12,10 @@ trap 'rm -rf "$OUT"' EXIT
   $(find "$HERE/fixtures/runtime-stubs" -name '*.java' | sort) \
   "$HERE/java/io/github/xyz1001/pdsync/android/MainRuntimeRecoveryChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/HistoryArrowGeometryChecks.java" \
-  "$HERE/java/io/github/xyz1001/pdsync/android/RuntimePlatformCompatibilityChecks.java"
+  "$HERE/java/io/github/xyz1001/pdsync/android/RuntimePlatformCompatibilityChecks.java" \
+  "$HERE/java/io/github/xyz1001/pdsync/android/EmbeddedBridgeRuntimeChecks.java"
 "$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.MainRuntimeRecoveryChecks
 "$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.HistoryArrowGeometryChecks
 "$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.RuntimePlatformCompatibilityChecks
+
+"$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.EmbeddedBridgeRuntimeChecks

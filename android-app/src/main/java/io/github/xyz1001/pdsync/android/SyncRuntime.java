@@ -57,7 +57,7 @@ final class SyncRuntime {
     }
 
     static String selectionToken(GamePreparationService.PreparedPair preparedPair) {
-        return preparedPair.originIdentity + ":" + preparedPair.sourceApkSetSha256 + ":" + preparedPair.sharedUid;
+        return preparedPair.originIdentity + ":" + preparedPair.sourceApkSetSha256 + ":" + (preparedPair.embeddedBridge() ? preparedPair.bridgeMode + ":" + preparedPair.runtimeDexSha256 : preparedPair.sharedUid);
     }
 
     static String currentNamespace(Context context) throws Exception {
@@ -151,6 +151,11 @@ final class SyncRuntime {
 
     static boolean automaticAllowed(Context context, SecureConnectionStore.Connection connection2) {
         if (isAutoUploadPaused(context) || connection2 == null) {
+            return false;
+        }
+        try {
+            if (!requirePreparedGame(context).embeddedBridge()) return false;
+        } catch (Exception unavailablePreparation) {
             return false;
         }
         return OnboardingGate.allowsAutomatic(onboardingProgress(context, connection2), false, true);

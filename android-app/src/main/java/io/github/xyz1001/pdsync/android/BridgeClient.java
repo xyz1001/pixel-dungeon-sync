@@ -69,7 +69,7 @@ public final class BridgeClient implements AndroidGameBridge {
     private Bundle exchange(final String operation, final Bundle extras) throws Exception {
         final boolean legacy;
         try { legacy = PackageTrust.requireBridgeForExchange(context, selected, preparation.currentLocalCertificateSha256()); }
-        catch (Exception error) { throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST, "PACKAGE_TRUST_FAILED", "游戏或助手的身份检查未通过，请检查详细诊断。不要卸载现有游戏。", error); }
+        catch (Exception error) { throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST, "PACKAGE_TRUST_FAILED", "游戏或存档桥的身份检查未通过，请检查详细诊断。不要卸载现有游戏。", error); }
         BridgeDiagnostics.ProviderSnapshot before = snapshotProvider();
         BridgeDiagnostics.TransportInfo transport = null;
         Bundle reply = null;
@@ -79,16 +79,21 @@ public final class BridgeClient implements AndroidGameBridge {
                     BridgeClient::closeReply, BridgeClient::lambda$exchange$1);
             reply=result.reply; transport=result.transport;
             if(reply==null || reply.getInt("apiVersion",-1)!=1)
-                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"INVALID_PROTOCOL","存档助手协议无法确认，请复制诊断后检查。",null);
+                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"INVALID_PROTOCOL","存档桥协议无法确认，请复制诊断后检查。",null);
             try {
                 if(legacy!=PackageTrust.requireBridgeForExchange(context,selected,preparation.currentLocalCertificateSha256()))
-                    throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST,"RECOVERY_IDENTITY_CHANGED","存档助手的恢复身份已变化，请重新检查。",null);
+                    throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST,"RECOVERY_IDENTITY_CHANGED","存档桥的恢复身份已变化，请重新检查。",null);
             } catch(Failure error) { throw error; }
-            catch(Exception error) { throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST,"PACKAGE_TRUST_CHANGED","助手调用期间应用身份发生变化，已停止访问。",error); }
+            catch(Exception error) { throw new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST,"PACKAGE_TRUST_CHANGED","存档桥调用期间应用身份发生变化，已停止访问。",error); }
             if(reply.getBoolean("ok",false) && (!replyIdentityMatches(reply,"gamePackage",selected.gamePackage,legacy)
                     || !replyIdentityMatches(reply,"originIdentity",selected.originIdentity,legacy)
                     || !replyIdentityMatches(reply,"sourceApkSetSha256",selected.sourceApkSetSha256,legacy)))
-                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"REPLY_IDENTITY_MISMATCH","助手返回的游戏来源与本次操作绑定不一致。",null);
+                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"REPLY_IDENTITY_MISMATCH","存档桥返回的游戏来源与本次操作绑定不一致。",null);
+            if(reply.getBoolean("ok",false) && selected.embeddedBridge()
+                    && (!"embedded-v1".equals(reply.getString("bridgeMode"))
+                        || !selected.bridgeRuntimeVersion.equals(reply.getString("bridgeRuntimeVersion"))
+                        || !selected.gamePackage.equals(reply.getString("providerPackage"))))
+                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"REPLY_IDENTITY_MISMATCH","内置存档桥返回的运行时身份不一致。",null);
             return reply;
         } catch(Failure error) {
             closeRejectedReply(reply,error);
@@ -99,7 +104,7 @@ public final class BridgeClient implements AndroidGameBridge {
             throw enriched;
         } catch(Exception error) {
             closeRejectedReply(reply,error);
-            if(transport!=null) throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"INVALID_PROTOCOL","存档助手返回内容无法确认，请复制诊断后检查。",error,transport.withSnapshots(before,snapshotProvider()));
+            if(transport!=null) throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY,"INVALID_PROTOCOL","存档桥返回内容无法确认，请复制诊断后检查。",error,transport.withSnapshots(before,snapshotProvider()));
             throw error;
         }
     }
@@ -124,7 +129,7 @@ public final class BridgeClient implements AndroidGameBridge {
     }
 
     static  BridgeDiagnostics.Failure lambda$exchange$1(BridgeDiagnostics.Stage stage, String str, Throwable th, BridgeDiagnostics.TransportInfo transportInfo) {
-        return new Failure(stage, str, "助手连接未完成，请复制诊断或重新检查。恢复结果未确认时不要启动游戏，无需重复卸载安装。", th, transportInfo);
+        return new Failure(stage, str, "存档桥连接未完成，请复制诊断或重新检查。恢复结果未确认时不要启动游戏，无需重复卸载安装。", th, transportInfo);
     }
 
     
@@ -139,7 +144,7 @@ public final class BridgeClient implements AndroidGameBridge {
         try {
             closeReply(bundle);
         } catch (Exception e) {
-            th.addSuppressed(new Failure(BridgeDiagnostics.Stage.IPC_CLOSE, "IPC_REPLY_CLOSE_FAILED", "助手返回资源关闭失败，请保留诊断。", e));
+            th.addSuppressed(new Failure(BridgeDiagnostics.Stage.IPC_CLOSE, "IPC_REPLY_CLOSE_FAILED", "存档桥返回资源关闭失败，请保留诊断。", e));
         }
     }
 
@@ -147,14 +152,16 @@ public final class BridgeClient implements AndroidGameBridge {
     private BridgeDiagnostics.ProviderSnapshot snapshotProvider() {
         try {
             boolean permission=context.checkSelfPermission("io.github.xyz1001.pdsync.android.ACCESS_BRIDGE")==0;
+            String host=selected.embeddedBridge()?selected.bridgeHostPackage:selected.helperPackage;
+            String process=selected.embeddedBridge()?host+":pdsync_bridge":host;
             ProviderInfo provider=context.getPackageManager().resolveContentProvider(selected.authority,0);
             if(provider==null) return new BridgeDiagnostics.ProviderSnapshot(BridgeDiagnostics.SnapshotStatus.NOT_FOUND,permission,false,false,false,false,false,false,false,false,false,false,false);
             ApplicationInfo app=provider.applicationInfo;
             return new BridgeDiagnostics.ProviderSnapshot(BridgeDiagnostics.SnapshotStatus.RESOLVED,permission,
                     provider.enabled,app!=null,app!=null&&app.enabled,app!=null&&(app.flags&ApplicationInfo.FLAG_STOPPED)!=0,
                     app!=null&&(app.flags&ApplicationInfo.FLAG_SUSPENDED)!=0,selected.authority.equals(provider.authority),
-                    "io.github.xyz1001.pdsync.bridge.SaveBridgeProvider".equals(provider.name),selected.helperPackage.equals(provider.packageName),
-                    selected.helperPackage.equals(provider.processName),provider.exported,provider.grantUriPermissions);
+                    "io.github.xyz1001.pdsync.bridge.SaveBridgeProvider".equals(provider.name),host.equals(provider.packageName),
+                    process.equals(provider.processName),provider.exported,provider.grantUriPermissions);
         } catch(Exception error) {
             return new BridgeDiagnostics.ProviderSnapshot(BridgeDiagnostics.SnapshotStatus.READ_FAILED,false,false,false,false,false,false,false,false,false,false,false,false);
         }
@@ -204,11 +211,11 @@ public final class BridgeClient implements AndroidGameBridge {
         } else if ("RESTORE_COMMITTED_CLEANUP_PENDING".equals(str)) {
             str3 = "存档已恢复并核对，但临时文件清理尚未完成。请检查恢复记录确认结果，不要重复恢复或卸载游戏。";
         } else if (str != null && (str.contains("RECOVER") || str.contains("ROLLBACK"))) {
-            str3 = "助手遇到未完成的存档写入。请不要重新启动游戏，先检查恢复记录。";
+            str3 = "存档桥遇到未完成的存档写入。请不要重新启动游戏，先检查恢复记录。";
         } else if ("SAVE_IO_ERROR".equals(str)) {
             str3 = "存档文件操作未完成，请查看详细诊断中的写入阶段和原因，并检查恢复记录后再启动游戏。无需卸载游戏。";
         } else {
-            str3 = "存档助手拒绝了本次访问，请复制诊断或重新检查。无需重复卸载安装。";
+            str3 = "存档桥拒绝了本次访问，请复制诊断或重新检查。无需重复卸载安装。";
         }
         if (th == null) {
             th = BridgeDiagnostics.helperDetail(str, str2);
@@ -242,13 +249,13 @@ public final class BridgeClient implements AndroidGameBridge {
         try {
             Bundle bundleCall = call("inspect", null);
             if (!this.selected.legacyUnboundHelper && (!bundleCall.containsKey("firstLaunchNeeded") || !bundleCall.containsKey("transferReady"))) {
-                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY, "READINESS_FIELDS_MISSING", "助手未返回完整的存档状态，请复制诊断。", null);
+                throw new Failure(BridgeDiagnostics.Stage.PROTOCOL_REPLY, "READINESS_FIELDS_MISSING", "存档桥未返回完整的存档状态，请复制诊断。", null);
             }
             String strFailureCode = BridgeReadiness.failureCode(bundleCall.getBoolean("ready", false), bundleCall.getBoolean("firstLaunchNeeded", false), bundleCall.containsKey("transferReady") ? Boolean.valueOf(bundleCall.getBoolean("transferReady", false)) : null);
             if (strFailureCode != null) {
                 throw helperFailure(strFailureCode);
             }
-            return "游戏、存档助手和存档目录已验证；可开始稳定性检查。";
+            return "游戏、存档桥和存档目录已验证；可开始稳定性检查。";
         } catch (Failure e) {
             throw e;
         } catch (Exception e2) {
@@ -258,7 +265,7 @@ public final class BridgeClient implements AndroidGameBridge {
 
     public String recoverInterruptedBackup() {
         try {
-            return "助手已恢复并验证中断前备份（" + call("recover", null).getInt("fileCount", 0) + " 个文件）。";
+            return "存档桥已恢复并验证中断前备份（" + call("recover", null).getInt("fileCount", 0) + " 个文件）。";
         } catch (Failure e) {
             throw e;
         } catch (Exception e2) {
@@ -277,7 +284,7 @@ public final class BridgeClient implements AndroidGameBridge {
             }
             String string = (packageInfoInstalled.versionName == null || packageInfoInstalled.versionName.trim().isEmpty()) ? Long.toString(PackageTrust.versionCode(packageInfoInstalled)) : packageInfoInstalled.versionName;
             if (zRequireBridgeForExchange && !PackageTrust.legacyRecoveryMarkerPresent(this.context.getFilesDir())) {
-                throw new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "LEGACY_RECOVERY_ENDED", "原有恢复记录已结束。请重新准备绑定来源的游戏与助手。", null);
+                throw new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "LEGACY_RECOVERY_ENDED", "原有恢复记录已结束。请重新准备绑定来源的游戏与存档桥。", null);
             }
             return new AndroidGameTarget(this.identity, string, PackageTrust.versionCode(packageInfoInstalled), strApkSetSha256, this.selected.sourceApkSetSha256, zRequireBridgeForExchange);
         } catch (Failure e) {
@@ -302,7 +309,7 @@ public final class BridgeClient implements AndroidGameBridge {
             targetGame();
             Bundle reply=call("export",null);
             ParcelFileDescriptor descriptor=AndroidCompat.descriptor(reply,"archive");
-            if(descriptor==null) throw new Failure("助手未返回存档数据。");
+            if(descriptor==null) throw new Failure("存档桥未返回存档数据。");
             SaveArchiveCodec.Inventory inventory;
             try(InputStream input=new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
                 inventory=SaveArchiveCodec.readExportArchive(input,path);

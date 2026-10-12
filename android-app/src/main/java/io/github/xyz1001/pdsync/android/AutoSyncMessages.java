@@ -29,7 +29,7 @@ public final class AutoSyncMessages {
                 str2 = "云端提交、快照或祖先记录缺失、不完整或暂时无法验证，请稍后重试。";
                 break;
             case "BRIDGE_UNAVAILABLE":
-                str2 = "存档助手未能完成本次访问，请返回首页检查助手诊断后重试。";
+                str2 = "存档存档桥未能完成本次访问，请返回首页检查存档桥诊断后重试。";
                 break;
             case "BASELINE_UNVERIFIED":
                 str2 = "同步基线与当前云端历史的关系无法确认，请返回首页重新比较。";
@@ -44,7 +44,7 @@ public final class AutoSyncMessages {
                 str2 = "云端不可变历史校验失败，请在首页检查同步记录。";
                 break;
             case "TARGET_UNVERIFIED":
-                str2 = "无法确认所选游戏或助手的身份，请返回首页检查安装与身份诊断。";
+                str2 = "无法确认所选游戏或存档桥的身份，请返回首页检查安装与身份诊断。";
                 break;
             case "UNSUPPORTED_SAVE_FORMAT":
                 str2 = "当前存档格式不受支持或无法读取，请检查所选游戏与存档位置。";

@@ -90,7 +90,7 @@ public final class SaveArchiveCodec {
             ZipEntry entry;
             while((entry=zip.getNextEntry())!=null) {
                 String name=entry.getName(); validateName(name);
-                if(entry.isDirectory() || !aliases.add(name.toLowerCase(Locale.ROOT)) || hashes.size()>=MAX_FILES) throw new IOException("助手返回了重复或不安全的存档条目。");
+                if(entry.isDirectory() || !aliases.add(name.toLowerCase(Locale.ROOT)) || hashes.size()>=MAX_FILES) throw new IOException("存档桥返回了重复或不安全的存档条目。");
                 Path target=root.resolve(name).normalize();
                 if(!target.toAbsolutePath().startsWith(root.toAbsolutePath().normalize())) throw new IOException("存档路径无效。");
                 ensureParents(root,target.getParent()); MessageDigest hash=digest();

@@ -8,7 +8,6 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
-import io.github.xyz1001.pdsync.android.prepare.HelperUpdatePolicy;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -81,21 +80,19 @@ public final class InstallCoordinator {
         }
     }
 
-    public void registerPrepared(GamePreparationService.PreparedPair preparedPair) throws Exception {
-        String str;
+    public void registerPrepared(GamePreparationService.PreparedPair pair) throws Exception {
         assertCanPrepare();
-        this.preparation.validatePrepared(preparedPair);
-        if (preparedPair.helperOnlyUpgrade) {
-            this.preparation.validateHelperUpdateGame(preparedPair);
-        }
-        SyncRuntime.setPreparedGame(this.context, preparedPair);
-        SharedPreferences.Editor editorPutString = this.prefs.edit().putString("state", "READY");
-        if (preparedPair.helperOnlyUpgrade) {
-            str = "已准备助手兼容更新，游戏 APK 原字节保留，仅允许覆盖助手，无需卸载游戏。";
-        } else {
-            str = "两个安装包已暂存并通过签名与内容校验，尚未卸载或安装应用。";
-        }
-        persist(editorPutString.putString("message", str).remove("confirmation").remove("session").remove("package").remove("nonce"));
+        requireEmbedded(pair);
+        this.preparation.validatePrepared(pair);
+        SyncRuntime.setPreparedGame(this.context, pair);
+        persist(this.prefs.edit().putString("state", "READY")
+                .putString("message", "游戏 APK 集合与内置存档桥已暂存并通过签名与内容校验，尚未卸载或安装应用。")
+                .remove("confirmation").remove("session").remove("package").remove("nonce"));
+    }
+
+    private static void requireEmbedded(GamePreparationService.PreparedPair pair) throws IOException {
+        if (pair == null || !pair.embeddedBridge() || pair.helperOnlyUpgrade)
+            throw new IOException("旧版助手安装流程已停用。请先处理原有恢复记录，再重新准备带内置存档桥的游戏。");
     }
 
     public GamePreparationService.PreparedPair freshPair() throws Exception {
@@ -103,6 +100,7 @@ public final class InstallCoordinator {
         if (preparedPairReloadPrepared == null) {
             throw new IOException("未找到完整的安装包，请重新准备游戏。");
         }
+        requireEmbedded(preparedPairReloadPrepared);
         this.preparation.validatePrepared(preparedPairReloadPrepared);
         GamePreparationService.PreparedPair preparedPairRefreshInstallStrategies = this.preparation.refreshInstallStrategies(preparedPairReloadPrepared);
         SyncRuntime.setPreparedGame(this.context, preparedPairRefreshInstallStrategies);
@@ -122,28 +120,12 @@ public final class InstallCoordinator {
         return false;
     }
 
-    public String nextPackage(GamePreparationService.PreparedPair preparedPair) throws Exception {
-        if (preparedPair.helperOnlyUpgrade) {
-            this.preparation.validateHelperUpdateGame(preparedPair);
-            if (preparedPair.helperStrategy == GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL) {
-                throw new IOException("助手与保留的升级包不兼容，已停止；仅助手升级不会卸载应用或重新安装游戏。");
-            }
-            if (!installedMatches(preparedPair.helperPackage, Collections.singletonList(preparedPair.helperApk))) {
-                return preparedPair.helperPackage;
-            }
-            PackageTrust.requireBridge(this.context, preparedPair, preparedPair.signingCertificateSha256);
-            return null;
-        }
-        if (preparedPair.gameStrategy == GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL) {
-            return preparedPair.gamePackage;
-        }
-        if (!installedMatches(preparedPair.helperPackage, Collections.singletonList(preparedPair.helperApk))) {
-            return preparedPair.helperPackage;
-        }
-        if (!installedMatches(preparedPair.gamePackage, preparedPair.gameApks)) {
-            return preparedPair.gamePackage;
-        }
-        PackageTrust.requireBridge(this.context, preparedPair, preparedPair.signingCertificateSha256);
+    public String nextPackage(GamePreparationService.PreparedPair pair) throws Exception {
+        requireEmbedded(pair);
+        this.preparation.validatePrepared(pair);
+        if (pair.gameStrategy == GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL
+                || !installedMatches(pair.gamePackage, pair.gameApks)) return pair.gamePackage;
+        PackageTrust.requireBridge(this.context, pair, pair.signingCertificateSha256);
         return null;
     }
 
@@ -152,20 +134,18 @@ public final class InstallCoordinator {
         return packageInfoInstalled.firstInstallTime + ":" + packageInfoInstalled.lastUpdateTime + ":" + PackageTrust.versionCode(packageInfoInstalled) + ":" + PackageTrust.signer(packageInfoInstalled) + ":" + PackageTrust.apkSetSha256(PackageTrust.installedApks(packageInfoInstalled));
     }
 
-    private static boolean isGame(GamePreparationService.PreparedPair preparedPair, String str) throws IOException {
-        if (preparedPair.gamePackage.equals(str)) {
-            return true;
-        }
-        if (preparedPair.helperPackage.equals(str)) {
-            return false;
-        }
-        throw new IOException("系统请求与当前已验证的游戏/助手不一致。");
+    private static boolean isGame(GamePreparationService.PreparedPair pair, String packageName) throws IOException {
+        requireEmbedded(pair);
+        if (!pair.gamePackage.equals(packageName))
+            throw new IOException("系统请求必须只指向已验证的游戏，不能安装或卸载独立助手。");
+        return true;
     }
 
-    public String uninstallConsentReceipt(String str, GamePreparationService.PreparedPair preparedPair) throws Exception {
-        HelperUpdatePolicy.requireInstallAction(preparedPair.helperOnlyUpgrade, preparedPair.helperPackage, str, true);
-        this.preparation.validatePrepared(preparedPair);
-        return PackageTrust.apkSetSha256(preparedPair.gameApks) + ":" + PackageTrust.sha256(preparedPair.helperApk) + ":" + identity(str);
+    public String uninstallConsentReceipt(String packageName, GamePreparationService.PreparedPair pair) throws Exception {
+        isGame(pair, packageName);
+        this.preparation.validatePrepared(pair);
+        return pair.originIdentity + ":" + pair.signingCertificateSha256 + ":"
+                + PackageTrust.apkSetSha256(pair.gameApks) + ":" + identity(packageName);
     }
 
     public void requestUninstall(String str, String str2) throws Exception {
@@ -173,15 +153,15 @@ public final class InstallCoordinator {
             throw new IOException("请先完成上一个系统请求。");
         }
         GamePreparationService.PreparedPair preparedPairFreshPair = freshPair();
-        HelperUpdatePolicy.requireInstallAction(preparedPairFreshPair.helperOnlyUpgrade, preparedPairFreshPair.helperPackage, str, true);
-        if ((isGame(preparedPairFreshPair, str) ? preparedPairFreshPair.gameStrategy : preparedPairFreshPair.helperStrategy) != GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL || !uninstallConsentReceipt(str, preparedPairFreshPair).equals(str2)) {
+        isGame(preparedPairFreshPair, str);
+        if (preparedPairFreshPair.gameStrategy != GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL || !uninstallConsentReceipt(str, preparedPairFreshPair).equals(str2)) {
             throw new IOException("安装包或现有应用已变化。请重新检查后再次确认，尚未请求卸载。");
         }
         if (AndroidSyncFacade.hasUnresolvedRestore(new File(this.context.getFilesDir().getCanonicalFile(), "sync").toPath())) {
-            throw new IOException("存在未完成存档恢复，不能卸载游戏或助手。请先处理恢复记录与备份。");
+            throw new IOException("存在未完成存档恢复，不能卸载游戏。请先处理恢复记录与备份。");
         }
         String string = UUID.randomUUID().toString();
-        persist(this.prefs.edit().putString("state", "UNINSTALLING").putString("operation", "uninstall").putString("package", str).putString("identity", identity(str)).putBoolean("gameRequest", isGame(preparedPairFreshPair, str)).putString("nonce", string).remove("session").remove("confirmation").putString("message", "等待 Android 系统卸载确认与结果。尚不能确认应用是否被删除。"));
+        persist(this.prefs.edit().putString("state", "UNINSTALLING").putString("operation", "uninstall").putString("package", str).putString("identity", identity(str)).putString("uninstallPreparedApkSet", PackageTrust.apkSetSha256(preparedPairFreshPair.gameApks)).putString("uninstallOrigin", preparedPairFreshPair.originIdentity).putBoolean("gameRequest", isGame(preparedPairFreshPair, str)).putString("nonce", string).remove("session").remove("confirmation").putString("message", "等待 Android 系统卸载确认与结果。尚不能确认应用是否被删除。"));
         try {
             this.context.getPackageManager().getPackageInstaller().uninstall(str, PendingIntent.getBroadcast(this.context, string.hashCode(), new Intent(this.context, (Class<?>) InstallResultReceiver.class).setAction("io.github.xyz1001.pdsync.android.INSTALL_CHANGED." + string).putExtra("requestNonce", string), AndroidCompat.mutableCallbackFlags()).getIntentSender());
         } catch (IllegalArgumentException | SecurityException e) {
@@ -199,17 +179,16 @@ public final class InstallCoordinator {
     public void requestInstall(String packageName) throws Exception {
         if(hasActiveRequest()) throw new IOException("上一个系统安装请求尚未结束，请勿重复提交。");
         if(!context.getPackageManager().canRequestPackageInstalls()) throw new IOException("请先点击“允许本应用请求安装”，在系统设置中自行确认。");
+        assertCanPrepare();
         GamePreparationService.PreparedPair pair=freshPair();
-        HelperUpdatePolicy.requireInstallAction(pair.helperOnlyUpgrade,pair.helperPackage,packageName,false);
-        if(pair.helperOnlyUpgrade) { assertCanPrepare(); preparation.validateHelperUpdateGame(pair); }
         boolean game=isGame(pair,packageName);
-        if((game?pair.gameStrategy:pair.helperStrategy)==GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL)
+        if(pair.gameStrategy==GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL)
             throw new IOException("当前应用仍需用户确认卸载，不能直接覆盖安装。");
-        List<File> apks=game?pair.gameApks:Collections.singletonList(pair.helperApk);
+        List<File> apks=pair.gameApks;
         if(installedMatches(packageName,apks)) { reconcile(); return; }
         PackageInstaller installer=context.getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-        params.setAppPackageName(packageName); params.setAppLabel(game?pair.gameLabel:pair.gameLabel+" · 存档助手");
+        params.setAppPackageName(packageName); params.setAppLabel(pair.gameLabel);
         long size=0; for(File apk:apks) { size=Math.addExact(size,apk.length()); }
         params.setSize(size); RuntimePlatformCompat.requireInstallConfirmation(params);
         int sessionId=installer.createSession(params); String nonce=UUID.randomUUID().toString(); boolean commitAttempted=false;
@@ -229,7 +208,7 @@ public final class InstallCoordinator {
                 }
             }
             preparation.validatePrepared(pair);
-            if(pair.helperOnlyUpgrade) { assertCanPrepare(); preparation.validateHelperUpdateGame(pair); }
+            assertCanPrepare();
             String expected=ApkSetIdentity.digest(writtenHashes);
             if(!expected.equals(PackageTrust.apkSetSha256(apks)) || session.getNames().length!=apks.size())
                 throw new IOException("系统暂存 APK 完整集合校验失败。");
@@ -256,9 +235,14 @@ public final class InstallCoordinator {
             throw new IOException("没有可恢复的系统确认令牌，请使用“检查失效系统请求”。");
         }
         GamePreparationService.PreparedPair preparedPairFreshPair = freshPair();
-        if (preparedPairFreshPair.helperOnlyUpgrade) {
-            HelperUpdatePolicy.requireResumeConfirmation(true, preparedPairFreshPair.helperPackage, pendingPackage(), this.prefs.getString("operation", ""), AndroidSyncFacade.hasUnresolvedRestore(new File(this.context.getFilesDir().getCanonicalFile(), "sync").toPath()));
-            this.preparation.validateHelperUpdateGame(preparedPairFreshPair);
+        isGame(preparedPairFreshPair, pendingPackage());
+        if ("uninstall".equals(this.prefs.getString("operation", ""))) {
+            if (!identity(pendingPackage()).equals(this.prefs.getString("identity", ""))
+                    || !preparedPairFreshPair.originIdentity.equals(this.prefs.getString("uninstallOrigin", ""))
+                    || !PackageTrust.apkSetSha256(preparedPairFreshPair.gameApks).equals(this.prefs.getString("uninstallPreparedApkSet", "")))
+                throw new IOException("原游戏或已验证安装包发生变化，不能续用旧卸载确认。请关闭系统对话框并重新检查。");
+            if (AndroidSyncFacade.hasUnresolvedRestore(new File(this.context.getFilesDir().getCanonicalFile(), "sync").toPath()))
+                throw new IOException("存在未完成存档恢复，不能继续卸载游戏。请先处理恢复记录。");
         }
         PendingIntent pendingIntentFind = SystemConfirmationToken.find(this.context, this.prefs.getString("nonce", ""), this.prefs.getString("confirmation", null));
         if (pendingIntentFind != null) {
@@ -355,7 +339,7 @@ public final class InstallCoordinator {
                 SystemConfirmationToken.cancel(this.context, this.prefs.getString("nonce", ""), this.prefs.getString("confirmation", null));
             }
             if (z) {
-                persist(this.prefs.edit().putString("state", "READY").remove("confirmation").remove("session").remove("nonce").putString("message", "已核对本次系统安装的签名及完整 APK 内容；仍需检查另一应用与存档助手连接。"));
+                persist(this.prefs.edit().putString("state", "READY").remove("confirmation").remove("session").remove("nonce").putString("message", "已核对本次系统安装的签名及完整 APK 内容；仍需核验游戏内置存档桥与存档访问。"));
             } else {
                 if (!strState.equals("RESULT")) {
                     if (this.context.getPackageManager().getPackageInstaller().getSessionInfo(this.prefs.getInt("session", -1)) == null) {

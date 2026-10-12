@@ -6,6 +6,7 @@ public final class InstallationReadiness {
     public final PackageStatus game;
     public final PackageStatus helper;
     public final boolean identityVerified;
+    public final boolean embeddedBridge;
     public final boolean restorePending;
     public final boolean systemRequestActive;
 
@@ -28,16 +29,23 @@ public final class InstallationReadiness {
         FRESH_INSTALL,
         COMPATIBLE_UPDATE,
         REQUIRES_UNINSTALL,
-        VERIFIED
+        VERIFIED,
+        NOT_APPLICABLE
     }
 
     public InstallationReadiness(PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
-        if (packageStatus == null || packageStatus2 == null || accessStatus == null) {
+        this(false, packageStatus, packageStatus2, z, z2, z3, accessStatus);
+    }
+
+    private InstallationReadiness(boolean embedded, PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
+        if (packageStatus == null || packageStatus == PackageStatus.NOT_APPLICABLE || packageStatus2 == null || accessStatus == null) {
             throw new IllegalArgumentException("Readiness states are required");
         }
+        this.embeddedBridge = embedded;
+        if (embedded != (packageStatus2 == PackageStatus.NOT_APPLICABLE)) throw new IllegalArgumentException("Bridge mode must match package states");
         this.game = packageStatus;
         this.helper = packageStatus2;
-        boolean z4 = z && packageStatus == PackageStatus.VERIFIED && packageStatus2 == PackageStatus.VERIFIED;
+        boolean z4 = z && packageStatus == PackageStatus.VERIFIED && (embedded || packageStatus2 == PackageStatus.VERIFIED);
         this.identityVerified = z4;
         this.systemRequestActive = z2;
         this.restorePending = z3;
@@ -47,21 +55,25 @@ public final class InstallationReadiness {
         this.access = accessStatus;
     }
 
+    public static InstallationReadiness embedded(PackageStatus game, boolean identityVerified, boolean systemRequestActive, boolean restorePending, AccessStatus access) {
+        return new InstallationReadiness(true, game, PackageStatus.NOT_APPLICABLE, identityVerified, systemRequestActive, restorePending, access);
+    }
+
     public static InstallationReadiness noSelection() {
-        return new InstallationReadiness(PackageStatus.NOT_SELECTED, PackageStatus.NOT_SELECTED, false, false, false, AccessStatus.NOT_CHECKED);
+        return embedded(PackageStatus.NOT_SELECTED, false, false, false, AccessStatus.NOT_CHECKED);
     }
 
     public static InstallationReadiness checking(boolean z, boolean z2) {
         PackageStatus packageStatus = z ? PackageStatus.NOT_CHECKED : PackageStatus.NOT_SELECTED;
-        return new InstallationReadiness(packageStatus, packageStatus, false, z2, false, AccessStatus.NOT_CHECKED);
+        return embedded(packageStatus, false, z2, false, AccessStatus.NOT_CHECKED);
     }
 
     public InstallationReadiness withSystemRequest(boolean z) {
-        return new InstallationReadiness(this.game, this.helper, this.identityVerified, z, this.restorePending, this.access);
+        return new InstallationReadiness(this.embeddedBridge, this.game, this.helper, this.identityVerified, z, this.restorePending, this.access);
     }
 
     public InstallationReadiness withAccessCode(String str) {
-        return new InstallationReadiness(this.game, this.helper, this.identityVerified, this.systemRequestActive, this.restorePending, classify(str));
+        return new InstallationReadiness(this.embeddedBridge, this.game, this.helper, this.identityVerified, this.systemRequestActive, this.restorePending, classify(str));
     }
 
     public boolean installationVerified() {
@@ -77,7 +89,7 @@ public final class InstallationReadiness {
     }
 
     public boolean canContinueInstallation() {
-        if (!this.systemRequestActive && checked(this.game) && checked(this.helper)) {
+        if (!this.systemRequestActive && checked(this.game) && (this.embeddedBridge || checked(this.helper))) {
             return needsInstall(this.game) || needsInstall(this.helper);
         }
         return false;
@@ -107,11 +119,14 @@ public final class InstallationReadiness {
             return "系统安装或卸载请求尚未结束，请完成或取消当前系统确认。";
         }
         if (this.identityVerified) {
-            return "游戏与助手安装已完成：签名、完整 APK 内容、绑定身份与共享 UID 已核对。";
+            return this.embeddedBridge ? "游戏内置存档桥已验证：本机签名、完整 APK、来源绑定与独立 UID 已核对。" : "旧版游戏与助手已核对，仅用于保留的恢复流程。";
         }
         if (this.game == PackageStatus.NOT_CHECKED || this.helper == PackageStatus.NOT_CHECKED) {
             return "安装状态尚未完成核验，请重新检查状态并查看诊断。";
         }
+        if (this.embeddedBridge) return this.game == PackageStatus.VERIFIED
+                ? "游戏签名与完整 APK 已核对；内置存档桥身份尚未通过验证，请查看诊断。"
+                : "仅需安装准备好的这一组游戏 APK，内置存档桥会随游戏一并安装。";
         return (this.game == PackageStatus.VERIFIED && this.helper == PackageStatus.VERIFIED) ? "游戏与助手的签名和 APK 内容已核对；包身份或共享 UID 尚未通过验证，请查看诊断。" : "游戏与助手尚未全部完成安装，请按下方各自的当前状态继续。";
     }
 
@@ -137,11 +152,11 @@ public final class InstallationReadiness {
             case 5:
                 return "存档目录已存在，但布局尚不能识别。请查看诊断；未把它当作空存档。";
             case 6:
-                return "助手有未完成的存档恢复。请先在设置中检查恢复记录，暂时不要启动游戏。";
+                return "存档桥有未完成的存档恢复。请先在设置中检查恢复记录，暂时不要启动游戏。";
             case 7:
-                return "存档助手的身份或访问权限检查未通过，请查看诊断后重新检查。";
+                return "存档桥的身份或访问权限检查未通过，请查看诊断后重新检查。";
             case 8:
-                return "尚未完成与存档助手的通信，请重新检查；若仍失败，请查看诊断。";
+                return "尚未完成与存档桥的通信，请重新检查；若仍失败，请查看诊断。";
             case 9:
                 return "存档访问检查失败，请查看诊断并重新检查。";
             default:
@@ -167,6 +182,7 @@ public final class InstallationReadiness {
         if (iOrdinal == 5) {
             return "已安装，签名及完整 APK 内容已核对";
         }
+        if (packageStatus == PackageStatus.NOT_APPLICABLE) return "无需独立安装";
         return "尚未完成核验";
     }
 
