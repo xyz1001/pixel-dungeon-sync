@@ -63,6 +63,13 @@ public final class InstallCoordinator {
         return (state().equals("PENDING_CONFIRMATION") || state().equals("UNINSTALLING") || state().equals("INSTALLING")) && this.prefs.contains("confirmation");
     }
 
+    public boolean hasObsoleteLegacyRequest(GamePreparationService.PreparedPair pair) {
+        String operation = this.prefs.getString("operation", "");
+        return hasActiveRequest() && pair != null && !pair.embeddedBridge()
+                && ("install".equals(operation) || "uninstall".equals(operation))
+                && InstallProgressPolicy.cleanupTargetMatches(false, pair.gamePackage, pair.helperPackage, pendingPackage());
+    }
+
     public String summary() {
         String string = this.prefs.getString("message", "还没有待处理的系统安装操作。");
         if (!originalRemoved()) {
@@ -105,6 +112,16 @@ public final class InstallCoordinator {
         GamePreparationService.PreparedPair preparedPairRefreshInstallStrategies = this.preparation.refreshInstallStrategies(preparedPairReloadPrepared);
         SyncRuntime.setPreparedGame(this.context, preparedPairRefreshInstallStrategies);
         return preparedPairRefreshInstallStrategies;
+    }
+
+    /** This loader authorizes cleanup only. Never use it to install, uninstall, or reopen confirmation. */
+    private GamePreparationService.PreparedPair retainedCleanupPair() throws Exception {
+        GamePreparationService.PreparedPair pair = this.preparation.reloadPrepared();
+        if (pair == null) throw new IOException("无法核对旧系统请求对应的准备记录，尚未清理请求。");
+        this.preparation.validatePrepared(pair);
+        if (!InstallProgressPolicy.cleanupTargetMatches(pair.embeddedBridge(), pair.gamePackage, pair.helperPackage, pendingPackage()))
+            throw new IOException("旧系统请求的应用与保留的准备记录不匹配，尚未清理请求。");
+        return pair;
     }
 
     public boolean installedMatches(String str, List<File> list) throws Exception {
@@ -258,7 +275,7 @@ public final class InstallCoordinator {
             if (!InstallProgressPolicy.mayResetExpiredConfirmation(z, z2)) {
                 throw new IOException(z2 ? "原系统确认令牌仍有效，请继续该请求并在系统界面确认或取消。" : "需先确认旧系统对话框已关闭。");
             }
-            freshPair();
+            GamePreparationService.PreparedPair cleanupPair = retainedCleanupPair();
             String strPendingPackage = pendingPackage();
             if ("uninstall".equals(this.prefs.getString("operation", ""))) {
                 try {
@@ -275,8 +292,47 @@ public final class InstallCoordinator {
                     this.context.getPackageManager().getPackageInstaller().abandonSession(i);
                 }
             }
-            persist(this.prefs.edit().putString("state", "READY").remove("nonce").remove("confirmation").remove("session").putString("message", "失效请求已结束，安装包仍保留。尚未重新请求卸载；点击继续后会重新核验并再次警告、确认。"));
+            clearCleanupCheckpoint(cleanupPair.embeddedBridge()
+                    ? "失效请求已结束，安装包仍保留。尚未重新请求卸载；点击继续后会重新核验并再次警告、确认。"
+                    : "旧版失效请求已清理，准备记录仍保留。请重新核对现有安装并准备内置存档桥游戏；不会继续旧版安装或卸载。");
         }
+    }
+
+    /** Explicit cancellation of obsolete flows; never replays a legacy PendingIntent. */
+    public void cancelObsoleteLegacyRequest(boolean dialogClosedByUser) throws Exception {
+        if (!dialogClosedByUser) throw new IOException("请先在 Android 中取消并关闭旧安装／卸载界面，再明确确认清理。");
+        reconcile();
+        if (!hasActiveRequest()) return;
+        GamePreparationService.PreparedPair pair = retainedCleanupPair();
+        boolean uninstall = "uninstall".equals(this.prefs.getString("operation", ""));
+        if (!uninstall && !"install".equals(this.prefs.getString("operation", "")))
+            throw new IOException("旧系统请求的操作类型无法核对，尚未清理。");
+        boolean unchanged = !uninstall || identity(pendingPackage()).equals(this.prefs.getString("identity", ""));
+        if (!InstallProgressPolicy.mayCancelObsoleteLegacy(dialogClosedByUser, pair.embeddedBridge(),
+                InstallProgressPolicy.cleanupTargetMatches(pair.embeddedBridge(), pair.gamePackage, pair.helperPackage, pendingPackage()),
+                uninstall, unchanged))
+            throw new IOException("仅能清理已关闭界面、身份未变的旧版请求；尚未清理或重试任何操作。");
+        if (!uninstall) {
+            int session = this.prefs.getInt("session", -1);
+            PackageInstaller installer = this.context.getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionInfo info = session < 0 ? null : installer.getSessionInfo(session);
+            if (info != null) {
+                if (!pendingPackage().equals(info.getAppPackageName()))
+                    throw new IOException("系统安装会话与旧请求目标不一致，尚未取消会话。");
+                installer.abandonSession(session);
+            }
+        }
+        SystemConfirmationToken.cancel(this.context, this.prefs.getString("nonce", ""), this.prefs.getString("confirmation", null));
+        clearCleanupCheckpoint(uninstall
+                ? "你已确认在系统中取消并关闭旧界面；已核对原应用身份未变，仅清理旧请求令牌与记录。请重新准备内置存档桥游戏。"
+                : "已取消旧版待处理安装会话并清理请求记录。不会继续旧版安装；已经发生的安装或卸载不能撤销，请重新检查并准备游戏。");
+    }
+
+    private void clearCleanupCheckpoint(String message) throws IOException {
+        persist(this.prefs.edit().putString("state", "READY").putString("message", message)
+                .remove("nonce").remove("confirmation").remove("session").remove("operation").remove("package")
+                .remove("identity").remove("expectedApkSet").remove("expectedApk")
+                .remove("uninstallPreparedApkSet").remove("uninstallOrigin"));
     }
 
     public void confirmationLaunched() throws IOException {

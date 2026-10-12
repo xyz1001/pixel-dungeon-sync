@@ -40,7 +40,8 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         request = body(INSTALL, 'public void requestInstall(')
         self.assertIn('List<File> apks=pair.gameApks;', request)
         self.assertNotIn('helperApk', INSTALL)
-        self.assertNotIn('helperPackage', INSTALL)
+        self.assertNotIn('helperPackage', request)
+        self.assertNotIn('helperPackage', body(INSTALL, 'public void requestUninstall('))
         self.assertNotIn('helperStrategy', INSTALL)
         self.assertIn('session.getNames().length!=apks.size()', request)
 
@@ -79,6 +80,37 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         self.assertLess(cancellation.index('"uninstall"'), cancellation.index('abandonSession('))
         self.assertIn('throw new IOException', cancellation)
         self.assertIn('系统确认尚未结束，不能当作原应用已保留', cancellation)
+
+    def test_expired_legacy_cleanup_does_not_require_installable_embedded_pair(self):
+        cleanup = body(INSTALL, 'public void acknowledgeExpiredRequest(')
+        self.assertIn('mayResetExpiredConfirmation(z, z2)', cleanup)
+        self.assertIn('retainedCleanupPair()', cleanup)
+        self.assertNotIn('freshPair()', cleanup)
+        self.assertIn('identity(strPendingPackage)', cleanup)
+        self.assertIn('clearCleanupCheckpoint(', cleanup)
+        self.assertIn('freshPair()', body(INSTALL, 'public PendingIntent confirmationToken()'))
+
+    def test_legacy_live_token_cleanup_requires_explicit_closure_and_never_replays(self):
+        cleanup = body(INSTALL, 'public void cancelObsoleteLegacyRequest(')
+        self.assertIn('if (!dialogClosedByUser)', cleanup)
+        self.assertIn('retainedCleanupPair()', cleanup)
+        self.assertIn('identity(pendingPackage())', cleanup)
+        self.assertIn('mayCancelObsoleteLegacy(', cleanup)
+        self.assertIn('info.getAppPackageName()', cleanup)
+        self.assertIn('installer.abandonSession(session)', cleanup)
+        self.assertIn('SystemConfirmationToken.cancel(', cleanup)
+        for forbidden in ('.uninstall(', 'requestInstall(', 'confirmationToken()', '.send(', 'freshPair()'):
+            self.assertNotIn(forbidden, cleanup)
+        self.assertLess(cleanup.index('mayCancelObsoleteLegacy('), cleanup.index('SystemConfirmationToken.cancel('))
+        reset = body(INSTALL, 'private void clearCleanupCheckpoint(')
+        self.assertIn('.remove("nonce")', reset)
+        self.assertIn('.remove("operation")', reset)
+        self.assertNotIn('gameRemoved', reset)
+        ui = body(MAIN, 'private void confirmObsoleteLegacyCleanup()')
+        self.assertIn('先在 Android 旧安装／卸载对话框点击取消并关闭', ui)
+        self.assertIn('cancelObsoleteLegacyRequest(true)', ui)
+        discovery = body(MAIN, 'private void renderDiscovery()')
+        self.assertIn('this.installer.hasConfirmation() && !obsoleteLegacyRequest', discovery)
 
     def test_runtime_binding_rechecked_after_successful_reply(self):
         exchange = body(CLIENT, 'private Bundle exchange(')

@@ -6,6 +6,17 @@ public final class InstallProgressPolicy {
         return z && !z2;
     }
 
+    /** Cleanup identity is deliberately separate from permission to install or resume a request. */
+    public static boolean cleanupTargetMatches(boolean embedded, String gamePackage, String helperPackage, String pendingPackage) {
+        return pendingPackage != null && !pendingPackage.isEmpty()
+                && (pendingPackage.equals(gamePackage) || (!embedded && pendingPackage.equals(helperPackage)));
+    }
+
+    public static boolean mayCancelObsoleteLegacy(boolean dialogClosedByUser, boolean embedded,
+            boolean targetMatches, boolean uninstall, boolean unchangedInstalledIdentity) {
+        return dialogClosedByUser && !embedded && targetMatches && (!uninstall || unchangedInstalledIdentity);
+    }
+
     public static boolean requiresRebindAfterLegacyRecovery(boolean z, boolean z2) {
         return z && !z2;
     }

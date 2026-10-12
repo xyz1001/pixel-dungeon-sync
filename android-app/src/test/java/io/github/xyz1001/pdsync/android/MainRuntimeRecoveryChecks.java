@@ -370,6 +370,19 @@ public final class MainRuntimeRecoveryChecks {
             equal(first && !second, InstallProgressPolicy.requiresRebindAfterLegacyRecovery(first, second), "legacy recovery completion requires rebind");
             equal(!first || second, InstallProgressPolicy.uninstallSettled(first, second), "still-installed package needs terminal result");
         }
+        for (boolean closed : new boolean[]{false,true}) for (boolean embedded : new boolean[]{false,true})
+                for (boolean target : new boolean[]{false,true}) for (boolean uninstall : new boolean[]{false,true})
+                for (boolean unchanged : new boolean[]{false,true}) {
+            equal(closed && !embedded && target && (!uninstall || unchanged),
+                    InstallProgressPolicy.mayCancelObsoleteLegacy(closed, embedded, target, uninstall, unchanged),
+                    "legacy cleanup requires explicit closed-dialog confirmation, exact target and original uninstall identity");
+        }
+        check(InstallProgressPolicy.cleanupTargetMatches(false,"game","helper","game"),"legacy game cleanup target accepted");
+        check(InstallProgressPolicy.cleanupTargetMatches(false,"game","helper","helper"),"legacy helper cleanup target accepted without install permission");
+        check(!InstallProgressPolicy.cleanupTargetMatches(true,"game","helper","helper"),"embedded receipt cannot authorize helper cleanup");
+        check(InstallProgressPolicy.cleanupTargetMatches(true,"game",null,"game"),"embedded game cleanup accepted");
+        for (String rejectedTarget : new String[]{null,"","other"})
+            check(!InstallProgressPolicy.cleanupTargetMatches(false,"game","helper",rejectedTarget),"unrelated or missing cleanup target rejected");
         for (boolean uninstall : new boolean[]{false,true}) {
             check(!InstallProgressPolicy.acceptsCallback(uninstall,7,7,null,null), "empty request cannot receive callback");
             check(!InstallProgressPolicy.acceptsCallback(uninstall,7,7,"", ""), "empty nonce rejected");

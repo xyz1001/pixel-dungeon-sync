@@ -1203,7 +1203,12 @@ public final class MainActivity extends Activity {
                 });
             }
         }
-        if (this.installer.hasConfirmation()) {
+        boolean obsoleteLegacyRequest = this.installer.hasObsoleteLegacyRequest(this.prepared);
+        if (obsoleteLegacyRequest) {
+            text("旧版安装／卸载请求不会继续。请先在 Android 原系统界面中点击取消并关闭；返回后可核对并清理旧请求。");
+            button("核对并清理旧版请求", this::confirmObsoleteLegacyCleanup);
+        }
+        if (this.installer.hasConfirmation() && !obsoleteLegacyRequest) {
             button("继续系统安装／卸载确认", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda70
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -1211,7 +1216,7 @@ public final class MainActivity extends Activity {
                 }
             });
         }
-        if (this.installer.hasActiveRequest()) {
+        if (this.installer.hasActiveRequest() && !obsoleteLegacyRequest) {
             button("取消待处理安装", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda71
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -1297,6 +1302,14 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m94x78052cd6(obj);
             }
         });
+    }
+
+    private void confirmObsoleteLegacyCleanup() {
+        confirm("已在系统中取消旧版请求？",
+                "先在 Android 旧安装／卸载对话框点击取消并关闭。确认后只会核对原应用、取消保留的请求令牌并清理旧记录，不会重新打开或继续旧版安装／卸载。\n\n已经发生的卸载与存档删除不能撤销；若原应用身份发生变化，将停止清理并提示检查。",
+                "已取消并关闭，核对清理", () -> work("正在核对并清理旧版请求…",
+                        () -> { this.installer.cancelObsoleteLegacyRequest(true); return null; },
+                        ignored -> refreshReadiness()));
     }
 
     /* renamed from: lambda$renderDiscovery$23$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
