@@ -65,3 +65,10 @@ game[0-9]*/
 !/docs/installation-discovery-evidence/*.log
 
 !/docs/onboarding-v10-evidence/evidence/*.log
+
+# Android generated binaries and compiler output (helper is injected at build time)
+*.apk
+*.aab
+*.dex
+android-app/assets/helper-unsigned.apk
+.android-build/

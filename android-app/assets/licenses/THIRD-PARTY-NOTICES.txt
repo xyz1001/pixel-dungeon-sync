@@ -1,0 +1,29 @@
+Android test application dependencies
+
+Android APK Signature Scheme library (apksig) 8.9.3
+Copyright (c) 2016, The Android Open Source Project
+https://android.googlesource.com/platform/tools/apksig/
+Apache License 2.0; see apksig-LICENSE.txt.
+
+Kotlin standard library 2.2.20, compatibility modules 1.9.10,
+kotlinx.coroutines 1.10.2, kotlinx.serialization 1.9.0,
+JetBrains annotations 23.0.0
+Copyright JetBrains s.r.o. and contributors
+https://github.com/JetBrains/kotlin
+https://github.com/Kotlin/kotlinx.coroutines
+https://github.com/Kotlin/kotlinx.serialization
+https://github.com/JetBrains/java-annotations
+Apache License 2.0; see apksig-LICENSE.txt for the license terms.
+
+OkHttp 4.12.0 and Okio 3.6.0
+Copyright Square, Inc. and contributors
+https://square.github.io/okhttp/
+https://square.github.io/okio/
+Apache License 2.0; see apksig-LICENSE.txt for the license terms.
+
+OkHttp publicsuffixes.gz derives from the Public Suffix List and is
+licensed under Mozilla Public License 2.0. See public-suffix-NOTICE.txt.
+The unmodified list source is available from the source link in that notice.
+
+No original game APK or game code/resources are distributed in this app.
+The user selects their own supported original APK on the device.
