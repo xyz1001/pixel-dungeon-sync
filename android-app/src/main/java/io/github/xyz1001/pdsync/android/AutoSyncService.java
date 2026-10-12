@@ -201,8 +201,9 @@ public final class AutoSyncService extends Service {
                 this.policy.knownReturn();
                 this.returned = false;
             }
+            AndroidSyncFacade.ControlledObservation controlledObservation = this.facade.beginControlledObservation(this.token);
             BridgeClient.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
-            this.facade.observeControlledSession(this.token, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
+            this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
             AutoSyncPolicy.Step stepObserve = this.policy.observe(observationObserveLifecycle.reliable, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
                 finish("BLOCKED", "多次无法可靠观察游戏状态，已停止本次监听。请返回首页检查助手或手动同步。");

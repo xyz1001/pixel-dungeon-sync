@@ -7,9 +7,14 @@ import pdsync.*
 
 /** Process-local, single-use evidence, shared by the activity and service facades. Never portable. */
 internal class AndroidControlledSessions(private val now: () -> Long = System::nanoTime) {
- private data class Window(val scope: Path, val token: String, val target: AndroidGameTarget,
+ internal class Window(val scope: Path, val token: String, val target: AndroidGameTarget,
   val files: Map<String,String>, val runs: Map<String,RunIdentity>, val evidence: Map<String,RunProgressEvidence>,
-  val started: Long, var observed: Long, var foregroundSeen: Boolean = false, var leftForeground: Boolean = false)
+  val started: Long, var observed: Long, var foregroundSeen: Boolean = false, var leftForeground: Boolean = false) {
+  var observation:ObservationProof?=null
+  var export:ExportProof?=null
+ }
+ internal class ObservationProof internal constructor(internal val root:Path,internal val window:Window,internal val started:Long)
+ internal class ExportProof internal constructor(internal val root:Path,internal val window:Window,internal val foregroundSeen:Boolean,internal val started:Long)
  private val windows=mutableMapOf<Path,Window>()
  @Synchronized fun begin(root:Path,scope:Path,target:AndroidGameTarget,files:Map<String,String>,runs:Map<String,RunIdentity>,bytes:Map<String,ByteArray>):String {
   val token=UUID.randomUUID().toString();val time=now()
@@ -20,21 +25,55 @@ internal class AndroidControlledSessions(private val now: () -> Long = System::n
  }
  @Synchronized fun cancel(root:Path,token:String?=null) {if(token==null || windows[root]?.token==token)windows.remove(root)}
  @Synchronized fun observe(root:Path,scope:Path,token:String,reliable:Boolean,foreground:Boolean) {
-  val window=windows[root] ?: return
-  if(window.token!=token)return // A late callback from an old service cannot cancel a newer launch.
+  observe(root,scope,beginObservation(root,scope,token),reliable,foreground)
+ }
+ /** Check the external observation gap before the trusted Android call starts blocking. */
+ @Synchronized fun beginObservation(root:Path,scope:Path,token:String):ObservationProof? {
+  val window=windows[root] ?: return null
+  if(window.token!=token)return null // A late callback from an old service cannot cancel a newer launch.
   val time=now()
-  if(window.scope!=scope || !reliable || !withinWindow(window,time)){windows.remove(root);return}
+  if(window.scope!=scope || !withinWindow(window,time) || window.observation!=null){windows.remove(root);return null}
+  return ObservationProof(root,window,time).also {window.observation=it}
+ }
+ @Synchronized fun observe(root:Path,scope:Path,proof:ObservationProof?,reliable:Boolean,foreground:Boolean) {
+  if(proof==null)return
+  val window=proof.window
+  if(windows[proof.root]!==window || window.observation!==proof)return
+  window.observation=null // A result cannot be replayed to keep an idle window alive.
+  val time=now()
+  if(root!=proof.root || window.scope!=scope || !reliable || time<proof.started || !withinLifetime(window,time)){windows.remove(proof.root);return}
   if(foreground && window.leftForeground){windows.remove(root);return}
   window.observed=time
   if(foreground)window.foregroundSeen=true else if(window.foregroundSeen)window.leftForeground=true
  }
+ /** Reserve a single export while the latest observation is still fresh, before trust/ZIP I/O. */
+ @Synchronized fun beginExport(root:Path,scope:Path):ExportProof? {
+  val window=windows[root] ?: return null
+  val time=now()
+  if(window.scope!=scope || !withinWindow(window,time) || window.export!=null){windows.remove(root);return null}
+  return ExportProof(root,window,window.foregroundSeen,time).also {window.export=it}
+ }
+ @Synchronized fun abandonExport(proof:ExportProof?) {
+  if(proof!=null && windows[proof.root]===proof.window && proof.window.export===proof)windows.remove(proof.root)
+ }
  /** A verified stable helper export is the exit boundary, even if the activity beats the service. */
  @Synchronized fun consume(root:Path,scope:Path,target:AndroidGameTarget,before:Map<String,String>,runs:Map<String,RunIdentity>,after:Map<String,String>,bytes:Map<String,ByteArray>):Map<String,RunIdentity> {
-  val window=windows[root] ?: return emptyMap()
-  if(window.scope!=scope || window.target!=target || !withinWindow(window,now()) || window.files!=before || window.runs!=runs) {
-   windows.remove(root);return emptyMap()
+  return consume(beginExport(root,scope),root,scope,target,before,runs,after,bytes)
+ }
+ @Synchronized fun consume(proof:ExportProof?,root:Path,scope:Path,target:AndroidGameTarget,before:Map<String,String>,runs:Map<String,RunIdentity>,after:Map<String,String>,bytes:Map<String,ByteArray>):Map<String,RunIdentity> {
+  if(proof==null)return emptyMap()
+  val window=proof.window
+  if(windows[proof.root]!==window || window.export!==proof)return emptyMap()
+  window.export=null
+  val time=now()
+  if(root!=proof.root || window.scope!=scope || window.target!=target || time<proof.started || !withinLifetime(window,time) || window.files!=before || window.runs!=runs) {
+   windows.remove(proof.root);return emptyMap()
   }
-  if(!window.foregroundSeen) {if(before!=after)windows.remove(root);return emptyMap()}
+  if(!proof.foregroundSeen) {
+   if(before!=after)windows.remove(root)
+   else window.observed=time // Verified unchanged/quiescent export closes its own I/O gap; it never invents foreground.
+   return emptyMap()
+  }
   windows.remove(root) // Never reuse a window for a later game launch or a retry's newer bytes.
   val hashes=runContentHashes(after)
   return window.evidence.mapNotNull { (slot,previous) ->
@@ -44,7 +83,8 @@ internal class AndroidControlledSessions(private val now: () -> Long = System::n
    if(retainedFiles && current.continues(previous))slot to window.runs.getValue(slot).copy(contentSha256=digest) else null
   }.toMap()
  }
- private fun withinWindow(window:Window,time:Long)=time>=window.started && time-window.started<=6L*60*60*1_000_000_000 && time>=window.observed && time-window.observed<=15L*1_000_000_000
+ private fun withinLifetime(window:Window,time:Long)=time>=window.started && time-window.started<=6L*60*60*1_000_000_000 && time>=window.observed
+ private fun withinWindow(window:Window,time:Long)=withinLifetime(window,time) && time-window.observed<=15L*1_000_000_000
 }
 
 /** Structural continuity checks supplement the observed window; seed alone is never sufficient.

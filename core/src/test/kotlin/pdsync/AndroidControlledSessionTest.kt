@@ -83,4 +83,72 @@ class AndroidControlledSessionTest {
   assertTrue(RunProgressEvidence.read(controlledRun(3.0,version=2000))!!.continues(RunProgressEvidence.read(controlledRun(version=2000))!!))
   assertFalse(RunProgressEvidence.read(controlledRun(3.0,version=897))!!.continues(RunProgressEvidence.read(controlledRun())!!))
  }
+ @Test fun blockingTrustedObservationChecksFreshnessAtEntryAndResultOnlyOnce() {
+  val token=begin();val proof=sessions.beginObservation(root,scope,token)
+  ticks+=16_000_000_000;sessions.observe(root,scope,proof,true,true)
+  assertEquals(id,consume().getValue("game1").runUUID)
+  val next=begin();val once=sessions.beginObservation(root,scope,next);sessions.observe(root,scope,once,true,true)
+  ticks+=16_000_000_000;sessions.observe(root,scope,once,true,true)
+  assertTrue(consume().isEmpty()) // Replaying an old result never refreshes a genuine idle gap.
+ }
+ @Test fun trustedExportCanFinishAfterFifteenSecondsButCannotStartAfterAnIdleGap() {
+  val token=begin();sessions.observe(root,scope,token,true,true)
+  val proof=sessions.beginExport(root,scope);ticks+=16_000_000_000
+  assertEquals(id,sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).getValue("game1").runUUID)
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+  val next=begin();sessions.observe(root,scope,next,true,true);ticks+=16_000_000_000
+  assertNull(sessions.beginExport(root,scope));assertNull(sessions.beginObservation(root,scope,next))
+ }
+ @Test fun slowUnchangedPrelaunchExportClosesOnlyItsIoGapWithoutInventingForeground() {
+  val token=begin();val proof=sessions.beginExport(root,scope);ticks+=16_000_000_000
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,files,before).isEmpty())
+  val observation=sessions.beginObservation(root,scope,token);assertNotNull(observation)
+  ticks+=16_000_000_000;sessions.observe(root,scope,observation,true,true)
+  assertEquals(id,consume().getValue("game1").runUUID)
+  begin();val unchanged=sessions.beginExport(root,scope);ticks+=16_000_000_000
+  assertTrue(sessions.consume(unchanged,root,scope,target,files,runs,files,before).isEmpty())
+  assertTrue(consume().isEmpty()) // An unchanged export by itself is never foreground evidence.
+ }
+ @Test fun failedUnreliableCancelledAndReplacedProofsCannotBlessAContinuation() {
+  var token=begin();sessions.observe(root,scope,token,true,true)
+  var proof=sessions.beginExport(root,scope);sessions.abandonExport(proof)
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+  token=begin();sessions.observe(root,scope,token,true,true);proof=sessions.beginExport(root,scope)
+  sessions.observe(root,scope,token,false,false)
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+  val old=begin();val observation=sessions.beginObservation(root,scope,old);val current=begin()
+  sessions.observe(root,scope,observation,true,true);assertTrue(consume(before).isEmpty())
+  sessions.observe(root,scope,current,true,true);assertEquals(id,consume().getValue("game1").runUUID)
+  token=begin();val cancelled=sessions.beginObservation(root,scope,token);sessions.cancel(root,token)
+  sessions.observe(root,scope,cancelled,true,true);assertTrue(consume().isEmpty())
+ }
+ @Test fun observationLeasesStillRejectUnknownScopeOverlapAndAbsoluteExpiry() {
+  var token=begin();var proof=sessions.beginObservation(root,scope,token)
+  ticks+=16_000_000_000;sessions.observe(root,scope,proof,false,true);assertTrue(consume().isEmpty())
+  token=begin();proof=sessions.beginObservation(root,scope,token)
+  sessions.observe(root,scope.resolve("other"),proof,true,true);assertTrue(consume().isEmpty())
+  token=begin();proof=sessions.beginObservation(root,scope,token);assertNull(sessions.beginObservation(root,scope,token))
+  sessions.observe(root,scope,proof,true,true);assertTrue(consume().isEmpty())
+  token=begin();proof=sessions.beginObservation(root,scope,token)
+  ticks+=6L*60*60*1_000_000_000+1;sessions.observe(root,scope,proof,true,true);assertTrue(consume().isEmpty())
+ }
+ @Test fun exportLeasesStillBindOriginalBaselineTargetAndKnownIdentity() {
+  val changedRuns=runs.mapValues {it.value.copy(runUUID=null,previousRunUUID=id)}
+  for((otherTarget,otherRuns) in listOf(target.copy(apkSha256="c".repeat(64)) to runs,target to changedRuns)) {
+   val token=begin();sessions.observe(root,scope,token,true,true);val proof=sessions.beginExport(root,scope);ticks+=16_000_000_000
+   assertTrue(sessions.consume(proof,root,scope,otherTarget,files,otherRuns,after.mapValues {hash(it.value)},after).isEmpty())
+  }
+  val token=begin(changedRuns);sessions.observe(root,scope,token,true,true);val proof=sessions.beginExport(root,scope);ticks+=16_000_000_000
+  assertTrue(sessions.consume(proof,root,scope,target,files,changedRuns,after.mapValues {hash(it.value)},after).isEmpty())
+ }
+ @Test fun exportLeaseDoesNotSurviveRestartNewLaunchOrAbsoluteExpiry() {
+  var token=begin();sessions.observe(root,scope,token,true,true);var proof=sessions.beginExport(root,scope)
+  assertTrue(AndroidControlledSessions {ticks}.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+  val current=begin();sessions.abandonExport(proof)
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+  sessions.observe(root,scope,current,true,true);assertEquals(id,consume().getValue("game1").runUUID)
+  token=begin();sessions.observe(root,scope,token,true,true);proof=sessions.beginExport(root,scope)
+  ticks+=6L*60*60*1_000_000_000+1
+  assertTrue(sessions.consume(proof,root,scope,target,files,runs,after.mapValues {hash(it.value)},after).isEmpty())
+ }
 }

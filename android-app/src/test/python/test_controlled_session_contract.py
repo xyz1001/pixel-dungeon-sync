@@ -28,8 +28,9 @@ class ControlledSessionContractTest(unittest.TestCase):
         self.assertIn("controlledToken == null ? UUID.randomUUID().toString() : controlledToken", SERVICE)
 
     def test_only_actual_helper_observation_is_forwarded_before_upload_decision(self):
-        observation = "this.facade.observeControlledSession(this.token, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);"
+        observation = "this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);"
         self.assertIn(observation, SERVICE)
+        self.assertLess(SERVICE.index("this.facade.beginControlledObservation(this.token)"), SERVICE.index("this.bridge.observeLifecycle()"))
         self.assertLess(SERVICE.index(observation), SERVICE.index("this.policy.observe("))
         self.assertNotIn("observeControlledSession(this.token, true", SERVICE)
 

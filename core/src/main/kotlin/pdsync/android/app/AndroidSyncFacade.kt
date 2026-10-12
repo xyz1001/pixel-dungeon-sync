@@ -13,7 +13,8 @@ import pdsync.*
 /** Platform-neutral sync facade. The helper owns actual Android files; core owns history. */
 class AndroidSyncFacade internal constructor(
  workspaceRoot: Path, private val connection: AndroidConnection, private val bridge: AndroidGameBridge,
- val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?, private val quietMillis: Long
+ val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?, private val quietMillis: Long,
+ private val controlledSessions:AndroidControlledSessions=sharedControlledSessions
 ) {
  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
   this(root,connection,bridge,identity,null,0)
@@ -63,6 +64,7 @@ class AndroidSyncFacade internal constructor(
  }
  class MergePreview(val isAllowed:Boolean,val message:String,val slotCount:Int,decisions:List<String>) { val decisions=immutable(decisions) }
  class LocalPreview(val fileCount:Int,val summary:SaveSummary?,val message:String)
+ class ControlledObservation internal constructor(internal val proof:AndroidControlledSessions.ObservationProof?)
  @Serializable private data class RestoreJournal(val schema:Int=2,val profileScope:String,val gameSourceIdentity:String,val gamePackage:String,val installedApkSha256:String,val sourceApkSha256:String,val expectedBefore:Map<String,String>,val expectedAfter:Map<String,String>,val action:String,val ready:Boolean=false)
  @Serializable private data class LegacyRestoreJournal(val schema:Int=1,val profileScope:String,val expectedBefore:Map<String,String>,val expectedAfter:Map<String,String>,val action:String,val ready:Boolean=false)
  @Serializable private data class LegacyWorkspaceBinding(val schema:Int=1,val gameSourceIdentity:String,val gamePackage:String,val namespace:String,val currentScope:String,val legacyScope:String)
@@ -86,7 +88,7 @@ class AndroidSyncFacade internal constructor(
  /** Freeze only already-known identities before Android starts the selected game. */
  fun beginControlledSession():String=locked {
   requireNoRecovery();controlledSessions.cancel(base)
-  freshExport {replaceMirror(it)}
+  refreshMirror()
   val snapshot=capture(mirror);val sidecar=(DirectoryMetadataStore(mirror).read() as? SidecarRead.Valid)?.value
   val runs=sidecar?.runs?.filterValues {it.runUUID!=null}.orEmpty()
   // Stale/unknown metadata is not re-confirmed by starting the game.
@@ -94,11 +96,13 @@ class AndroidSyncFacade internal constructor(
   controlledSessions.begin(base,workspace,verifiedTarget(),snapshot.manifest.files,sidecar?.runs.orEmpty(),Snapshots.verify(snapshot,adapter).filterKeys {name->name.substringBefore('/') in known})
  }
  fun observeControlledSession(token:String,reliable:Boolean,foreground:Boolean) {controlledSessions.observe(base,workspace,token,reliable,foreground)}
+ fun beginControlledObservation(token:String)=ControlledObservation(controlledSessions.beginObservation(base,workspace,token))
+ fun observeControlledSession(observation:ControlledObservation,reliable:Boolean,foreground:Boolean) {controlledSessions.observe(base,workspace,observation.proof,reliable,foreground)}
  fun cancelControlledSession(token:String) {controlledSessions.cancel(base,token)}
  fun inspect()=locked { inspectLocked() }
  private fun inspectLocked():Inspection {
   if(anyUnresolvedRestore()) return Inspection(owner,null,"BLOCKED","A game restore needs verification or recovery. Upload is blocked until it is resolved.",currentFiles().size,emptyList(),false,false,true,SyncBlockReason.RESTORE_RECOVERY_REQUIRED)
-  freshExport { replaceMirror(it) }
+  refreshMirror()
   val comparison=session.compareOnboarding(store,mirrorStopped)
   val remote=comparison.remoteEntries.map { version(it.commit,true,it.entry.reason) }
   return try {
@@ -277,12 +281,16 @@ class AndroidSyncFacade internal constructor(
  private fun currentFiles()=capture(mirror).manifest.files
  private fun <T> freshExport(block:(Path)->T):T {val temp=Files.createTempDirectory(scratch,"export-");try {verifiedTarget();bridge.exportTo(temp);verifiedTarget();validateExport(temp);val snapshot=capture(temp);Snapshots.verify(snapshot,adapter);versions.detect(snapshot);return block(temp)}finally{deleteTree(temp)}}
  private fun validateExport(root:Path) {var count=0;Files.walk(root).use {paths->paths.forEach {p->require(++count<=16384){"Bridge export has too many entries."};require(!Files.isSymbolicLink(p)){"Bridge export contains a symbolic link."};if(p!=root){val name=root.relativize(p).toString().replace('\\','/');require(adapter.includes(name)&&!isDirectoryMetadata(name)){"Bridge exported an unrecognized save entry."};require(Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS)||Files.isDirectory(p,LinkOption.NOFOLLOW_LINKS))}}}}
- private fun replaceMirror(exported:Path) {
+ private fun refreshMirror() {
+  val proof=controlledSessions.beginExport(base,workspace)
+  try {freshExport {replaceMirror(it,proof)}}finally{controlledSessions.abandonExport(proof)}
+ }
+ private fun replaceMirror(exported:Path,proof:AndroidControlledSessions.ExportProof?=null) {
   // A fresh verified helper export with identical complete bytes is a filesystem no-op.
   // Do not replace directory identities/timestamps or the directory metadata sidecar.
   val before=currentFiles();val snapshot=capture(exported)
   val metadata=DirectoryMetadataStore(mirror);val old=(metadata.read() as? SidecarRead.Valid)?.value
-  val continued=controlledSessions.consume(base,workspace,verifiedTarget(),before,old?.runs.orEmpty(),snapshot.manifest.files,Snapshots.verify(snapshot,adapter))
+  val continued=controlledSessions.consume(proof,base,workspace,verifiedTarget(),before,old?.runs.orEmpty(),snapshot.manifest.files,Snapshots.verify(snapshot,adapter))
   if(before==snapshot.manifest.files)return
   Files.walk(mirror).use {paths->paths.sorted(Comparator.reverseOrder()).forEach {p->if(p!=mirror){val name=mirror.relativize(p).toString().replace('\\','/');if(adapter.includes(name)&&!isDirectoryMetadata(name))Files.delete(p)}}}
   copySaveFiles(exported,mirror)
@@ -294,8 +302,8 @@ class AndroidSyncFacade internal constructor(
  private fun copySaveFiles(source:Path,destination:Path) {val snapshot=capture(source);Snapshots.verify(snapshot,adapter).forEach {(name,bytes)->val path=SafePaths.checked(destination.resolve(name));Files.createDirectories(path.parent);Files.write(path,bytes,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);Files.setLastModifiedTime(path,Files.getLastModifiedTime(source.resolve(name),LinkOption.NOFOLLOW_LINKS))};require(capture(destination).manifest.files==snapshot.manifest.files){"Staging copy failed content verification."}}
  private fun <T> locked(action:()->T):T=synchronized(this) {FileChannel.open(SafePaths.checked(base.resolve("android-facade.lock")),StandardOpenOption.CREATE,StandardOpenOption.WRITE).use {channel->val lock=try {channel.tryLock()}catch(_:OverlappingFileLockException){null};checkNotNull(lock){"Another Android sync operation is running. Wait for it to finish."};lock.use {action()}}}
  companion object {
-  private val controlledSessions=AndroidControlledSessions()
-  @JvmStatic fun cancelControlledSession(root:Path,token:String){controlledSessions.cancel(SafePaths.checked(root),token)}
+  private val sharedControlledSessions=AndroidControlledSessions()
+  @JvmStatic fun cancelControlledSession(root:Path,token:String){sharedControlledSessions.cancel(SafePaths.checked(root),token)}
   @JvmStatic fun hasUnresolvedRestore(root:Path):Boolean {val base=SafePaths.checked(root);if(Files.exists(base.resolve("android-restore.json"),LinkOption.NOFOLLOW_LINKS))return true;val dir=SafePaths.checked(base.resolve("restore-journals"));if(!Files.exists(dir,LinkOption.NOFOLLOW_LINKS))return false;require(Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)){"Restore recovery storage is damaged."};return Files.list(dir).use {it.anyMatch {p->p.fileName.toString().endsWith(".json")}}}
   private fun automaticEligible(c:OnboardingComparison):Boolean {
    if(c.observedTips.size>1)return false
