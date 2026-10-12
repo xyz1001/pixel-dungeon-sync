@@ -88,7 +88,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
                     || inventory.hashes.size()!=reply.fileCount || inventory.bytes!=reply.contentBytes)
                 throw failure("ROOT_EXPORT_MISMATCH",null);
             targetGame();
-        }catch(BridgeDiagnostics.Failure failure){throw failure;}
+        }catch(BridgeDiagnostics.Failure failure){throw atStage(BridgeDiagnostics.Stage.EXPORT,failure);}
         catch(Exception failure){throw failure("ROOT_EXPORT_FAILED",failure);}
         finally {if(archive!=null)try{Files.deleteIfExists(archive);}catch(IOException ignored){}}
     }
@@ -120,12 +120,19 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
         catch(RootProcessTransport.Failure failure){throw failure(failure.code,failure);}
         catch(Exception failure){throw failure("ROOT_ACCESS_FAILED",failure);}
     }
+    private static BridgeDiagnostics.Failure atStage(BridgeDiagnostics.Stage stage, BridgeDiagnostics.Failure failure) {
+        return new BridgeDiagnostics.Failure(stage,failure.code,failure.getMessage(),failure.getCause());
+    }
     private static BridgeDiagnostics.Failure failure(String code,Throwable cause) {
         String message=code.contains("UNSUPPORTED")?"Root 模式尚未实现安全恢复，当前只允许读取与导出。":
                 "ROOT_AUTH_REQUIRED".equals(code)?"请先点击“授权并检查 Root”。不会在启动时自动请求 Root。":
                 "ROOT_MISSING_DIRECTORY".equals(code)?"游戏尚未创建存档目录。请启动一次游戏，正常退出后再授权并检查 Root。":
                 "ROOT_TIMEOUT".equals(code)?"Root 请求超时，已关闭本次进程。请检查 Root 管理器后手动重试。":
                 "Root 存档访问未完成（"+code+"）。请保留游戏安装，重新检查授权与目标。";
-        return new BridgeDiagnostics.Failure(BridgeDiagnostics.Stage.SAVE_READINESS,code,message,cause);
+        BridgeDiagnostics.Stage stage = code.startsWith("ROOT_EXPORT_") || code.equals("ROOT_ARCHIVE_INCOMPLETE")
+                ? BridgeDiagnostics.Stage.EXPORT : code.startsWith("ROOT_RESTORE_") ? BridgeDiagnostics.Stage.RESTORE
+                : code.startsWith("ROOT_RECOVERY_") ? BridgeDiagnostics.Stage.RECOVERY
+                : code.equals("ROOT_TARGET_CHANGED") ? BridgeDiagnostics.Stage.TARGET_IDENTITY : BridgeDiagnostics.Stage.SAVE_READINESS;
+        return new BridgeDiagnostics.Failure(stage,code,message,cause);
     }
 }

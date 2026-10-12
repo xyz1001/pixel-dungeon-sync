@@ -58,6 +58,15 @@ public final class RootClientChecks {
     }
     public static void main(String[] args)throws Exception {
         SelectedRootGame game=selection();Path dir=Files.createTempDirectory("root-client-host-");
+        String[] rootCodes={"ROOT_AUTH_REQUIRED","ROOT_UNAVAILABLE","ROOT_DENIED_OR_EXITED","ROOT_TIMEOUT",
+                "ROOT_CANCELLED","ROOT_INVALID_REPLY","ROOT_PIPE_FAILED","ROOT_DIAGNOSTIC_LIMIT","ROOT_TARGET_CHANGED",
+                "ROOT_BINDING_MISMATCH","ROOT_ACCESS_FAILED","ROOT_SAVE_NOT_READY","ROOT_UNEXPECTED_ARCHIVE",
+                "ROOT_EXPORT_MISMATCH","ROOT_EXPORT_FAILED","ROOT_ARCHIVE_INCOMPLETE","ROOT_RESTORE_UNSUPPORTED",
+                "ROOT_RECOVERY_UNSUPPORTED","ROOT_UNSUPPORTED","ROOT_NOT_ROOT","ROOT_INVALID_REQUEST","ROOT_UNSAFE_PATH",
+                "ROOT_CHANGED","ROOT_TOO_LARGE","ROOT_UNRELIABLE","ROOT_IO_ERROR","ROOT_MISSING_DIRECTORY",
+                "ROOT_UNRECOGNIZED_LAYOUT","ROOT_BUSY"};
+        for(String code:rootCodes)check(new BridgeDiagnostics.Failure(BridgeDiagnostics.Stage.SAVE_READINESS,code,"bounded",null).code.equals(code),"preserved typed root diagnostic "+code);
+        check(new BridgeDiagnostics.Failure(BridgeDiagnostics.Stage.SAVE_READINESS,"ROOT_ARBITRARY_UNTRUSTED","bounded",null).code.equals("UNKNOWN_BRIDGE_FAILURE"),"unknown codes stay filtered");
         RootSelectionStore store=new RootSelectionStore(dir.toFile());check(store.load()==null,"fresh selection");
         store.save(game);check(store.load().matches(game),"selection survives restart");
         check(store.load().namespaceId.equals(game.namespaceId),"namespace continuity");
@@ -108,6 +117,8 @@ public final class RootClientChecks {
         unauthorized.probeAuthorization();check(calls.get()==1,"explicit probe only");
         check(!unauthorized.capabilities().restoreSupported&&!unauthorized.capabilities().interruptedBackupRecovery,"readonly caps");
         rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),"尚未实现");
+        try{unauthorized.restoreFrom(dir,Collections.emptyMap());}catch(BridgeDiagnostics.Failure failure){
+            check(failure.code.equals("ROOT_RESTORE_UNSUPPORTED")&&failure.stage==BridgeDiagnostics.Stage.RESTORE,"restore stage/code preserved");}
         rejects(unauthorized::recoverInterruptedBackup,"尚未实现");check(calls.get()==1,"unsupported write never launches root");
         RootGameBridge changed=new RootGameBridge(game,identity,g->{if(verifies.incrementAndGet()>0)throw new IOException("changed");},(r,o)->{calls.incrementAndGet();return okayUnchecked(game);},()->true,dir.toFile());
         rejects(changed::targetGame,"ROOT_TARGET_CHANGED");check(calls.get()==1,"target change blocks transport");
@@ -143,6 +154,8 @@ public final class RootClientChecks {
                     "ALLOWLISTED_FILES_PRESENT",1,save.length,A,"CACHED",true,archiveBytes);
         },()->true,dir.toFile());
         rejects(()->badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint"))),"ROOT_EXPORT_MISMATCH");
+        try{badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint-stage")));}
+        catch(BridgeDiagnostics.Failure failure){check(failure.code.equals("ROOT_EXPORT_MISMATCH")&&failure.stage==BridgeDiagnostics.Stage.EXPORT,"export stage/code preserved");}
         AtomicInteger authorizationReads=new AtomicInteger();
         RootGameBridge revoked=new RootGameBridge(game,identity,g->{},(r,o)->okayUnchecked(game),()->authorizationReads.incrementAndGet()==1,dir.toFile());
         rejects(revoked::inspectReady,"ROOT_CANCELLED");
