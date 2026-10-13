@@ -2171,14 +2171,13 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m88xda0abd19();
             }
         });
-        text("密码可留空。测试会检查并准备本应用的同步目录。");
         if (!this.connectionLoadError.isEmpty()) text("连接设置读取失败，请重试。");
         if (!this.connectionLoadError.isEmpty() || (this.connection != null && this.connection.isTemporary() && this.secrets.exists())) {
             button(this.connectionLoadError.isEmpty() ? "恢复已保存连接" : "重试读取已保存连接", this::reloadSavedConnection);
         }
         LinearLayout linearLayoutRow = row();
         this.footer.addView(linearLayoutRow);
-        addButton(linearLayoutRow, "返回", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda129
+        addButton(linearLayoutRow, this.onboardingActive ? "上一步" : "返回", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda129
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m89x4f84e35a();

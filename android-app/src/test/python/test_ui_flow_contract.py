@@ -56,10 +56,21 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertIn('private String draftPassword = ""', MAIN)
         render = body(MAIN, "private void renderConnection()")
         self.assertIn('field("密码", this.draftPassword, true)', render)
-        self.assertIn("密码可留空", render)
+        self.assertNotIn("密码可留空", render)
+        self.assertNotIn("准备本应用的同步目录", render)
         self.assertNotIn("draftPassword.isEmpty()", render)
         self.assertNotIn("passwordInput.getText().length()", render)
         self.assertIn("setSaveEnabled(false)", body(MAIN, "private EditText field("))
+
+    def test_connection_has_no_static_explanation_and_preserves_settings_back(self):
+        render = body(MAIN, "private void renderConnection()")
+        self.assertIn('this.onboardingActive ? "上一步" : "返回"', render)
+        self.assertIn('this.onboardingActive ? "下一步" : "保存"', render)
+        self.assertFalse(re.search(r'^        text\("', render, re.MULTILINE))
+        self.assertIn('navigate(this.onboardingActive ? SyncPage.PATH : SyncPage.SETTINGS)',
+                      body(MAIN, "void m89x4f84e35a("))
+        for token in ('field("WebDAV 地址"', 'field("用户名"', 'field("密码"', 'button("测试连接"'):
+            self.assertIn(token, render)
 
     def test_all_editable_connection_fields_use_executed_proof_policy(self):
         render = body(MAIN, "private void renderConnection()")
