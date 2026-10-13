@@ -12,6 +12,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
@@ -98,6 +99,7 @@ public final class MainActivity extends Activity {
     private Runnable confirmedAction;
     private SecureConnectionStore.Connection connection;
     private boolean detailsExpanded;
+    private boolean feedbackError;
     private boolean draftLoaded;
     private EditText endpointInput;
     private AndroidSyncFacade facade;
@@ -265,9 +267,11 @@ public final class MainActivity extends Activity {
         captureDraft();
         this.diagnosticReport = "";
         this.details = "";
+        this.feedbackError = false;
         this.busy = true;
         this.notice = str;
         this.status.setText(str);
+        this.status.setVisibility(View.VISIBLE);
         disable(this.root);
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
@@ -344,6 +348,7 @@ public final class MainActivity extends Activity {
 
     private void reportError(Exception exc) {
         captureDiagnostic(exc);
+        this.feedbackError = true;
         String strCode = BridgeDiagnostics.code(exc);
         if (strCode != null) {
             this.bridgeAccessCode = strCode;
@@ -351,7 +356,7 @@ public final class MainActivity extends Activity {
             this.localPreview = null;
             this.previewAttempted = false;
             this.cloudVerified = false;
-            this.notice = safeText(BridgeDiagnostics.find(exc).getMessage());
+            this.notice = NoviceCopy.feedback(safeText(BridgeDiagnostics.find(exc).getMessage()), "无法读取存档，请重试。");
             return;
         }
         this.notice = safeError(exc);
@@ -719,14 +724,15 @@ public final class MainActivity extends Activity {
         } else {
             this.page = this.onboardingActive ? SyncPage.COMPARISON : SyncPage.HOME;
         }
-        this.notice = !readyForSaves() ? this.readinessState.statusDescription() : this.cloudVerified ? comparisonCopy() : "游戏与存档访问已就绪，请检查存档。";
+        if (!this.feedbackError) this.notice = !readyForSaves() ? this.readinessState.statusDescription() : "";
         if (this.connectionLoadError.isEmpty()) {
             return;
         }
         if (canRequestSaveAccess()) {
             this.page = SyncPage.CONNECTION;
         }
-        this.notice = this.connectionLoadError;
+        this.notice = "连接设置读取失败，请重试。";
+        this.feedbackError = true;
     }
 
     private void readInstallationReadiness() throws Exception {
@@ -797,6 +803,8 @@ public final class MainActivity extends Activity {
             return;
         }
         captureDraft();
+        if (this.page == SyncPage.CONNECTION && syncPage != SyncPage.CONNECTION) this.testedDraft = null;
+        if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
         this.detailsExpanded = false;
         this.page = syncPage;
         if (syncPage == SyncPage.CONNECTION && !this.draftLoaded) {
@@ -834,18 +842,12 @@ public final class MainActivity extends Activity {
         if (this.page == SyncPage.HOME) {
             this.root.addView(label(this.cloudVerified ? "存档自动同步  /  ● 云端已连接" : "存档自动同步  /  ○ 等待连接", 12, -10129303));
         }
-        TextView textViewLabel = label(this.notice, 14, -13474224);
+        String visibleNotice = visibleNotice();
+        TextView textViewLabel = label(visibleNotice, 14, -13474224);
+        textViewLabel.setVisibility(visibleNotice.isEmpty() ? View.GONE : View.VISIBLE);
         this.status = textViewLabel;
         textViewLabel.setPadding(0, dp(8), 0, dp(8));
         this.root.addView(this.status);
-        if (!this.diagnosticReport.isEmpty()) {
-            addButton(this.root, "复制脱敏诊断", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda50
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.copyDiagnostic();
-                }
-            }, false);
-        }
         if (this.busy) {
             this.root.addView(new ProgressBar(this, null, 16842872), new LinearLayout.LayoutParams(-1, dp(3)));
         }
@@ -888,7 +890,7 @@ public final class MainActivity extends Activity {
                 renderConfirmation();
                 break;
         }
-        if (!this.details.isEmpty()) {
+        if (!this.details.isEmpty() && !(this.page == SyncPage.COMPARISON && showEmptyCompletion() && !this.feedbackError)) {
             button(this.detailsExpanded ? "收起详细信息" : "详细信息", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda51
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -897,6 +899,7 @@ public final class MainActivity extends Activity {
             });
             if (this.detailsExpanded) {
                 text(this.details);
+                if (!this.diagnosticReport.isEmpty()) button("复制诊断", this::copyDiagnostic);
             }
         }
         setContentView(this.root);
@@ -1064,18 +1067,17 @@ public final class MainActivity extends Activity {
     }
 
     private void renderHome() {
-        String str;
         String str2;
         String str3;
         AndroidSyncFacade.Inspection inspection;
-        TextView textViewLabel = label((!automaticObservationSupported() ? "当前访问方式不支持退出后自动上传" : this.progress == OnboardingProgress.COMPLETE ? SyncRuntime.isAutoUploadPaused(this) ? "自动上传已暂停" : AutoSyncService.status(this) : "自动上传暂停，请先选择上传或恢复。") + "\n本机：" + Build.MODEL, 14, -13474224);
-        textViewLabel.setPadding(dp(12), dp(12), dp(12), dp(12));
-        textViewLabel.setBackgroundColor(-1839130);
-        this.body.addView(textViewLabel);
-        str = selectedGameLabel() + (this.rootGame == null ? "" : " · Root");
-        text(str);
+        if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE) {
+            text("自动上传已暂停");
+        }
+        String automaticStatus = automaticStatusBrief();
+        if (!automaticStatus.isEmpty()) text(automaticStatus);
+        text(selectedGameLabel());
         if (!readyForSaves()) {
-            button(this.rootGame != null ? "检查 Root 存档访问" : "检查游戏与内置存档桥状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
+            button("检查存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
                 @Override // java.lang.Runnable
                 public final void run() {
                     if (MainActivity.this.rootGame != null) MainActivity.this.requestRootAuthorization();
@@ -1085,7 +1087,6 @@ public final class MainActivity extends Activity {
         }
         LinearLayout linearLayoutRow = row();
         this.body.addView(linearLayoutRow);
-        boolean z = false;
         addButton(linearLayoutRow, "启动游戏", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda4
             @Override // java.lang.Runnable
             public final void run() {
@@ -1100,16 +1101,6 @@ public final class MainActivity extends Activity {
         }, true).setEnabled(canRequestSaveAccess());
         addButton(linearLayoutRow, "恢复", this::requestRestore, true).setEnabled(restoreSupported() && canRequestSaveAccess() && this.connection != null);
         if (!restoreSupported()) text("当前访问方式不支持恢复与合并写入。");
-        Button button = button("存档名称与单局身份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda7
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.editCurrent();
-            }
-        });
-        if (this.inspection != null && this.cloudVerified) {
-            z = true;
-        }
-        button.setEnabled(z);
         AndroidSyncFacade.Inspection inspection2 = this.inspection;
         if (inspection2 != null && inspection2.isRetryablePending()) {
             text("上次上传尚未完成，请先重试上传。");
@@ -1120,7 +1111,7 @@ public final class MainActivity extends Activity {
         }
         heading("完整档案历史");
         if (this.history == null) {
-            str2 = this.rootGame != null ? "点击检查存档后读取历史；尚未请求 Root 访问。" : "正在读取存档历史…";
+            str2 = "尚未读取存档历史";
         } else {
             str2 = this.history.getCloud().size() + " 份云端记录";
         }
@@ -1155,7 +1146,6 @@ public final class MainActivity extends Activity {
     private void renderHistory() {
         SyncHistory syncHistory = this.history;
         if (syncHistory == null) {
-            text("尚未完成核验。连接失败不会被当作云端为空。");
             return;
         }
         final HistoryPresentation historyPresentationFrom = HistoryPresentation.from(syncHistory, this.historyPage);
@@ -1933,14 +1923,52 @@ public final class MainActivity extends Activity {
         this.notice = this.installer.summary();
     }
 
+    private String savePathLabel() {
+        if (this.rootGame != null) return new java.io.File(this.rootGame.dataDir, "files").getPath();
+        String gamePackage = selectedGamePackage();
+        if (gamePackage == null) return "尚未选择游戏";
+        try {
+            return new java.io.File(getPackageManager().getApplicationInfo(gamePackage, 0).dataDir, "files").getPath();
+        } catch (PackageManager.NameNotFoundException unavailable) {
+            return gamePackage + " / files";
+        }
+    }
+
+    private boolean showEmptyCompletion() {
+        return AndroidUiFlowPolicy.showEmptyCompletion(kind() == null ? null : kind().name(), this.cloudVerified,
+                this.inspection != null && this.inspection.getNeedsRestoreRecovery(),
+                this.inspection != null && this.inspection.isRetryablePending());
+    }
+
+    private String automaticStatusBrief() {
+        if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE) return "";
+        String result = AutoSyncService.status(this);
+        if (result.startsWith("从本应用启动游戏后")) return "";
+        if (result.contains("HISTORY_CONFLICT")) return "有存档冲突，自动上传已跳过。";
+        if (result.contains("并发分支")) return "本机已上传，有存档冲突待处理。";
+        if (result.contains("云端随后又有新版本")) return "本机已上传，云端有新进度待选择。";
+        if (result.contains("自动上传未完成") || result.contains("未完成") || result.length() > 48) {
+            if (this.details.isEmpty()) this.details = safeText(result);
+            return "自动上传未完成，请检查存档。";
+        }
+        return result;
+    }
+
+    private String visibleNotice() {
+        if (this.busy) return this.notice;
+        if (this.feedbackError) return NoviceCopy.feedback(this.notice, "操作未完成，请重试。");
+        if (this.page == SyncPage.DISCOVERY) return this.notice;
+        if (this.page == SyncPage.COMPARISON && this.notice.equals(comparisonCopy())) return "";
+        if (this.notice.equals("请选择游戏。") || this.notice.equals("配置完成。") || this.notice.length() > 48) return "";
+        return this.notice;
+    }
+
     private void renderPath() {
         heading("2 / 4  设置存档路径");
         text("存档目录");
-        text(selectedGamePackage() == null ? "尚未选择游戏" : selectedGamePackage() + " / files");
-        if (this.rootGame != null) text("Root 模式按已核对的用户、UID 与安装身份读取私有存档；不会修改游戏 APK。点击预览或同步时会检查实际权限与存档状态；显示此页面不会请求 Root。");
-        else text("Android 由游戏内置存档桥在游戏自身 UID 中访问私有存档目录。同步主程序使用独立 UID，连接前核对本机签名、完整 APK、来源绑定及主程序证书。系统文件选择器不能替代这项访问。");
+        text(savePathLabel());
         if (this.localPreview == null) {
-            text("尚未完成本机存档预览，请检查存档。");
+            text("请检查存档。");
         } else {
             StringBuilder sb = new StringBuilder("游戏槽位 ");
             sb.append(this.localPreview.getSlots().size());
@@ -1948,12 +1976,16 @@ public final class MainActivity extends Activity {
             sb.append(this.localPreview.getPlays() == null ? "未知" : this.localPreview.getPlays());
             sb.append(" 次");
             text(sb.toString());
+            if (this.localPreview.getSlots().isEmpty()) {
+                text(this.localPreview.getFiles() > 0 || (this.localPreview.getPlays() != null && this.localPreview.getPlays() > 0)
+                        ? "有记录，暂无可继续的存档。" : "暂无存档。");
+            }
             for (Map.Entry<String, String> entry : this.localPreview.getSlots().entrySet()) {
                 text(entry.getKey() + " · " + HistoryPresentation.time(entry.getValue()));
             }
         }
         if (!readyForSaves()) {
-            text(this.readinessState.accessDescription());
+            text("暂时无法读取存档，请重新检查。");
         }
         if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
             button("启动游戏一次", this::launchGameForInitialization);
@@ -1964,7 +1996,6 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m108xe2dc5156();
             }
         });
-        text("只读取实际游戏存档，不生成游戏进度。请正常退出游戏，等待写入稳定后继续。");
         steps(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda88
             @Override // java.lang.Runnable
             public final void run() {
@@ -2022,7 +2053,7 @@ public final class MainActivity extends Activity {
         }
         this.previewAttempted = true;
         this.localPreview = null;
-        work("正在读取实际存档槽位与游玩次数…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda44
+        work("正在读取存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda44
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m64x685e4018();
@@ -2079,7 +2110,7 @@ public final class MainActivity extends Activity {
     /* renamed from: lambda$previewPath$51$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m65xddd86659(SaveSummary saveSummary) throws Exception {
         this.localPreview = saveSummary;
-        this.notice = "本机存档预览已完成。";
+        this.notice = "";
     }
 
     private void loadDraft() {
@@ -2128,7 +2159,6 @@ public final class MainActivity extends Activity {
             loadDraft();
         }
         heading(this.onboardingActive ? "3 / 4  连接云端" : "连接设置");
-        boolean z = false;
         EditText editTextField = field("WebDAV 地址", this.draftEndpoint, false);
         this.endpointInput = editTextField;
         editTextField.setHint("https://example.com/dav");
@@ -2141,19 +2171,10 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m88xda0abd19();
             }
         });
-        text("密码可留空，匿名服务将账号和密码均留空。仅 127.0.0.1 本机 HTTP 测试必须匿名。测试会检查并准备本应用的同步目录。");
-        text("测试成功后点击下一步或保存，会将 HTTPS 连接及明文密码存入主程序私有文件，重启和覆盖更新后保留。测试和返回不保存；密码不交给游戏。");
-        text("127.0.0.1 本机 HTTP 测试仅本次使用，不改动已保存连接；重启后恢复原连接。");
-        if (!this.connectionLoadError.isEmpty()) {
-            text(this.connectionLoadError);
-        }
-        if (this.secrets.exists() || !this.connectionLoadError.isEmpty()) {
-            button(this.connectionLoadError.isEmpty() ? "恢复已保存连接" : "重试读取已保存连接", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda128
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.reloadSavedConnection();
-                }
-            });
+        text("密码可留空。测试会检查并准备本应用的同步目录。");
+        if (!this.connectionLoadError.isEmpty()) text("连接设置读取失败，请重试。");
+        if (!this.connectionLoadError.isEmpty() || (this.connection != null && this.connection.isTemporary() && this.secrets.exists())) {
+            button(this.connectionLoadError.isEmpty() ? "恢复已保存连接" : "重试读取已保存连接", this::reloadSavedConnection);
         }
         LinearLayout linearLayoutRow = row();
         this.footer.addView(linearLayoutRow);
@@ -2169,11 +2190,7 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m90xc4ff099b();
             }
         }, true);
-        String str = this.testedDraft;
-        if (str != null && str.equals(draftFingerprint())) {
-            z = true;
-        }
-        buttonAddButton.setEnabled(z);
+        buttonAddButton.setEnabled(AndroidUiFlowPolicy.canContinue(this.testedDraft, draftFingerprint(), this.busy));
         TextWatcher textWatcher = new TextWatcher() { // from class: io.github.xyz1001.pdsync.android.MainActivity.2
             @Override // android.text.TextWatcher
             public void afterTextChanged(Editable editable) {
@@ -2185,8 +2202,16 @@ public final class MainActivity extends Activity {
 
             @Override // android.text.TextWatcher
             public void onTextChanged(CharSequence charSequence, int i, int i2, int i3) {
+                String before = MainActivity.this.draftFingerprint();
                 MainActivity.this.captureDraft();
-                buttonAddButton.setEnabled(MainActivity.this.testedDraft != null && MainActivity.this.testedDraft.equals(MainActivity.this.draftFingerprint()));
+                MainActivity.this.testedDraft = AndroidUiFlowPolicy.invalidateProofOnEdit(
+                        MainActivity.this.testedDraft, before, MainActivity.this.draftFingerprint());
+                buttonAddButton.setEnabled(AndroidUiFlowPolicy.canContinue(
+                        MainActivity.this.testedDraft, MainActivity.this.draftFingerprint(), MainActivity.this.busy));
+                if (!before.equals(MainActivity.this.draftFingerprint()) && !MainActivity.this.busy && !MainActivity.this.feedbackError) {
+                    MainActivity.this.notice = "";
+                    MainActivity.this.status.setVisibility(View.GONE);
+                }
             }
         };
         this.endpointInput.addTextChangedListener(textWatcher);
@@ -2280,11 +2305,13 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$applyConnection$58$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m18x35802ca1(String str, boolean z, Object obj) throws Exception {
-        this.testedDraft = str;
         if (!z) {
-            this.notice = "连接测试成功，请点击".concat(this.onboardingActive ? "下一步。" : "保存。");
+            this.testedDraft = str;
+            this.notice = "连接测试通过。";
         } else {
+            this.testedDraft = null;
             this.onboardingActive = true;
+            navigate(SyncPage.COMPARISON);
             refreshComparison(SyncPage.COMPARISON);
         }
     }
@@ -2455,15 +2482,27 @@ public final class MainActivity extends Activity {
     }
 
     private String comparisonCopy() {
-        if (this.inspection != null && this.inspection.getCanKeepLocalProgress()) {
-            return "本机有新的游戏进度，云端仍是已关联的同步基线。可以保留本机进度并完成配置。";
+        if (this.cloudVerified && this.inspection != null && this.inspection.getCanKeepLocalProgress()) {
+            return "本机有新的游戏进度，可以继续。";
         }
-        return NoviceCopy.comparison(kind(), this.busy);
+        return NoviceCopy.comparison(this.cloudVerified || kind() == OnboardingKind.BLOCKED ? kind() : null, this.busy);
     }
 
     private void renderComparison() {
-        heading(kind() == OnboardingKind.BOTH_EMPTY ? "4 / 4  配置完成" : "4 / 4  选择存档");
+        if (showEmptyCompletion()) {
+            heading(this.feedbackError ? "4 / 4  配置尚未完成" : "4 / 4  配置完成");
+            if (!this.feedbackError) text("配置完成");
+            foot("上一步", () -> navigate(SyncPage.CONNECTION));
+            foot("完成", this::completeEmpty).setEnabled(!this.busy && this.onboardingActive && this.connection != null);
+            return;
+        }
+        heading("4 / 4  选择存档");
         text(comparisonCopy());
+        if (!this.cloudVerified && kind() != OnboardingKind.BLOCKED) {
+            foot("上一步", () -> navigate(SyncPage.CONNECTION));
+            foot("重新比较", () -> refreshComparison(SyncPage.COMPARISON));
+            return;
+        }
         if (this.inspection != null) {
             text("本机 · " + Build.MODEL + "\n" + OnboardingGate.localFileCountLabel(kind(), this.inspection.getLocalFileCount(), this.inspection.isRetryablePending()));
             Iterator<AndroidSyncFacade.Version> it = this.inspection.getRemoteVersions().iterator();
@@ -2493,18 +2532,9 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m81xec57ebf0();
             }
         }, true);
-        if (kind() == OnboardingKind.BOTH_EMPTY) {
-            foot("完成", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda137
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.completeEmpty();
-                }
-            });
-            return;
-        }
         AndroidSyncFacade.Inspection inspection = this.inspection;
         if (inspection != null && inspection.getCanKeepLocalProgress()) {
-            foot("保留本机进度并完成", this::completeLocalProgress);
+            foot("完成", this::completeLocalProgress);
         } else if (inspection != null && inspection.getCanCompleteWithoutTransfer()) {
             foot("完成", this::completeReadyComparison);
         }
@@ -2562,8 +2592,7 @@ public final class MainActivity extends Activity {
         sb.append(HistoryPresentation.time(version.getCapturedAt()));
         sb.append(" · ");
         sb.append(version.getFileCount());
-        sb.append(" 个文件\n");
-        sb.append(version.getVersionSummary());
+        sb.append(" 个文件");
         radioButton.setText(sb.toString());
         radioButton.setTextSize(14.0f);
         radioButton.setChecked(version.getSnapshotId().equals(this.selected));
@@ -2601,7 +2630,7 @@ public final class MainActivity extends Activity {
             this.progress = OnboardingProgress.COMPLETE;
             this.onboardingActive = false;
             this.page = SyncPage.HOME;
-            this.notice = "本机与已关联云端存档一致，配置完成。";
+            this.notice = "配置完成。";
         });
     }
 
@@ -2623,14 +2652,16 @@ public final class MainActivity extends Activity {
             this.progress = OnboardingProgress.COMPLETE;
             this.onboardingActive = false;
             this.page = SyncPage.HOME;
-            this.notice = !automaticObservationSupported() ? "本机进度已保留，配置完成。当前访问方式请手动检查和上传。" : SyncRuntime.isAutoUploadPaused(this)
-                    ? "本机进度已保留，配置完成。自动上传仍按设置暂停。"
-                    : "本机进度已保留，配置完成。启动游戏并正常退出后会尝试无冲突自动上传。";
+            this.notice = "配置完成。";
         });
     }
 
     /* JADX INFO: Access modifiers changed from: private */
     public void completeEmpty() {
+        if (!AndroidUiFlowPolicy.canFinishEmpty(kind() == null ? null : kind().name(), this.cloudVerified,
+                this.inspection != null && this.inspection.getNeedsRestoreRecovery(),
+                this.inspection != null && this.inspection.isRetryablePending(),
+                this.page == SyncPage.COMPARISON && this.onboardingActive, this.busy, this.connection != null)) return;
         work("正在完成配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda33
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
@@ -2647,7 +2678,7 @@ public final class MainActivity extends Activity {
     /* renamed from: lambda$completeEmpty$67$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ Object m29xb53dc5d7() throws Exception {
         readComparison();
-        if (!EmptySetupCompletion.canFinish(kind(), kind() == OnboardingKind.BLOCKED ? this.inspection.getMessage() : null, true, false, this.connection != null)) {
+        if (!showEmptyCompletion() || !EmptySetupCompletion.canFinish(kind(), null, this.page == SyncPage.COMPARISON && this.onboardingActive, false, this.connection != null)) {
             throw new IOException("存档已变化，请重新比较后选择。");
         }
         sync().completeOnboarding(this.inspection);
@@ -2815,7 +2846,7 @@ public final class MainActivity extends Activity {
 
     private void renderConflict() {
         heading("存档发生冲突");
-        text("覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；图鉴次数取最大，排行榜去重后保留最高分11条。累计统计缺少完整证据时保守取较大值，可能少计；格式损坏或超出六槽仍停止，原始快照保留。");
+        text("请选择要继续的进度。");
         if (this.inspection == null || kind() != OnboardingKind.BRANCHED) {
             text("分支已变化，请重新比较。");
             foot("重新比较", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda143
@@ -2872,7 +2903,7 @@ public final class MainActivity extends Activity {
             return;
         }
         final AndroidSyncFacade.Inspection inspection = this.inspection;
-        showConfirmation("恢复存档", "所选存档：" + selectedName() + "\n\n将先备份，再替换本机存档；所选存档中没有的进度会移除。\n会保留全部已观察分支的历史，并发布你的明确选择。", "覆盖本机", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda159
+        showConfirmation("恢复存档", "所选存档：" + selectedName() + "\n\n将先备份，再替换本机存档；所选存档中没有的进度会移除。", "覆盖本机", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda159
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m86xfa720d6a(inspection, str);
@@ -3080,7 +3111,7 @@ public final class MainActivity extends Activity {
             str2 = "确认已失效，请重新选择。";
         }
         text(str2);
-        foot("取消，返回".concat(this.confirmationReturn == SyncPage.HOME ? "主页" : "存档"), new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda23
+        foot("取消", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda23
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.cancelConfirmation();
@@ -3144,14 +3175,11 @@ public final class MainActivity extends Activity {
 
     private void renderSettings() {
         String str;
-        String string;
-        AndroidSyncFacade.Inspection inspection;
         heading("设置");
         Switch r0 = new Switch(this);
         r0.setText("自动上传");
         r0.setChecked(automaticObservationSupported() && !SyncRuntime.isAutoUploadPaused(this));
         r0.setEnabled(automaticObservationSupported());
-        if (this.rootGame != null) text("Root 退出监听沿用当前自动上传设置；每次观察仍须取得实际权限和可靠的游戏状态。状态不明会停止，冲突不会自动覆盖。");
         this.body.addView(r0);
         r0.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda74
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
@@ -3159,7 +3187,7 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m128x5965f8ae(compoundButton, z);
             }
         });
-        str = selectedGameLabel() + (this.rootGame == null ? "" : " · Root") + (selectedGamePackage() == null ? "" : "\n" + selectedGamePackage());
+        str = selectedGameLabel();
         text(str);
         button("更换游戏…", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda78
             @Override // java.lang.Runnable
@@ -3185,36 +3213,20 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m132x2f4e91b2();
             }
         });
-        if (selectedGamePackage() == null) {
-            string = "存档位置尚未确认";
-        } else {
-            StringBuilder sb = new StringBuilder("存档位置：");
-            sb.append(selectedGamePackage());
-            sb.append(" / files\n同步空间：");
-            sb.append(this.selectedNamespace);
-            sb.append("\n档案：");
-            SecureConnectionStore.Connection connection = this.connection;
-            sb.append(connection == null ? "default" : connection.profile);
-            string = sb.toString();
-        }
-        text(string);
-        text("不同游戏来源默认使用不同同步空间，避免改版混档。只有经过识别的相同来源才沿用已有空间。");
         if (selectedGamePackage() != null) {
-            button("高级：关联同一游戏的 PC 档案", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda82
+            button("关联 PC 档案", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda82
                 @Override // java.lang.Runnable
                 public final void run() {
                     MainActivity.this.editNamespace();
                 }
             });
         }
-        heading("Android 权限");
         button("允许同步通知（可选）", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda83
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m133xa4c8b7f3();
             }
         });
-        text("通知权限可选。退出同步使用 Android 前台服务，系统仍可能限制后台运行。通过其他入口启动时不能保证观察到退出；可返回主页手动检查。");
         heading("恢复与待上传操作");
         if (restoreNeedsAttention()) {
             button("检查未完成恢复", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda84
@@ -3230,7 +3242,7 @@ public final class MainActivity extends Activity {
                 }
             });
         }
-        button(this.rootGame != null ? "核对并恢复 Root 中断事务" : "恢复存档桥保留的中断前备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda86
+        button("恢复中断前备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda86
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m116x9e9ac3b0();
