@@ -143,6 +143,7 @@ public final class MainActivity extends Activity {
     private String draftUser = "";
     private String draftPassword = "";
     private String draftProfile = "default";
+    private final InstalledAppPickerModel.State installedPickerState = new InstalledAppPickerModel.State();
     private String connectionLoadError = "";
     private final BroadcastReceiver installChanged = new BroadcastReceiver() { // from class: io.github.xyz1001.pdsync.android.MainActivity.1
         @Override // android.content.BroadcastReceiver
@@ -178,6 +179,8 @@ public final class MainActivity extends Activity {
             }
             this.selected = bundle.getString("selected");
             this.historyPage = bundle.getInt("historyPage", 0);
+            this.installedPickerState.setQuery(bundle.getString("installedPicker.query", ""));
+            this.installedPickerState.setShowAll(bundle.getBoolean("installedPicker.showAll", false));
         }
         render();
     }
@@ -188,6 +191,8 @@ public final class MainActivity extends Activity {
         bundle.putString("page", this.page.name());
         bundle.putString("selected", this.selected);
         bundle.putInt("historyPage", this.historyPage);
+        bundle.putString("installedPicker.query", this.installedPickerState.query());
+        bundle.putBoolean("installedPicker.showAll", this.installedPickerState.showAll());
     }
 
     @Override // android.app.Activity
@@ -562,21 +567,13 @@ public final class MainActivity extends Activity {
     }
 
     private void chooseRootInstalled() {
+        String selectedPackage = selectedGamePackage();
         work("正在只读列出已安装应用…", () -> {
             if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
                 throw new IOException("请先处理未完成恢复或系统安装请求，再切换访问方式。");
-            return this.preparation.listInstalledGames();
-        }, games -> {
-            if (games.isEmpty()) { this.notice = "未发现可选择的已安装应用。Root 模式不接受待安装 APK。"; return; }
-            String[] labels = new String[games.size()];
-            for (int i = 0; i < games.size(); i++) {
-                GamePreparationService.InstalledGame game = games.get(i);
-                labels[i] = game.label + " " + game.versionName + "\n" + game.packageName;
-            }
-            new AlertDialog.Builder(this).setTitle("Root 模式：选择已安装游戏")
-                    .setItems(labels, (dialog, index) -> selectRootGame(games.get(index).packageName))
-                    .setNegativeButton("取消", null).show();
-        });
+            return InstalledAppCatalog.load(this, selectedPackage);
+        }, games -> InstalledAppPickerDialog.show(this, "Root 模式：选择已安装游戏", games,
+                selectedPackage, installedPickerState, this::selectRootGame));
     }
 
     private void selectRootGame(String packageName) {
@@ -1636,48 +1633,12 @@ public final class MainActivity extends Activity {
     /* JADX INFO: Access modifiers changed from: private */
     public void chooseInstalled() {
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
-        work("正在读取可选择的已安装应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda46
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m21x8059b36c();
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda47
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m23x6b4dffee((List) obj);
-            }
-        });
-    }
-
-    /* renamed from: lambda$chooseInstalled$27$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ List m21x8059b36c() throws Exception {
-        this.installer.assertCanPrepare();
-        return this.preparation.listInstalledGames();
-    }
-
-    /* renamed from: lambda$chooseInstalled$29$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m23x6b4dffee(final List list) throws Exception {
-        if (list.isEmpty()) {
-            this.notice = "未发现可选择的应用，请从文件选择完整 APK。";
-            return;
-        }
-        int size = list.size();
-        String[] strArr = new String[size];
-        for (int i = 0; i < size; i++) {
-            GamePreparationService.InstalledGame installedGame = (GamePreparationService.InstalledGame) list.get(i);
-            strArr[i] = installedGame.label + " " + installedGame.versionName + "\n" + installedGame.packageName;
-        }
-        new AlertDialog.Builder(this).setTitle("选择游戏").setItems(strArr, new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda32
-            @Override // android.content.DialogInterface.OnClickListener
-            public final void onClick(DialogInterface dialogInterface, int i2) {
-                MainActivity.this.m22xf5d3d9ad(list, dialogInterface, i2);
-            }
-        }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
-    }
-
-    /* renamed from: lambda$chooseInstalled$28$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m22xf5d3d9ad(List list, DialogInterface dialogInterface, int i) {
-        requestPrepare(((GamePreparationService.InstalledGame) list.get(i)).packageName, null);
+        String selectedPackage = selectedGamePackage();
+        work("正在读取可选择的已安装应用…", () -> {
+            this.installer.assertCanPrepare();
+            return InstalledAppCatalog.load(this, selectedPackage);
+        }, games -> InstalledAppPickerDialog.show(this, "选择游戏", games, selectedPackage,
+                installedPickerState, packageName -> requestPrepare(packageName, null)));
     }
 
     private void requestPrepare(final String str, final List<Uri> list) {
