@@ -33,16 +33,41 @@ public final class ManualPaymentFlowChecks {
     }
 
     public static void main(String[] args) throws Exception {
+        donationContractSnapshots();
         disabledAndBootstrap();
         durableSingleFlightAndUnknownCreate();
         staleCancellationAndAccountIsolation();
         restoreMineAndPlanBinding();
         stateAndDavGates();
+        unsupportedContractRequiresFullRefresh();
         activeEntitlementNeedsDav();
         boundedForegroundPolling();
         malformedCallbacksAndStorageFailures();
         atomicDraftFile();
         System.out.println("ManualPaymentFlowChecks: " + checks + " checks passed (host-only; no HTTP/device/account)");
+    }
+
+    private static void donationContractSnapshots() throws Exception {
+        ManualOrderClient.Plan plan = plans().get(0);
+        eq("donation", plan.paymentMode, "plan declares donation mode");
+        eq(null, plan.amountMinor, "donation plan has no quoted amount");
+        eq(null, plan.currency, "donation plan has no quoted currency");
+        eq("calendar_year", plan.term, "donation grants a calendar year");
+        eq(0L, plan.days, "calendar year is not a fixed-day interval");
+        eq("sandbox_upload_only", plan.expiryPolicy, "expiry policy remains sandbox upload-only");
+        for (String state : new String[]{"created", "review", "applying", "approved", "cancelled", "rejected"}) {
+            ManualOrderClient.Order order = order(state);
+            boolean reserved = state.equals("applying") || state.equals("approved");
+            eq(null, order.amountMinor, state + " order has no quoted amount");
+            eq(null, order.currency, state + " order has no quoted currency");
+            eq("calendar_year", order.term, state + " order keeps calendar-year term");
+            eq(0L, order.days, state + " order does not invent fixed days");
+            eq(reserved ? Long.valueOf(123) : null, order.actualAmountMinor,
+                    state + " has verified amount only after approval reservation");
+            eq(reserved ? "CNY" : null, order.actualCurrency,
+                    state + " has verified currency only after approval reservation");
+            check(ManualPaymentFlow.matches(plan, order), state + " display matches nullable donation snapshot");
+        }
     }
 
     private static void disabledAndBootstrap() throws Exception {
@@ -149,8 +174,8 @@ public final class ManualPaymentFlowChecks {
         check(!f.snapshot().canCreate && !f.selectPlan("fixture_b"), "pending pins existing plan");
         check(f.snapshot().paymentDisplayMatches, "matching snapshot can show fixture display");
         check(!ManualPaymentFlow.matches(plans().get(1), f.snapshot().order), "different plan display rejected");
-        ManualOrderClient.Order differentPrice = orderRaw(orderJson(ID, "fixture_a", "review", 99));
-        check(!ManualPaymentFlow.matches(plans().get(0), differentPrice), "changed price image display rejected");
+        ManualOrderClient.Order differentQuota = orderRaw(orderJson(ID, "fixture_a", "review", 2048));
+        check(!ManualPaymentFlow.matches(plans().get(0), differentQuota), "changed quota image display rejected");
         f.leave();
         boot(f, A, 10, Collections.singletonList(order("applying")));
         eq(ManualPaymentFlow.Phase.APPLYING, f.snapshot().phase, "pending survives page return");
@@ -223,6 +248,50 @@ public final class ManualPaymentFlowChecks {
         boot(terminal, A, 100, Collections.singletonList(order("cancelled")));
         eq("fixture_b", terminal.snapshot().selectedPlanId, "Back preserves a newly chosen plan after terminal order");
         check(!first.requestKey.equals(terminal.create().requestKey), "new purchase after cancellation gets new key");
+    }
+
+    private static void unsupportedContractRequiresFullRefresh() throws Exception {
+        for (String state : new String[]{"created", "review", "approved"}) {
+            ManualPaymentFlow f = new ManualPaymentFlow(true, new MemoryStore());
+            boot(f, A, 0, Collections.emptyList());
+            check(f.acceptOrder(f.create(), order(state)), "restore " + state + " before unsupported response");
+            if (state.equals("approved")) {
+                check(f.acceptDavSuccess(f.beginDavTest()) && f.snapshot().canContinue,
+                        "approved fixture starts with verified DAV continuation");
+            }
+            ManualPaymentFlow.Ticket status = f.refresh(1);
+            action(status, ManualPaymentFlow.Action.STATUS);
+            check(f.fail(status, "UNSUPPORTED_CONTRACT"), "unsupported status response is accepted as failure");
+            eq(ManualPaymentFlow.Phase.ERROR, f.snapshot().phase, "unsupported contract overrides prior " + state + " phase");
+            eq("赞赏服务版本不支持", f.snapshot().message, "unsupported contract has short fixed copy");
+            check(!f.snapshot().canContinue && !f.snapshot().canCreate && !f.snapshot().canSubmit
+                    && !f.snapshot().canTestDav, "unsupported contract locks all continuation/payment gates");
+            eq(null, f.create(), "unsupported contract cannot create");
+            eq(null, f.submit(), "unsupported contract cannot submit");
+            eq(null, f.beginDavTest(), "unsupported contract cannot test DAV");
+            eq(null, f.poll(2_001), "unsupported contract cannot poll");
+            eq(ManualPaymentFlow.NO_POLL, f.nextDelayMillis(2_001), "unsupported contract schedules no poll");
+
+            ManualPaymentFlow.Ticket plans = f.refresh(2_002);
+            action(plans, ManualPaymentFlow.Action.LOAD_PLANS);
+            check(!f.snapshot().canContinue, "refresh never reuses old verified continuation");
+            ManualPaymentFlow.Ticket mine = f.acceptPlans(plans, plans());
+            action(mine, ManualPaymentFlow.Action.LOAD_MINE);
+            check(!f.snapshot().canTestDav, "plans refresh alone cannot restore old approval gate");
+            ManualPaymentFlow.Ticket ent = f.acceptMine(mine, Collections.singletonList(order(state)));
+            action(ent, ManualPaymentFlow.Action.LOAD_ENTITLEMENT);
+            check(!f.snapshot().canTestDav, "mine refresh still waits for fresh entitlement");
+            eq(null, f.acceptEntitlement(ent, entitlement()), "full refresh completes without extra request");
+            check(!f.snapshot().canContinue, "full refresh still requires fresh DAV success");
+            if (state.equals("approved")) {
+                check(f.acceptDavSuccess(f.beginDavTest()) && f.snapshot().canContinue,
+                        "fresh full bootstrap and DAV restore approved continuation");
+            } else if (state.equals("created")) {
+                check(f.snapshot().canSubmit, "fresh full bootstrap restores created claim action");
+            } else {
+                eq(2_000L, f.nextDelayMillis(2_002), "fresh full bootstrap restores bounded review polling");
+            }
+        }
     }
 
     private static void activeEntitlementNeedsDav() throws Exception {
@@ -299,20 +368,20 @@ public final class ManualPaymentFlowChecks {
         store.failWrite = false;
         boot(f, A, 1, Collections.emptyList());
         ManualPaymentFlow.Ticket create = f.create();
-        check(!f.acceptOrder(create, orderRaw(orderJson(ID, "fixture_b", "created", 1))),
+        check(!f.acceptOrder(create, orderRaw(orderJson(ID, "fixture_b", "created", 1024))),
                 "wrong plan create response rejected");
         check(f.snapshot().outcomeUnknown, "malformed response retains unknown outcome key");
         ManualPaymentFlow.Ticket retry = f.create();
         eq(create.requestKey, retry.requestKey, "malformed create response retains original key");
         f.acceptOrder(retry, order("created"));
         ManualPaymentFlow.Ticket status = f.refresh(2);
-        check(!f.acceptOrder(status, orderRaw(orderJson(ID2, "fixture_a", "approved", 1))),
+        check(!f.acceptOrder(status, orderRaw(orderJson(ID2, "fixture_a", "approved", 1024))),
                 "status response cannot substitute order identity");
         check(!f.snapshot().canContinue, "substituted order cannot unlock Next");
         f.leave();
         ManualPaymentFlow.Ticket p = f.enter(A, 3);
         ManualPaymentFlow.Ticket m = f.acceptPlans(p, plans());
-        eq(null, f.acceptMine(m, Arrays.asList(order("review"), orderRaw(orderJson(ID2, "fixture_a", "created", 1)))),
+        eq(null, f.acceptMine(m, Arrays.asList(order("review"), orderRaw(orderJson(ID2, "fixture_a", "created", 1024)))),
                 "multiple pending orders fail closed");
         check(!f.snapshot().canCreate, "invalid mine cannot create");
         store.failRead = true;
@@ -397,32 +466,35 @@ public final class ManualPaymentFlowChecks {
         eq(null, f.acceptEntitlement(e, entitlement()), "bootstrap ends without extra request");
     }
     private static List<ManualOrderClient.Plan> plans() throws Exception {
-        return client("[" + planJson("fixture_a", 1) + "," + planJson("fixture_b", 2) + "]").plans();
+        return client("[" + planJson("fixture_a", 1024) + "," + planJson("fixture_b", 2048) + "]").plans();
     }
     private static ManualOrderClient.Entitlement entitlement() throws Exception {
         return client("{\"source\":\"sandbox_ledger\",\"expires_ms\":null,\"active\":false}").entitlement();
     }
     private static ManualOrderClient.Order order(String state) throws Exception {
-        return orderRaw(orderJson(ID, "fixture_a", state, 1));
+        return orderRaw(orderJson(ID, "fixture_a", state, 1024));
     }
     private static ManualOrderClient.Order orderRaw(String json) throws Exception { return client("[" + json + "]").mine().get(0); }
     private static ManualOrderClient client(String data) {
         byte[] bytes = ("{\"sandbox\":true,\"data\":" + data + "}").getBytes(StandardCharsets.UTF_8);
         return new ManualOrderClient("http://127.0.0.1:18080", request -> new ManualOrderClient.Response(200, "application/json", bytes));
     }
-    private static String common(long amount) {
-        return "\"currency\":\"CNY\",\"term\":\"fixed_days\",\"amount_minor\":" + amount
-                + ",\"days\":1,\"quota_bytes\":1024,\"upload_kbps\":1,\"download_kbps\":1";
+    private static String common(long quota) {
+        return "\"currency\":null,\"term\":\"calendar_year\",\"amount_minor\":null"
+                + ",\"days\":0,\"quota_bytes\":" + quota + ",\"upload_kbps\":1,\"download_kbps\":1";
     }
-    private static String planJson(String id, long amount) {
-        return "{\"id\":\"" + id + "\"," + common(amount) + ",\"display_name\":\"Synthetic fixture\","
+    private static String planJson(String id, long quota) {
+        return "{\"id\":\"" + id + "\"," + common(quota) + ",\"display_name\":\"Synthetic fixture\","
                 + "\"payment_instructions\":\"No payment\",\"payment_image_path\":\"/api/order/payment-image/" + id
-                + "\",\"expiry_policy\":\"sandbox_ledger_only\"}";
+                + "\",\"expiry_policy\":\"sandbox_upload_only\",\"payment_mode\":\"donation\"}";
     }
-    private static String orderJson(String id, String plan, String state, long amount) {
-        return "{\"id\":\"" + id + "\",\"plan_id\":\"" + plan + "\"," + common(amount)
+    private static String orderJson(String id, String plan, String state, long quota) {
+        boolean reserved = state.equals("approved") || state.equals("applying");
+        return "{\"id\":\"" + id + "\",\"plan_id\":\"" + plan + "\"," + common(quota)
                 + ",\"remark_code\":\"1234\",\"created_ms\":1,\"target_ms\":"
-                + (state.equals("approved") || state.equals("applying") ? "100" : "null")
+                + (reserved ? "100" : "null")
+                + ",\"actual_amount_minor\":" + (reserved ? "123" : "null")
+                + ",\"actual_currency\":" + (reserved ? "\"CNY\"" : "null")
                 + ",\"state\":\"" + state + "\"}";
     }
     private static void action(ManualPaymentFlow.Ticket ticket, ManualPaymentFlow.Action action) {

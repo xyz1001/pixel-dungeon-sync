@@ -20,6 +20,7 @@ final class ManualPaymentPanel {
         if (!view.sandbox) throw new IllegalArgumentException("Sandbox session required");
         label(activity, body, "沙箱", 14);
         label(activity, body, view.message, 16);
+        label(activity, body, ManualPaymentCopy.validity(), 14);
         if (view.busy) body.addView(new ProgressBar(activity));
 
         ManualOrderClient.Order order = view.order;
@@ -28,29 +29,25 @@ final class ManualPaymentPanel {
             if (!view.canContinue) {
                 for (ManualOrderClient.Plan plan : view.plans) {
                     Button choice = button(activity, body,
-                            (plan.id.equals(view.selectedPlanId) ? "✓ " : "") + plan.displayName + "\n"
-                                    + ManualPaymentCopy.amount(plan.amountMinor, plan.currency) + " · "
-                                    + ManualPaymentCopy.term(plan.term, plan.days),
+                            (plan.id.equals(view.selectedPlanId) ? "✓ " : "") + plan.displayName,
                             () -> session.selectPlan(plan.id));
                     choice.setEnabled(!view.busy && !view.outcomeUnknown);
                 }
-                button(activity, body, view.outcomeUnknown ? "重试创建" : renewal(view) ? "续费" : "购买",
+                button(activity, body, view.outcomeUnknown ? "重试创建" : renewal(view) ? "赞赏续期" : "赞赏",
                         session::create).setEnabled(view.canCreate);
             }
         }
         if (order != null) {
-            label(activity, body, ManualPaymentCopy.amount(order.amountMinor, order.currency)
-                    + " · " + ManualPaymentCopy.term(order.term, order.days), 18);
             if (order.state == ManualOrderClient.State.CREATED) {
-                // The code and immutable amount are displayed only after a durable server order exists.
-                label(activity, body, "备注 " + order.remarkCode, 24);
+                // Optional manual matching aid, shown only after a durable order exists. Never require a payment remark.
+                label(activity, body, "辅助编号 " + order.remarkCode, 16);
                 if (view.paymentDisplayMatches && view.selectedPlan != null) {
                     label(activity, body, view.selectedPlan.paymentInstructions, 16);
                     byte[] png = session.paymentImage();
                     if (png != null) showImage(activity, body, png);
                     else if (!session.imageMessage().isEmpty()) label(activity, body, session.imageMessage(), 14);
-                } else label(activity, body, "付款信息需要更新，请刷新。", 16);
-                button(activity, body, "我已付款", session::submit).setEnabled(view.canSubmit && view.paymentDisplayMatches);
+                } else label(activity, body, "赞赏信息需要更新，请刷新。", 16);
+                button(activity, body, "我已赞赏", session::submit).setEnabled(view.canSubmit && view.paymentDisplayMatches);
             }
         }
         if (view.canCancel && order != null) button(activity, body, "取消订单", () -> {
@@ -79,13 +76,13 @@ final class ManualPaymentPanel {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > 2048 || bounds.outHeight > 2048
                 || (long) bounds.outWidth * bounds.outHeight > 2_000_000) {
-            label(activity, body, "收款图无法显示，请刷新。", 14);
+            label(activity, body, "赞赏码无法显示，请刷新。", 14);
             return;
         }
         Bitmap image = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        if (image == null) { label(activity, body, "收款图无法显示，请刷新。", 14); return; }
+        if (image == null) { label(activity, body, "赞赏码无法显示，请刷新。", 14); return; }
         ImageView view = new ImageView(activity);
-        view.setContentDescription("沙箱收款图");
+        view.setContentDescription("沙箱赞赏码");
         view.setImageBitmap(image);
         view.setAdjustViewBounds(true);
         view.setScaleType(ImageView.ScaleType.FIT_CENTER);

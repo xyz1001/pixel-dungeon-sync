@@ -98,7 +98,7 @@ public final class ManualPaymentFlow {
     private long generation, pollDeadline, nextPollAt;
     private int pollRequests;
     private boolean active, foreground, plansLoaded, mineLoaded, entitlementLoaded, storageReady,
-            davPassed, outcomeUnknown, pollNeedsWindow;
+            davPassed, outcomeUnknown, pollNeedsWindow, unsupportedContract;
     private Ticket current;
     private Draft draft;
     private List<ManualOrderClient.Plan> plans = Collections.emptyList();
@@ -129,6 +129,7 @@ public final class ManualPaymentFlow {
             outcomeUnknown = false;
         }
         plansLoaded = mineLoaded = entitlementLoaded = false;
+        unsupportedContract = false;
         resetPollWindow(now);
         if (!enabled) return null;
         try {
@@ -230,13 +231,18 @@ public final class ManualPaymentFlow {
         notice = null;
         resetPollWindow(now);
         if (!storageReady) return enter(scope, now);
+        if (unsupportedContract) {
+            unsupportedContract = false;
+            plansLoaded = mineLoaded = entitlementLoaded = false;
+            return issue(Action.LOAD_PLANS);
+        }
         if (!plansLoaded) return issue(Action.LOAD_PLANS);
         if (!mineLoaded || !entitlementLoaded || order == null) return issue(Action.LOAD_MINE);
         return issue(Action.STATUS);
     }
 
     public synchronized long nextDelayMillis(long now) {
-        if (!enabled || !active || !foreground || current != null || !waiting()) return NO_POLL;
+        if (!enabled || !active || !foreground || unsupportedContract || current != null || !waiting()) return NO_POLL;
         if (pollNeedsWindow) resetPollWindow(now);
         if (pollRequests >= MAX_POLL_REQUESTS || now >= pollDeadline || nextPollAt >= pollDeadline)
             return NO_POLL;
@@ -354,10 +360,12 @@ public final class ManualPaymentFlow {
         current = null;
         davPassed = false;
         if (ticket.action == Action.CREATE) outcomeUnknown = true;
+        if ("UNSUPPORTED_CONTRACT".equals(code)) unsupportedContract = true;
         if (ticket.action == Action.DAV_TEST) notice = "连接测试未通过";
-        else if ("PAYMENTS_DISABLED".equals(code)) notice = "沙箱付款未开启";
+        else if ("PAYMENTS_DISABLED".equals(code)) notice = "沙箱赞赏未开启";
         else if ("AUTHENTICATION_REQUIRED".equals(code) || "FORBIDDEN".equals(code)) notice = "请重新验证账号";
         else if ("PENDING_ORDER_EXISTS".equals(code)) notice = "已有待处理订单，请刷新";
+        else if ("UNSUPPORTED_CONTRACT".equals(code)) notice = "赞赏服务版本不支持";
         else if ("INVALID_RESPONSE".equals(code)) notice = "订单响应无法确认";
         else if (outcomeUnknown) notice = "结果待确认，请刷新或重试";
         else notice = "暂时无法查询，请重试";
@@ -392,7 +400,7 @@ public final class ManualPaymentFlow {
             return false;
         }
     }
-    private boolean usable() { return enabled && active && foreground && current == null && storageReady
+    private boolean usable() { return enabled && active && foreground && !unsupportedContract && current == null && storageReady
             && plansLoaded && mineLoaded && entitlementLoaded; }
     private boolean canCreate() { return usable() && selectedPlan() != null && !pending()
             && !(draft != null && draft.orderId != null && order == null)
@@ -418,26 +426,29 @@ public final class ManualPaymentFlow {
     }
     /** Equal price/limits cannot prove a versioned payment image: the v1 API has no image binding. */
     public static boolean matches(ManualOrderClient.Plan p, ManualOrderClient.Order o) {
-        return p != null && o != null && p.id.equals(o.planId) && p.currency.equals(o.currency)
-                && p.amountMinor == o.amountMinor && p.days == o.days && p.quotaBytes == o.quotaBytes
+        return p != null && o != null && p.id.equals(o.planId) && "donation".equals(p.paymentMode)
+                && "sandbox_upload_only".equals(p.expiryPolicy)
+                && Objects.equals(p.currency, o.currency)
+                && Objects.equals(p.amountMinor, o.amountMinor) && p.days == o.days && p.quotaBytes == o.quotaBytes
                 && p.uploadKbps == o.uploadKbps && p.downloadKbps == o.downloadKbps && p.term.equals(o.term);
     }
     private Phase phase() {
         if (!enabled) return Phase.DISABLED;
+        if (unsupportedContract) return Phase.ERROR;
         if (current != null) return current.action == Action.DAV_TEST ? Phase.DAV_TESTING : Phase.LOADING;
         if (davPassed && davEligible()) return Phase.READY;
         if (order != null) return Phase.valueOf(order.state.name());
         return notice == null ? Phase.SELECT_PLAN : Phase.ERROR;
     }
     private String message() {
-        if (!enabled) return "沙箱付款未开启";
+        if (!enabled) return "沙箱赞赏未开启";
         if (current != null) return current.action == Action.DAV_TEST ? "正在测试连接" : "正在查询";
         if (notice != null) return notice;
         if (davPassed && davEligible()) return "连接已通过";
         if (order == null && davEligible()) return "沙箱额度有效，请测试连接";
-        if (order == null) return outcomeUnknown ? "结果待确认，请刷新或重试" : "请选择测试套餐";
+        if (order == null) return outcomeUnknown ? "结果待确认，请刷新或重试" : "请选择赞赏服务";
         switch (order.state) {
-            case CREATED: return "待付款（沙箱）";
+            case CREATED: return "待赞赏（沙箱）";
             case REVIEW: return "等待人工确认";
             case APPLYING: return "正在开通，请稍候";
             case APPROVED: return "沙箱已确认，请测试连接";

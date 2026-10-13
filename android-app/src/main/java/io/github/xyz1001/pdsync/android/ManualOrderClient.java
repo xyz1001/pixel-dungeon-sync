@@ -85,7 +85,7 @@ public final class ManualOrderClient {
 
     public enum FailureKind {
         INVALID_INPUT, AUTHENTICATION_REQUIRED, FORBIDDEN, REQUEST_REJECTED,
-        CONFLICT, SERVICE_UNAVAILABLE, REDIRECT_REJECTED, INVALID_RESPONSE,
+        CONFLICT, SERVICE_UNAVAILABLE, REDIRECT_REJECTED, INVALID_RESPONSE, UNSUPPORTED_CONTRACT,
         RESPONSE_TOO_LARGE, TIMEOUT, NETWORK_ERROR
     }
 
@@ -111,15 +111,18 @@ public final class ManualOrderClient {
     }
 
     public static final class Plan {
-        public final String id, currency, term, displayName, paymentInstructions, paymentImagePath, expiryPolicy;
-        public final long amountMinor, days, quotaBytes, uploadKbps, downloadKbps;
+        public final String id, currency, term, displayName, paymentInstructions, paymentImagePath, expiryPolicy, paymentMode;
+        /** Donation offers carry no quoted amount or currency. Null is never converted to zero. */
+        public final Long amountMinor;
+        public final long days, quotaBytes, uploadKbps, downloadKbps;
 
         private Plan(JsonObject value) throws OrderException {
+            requireDonationContract(value, true);
             exact(value, "id", "currency", "amount_minor", "days", "quota_bytes", "upload_kbps",
-                    "download_kbps", "term", "display_name", "payment_instructions", "payment_image_path", "expiry_policy");
+                    "download_kbps", "term", "display_name", "payment_instructions", "payment_image_path", "expiry_policy", "payment_mode");
             id = matching(value, "id", PLAN_ID);
-            currency = matching(value, "currency", Pattern.compile("[A-Z]{3}"));
-            amountMinor = integer(value, "amount_minor");
+            currency = nullCurrency(value, "currency");
+            amountMinor = nullAmount(value, "amount_minor");
             days = integer(value, "days");
             quotaBytes = integer(value, "quota_bytes");
             uploadKbps = integer(value, "upload_kbps");
@@ -129,7 +132,8 @@ public final class ManualOrderClient {
             paymentInstructions = string(value, "payment_instructions");
             paymentImagePath = string(value, "payment_image_path");
             expiryPolicy = string(value, "expiry_policy");
-            if (!"sandbox_ledger_only".equals(expiryPolicy) || !(IMAGE_PREFIX + id).equals(paymentImagePath)) {
+            paymentMode = string(value, "payment_mode");
+            if (!(IMAGE_PREFIX + id).equals(paymentImagePath)) {
                 throw invalid();
             }
         }
@@ -138,25 +142,31 @@ public final class ManualOrderClient {
     }
 
     public static final class Order {
-        public final String id, planId, currency, term, remarkCode;
-        public final long amountMinor, days, quotaBytes, uploadKbps, downloadKbps, createdMs;
-        public final Long targetMs;
+        public final String id, planId, currency, term, remarkCode, actualCurrency;
+        public final long days, quotaBytes, uploadKbps, downloadKbps, createdMs;
+        /** Quoted amount remains null; actual amount is reviewer-confirmed only. */
+        public final Long amountMinor, actualAmountMinor, targetMs;
         public final State state;
 
         private Order(JsonObject value) throws OrderException {
+            requireDonationContract(value, false);
             exact(value, "id", "plan_id", "currency", "remark_code", "amount_minor", "days", "quota_bytes",
-                    "upload_kbps", "download_kbps", "created_ms", "term", "state", "target_ms");
+                    "upload_kbps", "download_kbps", "created_ms", "term", "state", "target_ms",
+                    "actual_amount_minor", "actual_currency");
             id = matching(value, "id", ORDER_ID);
             planId = matching(value, "plan_id", PLAN_ID);
-            currency = matching(value, "currency", Pattern.compile("[A-Z]{3}"));
+            currency = nullCurrency(value, "currency");
             remarkCode = matching(value, "remark_code", Pattern.compile("[0-9]{4}"));
-            amountMinor = integer(value, "amount_minor");
+            amountMinor = nullAmount(value, "amount_minor");
             days = integer(value, "days");
             quotaBytes = integer(value, "quota_bytes");
             uploadKbps = integer(value, "upload_kbps");
             downloadKbps = integer(value, "download_kbps");
             createdMs = integer(value, "created_ms");
             targetMs = nullableInteger(value, "target_ms");
+            actualAmountMinor = nullableInteger(value, "actual_amount_minor");
+            actualCurrency = value.get("actual_currency") == JsonNull.INSTANCE ? null
+                    : matching(value, "actual_currency", Pattern.compile("[A-Z]{3}"));
             term = term(value);
             switch (string(value, "state")) {
                 case "created": state = State.CREATED; break;
@@ -167,6 +177,9 @@ public final class ManualOrderClient {
                 case "rejected": state = State.REJECTED; break;
                 default: throw invalid();
             }
+            boolean approvalRecorded = state == State.APPLYING || state == State.APPROVED;
+            if (approvalRecorded ? actualAmountMinor == null || actualAmountMinor <= 0 || actualCurrency == null
+                    : actualAmountMinor != null || actualCurrency != null) throw invalid();
         }
 
         @Override public String toString() { return "Sandbox order [fields hidden]"; }
@@ -330,7 +343,8 @@ public final class ManualOrderClient {
             if (response == null) throw invalid();
             return decoder.decode(response);
         } catch (OrderException error) {
-            boolean unknown = mutation && (error.kind == FailureKind.INVALID_RESPONSE
+            boolean unknown = mutation && (error.kind == FailureKind.UNSUPPORTED_CONTRACT
+                    || error.kind == FailureKind.INVALID_RESPONSE
                     || error.kind == FailureKind.RESPONSE_TOO_LARGE || error.kind == FailureKind.SERVICE_UNAVAILABLE
                     || error.kind == FailureKind.REDIRECT_REJECTED || error.kind == FailureKind.NETWORK_ERROR
                     || error.kind == FailureKind.TIMEOUT);
@@ -367,7 +381,7 @@ public final class ManualOrderClient {
     private static boolean knownError(int status, String code) {
         String codes;
         switch (status) {
-            case 400: codes = "INVALID_REQUEST INVALID_JSON INVALID_HOST INVALID_REQUEST_KEY UNKNOWN_PLAN INVALID_CHANNEL INVALID_RECEIPT_REFERENCE INVALID_CURSOR"; break;
+            case 400: codes = "INVALID_REQUEST INVALID_JSON INVALID_HOST INVALID_REQUEST_KEY UNKNOWN_PLAN INVALID_CHANNEL INVALID_RECEIPT_REFERENCE INVALID_CURSOR INVALID_ACTUAL_AMOUNT INVALID_ACTUAL_CURRENCY"; break;
             case 401: codes = "AUTHENTICATION_REQUIRED"; break;
             case 403: codes = "FORBIDDEN BROWSER_SESSION_UNSUPPORTED"; break;
             case 404: codes = "NOT_FOUND ORDER_NOT_FOUND"; break;
@@ -499,8 +513,34 @@ public final class ManualOrderClient {
 
     private static String term(JsonObject object) throws OrderException {
         String term = string(object, "term");
-        if (!"calendar_year".equals(term) && !"fixed_days".equals(term)) throw invalid();
+        if (!"calendar_year".equals(term)) throw failure(FailureKind.UNSUPPORTED_CONTRACT);
         return term;
+    }
+
+    /** Identify unsupported fixed-price/term semantics without inventing a wire version field. */
+    private static void requireDonationContract(JsonObject value, boolean plan) throws OrderException {
+        if (value.containsKey("amount_minor")) nullAmount(value, "amount_minor");
+        if (value.containsKey("currency")) nullCurrency(value, "currency");
+        if (value.containsKey("term")) term(value);
+        if (value.containsKey("days") && integer(value, "days") != 0) throw failure(FailureKind.UNSUPPORTED_CONTRACT);
+        if (plan && value.containsKey("payment_mode") && !"donation".equals(string(value, "payment_mode"))) {
+            throw failure(FailureKind.UNSUPPORTED_CONTRACT);
+        }
+        if (plan && value.containsKey("expiry_policy") && !"sandbox_upload_only".equals(string(value, "expiry_policy"))) {
+            throw failure(FailureKind.UNSUPPORTED_CONTRACT);
+        }
+    }
+
+    private static Long nullAmount(JsonObject value, String key) throws OrderException {
+        if (value.get(key) == JsonNull.INSTANCE) return null;
+        integer(value, key); // Malformed amounts remain malformed responses, never a zero quote.
+        throw failure(FailureKind.UNSUPPORTED_CONTRACT);
+    }
+
+    private static String nullCurrency(JsonObject value, String key) throws OrderException {
+        if (value.get(key) == JsonNull.INSTANCE) return null;
+        matching(value, key, Pattern.compile("[A-Z]{3}"));
+        throw failure(FailureKind.UNSUPPORTED_CONTRACT);
     }
 
     private static void input(String value, Pattern pattern) throws OrderException {
@@ -528,6 +568,7 @@ public final class ManualOrderClient {
             case FORBIDDEN: text = "沙箱未允许这次操作。"; break;
             case CONFLICT: text = "沙箱订单状态有冲突，请刷新原订单。"; break;
             case SERVICE_UNAVAILABLE: text = "沙箱服务暂不可用。"; break;
+            case UNSUPPORTED_CONTRACT: text = "赞赏服务版本不支持。"; break;
             case REDIRECT_REJECTED: text = "已拒绝沙箱地址跳转。"; break;
             case RESPONSE_TOO_LARGE: text = "沙箱响应超过大小限制。"; break;
             case TIMEOUT: text = "沙箱请求超时。"; break;

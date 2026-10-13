@@ -133,9 +133,14 @@ public final class ManualPaymentSession implements AutoCloseable {
                 final Object result = value;
                 ui.post(() -> accepted(epoch, ticket, result));
             } catch (Exception failure) {
-                String code = failure instanceof ManualOrderClient.OrderException
-                        ? ((ManualOrderClient.OrderException) failure).errorCode : "SERVICE_UNAVAILABLE";
-                ui.post(() -> failed(epoch, ticket, code));
+                String code = "SERVICE_UNAVAILABLE";
+                if (failure instanceof ManualOrderClient.OrderException) {
+                    ManualOrderClient.OrderException orderFailure = (ManualOrderClient.OrderException) failure;
+                    code = orderFailure.kind == ManualOrderClient.FailureKind.UNSUPPORTED_CONTRACT
+                            ? "UNSUPPORTED_CONTRACT" : orderFailure.errorCode;
+                }
+                final String failureCode = code;
+                ui.post(() -> failed(epoch, ticket, failureCode));
             }
         }); } catch (RejectedExecutionException rejected) {
             flow.fail(ticket, "SERVICE_UNAVAILABLE");
@@ -193,12 +198,12 @@ public final class ManualPaymentSession implements AutoCloseable {
             } catch (Exception ignored) {
                 ui.post(() -> {
                     if (available() && epoch == attachment && imageEpoch == imageGeneration && key.equals(imageKey)) {
-                        imageTask = null; imageMessage = "收款图暂不可用，请刷新。"; changed();
+                        imageTask = null; imageMessage = "赞赏码暂不可用，请刷新。"; changed();
                     }
                 });
             }
         }); } catch (RejectedExecutionException rejected) {
-            imageMessage = "收款图暂不可用，请刷新。";
+            imageMessage = "赞赏码暂不可用，请刷新。";
         }
     }
     private String currentImageKey() {

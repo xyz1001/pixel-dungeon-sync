@@ -11,6 +11,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -42,9 +43,10 @@ public final class ManualPaymentSessionChecks {
         refreshedImageCancelsQueuedDownload();
         imageFailureCanRefresh();
         foregroundPreservesPollingBudget();
+        unsupportedContractMapsToLockedFlow();
         rejectedExecutorFailsClosed();
         cancellationConfirmationIsScopeBound();
-        copyUsesExactServerAmounts();
+        copyUsesDonationValidity();
         System.out.println("ManualPaymentSessionChecks: " + checks
                 + " checks passed (queued host fixtures; no sockets/device/account/payment)");
     }
@@ -78,6 +80,9 @@ public final class ManualPaymentSessionChecks {
             check(h.session.view().busy && !h.session.view().canCreate, "mine alone cannot create");
             h.roundTrip();
             check(h.session.view().canCreate && !h.session.canContinue(), "bootstrap enables create only");
+            eq("donation", h.session.view().plans.get(0).paymentMode, "bootstrap retains donation mode");
+            eq(null, h.session.view().plans.get(0).amountMinor, "bootstrap never fabricates a quoted price");
+            eq(null, h.session.view().plans.get(0).currency, "bootstrap has no quoted currency");
             h.session.selectPlan("fixture_b");
             eq("fixture_b", h.session.view().selectedPlanId, "session forwards explicit plan choice");
             h.session.selectPlan(PLAN);
@@ -90,8 +95,12 @@ public final class ManualPaymentSessionChecks {
             check(key != null && key.matches("[A-Za-z0-9_-]{16,80}"), "create has valid persisted key");
             h.roundTrip();
             eq(key, h.transport.field(h.transport.last(), "request_key"), "wire create uses saved key");
+            eq(Set.of("plan_id", "request_key"), h.transport.bodies.get(h.transport.last()).keySet(),
+                    "create sends only plan and idempotency key, never a donated amount");
             eq(ID, h.session.view().order.id, "returned order ID retained");
             eq("0007", h.session.view().order.remarkCode, "returned leading-zero remark retained");
+            eq(null, h.session.view().order.actualAmountMinor, "created order has no verified payment amount");
+            eq(null, h.session.view().order.actualCurrency, "created order has no verified payment currency");
             check(h.session.view().canSubmit && !h.session.canContinue(), "created remains blocked from Next");
             h.roundTrip();
             eq((byte) 1, h.session.paymentImage()[8], "injected image displayed only after matching order");
@@ -103,7 +112,10 @@ public final class ManualPaymentSessionChecks {
             eq(1, h.io.pending(), "repeated submit queues one request");
             h.roundTrip();
             eq(ID, h.transport.field(h.transport.last(), "order_id"), "submit uses returned ID");
+            eq(Set.of("order_id"), h.transport.bodies.get(h.transport.last()).keySet(),
+                    "payment claim never supplies an amount or currency");
             eq(ManualPaymentFlow.Phase.REVIEW, h.session.view().phase, "submit enters review, not approval");
+            eq(null, h.session.view().order.actualAmountMinor, "review does not treat the claim as verified payment");
             check(h.session.paymentImage() == null, "review never exposes a stale created-order payment image");
             check(!h.session.canContinue() && !h.session.view().canTestDav, "review cannot bypass DAV gate");
             eq(2_000L, h.ui.nextDelay(), "submit after long dwell starts fresh bounded polling");
@@ -112,10 +124,14 @@ public final class ManualPaymentSessionChecks {
             h.transport.json("GET", "/api/order/status/" + ID, order(ID, "applying"));
             h.ui.advance(1); h.roundTrip();
             eq(ManualPaymentFlow.Phase.APPLYING, h.session.view().phase, "poll can observe applying");
+            eq(Long.valueOf(123), h.session.view().order.actualAmountMinor, "applying retains reviewer-confirmed amount");
+            eq("CNY", h.session.view().order.actualCurrency, "applying retains reviewer-confirmed currency");
             eq(4_000L, h.ui.nextDelay(), "review polling backs off");
             h.transport.json("GET", "/api/order/status/" + ID, order(ID, "approved"));
             h.ui.advance(4_000); h.roundTrip();
             check(h.session.view().canTestDav && !h.session.canContinue(), "approval still requires explicit DAV test");
+            eq(Long.valueOf(123), h.session.view().order.actualAmountMinor, "approval preserves actual amount");
+            eq(null, h.session.view().order.amountMinor, "approval does not turn actual amount into a quoted price");
             eq(0, h.ui.delayed.size(), "approval removes automatic polling");
             h.dav.failures = 1;
             h.session.testDav(); h.session.testDav();
@@ -304,7 +320,7 @@ public final class ManualPaymentSessionChecks {
             h.transport.failure("GET", imagePath(), new IOException("synthetic private diagnostic"));
             h.session.create(); h.roundTrip(); h.roundTrip();
             check(h.session.paymentImage() == null, "failed image has no bytes");
-            eq("收款图暂不可用，请刷新。", h.session.imageMessage(), "image error is fixed safe copy");
+            eq("赞赏码暂不可用，请刷新。", h.session.imageMessage(), "image error is fixed safe copy");
             h.transport.json("GET", "/api/order/status/" + ID, order(ID, "created"));
             h.transport.png(5);
             h.session.refresh(); h.roundTrip(); h.roundTrip();
@@ -339,6 +355,49 @@ public final class ManualPaymentSessionChecks {
         }
     }
 
+    private static void unsupportedContractMapsToLockedFlow() throws Exception {
+        // Explicit negative regression: a fixed-price quote is unsupported even in a v2-shaped response.
+        String unsupported = order(ID, "approved").replace("\"amount_minor\":null", "\"amount_minor\":123");
+        byte[] envelope = ("{\"sandbox\":true,\"data\":" + unsupported + "}").getBytes(StandardCharsets.UTF_8);
+        ManualOrderClient client = new ManualOrderClient("http://127.0.0.1:18080",
+                request -> new ManualOrderClient.Response(200, "application/json", envelope));
+        try {
+            client.status(ID);
+            throw new AssertionError("fixed-price response must be unsupported");
+        } catch (ManualOrderClient.OrderException failure) {
+            eq(ManualOrderClient.FailureKind.UNSUPPORTED_CONTRACT, failure.kind, "client identifies unsupported contract");
+            eq(null, failure.errorCode, "unsupported local parsing failure has no wire error code");
+        }
+        try (Harness h = new Harness(true)) {
+            h.boot(A, "[" + order(ID, "review") + "]");
+            h.transport.json("GET", "/api/order/status/" + ID, order(ID, "approved"));
+            h.session.refresh(); h.roundTrip();
+            h.session.testDav(); h.roundTrip();
+            check(h.session.canContinue(), "approved session starts with verified continuation");
+            h.transport.json("GET", "/api/order/status/" + ID, unsupported);
+            h.session.refresh(); h.roundTrip();
+            eq(ManualPaymentFlow.Phase.ERROR, h.session.view().phase, "unsupported parsing kind locks session flow");
+            eq("赞赏服务版本不支持", h.session.view().message, "session maps failure kind despite null wire error code");
+            check(!h.session.canContinue() && !h.session.view().canTestDav, "unsupported response revokes prior DAV success");
+            h.session.create(); h.session.submit(); h.session.testDav();
+            eq(0, h.io.pending(), "unsupported contract actions enqueue no requests");
+            eq(0, h.ui.delayed.size(), "unsupported contract leaves no poll timer");
+            h.queueBootstrap("[" + order(ID, "approved") + "]");
+            h.session.refresh(); h.roundTrip();
+            eq("/api/order/plans", h.transport.last().url().encodedPath(), "explicit refresh starts at plans");
+            check(!h.session.view().canTestDav, "plans cannot restore approved DAV gate");
+            h.roundTrip();
+            eq("/api/order/mine", h.transport.last().url().encodedPath(), "refresh reloads orders");
+            check(!h.session.view().canTestDav, "orders cannot skip fresh entitlement");
+            h.roundTrip();
+            eq("/api/order/entitlement", h.transport.last().url().encodedPath(), "refresh reloads entitlement");
+            check(h.session.view().canTestDav && !h.session.canContinue(), "full bootstrap restores only fresh DAV eligibility");
+            h.session.testDav(); h.roundTrip();
+            check(h.session.canContinue(), "fresh DAV test restores session continuation");
+            h.assertSettled();
+        }
+    }
+
     private static void rejectedExecutorFailsClosed() throws Exception {
         try (Harness h = new Harness(true)) {
             h.io.shutdown();
@@ -367,7 +426,7 @@ public final class ManualPaymentSessionChecks {
             h.io.shutdown(); h.ui.flush();
             check(!h.session.view().busy && h.session.view().canSubmit, "rejected image executor preserves accepted order state");
             check(h.session.paymentImage() == null, "rejected image executor never fabricates bytes");
-            eq("收款图暂不可用，请刷新。", h.session.imageMessage(), "rejected image executor has short safe error");
+            eq("赞赏码暂不可用，请刷新。", h.session.imageMessage(), "rejected image executor has short safe error");
             h.assertSettled();
         }
     }
@@ -398,23 +457,11 @@ public final class ManualPaymentSessionChecks {
         }
     }
 
-    private static void copyUsesExactServerAmounts() {
-        eq("CNY 0.00", ManualPaymentCopy.amount(0, "CNY"), "zero minor amount");
-        eq("CNY 0.01", ManualPaymentCopy.amount(1, "CNY"), "CNY fractional minor amount");
-        eq("CNY 1.23", ManualPaymentCopy.amount(123, "CNY"), "CNY normal amount");
-        eq("JPY 123", ManualPaymentCopy.amount(123, "JPY"), "JPY has no fractional currency digits");
-        eq("JPY 0", ManualPaymentCopy.amount(0, "JPY"), "JPY zero");
-        eq("CNY 90071992547409.93", ManualPaymentCopy.amount(9_007_199_254_740_993L, "CNY"), "amount never rounds through double");
-        eq("CNY 92233720368547758.07", ManualPaymentCopy.amount(Long.MAX_VALUE, "CNY"), "maximum long exact decimal");
-        eq("123 ZZZ（最小单位）", ManualPaymentCopy.amount(123, "ZZZ"), "unknown currency preserves minor units");
-        eq("0 ZZZ（最小单位）", ManualPaymentCopy.amount(0, "ZZZ"), "unknown currency zero");
-        eq("123 XXX（最小单位）", ManualPaymentCopy.amount(123, "XXX"), "undefined fraction digits preserve minor units");
-        eq("一年", ManualPaymentCopy.term("calendar_year", 0), "calendar year copy");
-        eq("7 天", ManualPaymentCopy.term("fixed_days", 7), "fixed days use returned value");
-        String[] states = {"待付款", "待核款", "开通中", "沙箱已开通", "已取消", "未通过"};
-        int i = 0;
-        for (ManualOrderClient.State state : ManualOrderClient.State.values())
-            eq(states[i++], ManualPaymentCopy.orderState(state), "state label " + state);
+    private static void copyUsesDonationValidity() {
+        String validity = ManualPaymentCopy.validity();
+        eq("确认赞赏后一年有效，未到期顺延一年。", validity, "short donation validity copy");
+        check(!validity.contains("年费") && !validity.contains("价格") && !validity.contains("CNY")
+                && !validity.contains("¥") && !validity.contains("￥"), "validity copy has no fixed price or annual fee");
     }
 
     private static final class MemoryStore implements ManualPaymentFlow.DraftStore {
@@ -581,20 +628,23 @@ public final class ManualPaymentSessionChecks {
     }
 
     private static String imagePath() { return "/api/order/payment-image/" + PLAN; }
-    private static String common(long amount) {
-        return "\"currency\":\"CNY\",\"term\":\"fixed_days\",\"amount_minor\":" + amount
-                + ",\"days\":1,\"quota_bytes\":1024,\"upload_kbps\":1,\"download_kbps\":1";
+    private static String common() {
+        return "\"currency\":null,\"term\":\"calendar_year\",\"amount_minor\":null"
+                + ",\"days\":0,\"quota_bytes\":1024,\"upload_kbps\":1,\"download_kbps\":1";
     }
-    private static String plans() { return "[" + plan(PLAN, 123) + "," + plan("fixture_b", 0) + "]"; }
-    private static String plan(String id, long amount) {
-        return "{\"id\":\"" + id + "\"," + common(amount) + ",\"display_name\":\"Synthetic session fixture\","
+    private static String plans() { return "[" + plan(PLAN) + "," + plan("fixture_b") + "]"; }
+    private static String plan(String id) {
+        return "{\"id\":\"" + id + "\"," + common() + ",\"display_name\":\"Synthetic session fixture\","
                 + "\"payment_instructions\":\"No payment\",\"payment_image_path\":\"/api/order/payment-image/" + id
-                + "\",\"expiry_policy\":\"sandbox_ledger_only\"}";
+                + "\",\"expiry_policy\":\"sandbox_upload_only\",\"payment_mode\":\"donation\"}";
     }
     private static String order(String id, String state) {
-        return "{\"id\":\"" + id + "\",\"plan_id\":\"" + PLAN + "\"," + common(123)
+        boolean reserved = state.equals("approved") || state.equals("applying");
+        return "{\"id\":\"" + id + "\",\"plan_id\":\"" + PLAN + "\"," + common()
                 + ",\"remark_code\":\"0007\",\"created_ms\":1,\"target_ms\":"
-                + (state.equals("approved") || state.equals("applying") ? "100" : "null")
+                + (reserved ? "100" : "null")
+                + ",\"actual_amount_minor\":" + (reserved ? "123" : "null")
+                + ",\"actual_currency\":" + (reserved ? "\"CNY\"" : "null")
                 + ",\"state\":\"" + state + "\"}";
     }
     private static void check(boolean condition, String message) {

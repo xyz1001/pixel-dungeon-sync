@@ -43,12 +43,15 @@ with patch('socket.socket', side_effect=AssertionError('Host tests must not open
             return orders.Principal('synthetic-fixture-owner')
     class Ledger:
         expiry = None
+        fail_once = True
         def ensure(self, username, expires_at_ms, operation_id):
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeError("synthetic first application is unresolved")
             self.expiry = expires_at_ms
         def observed_expiry(self, username):
             return self.expiry
-    plan = orders.Plan('fixture_year', 123, 'CNY', 'calendar_year', 'sandbox_ledger_only',
-                       quota_bytes=1, upload_kbps=1, download_kbps=1)
+    plan = orders.Plan('fixture_year', quota_bytes=1, upload_kbps=1, download_kbps=1)
     display = http_api.SandboxDisplay('仅沙箱 🧪', '合成测试，没有真实收款', b'\x89PNG\r\n\x1a\nfixture')
     fixtures = []
     with tempfile.TemporaryDirectory(prefix='pdsync-orders-host-') as temp:
@@ -81,7 +84,15 @@ with patch('socket.socket', side_effect=AssertionError('Host tests must not open
         fixtures.append(invoke('POST', '/api/order/submit', {'order_id': oid}))
         fixtures.append(invoke('GET', '/api/order/entitlement'))
         # Pure in-memory fixture approval, not an HTTP administrator call or real payment.
-        service.approve(orders.Principal('synthetic-fixture-admin', 'admin'), oid, 'synthetic-receipt', 'sandbox')
+        admin = orders.Principal('synthetic-fixture-admin', 'admin')
+        try:
+            service.approve(admin, oid, 'synthetic-receipt', 'sandbox', 123, 'CNY')
+            raise AssertionError('synthetic adapter should require a retry')
+        except orders.OrderError as error:
+            assert error.status == 503 and error.code == 'ENTITLEMENT_RETRY_REQUIRED'
+        applying = invoke('GET', '/api/order/status/' + oid)
+        assert applying['data']['state'] == 'applying'
+        service.retry(admin, oid)
         fixtures.append(invoke('GET', '/api/order/status/' + oid))
         fixtures.append(invoke('GET', '/api/order/entitlement'))
         next_order = invoke('POST', '/api/order/create', {'plan_id': plan.id, 'request_key': 'synthetic-stable-key-002'})
@@ -95,6 +106,7 @@ with patch('socket.socket', side_effect=AssertionError('Host tests must not open
         status, result = service.dispatch('GET', '/api/order/plans')
         assert status == 503
         fixtures.append(result)
+        fixtures.append(applying)
     pathlib.Path(sys.argv[2]).write_text('\n'.join(json.dumps(value, ensure_ascii=False) for value in fixtures) + '\n', encoding='utf-8')
 PY
 CP="$CORE:$(find -L "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"

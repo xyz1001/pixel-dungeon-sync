@@ -25,13 +25,13 @@ public final class ManualOrderClientChecks {
     private static final String OTHER_ID = "fedcba9876543210fedcba9876543210";
     private static final String KEY = "stable-synthetic-request-001";
     private static final String SECRET = "NEVER_ECHO_SYNTHETIC_SECRET";
-    private static final String NUMBERS = "\"amount_minor\":123,\"days\":0,\"quota_bytes\":0,\"upload_kbps\":0,\"download_kbps\":0";
-    private static final String PLAN = "{\"id\":\"fixture_year\",\"currency\":\"CNY\",\"term\":\"calendar_year\","
+    private static final String NUMBERS = "\"amount_minor\":null,\"days\":0,\"quota_bytes\":0,\"upload_kbps\":0,\"download_kbps\":0";
+    private static final String PLAN = "{\"id\":\"fixture_year\",\"currency\":null,\"term\":\"calendar_year\","
             + NUMBERS + ",\"display_name\":\"仅沙箱 🧪\",\"payment_instructions\":\"合成测试\\n没有真实收款\","
-            + "\"payment_image_path\":\"/api/order/payment-image/fixture_year\",\"expiry_policy\":\"sandbox_ledger_only\"}";
-    private static final String ORDER = "{\"id\":\"" + ID + "\",\"plan_id\":\"fixture_year\",\"currency\":\"CNY\","
+            + "\"payment_image_path\":\"/api/order/payment-image/fixture_year\",\"expiry_policy\":\"sandbox_upload_only\",\"payment_mode\":\"donation\"}";
+    private static final String ORDER = "{\"id\":\"" + ID + "\",\"plan_id\":\"fixture_year\",\"currency\":null,"
             + "\"term\":\"calendar_year\"," + NUMBERS
-            + ",\"state\":\"created\",\"remark_code\":\"0007\",\"created_ms\":0,\"target_ms\":null}";
+            + ",\"state\":\"created\",\"remark_code\":\"0007\",\"created_ms\":0,\"target_ms\":null,\"actual_amount_minor\":null,\"actual_currency\":null}";
     private static final String ENTITLEMENT = "{\"source\":\"sandbox_ledger\",\"expires_ms\":null,\"active\":false}";
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 0};
 
@@ -40,6 +40,7 @@ public final class ManualOrderClientChecks {
         endpointAndInputGuards();
         strictEnvelopeAndJson();
         exactFieldsAndNumbers();
+        donationContractAndVerifiedActuals();
         identityStateAndReferences();
         imagesAndBounds();
         allContractErrors();
@@ -98,14 +99,16 @@ public final class ManualOrderClientChecks {
         check(ManualOrderClient.class.getConstructors().length == 1, "no default endpoint or transport constructor");
         List<Plan> plans = client.plans();
         Plan plan = plans.get(0);
-        check(plan.amountMinor == 123 && plan.days == 0 && plan.quotaBytes == 0 && plan.uploadKbps == 0
+        check(plan.amountMinor == null && plan.currency == null && plan.days == 0 && plan.quotaBytes == 0 && plan.uploadKbps == 0
                 && plan.downloadKbps == 0, "schema zero quotas are accepted unchanged");
         check(plan.displayName.equals("仅沙箱 🧪") && plan.paymentInstructions.contains("\n"), "valid Unicode and escaped newline retained");
-        check(plan.expiryPolicy.equals("sandbox_ledger_only") && plan.term.equals("calendar_year"), "sandbox-only policy");
+        check(plan.expiryPolicy.equals("sandbox_upload_only") && plan.paymentMode.equals("donation") && plan.term.equals("calendar_year"), "sandbox-only policy");
         expectUnsupported(() -> plans.clear());
         List<Order> orders = client.mine();
         expectUnsupported(() -> orders.clear());
         check(orders.get(0).remarkCode.equals("0007"), "four digit code preserves leading zeroes");
+        check(orders.get(0).amountMinor == null && orders.get(0).currency == null
+                && orders.get(0).actualAmountMinor == null && orders.get(0).actualCurrency == null, "unverified donation has no quote or actual amount");
         check(!client.entitlement().active && client.entitlement().expiresMs == null, "empty sandbox ledger stays unknown for remote rights");
         check(client.status(ID).id.equals(ID), "status id");
         client.create(plan.id, KEY);
@@ -206,7 +209,7 @@ public final class ManualOrderClientChecks {
             fail(() -> fixed(200, wrap(removed)).status(ID), FailureKind.INVALID_RESPONSE, false);
             fail(() -> fixed(200, wrap(mutate(ORDER, key, "[]"))).status(ID), FailureKind.INVALID_RESPONSE, false);
         }
-        for (String field : new String[] {"amount_minor", "days", "quota_bytes", "upload_kbps", "download_kbps", "created_ms", "target_ms"}) {
+        for (String field : new String[] {"quota_bytes", "upload_kbps", "download_kbps", "created_ms", "target_ms"}) {
             for (String invalid : new String[] {"-1", "1.0", "1e3", "01", "+1", "-0", "1.", "NaN", "Infinity", "true", "\"0\"", "9223372036854775808"}) {
                 fail(() -> fixed(200, wrap(mutate(ORDER, field, invalid))).status(ID), FailureKind.INVALID_RESPONSE, false);
             }
@@ -216,9 +219,9 @@ public final class ManualOrderClientChecks {
         }
         for (String key : ((JsonObject) Json.Default.parseToJsonElement(PLAN)).keySet()) {
             fail(() -> fixed(200, wrap("[" + mutate(PLAN, key, null) + "]")).plans(), FailureKind.INVALID_RESPONSE, false);
+            fail(() -> fixed(200, wrap("[" + mutate(PLAN, key, "[]") + "]")).plans(), FailureKind.INVALID_RESPONSE, false);
         }
-        for (String value : new String[] {PLAN.replace("\"amount_minor\":123", "\"amount_minor\":0"),
-                PLAN.replace("calendar_year", "fixed_days"), PLAN.replace("仅沙箱 🧪", "")}) {
+        for (String value : new String[] {PLAN.replace("仅沙箱 🧪", "")}) {
             check(fixed(200, wrap("[" + value + "]")).plans().size() == 1, "do not invent additional product limits beyond response schema");
         }
         for (String value : new String[] {mutate(ORDER, "owner", "\"" + SECRET + "\""),
@@ -247,12 +250,88 @@ public final class ManualOrderClientChecks {
         check(entitlement.active && entitlement.expiresMs == 0, "preserve schema-valid ledger values without inferring subscription rules");
     }
 
+    private static void donationContractAndVerifiedActuals() throws Exception {
+        // Literal old v1 shapes are negative fixtures only. There is no invented version negotiation.
+        String oldPlan = "{\"id\":\"fixture_year\",\"currency\":\"CNY\",\"amount_minor\":123,\"days\":0,"
+                + "\"quota_bytes\":0,\"upload_kbps\":0,\"download_kbps\":0,\"term\":\"calendar_year\","
+                + "\"display_name\":\"synthetic old plan\",\"payment_instructions\":\"synthetic only\","
+                + "\"payment_image_path\":\"/api/order/payment-image/fixture_year\",\"expiry_policy\":\"sandbox_ledger_only\"}";
+        String oldOrder = "{\"id\":\"" + ID + "\",\"plan_id\":\"fixture_year\",\"currency\":\"CNY\","
+                + "\"amount_minor\":123,\"days\":0,\"quota_bytes\":0,\"upload_kbps\":0,\"download_kbps\":0,"
+                + "\"created_ms\":0,\"term\":\"calendar_year\",\"state\":\"created\",\"remark_code\":\"0007\",\"target_ms\":null}";
+        OrderException old = fail(() -> fixed(200, wrap("[" + oldPlan + "]")).plans(), FailureKind.UNSUPPORTED_CONTRACT, false);
+        check(old.userMessage().equals("赞赏服务版本不支持。") && old.httpStatus == 0 && old.errorCode == null,
+                "unsupported contract has local short message without pretending it is an API error code");
+        fail(() -> fixed(200, wrap(oldOrder)).status(ID), FailureKind.UNSUPPORTED_CONTRACT, false);
+        fail(() -> fixed(200, wrap("[" + oldOrder + "]")).mine(), FailureKind.UNSUPPORTED_CONTRACT, false);
+        fail(() -> fixed(200, wrap(oldOrder)).create("fixture_year", KEY), FailureKind.UNSUPPORTED_CONTRACT, true);
+        fail(() -> fixed(200, wrap(oldOrder)).submit(ID), FailureKind.UNSUPPORTED_CONTRACT, true);
+        fail(() -> fixed(200, wrap(oldOrder)).cancel(ID), FailureKind.UNSUPPORTED_CONTRACT, true);
+        for (String field : new String[] {"amount_minor", "currency", "term", "days"}) {
+            String unsupported = field.equals("currency") ? "\"CNY\"" : field.equals("term") ? "\"fixed_days\"" : "1";
+            fail(() -> fixed(200, wrap(mutate(ORDER, field, unsupported))).status(ID), FailureKind.UNSUPPORTED_CONTRACT, false);
+            fail(() -> fixed(200, wrap("[" + mutate(PLAN, field, unsupported) + "]")).plans(), FailureKind.UNSUPPORTED_CONTRACT, false);
+        }
+        for (String quote : new String[] {"0", "1", "9223372036854775807"}) {
+            fail(() -> fixed(200, wrap(mutate(ORDER, "amount_minor", quote))).status(ID), FailureKind.UNSUPPORTED_CONTRACT, false);
+            fail(() -> fixed(200, wrap("[" + mutate(PLAN, "amount_minor", quote) + "]")).plans(), FailureKind.UNSUPPORTED_CONTRACT, false);
+        }
+        for (String field : new String[] {"payment_mode", "expiry_policy"}) {
+            for (String unsupported : new String[] {"fixed_price", "subscription", "sandbox_ledger_only", "unknown", ""}) {
+                fail(() -> fixed(200, wrap("[" + mutate(PLAN, field, "\"" + unsupported + "\"") + "]")).plans(),
+                        FailureKind.UNSUPPORTED_CONTRACT, false);
+            }
+        }
+        for (String field : new String[] {"amount_minor", "days", "actual_amount_minor"}) {
+            for (String invalid : new String[] {"-1", "1.0", "1e3", "01", "+1", "-0", "1.", "NaN", "Infinity", "true", "\"0\"", "9223372036854775808"}) {
+                fail(() -> fixed(200, wrap(mutate(ORDER, field, invalid))).status(ID), FailureKind.INVALID_RESPONSE, false);
+            }
+        }
+        for (State state : State.values()) {
+            String order = withState(state);
+            Order decoded = fixed(200, wrap(order)).status(ID);
+            check(decoded.amountMinor == null && decoded.currency == null, "all states preserve an absent quote");
+            boolean recorded = state == State.APPLYING || state == State.APPROVED;
+            check(recorded ? decoded.actualAmountMinor == 123 && "CNY".equals(decoded.actualCurrency)
+                    : decoded.actualAmountMinor == null && decoded.actualCurrency == null, "actuals appear only after manual approval is recorded");
+            if (recorded) {
+                for (String valid : new String[] {"1", "100000000", "9223372036854775807"}) {
+                    check(fixed(200, wrap(mutate(order, "actual_amount_minor", valid))).status(ID).actualAmountMinor == Long.parseLong(valid),
+                            "verified positive integer boundary retained exactly");
+                }
+                for (String invalid : new String[] {"0", "null", "-1", "1.5", "true", "\"1\"", "9223372036854775808"}) {
+                    fail(() -> fixed(200, wrap(mutate(order, "actual_amount_minor", invalid))).status(ID), FailureKind.INVALID_RESPONSE, false);
+                }
+                for (String invalid : new String[] {"null", "\"\"", "\"cny\"", "\"CN\"", "\"CNYX\"", "1", "[]"}) {
+                    fail(() -> fixed(200, wrap(mutate(order, "actual_currency", invalid))).status(ID), FailureKind.INVALID_RESPONSE, false);
+                }
+            } else {
+                fail(() -> fixed(200, wrap(mutate(order, "actual_amount_minor", "123"))).status(ID), FailureKind.INVALID_RESPONSE, false);
+                fail(() -> fixed(200, wrap(mutate(order, "actual_currency", "\"CNY\""))).status(ID), FailureKind.INVALID_RESPONSE, false);
+                String forged = mutate(mutate(order, "actual_amount_minor", "123"), "actual_currency", "\"CNY\"");
+                fail(() -> fixed(200, wrap(forged)).status(ID), FailureKind.INVALID_RESPONSE, false);
+            }
+        }
+        fail(() -> fixed(200, wrap(mutate(ORDER, "payment_mode", "\"donation\""))).status(ID), FailureKind.INVALID_RESPONSE, false);
+        fail(() -> fixed(200, wrap(mutate(ORDER, "expiry_policy", "\"sandbox_upload_only\""))).status(ID), FailureKind.INVALID_RESPONSE, false);
+        fail(() -> fixed(200, mutate(wrap(ORDER), "version", "2")).status(ID), FailureKind.INVALID_RESPONSE, false);
+    }
+
+    private static String withState(State state) {
+        String order = mutate(ORDER, "state", "\"" + state.name().toLowerCase(java.util.Locale.ROOT) + "\"");
+        if (state == State.APPLYING || state == State.APPROVED) {
+            order = mutate(mutate(order, "actual_amount_minor", "123"), "actual_currency", "\"CNY\"");
+            order = mutate(order, "target_ms", "1731536000000");
+        }
+        return order;
+    }
+
     private static void identityStateAndReferences() throws Exception {
         for (String bad : new String[] {"CREATED", "paid", "expired", "", "unknown", " approved"}) {
             fail(() -> fixed(200, wrap(mutate(ORDER, "state", "\"" + bad + "\""))).status(ID), FailureKind.INVALID_RESPONSE, false);
         }
         for (State state : State.values()) {
-            check(fixed(200, wrap(mutate(ORDER, "state", "\"" + state.name().toLowerCase(java.util.Locale.ROOT) + "\"")))
+            check(fixed(200, wrap(withState(state)))
                     .status(ID).state == state, "all documented states map exactly");
         }
         for (String code : new String[] {"7", "007", "00007", "１２３４", "abcd", "-007", "0\n07"}) {
@@ -262,7 +341,7 @@ public final class ManualOrderClientChecks {
         for (String code : new String[] {"0000", "0007", "9999"}) {
             check(fixed(200, wrap(mutate(ORDER, "remark_code", "\"" + code + "\""))).status(ID).remarkCode.equals(code), "remark string boundary");
         }
-        for (String key : new String[] {"id", "plan_id", "currency", "term"}) {
+        for (String key : new String[] {"id", "plan_id", "currency"}) {
             fail(() -> fixed(200, wrap(mutate(ORDER, key, "\"../unsafe\""))).status(ID), FailureKind.INVALID_RESPONSE, false);
         }
         String mismatch = wrap(ORDER.replace(ID, OTHER_ID));
@@ -270,7 +349,7 @@ public final class ManualOrderClientChecks {
         fail(() -> fixed(200, mismatch).submit(ID), FailureKind.INVALID_RESPONSE, true);
         fail(() -> fixed(200, mismatch).cancel(ID), FailureKind.INVALID_RESPONSE, true);
         fail(() -> fixed(200, wrap(ORDER)).create("different_plan", KEY), FailureKind.INVALID_RESPONSE, true);
-        check(fixed(200, wrap(ORDER.replace("created\"", "approved\""))).create("fixture_year", KEY).state == State.APPROVED,
+        check(fixed(200, wrap(withState(State.APPROVED))).create("fixture_year", KEY).state == State.APPROVED,
                 "idempotent create accepts original completed order");
     }
 
@@ -311,7 +390,7 @@ public final class ManualOrderClientChecks {
 
     private static void allContractErrors() throws Exception {
         String[] groups = {
-            "400 INVALID_REQUEST INVALID_JSON INVALID_HOST INVALID_REQUEST_KEY UNKNOWN_PLAN INVALID_CHANNEL INVALID_RECEIPT_REFERENCE INVALID_CURSOR",
+            "400 INVALID_REQUEST INVALID_JSON INVALID_HOST INVALID_REQUEST_KEY UNKNOWN_PLAN INVALID_CHANNEL INVALID_RECEIPT_REFERENCE INVALID_CURSOR INVALID_ACTUAL_AMOUNT INVALID_ACTUAL_CURRENCY",
             "401 AUTHENTICATION_REQUIRED", "403 FORBIDDEN BROWSER_SESSION_UNSUPPORTED", "404 NOT_FOUND ORDER_NOT_FOUND",
             "405 METHOD_NOT_ALLOWED", "409 PENDING_ORDER_EXISTS IDEMPOTENCY_CONFLICT INVALID_STATE PAYMENT_NOT_SUBMITTED RECEIPT_ALREADY_USED APPROVAL_CONFLICT APPROVAL_IN_PROGRESS APPROVAL_NOT_RESERVED",
             "413 REQUEST_TOO_LARGE", "415 JSON_REQUIRED", "503 PAYMENTS_DISABLED SANDBOX_DISPLAY_REQUIRED REMARK_CODES_EXHAUSTED ENTITLEMENT_RETRY_REQUIRED DATABASE_UNAVAILABLE SERVICE_UNAVAILABLE"};
@@ -384,25 +463,33 @@ public final class ManualOrderClientChecks {
             @Override public void cancelPending() { throw new IllegalStateException(SECRET); }
         }).cancelPending();
         check(true, "cancellation exception does not escape or disclose transport content");
-        check(fixed(200, wrap(mutate(ORDER, "amount_minor", "9007199254740993"))).status(ID).amountMinor
-                == 9007199254740993L, "minor-unit amount does not round through floating point");
+        check(fixed(200, wrap(mutate(withState(State.APPROVED), "actual_amount_minor", "9007199254740993"))).status(ID).actualAmountMinor
+                == 9007199254740993L, "verified minor-unit amount does not round through floating point");
     }
 
     private static void serverInterop(String file) throws Exception {
         List<String> fixtures = Files.readAllLines(Paths.get(file), StandardCharsets.UTF_8);
-        check(fixtures.size() == 9, "fixtures cover actual adapter data plus default denial and disablement");
+        check(fixtures.size() == 10, "fixtures cover v2 producer, reserved approval, default denial and disablement");
         Plan plan = fixed(200, fixtures.get(0)).plans().get(0);
-        check(plan.id.equals("fixture_year") && plan.amountMinor == 123 && plan.paymentImagePath.endsWith(plan.id), "real checked-in plan producer");
+        check(plan.id.equals("fixture_year") && plan.amountMinor == null && plan.currency == null
+                && plan.paymentMode.equals("donation") && plan.expiryPolicy.equals("sandbox_upload_only")
+                && plan.paymentImagePath.endsWith(plan.id), "real checked-in plan producer");
         Order created = fixed(200, fixtures.get(1)).mine().get(0);
-        check(created.state == State.CREATED && created.remarkCode.length() == 4, "real create producer");
+        check(created.state == State.CREATED && created.remarkCode.length() == 4 && created.amountMinor == null
+                && created.currency == null && created.actualAmountMinor == null && created.actualCurrency == null, "real create producer preserves nulls");
         check(fixed(200, fixtures.get(2)).submit(created.id).state == State.REVIEW, "real submit producer");
         check(fixed(200, fixtures.get(3)).entitlement().expiresMs == null, "real empty entitlement producer");
-        check(fixed(200, fixtures.get(4)).status(created.id).state == State.APPROVED, "real approved producer");
+        Order approved = fixed(200, fixtures.get(4)).status(created.id);
+        check(approved.state == State.APPROVED && approved.amountMinor == null && approved.currency == null
+                && approved.actualAmountMinor == 123 && "CNY".equals(approved.actualCurrency), "real approval records actual payment separately");
         check(fixed(200, fixtures.get(5)).entitlement().active, "real sandbox ledger approval");
         Order cancelled = fixed(200, fixtures.get(6)).mine().get(0);
         check(cancelled.state == State.CANCELLED, "real cancelled producer");
         fail(() -> fixed(401, fixtures.get(7)).plans(), FailureKind.AUTHENTICATION_REQUIRED, false);
         fail(() -> fixed(503, fixtures.get(8)).plans(), FailureKind.SERVICE_UNAVAILABLE, false);
+        Order applying = fixed(200, fixtures.get(9)).status(created.id);
+        check(applying.state == State.APPLYING && applying.actualAmountMinor == 123 && "CNY".equals(applying.actualCurrency)
+                && applying.targetMs.equals(approved.targetMs), "real unresolved application preserves verified actuals and frozen target");
     }
 
     private static String wrap(String data) { return "{\"sandbox\":true,\"data\":" + data + "}"; }
