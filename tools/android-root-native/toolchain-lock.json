@@ -4,7 +4,7 @@
   "debian_version": "1:19.1.7-3+b1",
   "android_sysroot_revision": "f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f",
   "api": 26,
-  "download_bytes": 18341146,
+  "download_bytes": 18341244,
   "existing_llvm": {
     "path": "/usr/lib/x86_64-linux-gnu/libLLVM.so.19.1",
     "bytes": 129673080,
@@ -43,8 +43,10 @@
       "kind": "android-headers",
       "file": "android-headers.tar.gz",
       "url": "https://android.googlesource.com/platform/prebuilts/ndk/+archive/f8b85cc5262c6e5cbc9a92c1bab2b18b32a4c63f/platform/sysroot/usr/include.tar.gz",
-      "bytes": 1966302,
-      "sha256": "e9bb87e776003ecf8da57604103ca992b40db4c00f9f767450067d7aae78785e"
+      "bytes": 1966400,
+      "sha256": "3f668043979e220959697dcd8dd025fdbf6aba6b32ce946049a6879cf4e6e033",
+      "verified_git_tree_sha1": "cfad5dc3c662177cd7f758170c9b9746f6907758",
+      "archive_refresh_note": "2026-10-13: regenerated transport archive; all 1584 file blobs and 78 directories reproduce the same pinned commit include Git tree. Extraction remains gated by this exact archive size and SHA-256."
     },
     {
       "kind": "android-libc-stub",
