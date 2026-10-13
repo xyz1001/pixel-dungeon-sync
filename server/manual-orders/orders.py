@@ -249,6 +249,11 @@ class Orders:
                 target = extend_ms(max(self.clock(), current[0] if current else 0), row['term'], row['days'])
                 db.execute("UPDATE orders SET state='applying',target_ms=?,reviewer=?,receipt_ref=?,channel=?,actual_amount_minor=?,actual_currency=? WHERE id=?",
                            (target, principal.subject, receipt_ref, channel, actual_amount_minor, actual_currency, oid))
+                # The approved donation and durable application task commit
+                # together. The permission worker consumes this desired ledger.
+                # Remote failure cannot undo payment or add another term later.
+                db.execute('INSERT INTO entitlements VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET expires_ms=excluded.expires_ms',
+                           (row['owner'], target))
                 self.audit(db, oid, principal.subject, 'approval_reserved')
             else:
                 raise OrderError(409, 'PAYMENT_NOT_SUBMITTED')
@@ -281,8 +286,7 @@ class Orders:
             if failed:
                 self.audit(db, oid, principal.subject, 'apply_retry_required')
             else:
-                db.execute('INSERT INTO entitlements VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET expires_ms=excluded.expires_ms',
-                           (row['owner'], row['target_ms']))
+                # Application confirmation never calculates/writes entitlement.
                 db.execute("UPDATE orders SET state='approved' WHERE id=?", (oid,))
                 self.audit(db, oid, principal.subject, 'approved')
             result = self.public(self.owned(db, oid, principal))
@@ -345,8 +349,9 @@ class Orders:
             elif path == '/api/order/entitlement':
                 with self.connect() as db:
                     row = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (principal.subject,)).fetchone()
+                    applying = db.execute("SELECT 1 FROM orders WHERE owner=? AND state='applying'", (principal.subject,)).fetchone()
                     result = {'source': 'sandbox_ledger', 'expires_ms': row[0] if row else None,
-                              'active': bool(row and row[0] > self.clock())}
+                              'active': bool(row and row[0] > self.clock() and not applying)}
             elif path == '/api/order/mine':
                 with self.connect() as db:
                     result = [self.public(r) for r in db.execute(

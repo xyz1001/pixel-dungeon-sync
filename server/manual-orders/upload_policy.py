@@ -226,3 +226,37 @@ class UploadPolicy:
         with self.tx() as db:
             db.execute("UPDATE upload_policy_jobs SET state='confirmed' WHERE owner=? AND generation=?", (owner, generation))
         return dict(result, generation=generation)
+
+
+class OrderUploadAdapter:
+    """Sandbox bridge for Orders.adapter; no use of account expiration_date.
+
+    The order service must reserve the donation in the same database before
+    invoking ensure. observed_expiry reports a confirmed permission-job ledger
+    target, not the SFTPGo account's login expiration property.
+    """
+    def __init__(self, policy):
+        self.policy = policy
+
+    def ensure(self, username, expires_at_ms, operation_id):
+        self.policy.guard()
+        with self.policy.db() as db:
+            order = db.execute('SELECT owner,state,target_ms FROM orders WHERE id=?', (operation_id,)).fetchone()
+            ledger = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (username,)).fetchone()
+            if (order is None or order['owner'] != username or
+                order['state'] not in ('applying', 'approved') or
+                order['target_ms'] != expires_at_ms or ledger is None or ledger[0] < expires_at_ms):
+                raise PolicyError('DONATION_NOT_RESERVED')
+        # Reread current desired ledger rather than replay an old job target.
+        self.policy.reconcile(username)
+
+    def observed_expiry(self, username):
+        self.policy.guard()
+        preview = self.policy.dry_run(username)
+        with self.policy.db() as db:
+            job = db.execute('SELECT * FROM upload_policy_jobs WHERE owner=? ORDER BY generation DESC LIMIT 1', (username,)).fetchone()
+            if (job is None or job['state'] != 'confirmed' or
+                job['expires_ms'] != preview['expires_ms'] or
+                json.loads(job['desired']) != preview['after'] or preview['before'] != preview['after']):
+                raise PolicyError('PERMISSIONS_NOT_CONFIRMED')
+        return job['expires_ms']

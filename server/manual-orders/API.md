@@ -146,3 +146,13 @@ order IDs and manual transaction binding remain authoritative.
 New validation errors: `400 INVALID_ACTUAL_AMOUNT`,
 `400 INVALID_ACTUAL_CURRENCY`; all prior authentication/state errors remain.
 Use a fresh sandbox DB for this schema change; no live DB migration was run.
+
+## Confirmed donation versus applied service
+
+Approval atomically stores the fixed desired ledger expiry and the applying
+order before invoking a worker. While applying, entitlement.expires_ms can
+already contain that desired time, but active is false; the client must not
+treat the time alone as activation. Only confirmed application produces
+approved/active. Retry retains the same target. No response fields/routes have
+changed for this ordering correction. observed_expiry on the internal adapter
+means confirmed ledger application, never the SFTPGo login expiration_date.

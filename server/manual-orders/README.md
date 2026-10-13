@@ -90,7 +90,8 @@ is audited and does not lose the review queue. Notifications default to no-op;
 an optional adapter receives only order ID and code. This is best-effort wakeup,
 not a reliable delivery queue; the admin queue is authoritative.
 
-Approval first commits reviewer, channel/reference and an absolute target time.
+Approval commits reviewer, channel/reference, the absolute desired entitlement
+and the durable applying order together in one SQLite transaction.
 Renewal starts at `max(now, current ledger expiry)`. Calendar-year terms use UTC
 anniversaries with Feb 29 clamped to Feb 28.
 No local timezone/DST calculation or floating-point price arithmetic is used.
@@ -101,8 +102,8 @@ The durable `applying` row is the retry job. A 30-second lease is acquired in a
 short SQLite transaction, then the entitlement adapter is called **outside**
 the transaction. It must use bounded I/O and implement idempotent, monotonic
 `ensure(username, absolute_expiry_ms, order_id)`, never relative "add a year".
-`observed_expiry(username)` must read back an integer at least the target before
-approval can commit. The default adapter always refuses. Only the tests contain
+`observed_expiry(username)` must confirm an applied ledger target before the
+order becomes approved. It does not mean SFTPGo account expiration_date. The default adapter always refuses. Only the tests contain
 a fake adapter. A timed-out call keeps the same order ID and frozen target;
 retrying approval resumes it. Process death leaves a reclaimable lease. A stale
 worker cannot acknowledge or overwrite a newer lease. A new renewal cannot
@@ -178,3 +179,10 @@ New-account policy uses `new_account_policy` plus `enroll_new_account`: create
 read-only immediately, retain a separate trusted activation template without
 `*`, and treat missing entitlement as read-only. The current online registration
 service is unchanged; these are tested integration seams, not deployed enforcement.
+
+The sandbox OrderUploadAdapter now connects orders to the experimental policy
+worker: payment reservation writes the ledger before ensure runs; success only
+marks approved. Failure leaves applying and active=false without undoing the
+confirmed donation. Retry/restart never extends again. The CAS policy remains
+experimental; production should evaluate a per-request authenticated DAV write
+gate rather than assume SFTPGo supports atomic permission updates.

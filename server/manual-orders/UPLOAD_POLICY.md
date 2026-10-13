@@ -128,3 +128,17 @@ expiry and renewal, wildcard rejection and repeated-registration protection.
 The existing live registration template has not been changed. Therefore these
 safe interfaces are not yet wired into real registration, and no production
 claim is made that newly registered live users are already restricted.
+
+## Experimental status and order integration
+
+This CAS-based permission worker remains an experimental sandbox only. Do not
+continue toward a plain SFTPGo PUT production adapter. Production direction is
+an authenticated per-request DAV write gate, subject to an actual topology and
+bypass review. No gate or network configuration is deployed by this module.
+
+OrderUploadAdapter exists solely to test the corrected sandbox ordering: Orders
+commits desired entitlements plus applying state first; ensure validates that
+reservation and invokes reconciliation using the latest ledger. observed_expiry
+checks a confirmed job and read-back permissions, not account expiration_date.
+On failure the order remains applying; renewed rights are not delayed by waiting
+for the very ledger entry the worker needs. Completion never adds another year.
