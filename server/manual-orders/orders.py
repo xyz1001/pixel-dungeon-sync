@@ -1,6 +1,6 @@
 """Sandbox-only order foundation. No listener, credentials, or production adapters."""
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 import re
 import secrets
@@ -300,6 +300,9 @@ class Orders:
             if not isinstance(data, dict):
                 raise OrderError(400, 'INVALID_REQUEST')
             routes = {
+                '/api/order/plans': ('GET', set(), 'user'),
+                '/api/order/mine': ('GET', set(), 'user'),
+                '/api/order/entitlement': ('GET', set(), 'user'),
                 '/api/order/create': ('POST', {'plan_id', 'request_key'}, 'user'),
                 '/api/order/submit': ('POST', {'order_id'}, 'user'),
                 '/api/order/cancel': ('POST', {'order_id'}, 'user'),
@@ -307,7 +310,9 @@ class Orders:
                 '/api/admin/reject': ('POST', {'order_id'}, 'admin'),
                 '/api/admin/queue': ('GET', set(), 'admin'),
             }
-            if path.startswith('/api/order/status/'):
+            if path.startswith('/api/admin/queue/'):
+                route = ('GET', set(), 'admin')
+            elif path.startswith('/api/order/status/'):
                 route = ('GET', set(), 'user')
             else:
                 route = routes.get(path)
@@ -319,7 +324,19 @@ class Orders:
                 raise OrderError(403, 'FORBIDDEN')
             if set(data) != route[1] or any(not isinstance(v, str) for v in data.values()):
                 raise OrderError(400, 'INVALID_REQUEST')
-            if path == '/api/order/create':
+            if path == '/api/order/plans':
+                result = [asdict(plan) for plan in self.plans.values()]
+            elif path == '/api/order/entitlement':
+                with self.connect() as db:
+                    row = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (principal.subject,)).fetchone()
+                    result = {'source': 'sandbox_ledger', 'expires_ms': row[0] if row else None,
+                              'active': bool(row and row[0] > self.clock())}
+            elif path == '/api/order/mine':
+                with self.connect() as db:
+                    result = [self.public(r) for r in db.execute(
+                        'SELECT * FROM orders WHERE owner=? ORDER BY created_ms DESC,id DESC LIMIT 100',
+                        (principal.subject,))]
+            elif path == '/api/order/create':
                 result = self.create(principal, data['plan_id'], data['request_key'])
             elif path == '/api/order/submit':
                 result = self.submit(principal, data['order_id'])
@@ -329,9 +346,14 @@ class Orders:
                 result = self.close(principal, data['order_id'], 'rejected')
             elif path == '/api/admin/approve':
                 result = self.approve(principal, data['order_id'], data['receipt_ref'], data['channel'])
-            elif path == '/api/admin/queue':
+            elif path == '/api/admin/queue' or path.startswith('/api/admin/queue/'):
+                cursor = path.removeprefix('/api/admin/queue/') if path != '/api/admin/queue' else '0'
+                if not re.fullmatch(r'[0-9]{1,18}', cursor):
+                    raise OrderError(400, 'INVALID_CURSOR')
                 with self.connect() as db:
-                    result = [dict(self.public(r), owner=r['owner'], channel=r['channel']) for r in db.execute("SELECT * FROM orders WHERE state IN ('review','applying') ORDER BY created_ms,id LIMIT 100")]
+                    rows = db.execute("SELECT rowid AS cursor,* FROM orders WHERE rowid>? AND state IN ('review','applying') ORDER BY rowid LIMIT 101", (int(cursor),)).fetchall()
+                    result = {'items': [dict(self.public(r), owner=r['owner'], channel=r['channel']) for r in rows[:100]],
+                              'next_cursor': str(rows[99]['cursor']) if len(rows) > 100 else None}
             else:
                 with self.connect() as db:
                     result = self.public(self.owned(db, path.removeprefix('/api/order/status/'), principal))

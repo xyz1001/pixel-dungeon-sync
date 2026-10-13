@@ -1,0 +1,452 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pdsync:sandbox-orders:v1",
+  "title": "Sandbox order contract v1",
+  "$defs": {
+    "Order": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "remark_code": {
+          "type": "string"
+        },
+        "amount_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "quota_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "upload_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "download_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "term": {
+          "enum": [
+            "calendar_year",
+            "fixed_days"
+          ]
+        },
+        "state": {
+          "enum": [
+            "created",
+            "review",
+            "applying",
+            "approved",
+            "cancelled",
+            "rejected"
+          ]
+        },
+        "target_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "plan_id",
+        "currency",
+        "remark_code",
+        "amount_minor",
+        "days",
+        "quota_bytes",
+        "upload_kbps",
+        "download_kbps",
+        "created_ms",
+        "term",
+        "state",
+        "target_ms"
+      ],
+      "additionalProperties": false
+    },
+    "PlanDisplay": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "amount_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "quota_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "upload_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "download_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "term": {
+          "enum": [
+            "calendar_year",
+            "fixed_days"
+          ]
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "payment_instructions": {
+          "type": "string"
+        },
+        "payment_image_path": {
+          "type": "string"
+        },
+        "expiry_policy": {
+          "const": "sandbox_ledger_only"
+        }
+      },
+      "required": [
+        "id",
+        "currency",
+        "amount_minor",
+        "days",
+        "quota_bytes",
+        "upload_kbps",
+        "download_kbps",
+        "term",
+        "display_name",
+        "payment_instructions",
+        "payment_image_path",
+        "expiry_policy"
+      ],
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "string",
+          "pattern": "^[A-Z_]+$"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "CreateRequest": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string"
+        },
+        "request_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,80}$"
+        }
+      },
+      "required": [
+        "plan_id",
+        "request_key"
+      ],
+      "additionalProperties": false
+    },
+    "OrderRequest": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "additionalProperties": false
+    },
+    "ApproveRequest": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "sandbox",
+            "wechat",
+            "alipay"
+          ]
+        },
+        "receipt_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,100}$"
+        }
+      },
+      "required": [
+        "order_id",
+        "channel",
+        "receipt_ref"
+      ],
+      "additionalProperties": false
+    },
+    "OrderResponse": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "const": true
+        },
+        "data": {
+          "$ref": "#/$defs/Order"
+        }
+      },
+      "required": [
+        "sandbox",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "OrdersResponse": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "const": true
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Order"
+          }
+        }
+      },
+      "required": [
+        "sandbox",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "PlansResponse": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "const": true
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanDisplay"
+          }
+        }
+      },
+      "required": [
+        "sandbox",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "EntitlementResponse": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "sandbox_ledger"
+            },
+            "expires_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "active": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "source",
+            "expires_ms",
+            "active"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "sandbox",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "QueueResponse": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "plan_id": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "remark_code": {
+                    "type": "string"
+                  },
+                  "amount_minor": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "quota_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "upload_kbps": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "download_kbps": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "created_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "term": {
+                    "enum": [
+                      "calendar_year",
+                      "fixed_days"
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "created",
+                      "review",
+                      "applying",
+                      "approved",
+                      "cancelled",
+                      "rejected"
+                    ]
+                  },
+                  "target_ms": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "channel": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "plan_id",
+                  "currency",
+                  "remark_code",
+                  "amount_minor",
+                  "days",
+                  "quota_bytes",
+                  "upload_kbps",
+                  "download_kbps",
+                  "created_ms",
+                  "term",
+                  "state",
+                  "target_ms",
+                  "owner",
+                  "channel"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "next_cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "items",
+            "next_cursor"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "sandbox",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/OrderResponse"
+    },
+    {
+      "$ref": "#/$defs/OrdersResponse"
+    },
+    {
+      "$ref": "#/$defs/PlansResponse"
+    },
+    {
+      "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/EntitlementResponse"
+    },
+    {
+      "$ref": "#/$defs/QueueResponse"
+    }
+  ]
+}

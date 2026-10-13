@@ -1,7 +1,7 @@
 # Manual payment order foundation (phase one, sandbox only)
 
 This isolated Python/SQLite module models a manually reviewed order attached to
-an existing authenticated account. It does not install HTTP routes, listen on a
+an existing authenticated account. It does not automatically listen on a
 port, create users/passwords, call SFTPGo, send push messages, or change the
 existing free registration service. No production adapter or live-payment mode
 is included. `Orders(...)` defaults to disabled; `mode='live'` is rejected.
@@ -26,8 +26,11 @@ There is no anonymous administrator, generated admin key, or link-based approval
 A future HTTP host must enforce TLS, bounded JSON/request sizes, rate limiting,
 `Cache-Control: no-store`, redacted request logging, and authentication before
 dispatch. Cookie authentication additionally needs CSRF/Origin defenses. No
-HTTP host is supplied in this phase, so this is an in-process contract, not an
-already deployed API. Invalid/unknown callers fail closed.
+production HTTP host is supplied. The explicit `http_api.create_server` sandbox
+adapter only binds `127.0.0.1`, rejects browser Origin/cookie requests, and enforces
+bounded JSON, Host checks and no-store responses. It does not supply authentication.
+See [HTTP contract](API.md) and [machine-readable schemas](api.schema.json).
+Invalid/unknown callers fail closed. Nothing is deployed.
 
 ## Contract for the next client phase
 
@@ -37,11 +40,13 @@ owner, role, expiry or quota is rejected. Successful responses are
 
 | Method | Path | Body / result |
 | --- | --- | --- |
+| GET | `/api/order/plans` | Configured sandbox plan snapshots; HTTP adds explicit fixture display/image path |
+| GET | `/api/order/mine` | Current user's newest 100 orders; no other users' rows |
 | POST | `/api/order/create` | `plan_id`, `request_key` (16–80 URL-safe characters); returns server snapshot |
 | POST | `/api/order/submit` | `order_id`; claims payment, does not prove it |
 | GET | `/api/order/status/{order_id}` | No body; only order owner |
 | POST | `/api/order/cancel` | `order_id`; owner, before approval reservation |
-| GET | `/api/admin/queue` | No body; authenticated admin, oldest 100 review/applying orders |
+| GET | `/api/admin/queue/{cursor}` | No body; admin paginated review/applying rows; start cursor `0` |
 | POST | `/api/admin/approve` | `order_id`, `channel` (`sandbox`, `wechat`, `alipay`), `receipt_ref` |
 | POST | `/api/admin/reject` | `order_id`; authenticated admin, before reservation |
 
@@ -137,7 +142,7 @@ Python 3.10+ with standard-library SQLite only:
 
 ```sh
 cd server/manual-orders
-python -m unittest -v test_orders.py
+python -m unittest -v test_orders.py test_http_api.py
 ```
 
 Tests use fresh temporary databases, fake identities and a fake remote ledger.
@@ -145,4 +150,10 @@ They cover concurrent approvals on independent connections, timeout before and
 after a remote write, crash/lease recovery, stale-worker renewal, immutable
 snapshots, ownership, disabled defaults, receipt reuse, code-pool exhaustion,
 late code reuse, UTC/leap-year renewal and failed notification recovery. No
-network, production key, real transaction or phone is involved.
+external network, production key, real transaction or phone is involved. HTTP
+tests run real requests over loopback with injected test-only identities and a
+non-payment PNG, and close the listener after each test.
+An empty local ledger must not be treated as an existing SFTPGo account's
+baseline. Production onboarding must reject an unmanaged account or explicitly
+import and validate its current entitlement before calculating any paid renewal.
+

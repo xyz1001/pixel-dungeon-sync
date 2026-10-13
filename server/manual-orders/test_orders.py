@@ -264,7 +264,7 @@ class OrderTests(unittest.TestCase):
         a = self.submitted()
         status, queue = self.call('/api/admin/queue', identity='reviewer', method='GET')
         self.assertEqual(200, status)
-        self.assertEqual(a['id'], queue['data'][0]['id'])
+        self.assertEqual(a['id'], queue['data']['items'][0]['id'])
         self.assertEqual(1, self.audit(a['id'], 'notification_failed'))
         for secret in ('password', 'SENSITIVE', 'token', 'receipt_ref'):
             self.assertNotIn(secret, json.dumps(queue))
