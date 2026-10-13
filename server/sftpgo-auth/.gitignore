@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+private-test/
+credentials*.json
+report*.json
+.env*
+auth_service.py
+auth-v2-backup-*/
+*.v2tmp

@@ -1,0 +1,32 @@
+## 6. 用户指定凭据接口（version 2）
+
+POST https://webdav.xyz1001.top:8443/api/register
+Content-Type: application/json
+
+注册：{"version":2,"action":"register","username":"<username>","password":"<password>"}
+登录：{"version":2,"action":"login","username":"<username>","password":"<password>"}
+
+注册用户名：3–32 位小写英文字母、数字、下划线或短横线，首位必须小写字母。
+注册密码：8–128 个字符、UTF-8 不超过 512 字节，不含控制字符，首位不能是 $ 或 {（防止被管理 API 解释为预先计算的密码哈希）。不裁剪或改写密码。
+登录接受已有用户名（1–64 位 ASCII 字母数字、下划线、点、短横线，首位字母数字或下划线），密码按原值交 SFTPGo 验证。
+用户名密码同时用于 WebDAV Basic Auth；网关不另存密码，不建立新的身份数据库。
+
+成功 HTTP 200：
+{"code":200,"message":"success","data":{"webdav_url":"https://webdav.xyz1001.top:8443/dav/","username":"<username>","quota_bytes":5242880,"quota_mb":5,"upload_bandwidth_kb":100,"download_bandwidth_kb":100}}
+
+成功响应不返回 password、access_token 或账户密码哈希。客户端使用用户本次输入的密码连接 WebDAV。
+登录配额来自认证通过后的 SFTPGo 账户，0 表示上游无限制。注册沿用原 5 MiB、100 KB/s 配额与现有账号创建策略。
+
+错误统一：{"code":<HTTP状态>,"error":"<错误代码>","message":"<错误代码>"}，不返回上游异常或密码。
+400 INVALID_REQUEST / INVALID_USERNAME / INVALID_PASSWORD / REGISTRATION_REJECTED
+401 INVALID_CREDENTIALS（账号不存在、密码错误或不可登录统一处理）
+409 USERNAME_UNAVAILABLE（不覆盖或重置既有账户）
+413 REQUEST_TOO_LARGE（请求体最多4096字节）
+415 JSON_REQUIRED
+429 REGISTRATION_RATE_LIMITED / LOGIN_RATE_LIMITED
+502 UPSTREAM_ERROR
+
+注册保留原每IP每24小时50次限制；新增登录每IP15分钟30次限制（进程内，重启重置）。上游认证策略和2FA要求不绕过；需要2FA的账户当前不支持此简化登录表单。
+注册响应超时或502可能发生在上游已创建账户之后，不应自动重复注册；让用户用同一凭据明确尝试登录。
+旧 POST /api/register 空请求体或 {} 继续随机注册并使用原响应结构；/register 别名同样保留。新客户端必须显式传 version=2 和 action。
+验证：模拟上游自动测试及公开输入拒绝检查通过；经明确授权，已用一个独立受限账号验证注册、同凭据登录以及DAV MKCOL/PUT/GET/PROPFIND，下载字节哈希一致。跨设备客户端登录尚未验证。真实凭据和测试输出不纳入仓库。
