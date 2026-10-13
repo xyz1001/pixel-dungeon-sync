@@ -1,0 +1,429 @@
+package io.github.xyz1001.pdsync.android;
+
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import javax.net.ssl.SSLException;
+import kotlinx.serialization.json.Json;
+import kotlinx.serialization.json.JsonArray;
+import kotlinx.serialization.json.JsonElement;
+import kotlinx.serialization.json.JsonElementKt;
+import kotlinx.serialization.json.JsonObject;
+import kotlinx.serialization.json.JsonPrimitive;
+import okhttp3.Authenticator;
+import okhttp3.CookieJar;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.BufferedSink;
+import pdsync.AppendOnlyKt;
+
+/**
+ * Explicit, single-attempt v2 login/registration. Construction does no I/O. Invoke either
+ * operation on a background thread only after the user requests it. This client neither
+ * persists credentials nor connects to WebDAV. It never falls back to the v1 empty request.
+ *
+ * A failed registration may already have succeeded. Do not automatically retry registration;
+ * let the user log in with the same submitted credentials to establish the account state.
+ */
+final class OfficialServiceRegistrationClient {
+    static final String REGISTER_URL = "https://webdav.xyz1001.top:8443/api/register";
+    static final String DAV_URL = "https://webdav.xyz1001.top:8443/dav/";
+    static final int MAX_RESPONSE_BYTES = 32 * 1024;
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private static final Pattern JSON_NUMBER = Pattern.compile("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?");
+    private final Transport transport;
+
+    /** Test seam: responses are consumed and closed by the explicit operation. */
+    interface Transport {
+        Response execute(Request request) throws IOException;
+    }
+
+    enum FailureKind {
+        INVALID_INPUT, INVALID_CREDENTIALS, USERNAME_TAKEN, REQUEST_TOO_LARGE,
+        UNSUPPORTED_MEDIA_TYPE, RATE_LIMITED, UPSTREAM_ERROR, SERVER_ERROR, REQUEST_REJECTED,
+        REDIRECT_REJECTED, INVALID_RESPONSE, RESPONSE_TOO_LARGE,
+        TIMEOUT, NETWORK_ERROR, TLS_ERROR
+    }
+
+    static final class RegistrationException extends IOException {
+        final FailureKind kind;
+        /** True means registration may already have succeeded; use same-credential login. */
+        final boolean accountMayHaveBeenCreated;
+
+        private RegistrationException(FailureKind kind, boolean accountMayHaveBeenCreated) {
+            super(messageFor(kind, accountMayHaveBeenCreated));
+            this.kind = kind;
+            this.accountMayHaveBeenCreated = accountMayHaveBeenCreated;
+            // Do not attach the original exception: it may contain credentials or response text.
+        }
+
+        String userMessage() { return getMessage(); }
+    }
+
+    static final class Account {
+        final String endpoint;
+        final String username;
+        final String password;
+        final double quotaMb;
+        final long quotaBytes;
+        final long uploadBandwidthKb;
+        final long downloadBandwidthKb;
+
+        private Account(String endpoint, String username, String password,
+                        double quotaMb, long quotaBytes, long uploadBandwidthKb, long downloadBandwidthKb) {
+            this.endpoint = endpoint;
+            this.username = username;
+            this.password = password;
+            this.quotaMb = quotaMb;
+            this.quotaBytes = quotaBytes;
+            this.uploadBandwidthKb = uploadBandwidthKb;
+            this.downloadBandwidthKb = downloadBandwidthKb;
+        }
+
+        @Override public String toString() {
+            return "Official service account [private fields hidden]";
+        }
+    }
+
+    OfficialServiceRegistrationClient() {
+        OkHttpClient client = newHttpClient();
+        this.transport = new Transport() {
+            @Override public Response execute(Request request) throws IOException {
+                return client.newCall(request).execute();
+            }
+        };
+    }
+
+    OfficialServiceRegistrationClient(Transport transport) {
+        this.transport = Objects.requireNonNull(transport);
+    }
+
+    /** Separate from the DAV transport: no inherited credentials, logging, cookies or retries. */
+    static OkHttpClient newHttpClient() {
+        return new OkHttpClient.Builder()
+                .retryOnConnectionFailure(false)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .authenticator(Authenticator.NONE)
+                .proxyAuthenticator(Authenticator.NONE)
+                .cookieJar(CookieJar.NO_COOKIES)
+                .cache(null)
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .callTimeout(20, TimeUnit.SECONDS)
+                // Keep OkHttp's system trust manager and hostname verifier. No TLS bypass.
+                .build();
+    }
+
+    Account register(String username, String password) throws RegistrationException {
+        validateCredentials(username, password, true);
+        return request("register", username, password);
+    }
+
+    Account login(String username, String password) throws RegistrationException {
+        validateCredentials(username, password, false);
+        return request("login", username, password);
+    }
+
+    private static void validateCredentials(String username, String password, boolean registration)
+            throws RegistrationException {
+        if (username == null || password == null || username.isEmpty()
+                || username.length() > 1024 || password.length() > 4096
+                || username.indexOf(':') >= 0 || hasControl(username) || hasControl(password)
+                || hasUnpairedSurrogate(username) || hasUnpairedSurrogate(password)) {
+            throw failure(FailureKind.INVALID_INPUT, false);
+        }
+        if (registration && (!username.matches("[a-z][a-z0-9_-]{2,31}")
+                || password.codePointCount(0, password.length()) < 8
+                || password.codePointCount(0, password.length()) > 128
+                || password.startsWith("$") || password.startsWith("{"))) {
+            throw failure(FailureKind.INVALID_INPUT, false);
+        }
+        // The v2 login contract permits legacy naming, short passwords and $/{ prefixes.
+        // Its password limit is UTF-8 bytes, not Java UTF-16 units or registration characters.
+        if (!registration && (!username.matches("[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")
+                || password.isEmpty() || password.getBytes(StandardCharsets.UTF_8).length > 512)) {
+            throw failure(FailureKind.INVALID_INPUT, false);
+        }
+    }
+
+    private Account request(String action, String username, String password) throws RegistrationException {
+        final boolean registration = "register".equals(action);
+        Map<String, JsonElement> fields = new LinkedHashMap<>();
+        fields.put("version", JsonElementKt.JsonPrimitive((Number) Integer.valueOf(2)));
+        fields.put("action", JsonElementKt.JsonPrimitive(action));
+        fields.put("username", JsonElementKt.JsonPrimitive(username));
+        fields.put("password", JsonElementKt.JsonPrimitive(password));
+        final byte[] payload = new JsonObject(fields).toString().getBytes(StandardCharsets.UTF_8);
+        Request request = new Request.Builder().url(REGISTER_URL)
+                .header("Accept", "application/json")
+                .post(new RequestBody() {
+                    @Override public MediaType contentType() { return JSON; }
+                    @Override public long contentLength() { return payload.length; }
+                    @Override public void writeTo(BufferedSink sink) throws IOException { sink.write(payload); }
+                    // Also prevent HTTP replay (e.g. 503 Retry-After: 0), not just connection retries.
+                    @Override public boolean isOneShot() { return true; }
+                    @Override public String toString() { return "Official service request [private fields hidden]"; }
+                }).build();
+        try (Response response = transport.execute(request)) {
+            if (response == null) throw failure(FailureKind.INVALID_RESPONSE, true);
+            if (!REGISTER_URL.equals(response.request().url().toString())) {
+                throw failure(FailureKind.REDIRECT_REJECTED, true);
+            }
+            int status = response.code();
+            if (status != 200) throw httpFailure(status);
+            ResponseBody body = response.body();
+            if (body == null) throw failure(FailureKind.INVALID_RESPONSE, true);
+            return parseAccount(readBoundedUtf8(body), username, password);
+        } catch (RegistrationException failure) {
+            // Closing may add suppressed transport text. Rebuild a safe exception, and never
+            // suggest that a login (which cannot create an account) created one.
+            throw failure(failure.kind, registration && failure.accountMayHaveBeenCreated);
+        } catch (CharacterCodingException invalidUtf8) {
+            throw failure(FailureKind.INVALID_RESPONSE, registration);
+        } catch (InterruptedIOException timeout) {
+            throw failure(FailureKind.TIMEOUT, registration);
+        } catch (SSLException tls) {
+            throw failure(FailureKind.TLS_ERROR, registration);
+        } catch (IOException network) {
+            throw failure(FailureKind.NETWORK_ERROR, registration);
+        } catch (RuntimeException invalid) {
+            throw failure(FailureKind.INVALID_RESPONSE, registration);
+        } finally {
+            Arrays.fill(payload, (byte) 0);
+        }
+    }
+
+    private static RegistrationException httpFailure(int status) {
+        if (status == 400) return failure(FailureKind.INVALID_INPUT, false);
+        if (status == 401) return failure(FailureKind.INVALID_CREDENTIALS, false);
+        if (status == 409) return failure(FailureKind.USERNAME_TAKEN, false);
+        if (status == 413) return failure(FailureKind.REQUEST_TOO_LARGE, false);
+        if (status == 415) return failure(FailureKind.UNSUPPORTED_MEDIA_TYPE, false);
+        if (status == 429) return failure(FailureKind.RATE_LIMITED, false);
+        if (status == 502) return failure(FailureKind.UPSTREAM_ERROR, true);
+        if (status >= 300 && status < 400) return failure(FailureKind.REDIRECT_REJECTED, true);
+        if (status >= 500) return failure(FailureKind.SERVER_ERROR, true);
+        if (status == 408) return failure(FailureKind.TIMEOUT, true);
+        if (status >= 400 && status < 500) return failure(FailureKind.REQUEST_REJECTED, false);
+        return failure(FailureKind.INVALID_RESPONSE, true);
+    }
+
+    private static String readBoundedUtf8(ResponseBody body) throws IOException {
+        if (body.contentLength() > MAX_RESPONSE_BYTES) {
+            throw failure(FailureKind.RESPONSE_TOO_LARGE, true);
+        }
+        byte[] bytes = new byte[MAX_RESPONSE_BYTES + 1];
+        try {
+            InputStream input = body.byteStream();
+            int used = 0;
+            while (true) {
+                int count = input.read(bytes, used, bytes.length - used);
+                if (count == -1) break;
+                used += count;
+                if (used > MAX_RESPONSE_BYTES) throw failure(FailureKind.RESPONSE_TOO_LARGE, true);
+            }
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, 0, used)).toString();
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    private static Account parseAccount(String text, String submittedUsername, String submittedPassword)
+            throws RegistrationException {
+        checkNesting(text);
+        AppendOnlyKt.requireUniqueJsonKeys(text);
+        JsonObject root = object(Json.Default.parseToJsonElement(text));
+        validateJsonValues(root);
+        long code = integer(root, "code");
+        string(root, "message", 1024, true); // Required type, but never displayed or logged.
+        if (code != 200) throw failure(FailureKind.INVALID_RESPONSE, true);
+        JsonObject data = object(root.get("data"));
+        String endpoint = string(data, "webdav_url", 4096, false);
+        String username = string(data, "username", 1024, false);
+        // The v2 response must never supply a DAV password or substitute a token.
+        if (data.containsKey("password") || data.containsKey("token") || !username.equals(submittedUsername)) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        double quotaMb = nonnegativeNumber(data, "quota_mb");
+        long quotaBytes = integer(data, "quota_bytes");
+        long uploadBandwidth = integer(data, "upload_bandwidth_kb");
+        long downloadBandwidth = integer(data, "download_bandwidth_kb");
+        validateEndpoint(endpoint);
+        if (username.indexOf(':') >= 0 || hasControl(username)) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        // These are server metadata, not client-side limits. Zero/unlimited and a quota that
+        // is not an exact MiB multiple remain valid. Python account_info emits quota_mb as
+        // a float; the other three fields retain strict integer type/range validation.
+        return new Account(endpoint, username, submittedPassword, quotaMb, quotaBytes, uploadBandwidth, downloadBandwidth);
+    }
+
+    private static void validateEndpoint(String endpoint) throws RegistrationException {
+        try {
+            URI uri = new URI(endpoint);
+            if (!"https".equals(uri.getScheme()) || !"webdav.xyz1001.top".equals(uri.getHost())
+                    || uri.getPort() != 8443 || uri.getRawUserInfo() != null
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null
+                    || !"/dav/".equals(uri.getRawPath()) || !DAV_URL.equals(endpoint)) {
+                throw failure(FailureKind.INVALID_RESPONSE, true);
+            }
+        } catch (java.net.URISyntaxException invalid) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+    }
+
+    private static JsonObject object(JsonElement element) throws RegistrationException {
+        if (!(element instanceof JsonObject)) throw failure(FailureKind.INVALID_RESPONSE, true);
+        return (JsonObject) element;
+    }
+
+    /** Json tree parsing retains raw primitive tokens, so validate even future/unknown fields. */
+    private static void validateJsonValues(JsonElement element) throws RegistrationException {
+        if (element instanceof JsonObject) {
+            for (String key : ((JsonObject) element).keySet()) {
+                if (hasUnpairedSurrogate(key)) throw failure(FailureKind.INVALID_RESPONSE, true);
+            }
+            for (JsonElement child : ((JsonObject) element).values()) validateJsonValues(child);
+        } else if (element instanceof JsonArray) {
+            for (JsonElement child : (JsonArray) element) validateJsonValues(child);
+        } else if (element instanceof JsonPrimitive) {
+            JsonPrimitive primitive = (JsonPrimitive) element;
+            String value = primitive.getContent();
+            if (primitive.isString()) {
+                if (hasUnpairedSurrogate(value)) throw failure(FailureKind.INVALID_RESPONSE, true);
+            } else if (!"null".equals(value) && !"true".equals(value) && !"false".equals(value)
+                    && !JSON_NUMBER.matcher(value).matches()) {
+                throw failure(FailureKind.INVALID_RESPONSE, true);
+            }
+        } else throw failure(FailureKind.INVALID_RESPONSE, true);
+    }
+
+    private static String string(JsonObject object, String key, int limit, boolean allowEmpty)
+            throws RegistrationException {
+        JsonElement element = object.get(key);
+        if (!(element instanceof JsonPrimitive) || !((JsonPrimitive) element).isString()) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        String value = ((JsonPrimitive) element).getContent();
+        if ((!allowEmpty && value.isEmpty()) || value.length() > limit || hasUnpairedSurrogate(value)) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        return value;
+    }
+
+    private static long integer(JsonObject object, String key) throws RegistrationException {
+        JsonElement element = object.get(key);
+        if (!(element instanceof JsonPrimitive) || ((JsonPrimitive) element).isString()) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        String value = ((JsonPrimitive) element).getContent();
+        if (!value.matches("0|[1-9][0-9]{0,18}")) throw failure(FailureKind.INVALID_RESPONSE, true);
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException invalid) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+    }
+
+    private static double nonnegativeNumber(JsonObject object, String key) throws RegistrationException {
+        JsonElement element = object.get(key);
+        if (!(element instanceof JsonPrimitive) || ((JsonPrimitive) element).isString()) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+        String text = ((JsonPrimitive) element).getContent();
+        if (!JSON_NUMBER.matcher(text).matches()) throw failure(FailureKind.INVALID_RESPONSE, true);
+        try {
+            double value = Double.parseDouble(text);
+            // Decimal sign validation also rejects a negative value that underflows to -0.0.
+            if (!Double.isFinite(value) || new BigDecimal(text).signum() < 0) {
+                throw failure(FailureKind.INVALID_RESPONSE, true);
+            }
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw failure(FailureKind.INVALID_RESPONSE, true);
+        }
+    }
+
+    private static boolean hasControl(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isISOControl(text.charAt(i))) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasUnpairedSurrogate(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char current = text.charAt(i);
+            if (Character.isHighSurrogate(current)) {
+                if (++i == text.length() || !Character.isLowSurrogate(text.charAt(i))) return true;
+            } else if (Character.isLowSurrogate(current)) return true;
+        }
+        return false;
+    }
+
+    /** Bound parser recursion, including unrecognized extra fields, before building a JSON tree. */
+    private static void checkNesting(String text) throws RegistrationException {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < text.length(); i++) {
+            char value = text.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (value == '\\') escaped = true;
+                else if (value == '"') inString = false;
+            } else if (value == '"') inString = true;
+            else if (value == '{' || value == '[') {
+                if (++depth > 8) throw failure(FailureKind.INVALID_RESPONSE, true);
+            } else if (value == '}' || value == ']') depth--;
+        }
+    }
+
+    private static RegistrationException failure(FailureKind kind, boolean accountMayHaveBeenCreated) {
+        return new RegistrationException(kind, accountMayHaveBeenCreated);
+    }
+
+    private static String messageFor(FailureKind kind, boolean accountMayHaveBeenCreated) {
+        String message;
+        switch (kind) {
+            case INVALID_INPUT: message = "账号或密码格式不符合服务要求。"; break;
+            case INVALID_CREDENTIALS: message = "账号或密码不正确。"; break;
+            case USERNAME_TAKEN: message = "账号已被使用，请登录或更换账号。"; break;
+            case REQUEST_TOO_LARGE: message = "提交的信息过大。"; break;
+            case UNSUPPORTED_MEDIA_TYPE: message = "服务不支持这次请求的格式。"; break;
+            case RATE_LIMITED: message = "操作过于频繁，服务暂时限制了请求。"; break;
+            case UPSTREAM_ERROR: message = "服务暂时无法连接存储。"; break;
+            case SERVER_ERROR: message = "服务暂时异常。"; break;
+            case REQUEST_REJECTED: message = "服务未接受这次请求。"; break;
+            case REDIRECT_REJECTED: message = "服务地址发生了跳转。"; break;
+            case INVALID_RESPONSE: message = "服务返回的信息无效。"; break;
+            case RESPONSE_TOO_LARGE: message = "服务返回的信息过大。"; break;
+            case TIMEOUT: message = "请求超时。"; break;
+            case NETWORK_ERROR: message = "网络连接中断。"; break;
+            case TLS_ERROR: message = "无法验证服务安全连接。"; break;
+            default: message = "无法完成这次请求。"; break;
+        }
+        return message + (accountMayHaveBeenCreated ? "注册结果未确认，请用相同账号和密码登录。" : "");
+    }
+}
