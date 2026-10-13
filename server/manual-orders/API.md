@@ -150,9 +150,12 @@ Use a fresh sandbox DB for this schema change; no live DB migration was run.
 ## Confirmed donation versus applied service
 
 Approval atomically stores the fixed desired ledger expiry and the applying
-order before invoking a worker. While applying, entitlement.expires_ms can
-already contain that desired time, but active is false; the client must not
-treat the time alone as activation. Only confirmed application produces
-approved/active. Retry retains the same target. No response fields/routes have
-changed for this ordering correction. observed_expiry on the internal adapter
+order before invoking a worker. Client entitlement and the DAV write gate both
+read the maximum target of approved orders as the confirmed ledger. Desired
+rows and applying orders never grant writes. First application failure returns
+expires_ms=null and active=false. During a failed renewal, the previous confirmed
+expiry remains visible and usable until it expires; then writes are denied.
+Only successful confirmation publishes the fixed extension. Retry retains the
+same target. Response fields/routes are unchanged; pending desired expiry is
+available as the order's target_ms. observed_expiry on the internal adapter
 means confirmed ledger application, never the SFTPGo login expiration_date.

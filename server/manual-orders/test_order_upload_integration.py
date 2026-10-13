@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from orders import Orders, Plan
+from write_gate import WriteGate, SqliteEntitlements
 from upload_policy import UploadPolicy, OrderUploadAdapter, READ
 from test_orders import TestAuth, ms
 from test_upload_policy import FencedFake
@@ -24,6 +25,8 @@ class OrderUploadIntegrationTests(unittest.TestCase):
         self.template = ['list', 'download', 'upload', 'create_dirs']
         self.policy.enroll_new_account('alice', self.template)
         self.orders.adapter = OrderUploadAdapter(self.policy)
+        self.gate = WriteGate(enabled=True, authenticator=TestAuth(),
+                              ledger=SqliteEntitlements(self.path), clock=lambda: self.now)
 
     def make_orders(self):
         return Orders(self.path, (self.plan,), mode='sandbox', authenticator=TestAuth(), clock=lambda: self.now)
@@ -74,7 +77,9 @@ class OrderUploadIntegrationTests(unittest.TestCase):
         self.assertEqual('applying', state['state'])
         entitlement = self.call('/api/order/entitlement', method='GET')[1]['data']
         self.assertFalse(entitlement['active'])
-        self.assertEqual(state['target_ms'], entitlement['expires_ms'])
+        self.assertIsNone(entitlement['expires_ms'])
+        self.assertIn('upload', self.fake.account.permissions['/'])
+        self.assertEqual(403, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
         self.now += 86400000 * 10
         self.orders = self.make_orders()
         self.orders.adapter = OrderUploadAdapter(self.make_policy())
@@ -83,6 +88,7 @@ class OrderUploadIntegrationTests(unittest.TestCase):
             self.assertEqual(200, status, result)
             self.assertEqual(state['target_ms'], result['data']['target_ms'])
         self.assertTrue(self.call('/api/order/entitlement', method='GET')[1]['data']['active'])
+        self.assertEqual(204, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(1, db.execute("SELECT count(*) FROM audit WHERE event='approval_reserved'").fetchone()[0])
 
@@ -98,3 +104,30 @@ class OrderUploadIntegrationTests(unittest.TestCase):
         self.assertEqual(ms('2026-02-28T12:00:00+00:00'), renewed['data']['target_ms'])
         self.assertEqual({'/': sorted(self.template)}, self.fake.account.permissions)
         self.assertEqual(0, self.fake.account.expiration_date)
+
+    def test_unconfirmed_renewal_preserves_old_grant_until_expiry_and_retry_confirms_extension(self):
+        first = self.submitted('new-donation-000001')
+        old_expiry = self.approve(first, 'first_receipt_00001')[1]['data']['target_ms']
+        self.now = old_expiry - 1000
+        second = self.submitted('new-donation-000002')
+        self.fake.fail_after = True
+        self.assertEqual(503, self.approve(second, 'second_receipt_00002')[0])
+        target = self.call('/api/order/status/' + second, method='GET')[1]['data']['target_ms']
+        self.assertGreater(target, old_expiry)
+        self.assertEqual(204, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+        entitlement = self.call('/api/order/entitlement', method='GET')[1]['data']
+        self.assertEqual(old_expiry, entitlement['expires_ms'])
+        self.assertTrue(entitlement['active'])
+        self.now = old_expiry
+        self.orders = self.make_orders()
+        self.orders.adapter = OrderUploadAdapter(self.make_policy())
+        self.assertIn('upload', self.fake.account.permissions['/'])
+        self.assertEqual(403, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+        self.assertFalse(self.call('/api/order/entitlement', method='GET')[1]['data']['active'])
+        self.assertEqual(204, self.gate.decide('GET', {'test-identity': 'alice'}).status)
+        for _ in range(2):
+            self.assertEqual(200, self.call('/api/admin/retry', {'order_id': second}, True)[0])
+            self.assertEqual(204, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+            entitlement = self.call('/api/order/entitlement', method='GET')[1]['data']
+            self.assertEqual(target, entitlement['expires_ms'])
+            self.assertTrue(entitlement['active'])

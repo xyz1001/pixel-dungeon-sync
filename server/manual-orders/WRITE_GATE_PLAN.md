@@ -27,8 +27,10 @@ changed to gather this evidence. Private configuration bodies were not returned.
    design remains required; no new authentication system/key is invented here.
    On nginx auth_request, original method must be set by trusted internal config,
    not copied from a client-controlled override header. Never log credentials.
-3. For mutation requests, consult the current SQLite desired entitlement at the
-   server clock on each request. Missing/expired rights or lookup failure deny.
+3. For mutation requests, consult the current SQLite confirmed entitlement at the
+   server clock on each request. The shared query reads MAX(target_ms) from
+   approved orders; applying targets never grant writes. Failed renewals retain
+   the prior confirmed expiry only. Missing/expired rights or lookup failure deny.
    Reads retain SFTPGo authentication and filesystem authorization; they must not
    become anonymous downloads. The pure prototype authenticates reads too.
 4. Reconcile order application with gate availability: manual approval already

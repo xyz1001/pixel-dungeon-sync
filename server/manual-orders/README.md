@@ -182,8 +182,10 @@ service is unchanged; these are tested integration seams, not deployed enforceme
 
 The sandbox OrderUploadAdapter now connects orders to the experimental policy
 worker: payment reservation writes the ledger before ensure runs; success only
-marks approved. Failure leaves applying and active=false without undoing the
-confirmed donation. Retry/restart never extends again. The CAS policy remains
+marks approved, publishing its fixed target as confirmed service rights.
+Failure leaves applying without undoing the recorded donation. First activation
+remains inactive; an unconfirmed renewal retains only the prior confirmed
+expiry. The API and write gate use the same approved-order ledger query. Retry/restart never extends again. The CAS policy remains
 experimental; production should evaluate a per-request authenticated DAV write
 gate rather than assume SFTPGo supports atomic permission updates.
 

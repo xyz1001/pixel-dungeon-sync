@@ -107,6 +107,17 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 
+def confirmed_expiry(db, owner):
+    """Approved orders are the confirmed ledger; applying targets are desired only.
+
+    Derive from durable approval history so an unconfirmed renewal never revokes
+    an earlier grant or activates its extension. No migration of desired rows
+    into confirmed grants is safe or necessary.
+    """
+    return db.execute("SELECT MAX(target_ms) FROM orders WHERE owner=? AND state='approved'",
+                      (owner,)).fetchone()[0]
+
+
 class Orders:
     def __init__(self, path, plans=(), *, mode='disabled', authenticator=None,
                  entitlements=None, notifications=None, clock=None):
@@ -286,7 +297,8 @@ class Orders:
             if failed:
                 self.audit(db, oid, principal.subject, 'apply_retry_required')
             else:
-                # Application confirmation never calculates/writes entitlement.
+                # Confirm the fixed target atomically with approved state.
+                # This publishes it to confirmed_expiry without extending again.
                 db.execute("UPDATE orders SET state='approved' WHERE id=?", (oid,))
                 self.audit(db, oid, principal.subject, 'approved')
             result = self.public(self.owned(db, oid, principal))
@@ -348,10 +360,9 @@ class Orders:
                 result = [asdict(plan) for plan in self.plans.values()]
             elif path == '/api/order/entitlement':
                 with self.connect() as db:
-                    row = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (principal.subject,)).fetchone()
-                    applying = db.execute("SELECT 1 FROM orders WHERE owner=? AND state='applying'", (principal.subject,)).fetchone()
-                    result = {'source': 'sandbox_ledger', 'expires_ms': row[0] if row else None,
-                              'active': bool(row and row[0] > self.clock() and not applying)}
+                    expiry = confirmed_expiry(db, principal.subject)
+                    result = {'source': 'sandbox_ledger', 'expires_ms': expiry,
+                              'active': expiry is not None and expiry > self.clock()}
             elif path == '/api/order/mine':
                 with self.connect() as db:
                     result = [self.public(r) for r in db.execute(

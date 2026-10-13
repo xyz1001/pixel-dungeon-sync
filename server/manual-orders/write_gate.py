@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import sqlite3
 import time
 
-from orders import DenyAuthentication, Principal
+from orders import DenyAuthentication, Principal, confirmed_expiry
 
 
 READ_METHODS = frozenset(('GET', 'HEAD', 'PROPFIND', 'OPTIONS'))
@@ -30,8 +30,7 @@ class SqliteEntitlements:
         from pathlib import Path
         uri = Path(self.path).resolve().as_uri() + '?mode=ro'
         with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
-            row = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (owner,)).fetchone()
-            return row[0] if row else None
+            return confirmed_expiry(db, owner)
 
 
 class WriteGate:

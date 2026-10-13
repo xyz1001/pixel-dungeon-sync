@@ -26,8 +26,8 @@ class WriteGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'gate.sqlite'
         with closing(sqlite3.connect(self.path)) as db:
-            db.execute('CREATE TABLE entitlements(owner TEXT PRIMARY KEY,expires_ms INTEGER NOT NULL)')
-            db.execute('INSERT INTO entitlements VALUES(?,?)', ('alice', 1001))
+            db.execute('CREATE TABLE orders(owner TEXT, target_ms INTEGER, state TEXT)')
+            db.execute('INSERT INTO orders VALUES(?,?,?)', ('alice', 1001, 'approved'))
             db.commit()
         self.now = 1000
         self.gate = WriteGate(enabled=True, authenticator=FixtureAuth(),
@@ -84,7 +84,7 @@ class WriteGateTests(unittest.TestCase):
         self.now = 2000
         self.assertEqual(403, self.request('MOVE'))
         with closing(sqlite3.connect(self.path)) as db:
-            db.execute('UPDATE entitlements SET expires_ms=3000 WHERE owner=?', ('alice',))
+            db.execute('UPDATE orders SET target_ms=3000 WHERE owner=?', ('alice',))
             db.commit()
         self.assertEqual(204, self.request('MOVE'))
 
