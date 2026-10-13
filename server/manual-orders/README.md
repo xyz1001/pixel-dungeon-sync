@@ -8,12 +8,15 @@ is included. `Orders(...)` defaults to disabled; `mode='live'` is rejected.
 
 ## Explicit configuration and trusted boundary
 
-Sandbox construction requires explicit `Plan` values: versioned ID, positive
-integer minor-unit price, uppercase three-letter currency, `calendar_year` or
-`fixed_days`, positive quota bytes and upload/download KB/s, and the explicit
-`sandbox_ledger_only` expiry policy. There is no real price or policy default.
-Plans must use a new ID when their commercial terms change. Existing order
-snapshots remain immutable even when configuration changes.
+Sandbox `Plan` now means a donation offer, not an annual-price subscription.
+It requires an ID and explicit sandbox quota/bandwidth limits. `amount_minor`
+and `currency` must be null; `payment_mode` is `donation`. Actual amount/currency
+are recorded only by an authenticated administrator after statement verification.
+The confirmed product duration is one UTC calendar year, starting at approval
+or extending the current unexpired ledger expiry; Feb 29 clamps to Feb 28.
+`expiry_policy` is `sandbox_upload_only`; no production permission effect exists.
+No minimum donation, fixed annual fee or customer-entered amount is inferred.
+Offer IDs version the limits; existing order snapshots remain immutable.
 
 `dispatch(method, path, headers, body)` is the public integration seam. An
 injected authenticator must return a `Principal` for an existing authenticated
@@ -34,8 +37,9 @@ Invalid/unknown callers fail closed. Nothing is deployed.
 
 ## Contract for the next client phase
 
-All mutations are POST. Exact body keys are required; injecting price, currency,
-owner, role, expiry or quota is rejected. Successful responses are
+All mutations are POST. Exact body keys are required; client requests cannot
+supply price, currency, owner, role, expiry or quota. The administrator approval
+request alone records verified actual amount/currency. Successful responses are
 `200 {"sandbox":true,"data":...}`; errors are `{ "error": "CODE" }`.
 
 | Method | Path | Body / result |
@@ -47,19 +51,20 @@ owner, role, expiry or quota is rejected. Successful responses are
 | GET | `/api/order/status/{order_id}` | No body; only order owner |
 | POST | `/api/order/cancel` | `order_id`; owner, before approval reservation |
 | GET | `/api/admin/queue/{cursor}` | No body; admin paginated review/applying rows; start cursor `0` |
-| POST | `/api/admin/approve` | `order_id`, `channel` (`sandbox`, `wechat`, `alipay`), `receipt_ref` |
+| POST | `/api/admin/approve` | `order_id`, `channel` (`sandbox`, `wechat`, `alipay`), `receipt_ref`, `actual_amount_minor`, `actual_currency` |
 | POST | `/api/admin/retry` | `order_id` only; reuse durable approval after restart |
 | POST | `/api/admin/reject` | `order_id`; authenticated admin, before reservation |
 
 The `wechat`/`alipay` identifiers permit isolated contract tests; **all results
 remain sandbox results**. They do not activate those payment systems. A future
-reviewer must verify the actual channel statement, amount, currency and unique
+reviewer must verify the actual channel statement, actual amount, currency and unique
 transaction number; a claim, screenshot or four-digit code is not payment proof.
 The receipt reference is an opaque channel transaction identifier, 8–100 ASCII
 letters/digits/underscores/hyphens. Channel plus reference is globally unique in
 the database. It is never returned to the user or included in push messages.
 
-Order data: `id`, `plan_id`, `amount_minor`, `currency`, `term`, `days`,
+Order data: `id`, `plan_id`, null quoted `amount_minor`/`currency`,
+`actual_amount_minor`, `actual_currency`, `term`, `days`,
 `quota_bytes`, `upload_kbps`, `download_kbps`, `state`, `remark_code`, `created_ms`,
 `target_ms` (null until reservation). Queue results additionally include owner
 and channel. No passwords, tokens, or upstream account objects are returned.
@@ -87,7 +92,7 @@ not a reliable delivery queue; the admin queue is authoritative.
 
 Approval first commits reviewer, channel/reference and an absolute target time.
 Renewal starts at `max(now, current ledger expiry)`. Calendar-year terms use UTC
-anniversaries with Feb 29 clamped to Feb 28; fixed-day terms use 24-hour days.
+anniversaries with Feb 29 clamped to Feb 28.
 No local timezone/DST calculation or floating-point price arithmetic is used.
 The quota snapshot describes desired limits; phase one does not apply real
 quotas or real expiry to SFTPGo.
@@ -109,8 +114,8 @@ the operator need not retain the original receipt reference after a restart.
 
 Audit rows contain only order, actor, event and UTC milliseconds. Receipt and
 account association live in the private DB; keep it outside Git and protect it
-with host ACLs and backups. Database/schema migrations are not supplied yet;
-this initial schema targets fresh sandbox databases only.
+with host ACLs and backups. Database/schema migrations are not supplied yet; this donation revision requires
+a fresh sandbox database and must not be opened against old price-based fixtures.
 
 ## SFTPGo 2.7.6 compatibility and production blockers
 
@@ -125,9 +130,7 @@ Checked against the exact deployed version, not the main branch:
   instantly terminate transfers already in progress; disconnect is a separate
   policy/operation, not enabled by this module.
 
-**Unresolved production requirements:** authenticate renewals after an account
-expires; choose actual price/limits, grace/refund/retention policy and existing
-free-account treatment; verify personal payment-channel eligibility; configure
+**Unresolved production requirements:** preserve account login/download while disabling writes after entitlement expiry; choose actual limits and refund/retention policy; verify personal payment-channel eligibility; configure
 receiving QR and admin authentication/notification without leaking secrets;
 implement serialized SFTPGo update/readback and monotonic retry semantics while
 preserving other fields; enforce purchased rights server-side including old
@@ -158,3 +161,10 @@ non-payment PNG, and close the listener after each test.
 An empty local ledger must not be treated as an existing SFTPGo account's
 baseline. Production onboarding must reject an unmanaged account or explicitly
 import and validate its current entitlement before calculating any paid renewal.
+
+The user reports no existing product accounts; no migration of old paid users is
+planned. Existing development/test data are still not deleted. The selected
+channel is a WeChat appreciation code: its ability to accept a remark is unproven.
+Never require a four-digit remark; use the independent order ID plus manual
+verification and binding of the actual transaction reference. See
+[SFTPGo write-only restriction research](SFTPGO_UPLOAD_POLICY.md).

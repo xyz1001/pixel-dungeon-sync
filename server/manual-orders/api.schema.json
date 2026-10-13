@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pdsync:sandbox-orders:v1",
-  "title": "Sandbox order contract v1",
+  "$id": "urn:pdsync:sandbox-orders:v2-donation",
+  "title": "Sandbox donation order contract v2",
   "$defs": {
     "Order": {
       "type": "object",
@@ -13,18 +13,16 @@
           "type": "string"
         },
         "currency": {
-          "type": "string"
+          "type": "null"
         },
         "remark_code": {
           "type": "string"
         },
         "amount_minor": {
-          "type": "integer",
-          "minimum": 0
+          "type": "null"
         },
         "days": {
-          "type": "integer",
-          "minimum": 0
+          "const": 0
         },
         "quota_bytes": {
           "type": "integer",
@@ -43,10 +41,7 @@
           "minimum": 0
         },
         "term": {
-          "enum": [
-            "calendar_year",
-            "fixed_days"
-          ]
+          "const": "calendar_year"
         },
         "state": {
           "enum": [
@@ -64,6 +59,19 @@
             "null"
           ],
           "minimum": 0
+        },
+        "actual_amount_minor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "actual_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -79,7 +87,9 @@
         "created_ms",
         "term",
         "state",
-        "target_ms"
+        "target_ms",
+        "actual_amount_minor",
+        "actual_currency"
       ],
       "additionalProperties": false
     },
@@ -90,15 +100,13 @@
           "type": "string"
         },
         "currency": {
-          "type": "string"
+          "type": "null"
         },
         "amount_minor": {
-          "type": "integer",
-          "minimum": 0
+          "type": "null"
         },
         "days": {
-          "type": "integer",
-          "minimum": 0
+          "const": 0
         },
         "quota_bytes": {
           "type": "integer",
@@ -113,10 +121,7 @@
           "minimum": 0
         },
         "term": {
-          "enum": [
-            "calendar_year",
-            "fixed_days"
-          ]
+          "const": "calendar_year"
         },
         "display_name": {
           "type": "string"
@@ -128,7 +133,10 @@
           "type": "string"
         },
         "expiry_policy": {
-          "const": "sandbox_ledger_only"
+          "const": "sandbox_upload_only"
+        },
+        "payment_mode": {
+          "const": "donation"
         }
       },
       "required": [
@@ -143,7 +151,8 @@
         "display_name",
         "payment_instructions",
         "payment_image_path",
-        "expiry_policy"
+        "expiry_policy",
+        "payment_mode"
       ],
       "additionalProperties": false
     },
@@ -205,12 +214,23 @@
         "receipt_ref": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{8,100}$"
+        },
+        "actual_amount_minor": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        },
+        "actual_currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
         }
       },
       "required": [
         "order_id",
         "channel",
-        "receipt_ref"
+        "receipt_ref",
+        "actual_amount_minor",
+        "actual_currency"
       ],
       "additionalProperties": false
     },
@@ -326,18 +346,16 @@
                     "type": "string"
                   },
                   "currency": {
-                    "type": "string"
+                    "type": "null"
                   },
                   "remark_code": {
                     "type": "string"
                   },
                   "amount_minor": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "null"
                   },
                   "days": {
-                    "type": "integer",
-                    "minimum": 0
+                    "const": 0
                   },
                   "quota_bytes": {
                     "type": "integer",
@@ -356,10 +374,7 @@
                     "minimum": 0
                   },
                   "term": {
-                    "enum": [
-                      "calendar_year",
-                      "fixed_days"
-                    ]
+                    "const": "calendar_year"
                   },
                   "state": {
                     "enum": [
@@ -386,6 +401,19 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "actual_amount_minor": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "actual_currency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -403,7 +431,9 @@
                   "state",
                   "target_ms",
                   "owner",
-                  "channel"
+                  "channel",
+                  "actual_amount_minor",
+                  "actual_currency"
                 ],
                 "additionalProperties": false
               }

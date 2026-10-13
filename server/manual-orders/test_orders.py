@@ -54,7 +54,7 @@ class OrderTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'test.sqlite'
         self.now = ms('2024-02-29T12:34:56.789+00:00')
-        self.plan = Plan('annual-v1', 1234, 'CNY', 'calendar_year', 'sandbox_ledger_only', quota_bytes=5242880, upload_kbps=100, download_kbps=100)
+        self.plan = Plan('annual-v1', quota_bytes=5242880, upload_kbps=100, download_kbps=100)
         self.adapter = FakeEntitlements()
         self.service = self.make()
 
@@ -81,7 +81,7 @@ class OrderTests(unittest.TestCase):
         return order
 
     def approve(self, oid, receipt='receipt_00000001', service=None):
-        return self.call('/api/admin/approve', {'order_id': oid, 'receipt_ref': receipt, 'channel': 'sandbox'}, 'reviewer', service=service)
+        return self.call('/api/admin/approve', {'order_id': oid, 'receipt_ref': receipt, 'channel': 'sandbox', 'actual_amount_minor': 1234, 'actual_currency': 'CNY'}, 'reviewer', service=service)
 
     def audit(self, oid, event):
         with closing(sqlite3.connect(self.path)) as db:
@@ -129,14 +129,16 @@ class OrderTests(unittest.TestCase):
         a = self.create()
         body = {'plan_id': self.plan.id, 'request_key': 'request_000000000002', 'amount_minor': 1}
         self.assertEqual(400, self.call('/api/order/create', body)[0])
-        self.plan = Plan('annual-v1', 9999, 'USD', 'fixed_days', 'sandbox_ledger_only', 1, 9999, 200, 200)
+        self.plan = Plan('annual-v1', quota_bytes=9999, upload_kbps=200, download_kbps=200)
         self.service = self.make()
         self.assertEqual(a, self.create())
         self.call('/api/order/submit', {'order_id': a['id']})
         status, result = self.approve(a['id'])
         self.assertEqual(200, status)
-        self.assertEqual(1234, result['data']['amount_minor'])
-        self.assertEqual('CNY', result['data']['currency'])
+        self.assertIsNone(result['data']['amount_minor'])
+        self.assertEqual(1234, result['data']['actual_amount_minor'])
+        self.assertIsNone(result['data']['currency'])
+        self.assertEqual('CNY', result['data']['actual_currency'])
         self.assertEqual(5242880, result['data']['quota_bytes'])
         self.assertEqual(100, result['data']['upload_kbps'])
         self.assertEqual(ms('2025-02-28T12:34:56.789+00:00'), result['data']['target_ms'])
@@ -317,9 +319,33 @@ class OrderTests(unittest.TestCase):
     def test_code_pool_exhaustion_is_bounded(self):
         with self.service.transaction() as db:
             db.executemany('INSERT INTO orders(id,owner,request_key,plan_id,amount_minor,currency,term,days,expiry_policy,quota_bytes,upload_kbps,download_kbps,state,remark_code,created_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                           [(str(n), 'owner'+str(n), 'key', 'test', 1, 'CNY', 'fixed_days', 1, 'sandbox_ledger_only', 1, 1, 1, 'review', f'{n:04d}', self.now) for n in range(10000)])
+                           [(str(n), 'owner'+str(n), 'key', 'test', None, None, 'calendar_year', 0, 'sandbox_upload_only', 1, 1, 1, 'review', f'{n:04d}', self.now) for n in range(10000)])
         self.assertEqual((503, {'error': 'REMARK_CODES_EXHAUSTED'}),
                          self.call('/api/order/create', {'plan_id': self.plan.id, 'request_key': 'request_000000000001'}))
+
+    def test_donation_has_no_price_and_admin_records_verified_actual_amount(self):
+        a = self.create()
+        self.assertIsNone(a['amount_minor'])
+        self.assertIsNone(a['actual_amount_minor'])
+        self.call('/api/order/submit', {'order_id': a['id']})
+        self.now += 20 * 86400000
+        body = {'order_id': a['id'], 'channel': 'wechat', 'receipt_ref': 'donation_receipt_0001',
+                'actual_amount_minor': 567, 'actual_currency': 'CNY'}
+        self.assertEqual(400, self.call('/api/admin/approve', dict(body, actual_amount_minor=True), 'reviewer')[0])
+        self.assertEqual(400, self.call('/api/order/submit', {'order_id': a['id'], 'actual_amount_minor': 567})[0])
+        status, result = self.call('/api/admin/approve', body, 'reviewer')
+        self.assertEqual(200, status)
+        self.assertEqual(567, result['data']['actual_amount_minor'])
+        self.assertEqual(extend_ms(self.now, 'calendar_year', 0), result['data']['target_ms'])
+        self.assertEqual(409, self.call('/api/admin/approve', dict(body, actual_amount_minor=999), 'reviewer')[0])
+
+    def test_donation_offer_rejects_fixed_price_and_other_durations(self):
+        from dataclasses import replace
+        for plan in (replace(self.plan, amount_minor=100), replace(self.plan, currency='CNY'),
+                     replace(self.plan, term='fixed_days', days=365),
+                     replace(self.plan, expiry_policy='account_expiration')):
+            with self.assertRaises(ValueError):
+                Orders(self.path, (plan,), mode='sandbox')
 
 
 if __name__ == '__main__':

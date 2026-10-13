@@ -28,7 +28,7 @@ class HttpTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.plan = Plan('fixture-annual', 1234, 'CNY', 'calendar_year', 'sandbox_ledger_only',
+        self.plan = Plan('fixture-annual',
                          quota_bytes=5242880, upload_kbps=100, download_kbps=100)
         self.adapter = FakeEntitlements()
         self.service = Orders(Path(self.temp.name) / 'orders.sqlite', (self.plan,),
@@ -72,7 +72,8 @@ class HttpTests(unittest.TestCase):
             status, plans = self.request(port, 'GET', '/api/order/plans')
             self.assertEqual(200, status)
             self.assertTrue(plans['sandbox'])
-            self.assertEqual(1234, plans['data'][0]['amount_minor'])
+            self.assertIsNone(plans['data'][0]['amount_minor'])
+            self.assertEqual('donation', plans['data'][0]['payment_mode'])
             self.assertEqual((200, PNG), self.request(port, 'GET', plans['data'][0]['payment_image_path']))
             create = {'plan_id': self.plan.id, 'request_key': 'fixture-request-0001'}
             status, order = self.request(port, 'POST', '/api/order/create', create)
@@ -85,7 +86,7 @@ class HttpTests(unittest.TestCase):
             for _ in range(2):
                 self.assertEqual('review', self.request(port, 'POST', '/api/order/submit', {'order_id': oid})[1]['data']['state'])
             self.assertEqual({}, self.adapter.values)
-            approve = {'order_id': oid, 'channel': 'sandbox', 'receipt_ref': 'fixture-receipt-0001'}
+            approve = {'order_id': oid, 'channel': 'sandbox', 'receipt_ref': 'fixture-receipt-0001', 'actual_amount_minor': 1234, 'actual_currency': 'CNY'}
             for _ in range(2):
                 self.assertEqual('approved', self.request(port, 'POST', '/api/admin/approve', approve, 'reviewer')[1]['data']['state'])
             status, approved = self.request(port, 'GET', '/api/order/status/' + oid)
@@ -134,7 +135,7 @@ class HttpTests(unittest.TestCase):
     def test_admin_queue_paginates_101_orders_without_loss_or_duplicates(self):
         with self.service.transaction() as db:
             db.executemany('INSERT INTO orders(id,owner,request_key,plan_id,amount_minor,currency,term,days,expiry_policy,quota_bytes,upload_kbps,download_kbps,state,remark_code,created_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                           [(str(n), 'owner'+str(n), 'key', 'fixture', 1, 'CNY', 'fixed_days', 1, 'sandbox_ledger_only', 1, 1, 1, 'review', f'{n:04d}', n) for n in range(101)])
+                           [(str(n), 'owner'+str(n), 'key', 'fixture', None, None, 'calendar_year', 0, 'sandbox_upload_only', 1, 1, 1, 'review', f'{n:04d}', n) for n in range(101)])
         with self.running() as port:
             seen, cursor = [], '0'
             while cursor is not None:
@@ -157,7 +158,7 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(409, self.request(port, 'POST', '/api/admin/retry', {'order_id': oid}, 'reviewer')[0])
             self.request(port, 'POST', '/api/order/submit', {'order_id': oid})
             self.adapter.fail_after = True
-            approved = {'order_id': oid, 'channel': 'sandbox', 'receipt_ref': 'fixture-receipt-0001'}
+            approved = {'order_id': oid, 'channel': 'sandbox', 'receipt_ref': 'fixture-receipt-0001', 'actual_amount_minor': 1234, 'actual_currency': 'CNY'}
             self.assertEqual(503, self.request(port, 'POST', '/api/admin/approve', approved, 'reviewer')[0])
         restarted = Orders(self.service.path, (self.plan,), mode='sandbox',
                            authenticator=FixtureAuth(), entitlements=self.adapter)

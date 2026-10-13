@@ -1,4 +1,4 @@
-# Sandbox order HTTP contract v1
+# Sandbox order HTTP contract v2 (donation)
 
 This contract is for the optional **local sandbox only**. No public endpoint,
 product price, real collection image, credential or production auth is supplied.
@@ -27,19 +27,21 @@ Authorization, request bodies or receipt references. All responses are no-store.
 
 ## Response schemas
 
-See `api.schema.json` for the response/data and request JSON Schema definitions.
+See `api.schema.json` for the response/data and request JSON Schema definitions. This is a breaking sandbox revision; the client feature remains disabled until updated.
 Success: HTTP 200, `{"sandbox":true,"data":...}`. Failure:
 `{"error":"UPPERCASE_CODE"}` with a non-2xx status; it never contains raw upstream
 errors, credentials or payment transaction references. Time fields are UTC Unix
 milliseconds. `target_ms` is null until administrator approval reserves it.
-Amounts are integer minor units, not floating-point display prices. `sandbox`
+Quoted `amount_minor` and `currency` are always null. Only administrator-confirmed
+`actual_amount_minor` (positive integer minor units) and `actual_currency` are
+recorded at approval; before approval both are null. `sandbox`
 must be checked before presenting a test result as an actual subscription.
 
 ## Endpoints
 
 | Method/path | Role | Exact request / success data |
 | --- | --- | --- |
-| GET `/api/order/plans` | user | Array of PlanDisplay; immutable pricing/limits from explicit config |
+| GET `/api/order/plans` | user | Array of PlanDisplay; donation mode, no quoted price, explicit limits |
 | GET `/api/order/payment-image/{plan_id}` | user | `image/png` bytes from explicit fixture; no-store |
 | POST `/api/order/create` | user | `{plan_id,request_key}` -> Order |
 | GET `/api/order/mine` | user | Array of Order, newest first, maximum 100 |
@@ -48,7 +50,7 @@ must be checked before presenting a test result as an actual subscription.
 | POST `/api/order/submit` | user | `{order_id}` -> Order (payment claim only) |
 | POST `/api/order/cancel` | user | `{order_id}` -> Order |
 | GET `/api/admin/queue` or `/api/admin/queue/{cursor}` | admin | `{items:[Order+owner+channel],next_cursor:string-or-null}`; at most 100, initial cursor `0` |
-| POST `/api/admin/approve` | admin | `{order_id,channel,receipt_ref}` -> Order |
+| POST `/api/admin/approve` | admin | `{order_id,channel,receipt_ref,actual_amount_minor,actual_currency}` -> Order |
 | POST `/api/admin/retry` | admin | `{order_id}` -> Order; reuse persisted approval and target |
 | POST `/api/admin/reject` | admin | `{order_id}` -> Order |
 
@@ -120,3 +122,27 @@ and normal connection-test/save-comparison gates; do not force an upload.
 the same approval later. `ENTITLEMENT_RETRY_REQUIRED` leaves the order applying;
 it is not an unpaid/rejected state. Readback and remote monotonicity are adapter
 contracts; the fake ledger tests do **not** prove a regular SFTPGo PUT is fenced.
+
+## Donation rules (confirmed product change)
+
+`payment_mode=donation`, `term=calendar_year`, `days=0`, and
+`expiry_policy=sandbox_upload_only`. There is no fixed annual price. The app
+shows the appreciation code; available amounts come from WeChat's code page.
+Do not infer amounts from the image or let the client submit the paid amount.
+An authenticated reviewer records the verified positive minor-unit amount,
+currency and channel transaction number. Reapproving with different actual
+amount/currency conflicts; retry uses the persisted values.
+
+Each verified donation grants one UTC calendar year from manual approval, or
+from the current unexpired expiry, whichever is later. Feb 29 maps to Feb 28
+in the next year. The desired production expiry action is disabling uploads
+while retaining login/download and the same login-based renewal flow, not
+setting SFTPGo account `expiration_date`. No production enforcement is present.
+
+Remark-code entry in WeChat appreciation flow is unverified. The four-digit
+code is optional assistance only: never insist the user enter it. Independent
+order IDs and manual transaction binding remain authoritative.
+
+New validation errors: `400 INVALID_ACTUAL_AMOUNT`,
+`400 INVALID_ACTUAL_CURRENCY`; all prior authentication/state errors remain.
+Use a fresh sandbox DB for this schema change; no live DB migration was run.

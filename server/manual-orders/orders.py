@@ -42,10 +42,11 @@ class DisabledNotifications:
 @dataclass(frozen=True)
 class Plan:
     id: str
-    amount_minor: int
-    currency: str
-    term: str
-    expiry_policy: str
+    amount_minor: None = None
+    currency: None = None
+    term: str = 'calendar_year'
+    expiry_policy: str = 'sandbox_upload_only'
+    payment_mode: str = 'donation'
     days: int = 0
     quota_bytes: int = None
     upload_kbps: int = None
@@ -54,18 +55,14 @@ class Plan:
     def validate(self):
         if not isinstance(self.id, str) or not re.fullmatch(r'[a-z0-9_-]{1,48}', self.id):
             raise ValueError('invalid plan id')
-        if type(self.amount_minor) is not int or not 0 < self.amount_minor <= 100_000_000:
-            raise ValueError('explicit positive minor-unit amount required')
-        if not re.fullmatch(r'[A-Z]{3}', self.currency):
-            raise ValueError('explicit ISO currency code required')
+        if self.amount_minor is not None or self.currency is not None or self.payment_mode != 'donation':
+            raise ValueError('donation offers have no quoted price or currency')
         if any(type(x) is not int or x <= 0 for x in (self.quota_bytes, self.upload_kbps, self.download_kbps)):
             raise ValueError('explicit positive sandbox limits required')
-        if self.expiry_policy != 'sandbox_ledger_only':
+        if self.expiry_policy != 'sandbox_upload_only':
             raise ValueError('production expiry policy is not implemented')
-        if self.term not in ('calendar_year', 'fixed_days'):
-            raise ValueError('explicit term required')
-        if type(self.days) is not int or (self.term == 'fixed_days' and not 1 <= self.days <= 3660) or (self.term == 'calendar_year' and self.days != 0):
-            raise ValueError('invalid term days')
+        if self.term != 'calendar_year' or type(self.days) is not int or self.days != 0:
+            raise ValueError('donation grants exactly one UTC calendar year')
 
 
 def extend_ms(base_ms, term, days):
@@ -84,7 +81,8 @@ def extend_ms(base_ms, term, days):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS orders (
  id TEXT PRIMARY KEY, owner TEXT NOT NULL, request_key TEXT NOT NULL,
- plan_id TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
+ plan_id TEXT NOT NULL, amount_minor INTEGER, currency TEXT,
+ actual_amount_minor INTEGER, actual_currency TEXT,
  term TEXT NOT NULL, days INTEGER NOT NULL, expiry_policy TEXT NOT NULL,
  quota_bytes INTEGER NOT NULL, upload_kbps INTEGER NOT NULL, download_kbps INTEGER NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('created','review','applying','approved','cancelled','rejected')),
@@ -128,6 +126,9 @@ class Orders:
         self.notifications = notifications or DisabledNotifications()
         self.clock = clock or (lambda: time.time_ns() // 1_000_000)
         with self.connect() as db:
+            columns = {r['name']: r for r in db.execute('PRAGMA table_info(orders)')}
+            if columns and ('actual_amount_minor' not in columns or columns['amount_minor']['notnull']):
+                raise ValueError('donation contract requires a fresh sandbox database; no automatic migration')
             db.executescript(SCHEMA)
 
     @contextmanager
@@ -157,7 +158,7 @@ class Orders:
     @staticmethod
     def public(row):
         return {k: row[k] for k in ('id', 'plan_id', 'amount_minor', 'currency',
-                'term', 'days', 'quota_bytes', 'upload_kbps', 'download_kbps', 'state', 'remark_code', 'created_ms', 'target_ms')}
+                'actual_amount_minor', 'actual_currency', 'term', 'days', 'quota_bytes', 'upload_kbps', 'download_kbps', 'state', 'remark_code', 'created_ms', 'target_ms')}
 
     @staticmethod
     def owned(db, order_id, principal):
@@ -225,7 +226,11 @@ class Orders:
             self.audit(db, oid, principal.subject, state)
             return self.public(self.owned(db, oid, principal))
 
-    def approve(self, principal, oid, receipt_ref, channel):
+    def approve(self, principal, oid, receipt_ref, channel, actual_amount_minor, actual_currency):
+        if type(actual_amount_minor) is not int or not 0 < actual_amount_minor <= 100_000_000:
+            raise OrderError(400, 'INVALID_ACTUAL_AMOUNT')
+        if not isinstance(actual_currency, str) or not re.fullmatch(r'[A-Z]{3}', actual_currency):
+            raise OrderError(400, 'INVALID_ACTUAL_CURRENCY')
         if channel not in ('sandbox', 'wechat', 'alipay'):
             raise OrderError(400, 'INVALID_CHANNEL')
         if not isinstance(receipt_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', receipt_ref):
@@ -234,15 +239,16 @@ class Orders:
         with self.transaction() as db:
             row = self.owned(db, oid, principal)
             if row['state'] in ('applying', 'approved'):
-                if row['receipt_ref'] != receipt_ref or row['channel'] != channel:
+                if (row['receipt_ref'] != receipt_ref or row['channel'] != channel or
+                    row['actual_amount_minor'] != actual_amount_minor or row['actual_currency'] != actual_currency):
                     raise OrderError(409, 'APPROVAL_CONFLICT')
             elif row['state'] == 'review':
                 if db.execute('SELECT 1 FROM orders WHERE channel=? AND receipt_ref=?', (channel, receipt_ref)).fetchone():
                     raise OrderError(409, 'RECEIPT_ALREADY_USED')
                 current = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (row['owner'],)).fetchone()
                 target = extend_ms(max(self.clock(), current[0] if current else 0), row['term'], row['days'])
-                db.execute("UPDATE orders SET state='applying',target_ms=?,reviewer=?,receipt_ref=?,channel=? WHERE id=?",
-                           (target, principal.subject, receipt_ref, channel, oid))
+                db.execute("UPDATE orders SET state='applying',target_ms=?,reviewer=?,receipt_ref=?,channel=?,actual_amount_minor=?,actual_currency=? WHERE id=?",
+                           (target, principal.subject, receipt_ref, channel, actual_amount_minor, actual_currency, oid))
                 self.audit(db, oid, principal.subject, 'approval_reserved')
             else:
                 raise OrderError(409, 'PAYMENT_NOT_SUBMITTED')
@@ -291,7 +297,7 @@ class Orders:
             row = self.owned(db, oid, principal)
             if row['state'] not in ('applying', 'approved'):
                 raise OrderError(409, 'APPROVAL_NOT_RESERVED')
-        return self.approve(principal, oid, row['receipt_ref'], row['channel'])
+        return self.approve(principal, oid, row['receipt_ref'], row['channel'], row['actual_amount_minor'], row['actual_currency'])
 
     def dispatch(self, method, path, headers=None, body=None):
         """Transport-independent API. Hosting/auth integration is deliberately absent.
@@ -315,7 +321,7 @@ class Orders:
                 '/api/order/create': ('POST', {'plan_id', 'request_key'}, 'user'),
                 '/api/order/submit': ('POST', {'order_id'}, 'user'),
                 '/api/order/cancel': ('POST', {'order_id'}, 'user'),
-                '/api/admin/approve': ('POST', {'order_id', 'receipt_ref', 'channel'}, 'admin'),
+                '/api/admin/approve': ('POST', {'order_id', 'receipt_ref', 'channel', 'actual_amount_minor', 'actual_currency'}, 'admin'),
                 '/api/admin/retry': ('POST', {'order_id'}, 'admin'),
                 '/api/admin/reject': ('POST', {'order_id'}, 'admin'),
                 '/api/admin/queue': ('GET', set(), 'admin'),
@@ -332,7 +338,7 @@ class Orders:
                 raise OrderError(405, 'METHOD_NOT_ALLOWED')
             if principal.role != route[2]:
                 raise OrderError(403, 'FORBIDDEN')
-            if set(data) != route[1] or any(not isinstance(v, str) for v in data.values()):
+            if set(data) != route[1] or any(not isinstance(v, str) for k, v in data.items() if k != 'actual_amount_minor'):
                 raise OrderError(400, 'INVALID_REQUEST')
             if path == '/api/order/plans':
                 result = [asdict(plan) for plan in self.plans.values()]
@@ -355,7 +361,7 @@ class Orders:
             elif path == '/api/admin/reject':
                 result = self.close(principal, data['order_id'], 'rejected')
             elif path == '/api/admin/approve':
-                result = self.approve(principal, data['order_id'], data['receipt_ref'], data['channel'])
+                result = self.approve(principal, data['order_id'], data['receipt_ref'], data['channel'], data['actual_amount_minor'], data['actual_currency'])
             elif path == '/api/admin/retry':
                 result = self.retry(principal, data['order_id'])
             elif path == '/api/admin/queue' or path.startswith('/api/admin/queue/'):
