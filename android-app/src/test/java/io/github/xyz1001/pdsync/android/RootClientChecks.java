@@ -79,13 +79,15 @@ public final class RootClientChecks {
         RootProtocol.Request request=new RootProtocol.Request(RootProtocol.Command.PROBE,game.binding());
         byte[] valid=reply(okay(game).withRequest(request,RootProtocol.Outcome.READ_ONLY));FakeProcess success=new FakeProcess(valid,0);AtomicInteger launches=new AtomicInteger();
         RootProcessTransport transport=new RootProcessTransport("/data/app/self/base.apk",cmd->{
-            launches.incrementAndGet();check(cmd.length==3&&cmd[0].equals("su"),"fixed su args");
-            check(!cmd[2].contains(game.gamePackage)&&!cmd[2].contains(game.dataDir),"no target shell interpolation");return success;},1000);
+            launches.incrementAndGet();check(cmd.length==4&&cmd[0].equals("su")&&cmd[1].equals("--mount-master")&&cmd[2].equals("-c"),"fixed job-local global mount namespace args");
+            check(!cmd[3].contains(game.gamePackage)&&!cmd[3].contains(game.dataDir),"no target shell interpolation");return success;},1000);
         check(transport.exchange(request,null).status==RootProtocol.Status.OK,"valid response");
         check(RootProtocol.readRequest(new ByteArrayInputStream(success.written.toByteArray())).binding.matchesInstalled(game.binding()),"binary target binding");
         check(success.destroyed,"process closed");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->{throw new IOException("missing su");},100).exchange(request,null),"ROOT_UNAVAILABLE");
-        rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(new byte[0],1),100).exchange(request,null),"ROOT_DENIED_OR_EXITED");
+        AtomicInteger unsupportedNamespace=new AtomicInteger();
+        rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->{unsupportedNamespace.incrementAndGet();return new FakeProcess(new byte[0],1);},100).exchange(request,null),"ROOT_DENIED_OR_EXITED");
+        check(unsupportedNamespace.get()==1,"unsupported namespace option fails without an isolated-namespace retry");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(Arrays.copyOf(valid,valid.length-2),0),100).exchange(request,null),"ROOT_INVALID_REPLY");
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->new FakeProcess(new byte[0],124),100).exchange(request,null),"ROOT_RUNNER_TIMEOUT");
         byte[] trailing=Arrays.copyOf(valid,valid.length+1);

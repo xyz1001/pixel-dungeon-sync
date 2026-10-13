@@ -2,15 +2,30 @@
 
 This is an optional Android `app_process` file-access backend with host-testable
 read, export, transactional restore and recovery paths.
-The established embedded bridge is unchanged. Nothing here has been executed under
-Android root or on a phone. SDK compilation and injected host tests are not runtime
-verification or evidence that a particular root manager/SELinux policy permits it.
+The established embedded bridge is unchanged. SDK compilation and injected host
+tests are not runtime verification or evidence that a particular root manager or
+SELinux policy permits a complete read, restore, or recovery operation.
 
 ## Public boundary
 
 Entry point: `io.github.xyz1001.pdsync.root.RootRunner`, with **no arguments**.
 A normal-UID caller starts it explicitly after root authorization, sends exactly one
 `RootProtocol.Request`, closes stdin, receives exactly one reply, and waits for EOF.
+The fixed launcher is `su --mount-master -c` followed only by the app's own
+PM-provided APK and fixed `app_process` entry point. Android's app-data mount
+isolation can hide the selected game even after UID 0 is obtained. This asks the
+root manager for the global mount view for this one process; it does not change
+persistent root-manager settings or mount/unmount any directory. Unsupported or
+ineffective namespace selection fails the job; there is no implicit retry without
+that option and no alternate unbound target path. The selected package, UID, PM
+path and installed APK hashes are still independently validated.
+
+The documented option is implemented in
+[KernelSU's su launcher](https://github.com/tiann/KernelSU/blob/main/userspace/ksud/src/su.rs).
+[AOSP Zygote app-data isolation](https://android.googlesource.com/platform/frameworks/base/+/master/core/jni/com_android_internal_os_Zygote.cpp)
+explains why inherited app and global mount views differ. Actual support remains a
+root-manager/device capability, not something a host test can certify.
+
 The runner verifies actual `Os.geteuid() == 0` before PM or target filesystem access.
 It exits after the job, including framework/Binder threads, with a monotonic
 25-second probe/observe, 50-second inspect/export, or 120-second restore/recovery
@@ -185,6 +200,6 @@ isolated behind an API-level branch. `RootOpenFlags` selects the actual process 
 from the platform O_NOFOLLOW value where public stubs omit O_DIRECTORY; ARM/arm64
 and x86/x86_64 use different flag layouts. It rejects unknown layouts rather than
 passing the x86 O_DIRECTORY bit as ARM O_DIRECT. Fixed KERNEL_* diagnostic stages
-preserve the failed operation and bounded errno without exposing paths. Reflection-based PackageManager user context,
+preserve the failed operation and bounded errno without exposing paths. Required read-guard lookups additionally identify DATA_PACKAGE or SAVE_FILES; optional WORKSPACE absence is tested through complete INSPECT/EXPORT calls and never creates the workspace. Reflection-based PackageManager user context,
 root-manager launch, `/proc/self/fd`, SELinux, and Android lifecycle behavior still
 need authorized real-device testing. No `runtimeVerified=true` flag exists here.

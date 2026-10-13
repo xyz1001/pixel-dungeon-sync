@@ -49,7 +49,7 @@ public final class RootMutationReadGuard implements AutoCloseable {
         if (!canonicalParent.equals("/data/user/" + binding.userId)
                 && !(binding.userId == 0 && canonicalParent.equals("/data/data"))) fail(Code.UNSAFE);
         data = openData(); originalData = os.stat(data);
-        Stat filesBefore = os.childStat(data, "files"); liveDirectory(filesBefore);
+        Stat filesBefore = lookup(data, "files", MutationOs.Operation.LSTAT_SAVE_FILES); liveDirectory(filesBefore);
         files = os.openDirectory(data, "files"); originalFiles = os.stat(files);
         sameDirectory(filesBefore, originalFiles); liveDirectory(originalFiles);
         Stat found = optional(data, WORKSPACE);
@@ -137,7 +137,7 @@ public final class RootMutationReadGuard implements AutoCloseable {
         if (!canonicalParent.equals(os.canonicalSystemParent(fixedParent()))) fail(Code.CHANGED);
         try (MutationOs.Handle reopened = openData()) {
             sameDirectory(originalData, os.stat(reopened)); sameDirectory(originalData, os.stat(data));
-            sameDirectory(originalFiles, os.childStat(reopened, "files")); sameDirectory(originalFiles, os.stat(files));
+            sameDirectory(originalFiles, lookup(reopened, "files", MutationOs.Operation.LSTAT_SAVE_FILES)); sameDirectory(originalFiles, os.stat(files));
             Stat now = optional(reopened, WORKSPACE);
             if (workspace == null) { if (now != null) fail(Code.CHANGED); return; }
             if (now == null) fail(Code.CHANGED);
@@ -155,7 +155,7 @@ public final class RootMutationReadGuard implements AutoCloseable {
                 try { trusted(os.stat(next)); } catch (IOException e) { next.close(); throw e; }
                 current.close(); current = next;
             }
-            Stat before = os.childStat(current, binding.packageName); liveDirectory(before);
+            Stat before = lookup(current, binding.packageName, MutationOs.Operation.LSTAT_DATA_PACKAGE); liveDirectory(before);
             MutationOs.Handle result = os.openDirectory(current, binding.packageName);
             try { sameDirectory(before, os.stat(result)); liveDirectory(os.stat(result)); return result; }
             catch (IOException e) { result.close(); throw e; }
@@ -163,8 +163,17 @@ public final class RootMutationReadGuard implements AutoCloseable {
     }
     private String fixedParent() { return binding.dataDir.substring(0, binding.dataDir.lastIndexOf('/')); }
     private Stat optional(MutationOs.Handle parent, String name) throws IOException {
-        try { return os.childStat(parent, name); }
+        try { return lookup(parent, name, name.equals(WORKSPACE) ? MutationOs.Operation.LSTAT_WORKSPACE : MutationOs.Operation.LSTAT); }
         catch (MutationOs.Failure e) { if (e.error == MutationOs.Error.MISSING) return null; throw e; }
+    }
+    /** Keep the exact failed syscall and its fixed role, without returning target paths. */
+    private Stat lookup(MutationOs.Handle parent, String name, MutationOs.Operation role) throws IOException {
+        try { return os.childStat(parent, name); }
+        catch (MutationOs.Failure e) {
+            // Do not relabel an FD/fstat failure underneath a lookup as a missing child.
+            if (e.operation != MutationOs.Operation.NONE && e.operation != MutationOs.Operation.LSTAT) throw e;
+            throw new MutationOs.Failure(e.error, role, e.errno, e);
+        }
     }
     private void liveDirectory(Stat stat) throws IOException {
         if (!stat.directory() || stat.uid != binding.uid || (stat.mode & 07002) != 0

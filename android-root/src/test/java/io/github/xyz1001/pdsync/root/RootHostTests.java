@@ -394,8 +394,8 @@ public final class RootHostTests {
                 if(missing.equals("files"))required.readOs.data.children.remove("files");
                 else required.readOs.root.children.get("data").children.get("user").children.get("0").children.remove("com.example.game");
                 RootProtocol.Response rejected=new RootService(required).execute(query);
-                check(rejected.status==RootProtocol.Status.IO_ERROR&&rejected.diagnosticStage==RootProtocol.DiagnosticStage.KERNEL_LSTAT
-                        &&rejected.errno==2,"required "+missing+" ENOENT remains a failure "+command);
+                check(rejected.status==RootProtocol.Status.IO_ERROR&&rejected.diagnosticStage==(missing.equals("package")?RootProtocol.DiagnosticStage.KERNEL_LSTAT_DATA_PACKAGE:RootProtocol.DiagnosticStage.KERNEL_LSTAT_SAVE_FILES)
+                        &&rejected.diagnosticCategory==RootProtocol.DiagnosticCategory.MISSING&&rejected.errno==2,"required "+missing+" ENOENT remains a failure "+command);
                 check(required.fs.operations==0&&required.readOs.mutations==0&&required.readOs.workspace()==null,
                         "missing required "+missing+" stops before save reads and writes "+command);
             }

@@ -39,7 +39,10 @@ public final class RootProcessTransport implements AutoCloseable {
         this.factory=factory;this.timeoutMillis=timeoutMillis;this.commandBudgets=timeoutMillis==0;
         // Only the app's PM supplied APK enters this tightly encoded, fixed launcher.
         // Every target path, package, fingerprint and operation goes through the binary pipe.
-        this.command=new String[]{"su","-c","CLASSPATH='"+ownInstalledApk+"' exec /system/bin/app_process /system/bin io.github.xyz1001.pdsync.root.RootRunner"};
+        // Android app-data isolation is a mount namespace, independent of UID 0. Request
+        // the root manager's process-local global view; never change its persistent policy,
+        // mount/unmount directories, or silently retry in an isolated namespace.
+        this.command=new String[]{"su","--mount-master","-c","CLASSPATH='"+ownInstalledApk+"' exec /system/bin/app_process /system/bin io.github.xyz1001.pdsync.root.RootRunner"};
     }
     public RootProtocol.Response exchange(RootProtocol.Request request, OutputStream archive) throws IOException {
         return exchange(request,null,archive);

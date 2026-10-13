@@ -79,7 +79,13 @@ public final class AndroidMutationOs implements MutationOs {
         try { return convert(Os.fstat(fd(h).pfd.getFileDescriptor())); } catch (ErrnoException e) { throw failure(Operation.FSTAT, e); }
     }
     @Override public Stat childStat(Handle parent, String name) throws IOException {
-        try { return convert(Os.lstat(child(parent, name))); } catch (ErrnoException e) { throw failure(Operation.LSTAT, e); }
+        try { return convert(Os.lstat(child(parent, name))); }
+        catch (ErrnoException e) {
+            // ENOENT can also mean a vanished /proc/self/fd parent. Only a live directory
+            // descriptor may establish an optional child's absence; preserve FSTAT errors.
+            if (e.errno == OsConstants.ENOENT && !stat(parent).directory()) throw new Failure(Error.IO, Operation.FSTAT, 0, e);
+            throw failure(Operation.LSTAT, e);
+        }
     }
     @Override public List<String> children(Handle h, int limit) throws IOException {
         if (limit < 0 || limit > 16384) throw new Failure(Error.IO);

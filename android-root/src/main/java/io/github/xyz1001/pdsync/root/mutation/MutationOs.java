@@ -12,7 +12,7 @@ public interface MutationOs {
     /** Fixed diagnostics only; never carries a path, basename, or descriptor number. */
     enum Operation { NONE, OPEN_DIRECTORY, OPEN_REGULAR, DUP, FCNTL, FSTAT, LSTAT, READDIR,
         MKDIR, PREAD, PWRITE, FCHMOD, FCHOWN, FSYNC, GETXATTR, SETXATTR, RENAME, LINK, REMOVE,
-        LOCK, TIMESTAMP }
+        LOCK, TIMESTAMP, LSTAT_DATA_PACKAGE, LSTAT_SAVE_FILES, LSTAT_WORKSPACE }
     final class Failure extends IOException {
         public final Error error;
         public final Operation operation;

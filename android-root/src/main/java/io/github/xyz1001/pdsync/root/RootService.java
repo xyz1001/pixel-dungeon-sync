@@ -106,6 +106,7 @@ public final class RootService {
                 MutationOs.Failure os=(MutationOs.Failure)cause;errno=os.errno;
                 stage=kernelStage(os.operation,stage);
                 switch(os.error) {
+                    case MISSING:category=RootProtocol.DiagnosticCategory.MISSING;break;
                     case PERMISSION:category=RootProtocol.DiagnosticCategory.PERMISSION;break;
                     case CROSS_DEVICE:category=RootProtocol.DiagnosticCategory.CROSS_DEVICE;break;
                     case UNSUPPORTED:category=RootProtocol.DiagnosticCategory.UNSUPPORTED;break;
