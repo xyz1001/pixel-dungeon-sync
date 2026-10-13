@@ -9,5 +9,6 @@ SHARED="$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge"
 java com.sun.tools.javac.Main -source 17 -target 17 -d "$OUT" \
   "$SHARED"/{SaveArchive,SaveDirectoryPolicy,BridgeFailure}.java \
   $(find "$SRC" -name '*.java' ! -name 'Android*.java' ! -name 'RootRunner.java' | sort) \
+  "$BASE/src/test/java/io/github/xyz1001/pdsync/root/mutation/FakeMutationOs.java" \
   "$BASE/src/test/java/io/github/xyz1001/pdsync/root/RootHostTests.java"
 java -cp "$OUT" io.github.xyz1001.pdsync.root.RootHostTests

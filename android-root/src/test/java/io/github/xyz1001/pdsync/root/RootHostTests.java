@@ -2,6 +2,8 @@ package io.github.xyz1001.pdsync.root;
 
 import io.github.xyz1001.pdsync.bridge.SaveArchive;
 import io.github.xyz1001.pdsync.bridge.SaveDirectoryPolicy;
+import io.github.xyz1001.pdsync.root.mutation.FakeMutationOs;
+import io.github.xyz1001.pdsync.root.mutation.MutationOs;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -40,7 +42,7 @@ public final class RootHostTests {
     }
     private static RootProtocol.Request request(RootProtocol.Command command) throws IOException { return new RootProtocol.Request(command, binding()); }
     public static void main(String[] args) throws Exception {
-        bindings(); protocol(); lifecycle(); filesystem(); limitsAndRaces(); service();
+        bindings(); protocol(); lifecycle(); filesystem(); limitsAndRaces(); service(); absentWorkspaceReads();
         System.out.println("Root host tests passed: " + assertions + " assertions; Android/root runtime NOT tested");
     }
     private static void bindings() throws Exception {
@@ -293,6 +295,8 @@ public final class RootHostTests {
         RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
         int guardOpens, guardChecks, guardRevalidates, guardCloses;
         IOException guardFailure;
+        FakeMutationOs readOs;
+        MutationOs readBoundary;
         FakeRuntime() throws IOException { installed = binding(); fs.file("rankings.dat","synthetic"); }
         public int effectiveUid() { return euid; }
         public RootBinding installed(RootBinding request) throws IOException {
@@ -300,11 +304,16 @@ public final class RootHostTests {
         }
         public ReadGuard openReadGuard(RootBinding binding) throws IOException {
             guardOpens++;if(guardFailure!=null)throw guardFailure;
+            if(readOs!=null)return RootRuntime.super.openReadGuard(binding);
             return new ReadGuard() {
                 public void requireClear()throws IOException {guardChecks++;if(pending)throw new RootFailure(RootProtocol.Status.RECOVERY_REQUIRED);}
                 public void revalidate()throws IOException {guardRevalidates++;if(guardChanged)throw new RootFailure(RootProtocol.Status.CHANGED);}
                 public void close(){guardCloses++;}
             };
+        }
+        public MutationOs readMutationOs(RootBinding binding) throws IOException {
+            if(readOs==null)throw new IOException("No read OS fixture");
+            return readBoundary==null?readOs:readBoundary;
         }
         public RootFileSystem fileSystem() { return fs; }
         public RootUidState.Observation observe(int uid) {
@@ -313,6 +322,84 @@ public final class RootHostTests {
             return unreliable ? RootUidState.Observation.unknown() : RootHostTests.observe(26,foreground ? "2 (TOP)\n" : "17 (CACHED_EMPTY)\n");
         }
         public void quietWait() { if (mutateQuiet) fs.files.children.get("rankings.dat").bytes="different".getBytes(StandardCharsets.UTF_8); }
+    }
+    private static FakeRuntime guardedRuntime() throws IOException {
+        FakeRuntime runtime=new FakeRuntime();runtime.readOs=new FakeMutationOs();
+        runtime.readOs.data.uid=runtime.readOs.data.gid=UID;
+        runtime.readOs.files.uid=runtime.readOs.files.gid=UID;
+        return runtime;
+    }
+    /** Host filesystem only for the optional workspace lookup; all Android metadata/FDs remain injected. */
+    private static final class AbsentWorkspaceBoundary implements java.lang.reflect.InvocationHandler,AutoCloseable {
+        final FakeMutationOs delegate;
+        final Path directory=Files.createTempDirectory("pdsync-absent-workspace-");
+        final Path workspace=directory.resolve(".pdsync-root-restore");
+        final MutationOs os;
+        int missingLookups;
+        AbsentWorkspaceBoundary(FakeMutationOs delegate) throws IOException {
+            this.delegate=delegate;
+            os=(MutationOs)java.lang.reflect.Proxy.newProxyInstance(MutationOs.class.getClassLoader(),
+                    new Class<?>[]{MutationOs.class},this);
+        }
+        public Object invoke(Object proxy,java.lang.reflect.Method method,Object[] args) throws Throwable {
+            if(method.getName().equals("childStat")&&args[1].equals(".pdsync-root-restore")) {
+                check(delegate.stat((MutationOs.Handle)args[0]).inode==delegate.data.inode,"optional lookup anchored to package data");
+                try {
+                    Files.readAttributes(workspace,java.nio.file.attribute.BasicFileAttributes.class,java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                } catch(java.nio.file.NoSuchFileException absent) {
+                    missingLookups++;
+                    throw new MutationOs.Failure(MutationOs.Error.MISSING,MutationOs.Operation.LSTAT,2,absent);
+                }
+                throw new AssertionError("Host workspace fixture unexpectedly exists");
+            }
+            try { return method.invoke(delegate,args); }
+            catch(java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+        }
+        public void close() throws IOException { Files.delete(directory); }
+    }
+    private static void absentWorkspaceReads() throws Exception {
+        for(RootProtocol.Command command:new RootProtocol.Command[]{RootProtocol.Command.INSPECT,RootProtocol.Command.EXPORT}) {
+            FakeRuntime runtime=guardedRuntime();RootProtocol.Request query=request(command);
+            try(AbsentWorkspaceBoundary boundary=new AbsentWorkspaceBoundary(runtime.readOs)) {
+                runtime.readBoundary=boundary.os;
+                check(runtime.readOs.workspace()==null,"absent workspace fixture "+command);
+                // Exercise framing, the real default RootMutationReadGuard, scans and final read boundaries.
+                RootProtocol.RequestFrame frame=RootProtocol.readRequestFrame(new ByteArrayInputStream(wire(query)));
+                RootProtocol.Response response=new RootService(runtime).execute(frame);
+                check(response.status==RootProtocol.Status.OK,"MISSING/LSTAT/ENOENT workspace is optional "+command);
+                ByteArrayOutputStream encoded=new ByteArrayOutputStream();RootProtocol.writeResponse(encoded,response);
+                ByteArrayOutputStream archive=new ByteArrayOutputStream();
+                RootProtocol.Response decoded=RootProtocol.readResponse(new ByteArrayInputStream(encoded.toByteArray()),archive);
+                RootProtocol.requireReplyMatches(query,decoded);
+                check(decoded.outcome==RootProtocol.Outcome.READ_ONLY,"absent workspace read-only reply "+command);
+                check(decoded.contentFingerprint.equals(SaveArchive.fingerprint(Collections.singletonMap("rankings.dat",
+                        SaveArchive.sha256("synthetic".getBytes(StandardCharsets.UTF_8))))),"complete save scan "+command);
+                check(runtime.pmCalls==2&&runtime.observeCalls==3&&runtime.fs.scans>=3,"full read job completed "+command);
+                check(boundary.missingLookups>=5,"actual workspace absence checked at opening and final boundaries "+command);
+                try(java.util.stream.Stream<Path> entries=Files.list(boundary.directory)) {
+                    check(entries.count()==0,"host data directory remains empty "+command);
+                }
+                check(runtime.readOs.workspace()==null&&runtime.readOs.mutations==0&&runtime.readOs.log.isEmpty(),
+                        "absent workspace is never created or mutated "+command);
+                check(command==RootProtocol.Command.EXPORT?archive.size()>0:archive.size()==0,"correct archive presence "+command);
+                if(command==RootProtocol.Command.EXPORT)try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(archive.toByteArray()))) {
+                    check(zip.getNextEntry().getName().equals("rankings.dat"),"absent workspace export entry");
+                    check(Arrays.equals(zip.readAllBytes(),"synthetic".getBytes(StandardCharsets.UTF_8)),"absent workspace export bytes");
+                    check(zip.getNextEntry()==null,"absent workspace export has no workspace entries");
+                }
+            }
+            // The same errno at a required path must still fail closed, before any save scan.
+            for(String missing:new String[]{"package","files"}) {
+                FakeRuntime required=guardedRuntime();
+                if(missing.equals("files"))required.readOs.data.children.remove("files");
+                else required.readOs.root.children.get("data").children.get("user").children.get("0").children.remove("com.example.game");
+                RootProtocol.Response rejected=new RootService(required).execute(query);
+                check(rejected.status==RootProtocol.Status.IO_ERROR&&rejected.diagnosticStage==RootProtocol.DiagnosticStage.KERNEL_LSTAT
+                        &&rejected.errno==2,"required "+missing+" ENOENT remains a failure "+command);
+                check(required.fs.operations==0&&required.readOs.mutations==0&&required.readOs.workspace()==null,
+                        "missing required "+missing+" stops before save reads and writes "+command);
+            }
+        }
     }
     private static void service() throws Exception {
         FakeRuntime nonRoot=new FakeRuntime(); nonRoot.euid=UID;

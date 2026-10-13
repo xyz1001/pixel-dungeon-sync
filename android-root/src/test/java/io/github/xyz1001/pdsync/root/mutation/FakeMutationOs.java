@@ -77,7 +77,14 @@ public final class FakeMutationOs implements MutationOs {
     }
     private Stat stat(Node n) { return new Stat(n.device, n.inode, n.mode, n.uid, n.gid, n.links, n.directory() ? 0 : n.bytes.length, n.mtime, n.mtime + ":0:" + n.ctime + ":0"); }
     @Override public Stat stat(Handle h) throws IOException { return stat(n(h)); }
-    @Override public Stat childStat(Handle parent, String name) throws IOException { return stat(child(parent, name)); }
+    @Override public Stat childStat(Handle parent, String name) throws IOException {
+        try { return stat(child(parent, name)); }
+        catch (Failure failure) {
+            if (failure.error != Error.MISSING) throw failure;
+            // Match AndroidMutationOs's ENOENT classification, including the diagnostic-bearing constructor.
+            throw new Failure(Error.MISSING, Operation.LSTAT, 2, failure);
+        }
+    }
     @Override public List<String> children(Handle h, int limit) throws IOException {
         List<String> result = new ArrayList<>(n(h).children.keySet()); if (result.size() > limit) throw new Failure(Error.IO); return result;
     }
