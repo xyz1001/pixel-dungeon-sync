@@ -150,6 +150,30 @@ class HttpTests(unittest.TestCase):
             self.assertEqual((200, {'sandbox': True, 'data': {'source': 'sandbox_ledger', 'expires_ms': None, 'active': False}}),
                              self.request(port, 'GET', '/api/order/entitlement'))
 
+    def test_admin_retry_after_new_store_and_http_restart_needs_only_id(self):
+        with self.running() as port:
+            body = {'plan_id': self.plan.id, 'request_key': 'fixture-request-0001'}
+            oid = self.request(port, 'POST', '/api/order/create', body)[1]['data']['id']
+            self.assertEqual(409, self.request(port, 'POST', '/api/admin/retry', {'order_id': oid}, 'reviewer')[0])
+            self.request(port, 'POST', '/api/order/submit', {'order_id': oid})
+            self.adapter.fail_after = True
+            approved = {'order_id': oid, 'channel': 'sandbox', 'receipt_ref': 'fixture-receipt-0001'}
+            self.assertEqual(503, self.request(port, 'POST', '/api/admin/approve', approved, 'reviewer')[0])
+        restarted = Orders(self.service.path, (self.plan,), mode='sandbox',
+                           authenticator=FixtureAuth(), entitlements=self.adapter)
+        with self.running(restarted) as port:
+            queue = self.request(port, 'GET', '/api/admin/queue/0', identity='reviewer')[1]
+            self.assertNotIn('receipt_ref', json.dumps(queue))
+            recovered_id = queue['data']['items'][0]['id']
+            self.assertEqual(403, self.request(port, 'POST', '/api/admin/retry', {'order_id': recovered_id})[0])
+            self.assertEqual(405, self.request(port, 'GET', '/api/admin/retry', identity='reviewer')[0])
+            for _ in range(2):
+                status, result = self.request(port, 'POST', '/api/admin/retry', {'order_id': recovered_id}, 'reviewer')
+                self.assertEqual(200, status)
+                self.assertEqual('approved', result['data']['state'])
+            self.assertEqual(self.adapter.calls[0], self.adapter.calls[1])
+            self.assertEqual(1, len(self.adapter.operations))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -49,6 +49,7 @@ must be checked before presenting a test result as an actual subscription.
 | POST `/api/order/cancel` | user | `{order_id}` -> Order |
 | GET `/api/admin/queue` or `/api/admin/queue/{cursor}` | admin | `{items:[Order+owner+channel],next_cursor:string-or-null}`; at most 100, initial cursor `0` |
 | POST `/api/admin/approve` | admin | `{order_id,channel,receipt_ref}` -> Order |
+| POST `/api/admin/retry` | admin | `{order_id}` -> Order; reuse persisted approval and target |
 | POST `/api/admin/reject` | admin | `{order_id}` -> Order |
 
 `request_key`: client-generated stable idempotency key, 16–80 ASCII letters,
@@ -90,6 +91,12 @@ that order conflicts; one channel/receipt cannot approve two orders. Receipt
 references must come from actual statement verification in any future production
 workflow. Tests use purely synthetic references. GET can never approve.
 
+After a restart, an administrator discovers `applying` rows in the paginated
+queue and POSTs only their order ID to `/api/admin/retry`. This reuses the stored
+channel, receipt and fixed target without exposing them or making a new payment
+decision. Retry rejects orders without a reserved approval; approved orders are
+returned unchanged. No receipt needs to survive in the administrator's browser.
+
 Foreground clients should use bounded backoff and a manual refresh option;
 stop polling in the background. Do not turn `503` or an unknown outcome into a
 fresh order/registration. After future real approval, retain the existing account
@@ -104,7 +111,7 @@ and normal connection-test/save-comparison gates; do not force an upload.
 | 403 | FORBIDDEN, BROWSER_SESSION_UNSUPPORTED |
 | 404 | NOT_FOUND, ORDER_NOT_FOUND (missing and other owner's orders are indistinguishable) |
 | 405 | METHOD_NOT_ALLOWED |
-| 409 | PENDING_ORDER_EXISTS, IDEMPOTENCY_CONFLICT, INVALID_STATE, PAYMENT_NOT_SUBMITTED, RECEIPT_ALREADY_USED, APPROVAL_CONFLICT, APPROVAL_IN_PROGRESS |
+| 409 | PENDING_ORDER_EXISTS, IDEMPOTENCY_CONFLICT, INVALID_STATE, PAYMENT_NOT_SUBMITTED, RECEIPT_ALREADY_USED, APPROVAL_CONFLICT, APPROVAL_IN_PROGRESS, APPROVAL_NOT_RESERVED |
 | 413 | REQUEST_TOO_LARGE |
 | 415 | JSON_REQUIRED |
 | 503 | PAYMENTS_DISABLED, SANDBOX_DISPLAY_REQUIRED, REMARK_CODES_EXHAUSTED, ENTITLEMENT_RETRY_REQUIRED, DATABASE_UNAVAILABLE, SERVICE_UNAVAILABLE |

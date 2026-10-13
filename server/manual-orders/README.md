@@ -48,6 +48,7 @@ owner, role, expiry or quota is rejected. Successful responses are
 | POST | `/api/order/cancel` | `order_id`; owner, before approval reservation |
 | GET | `/api/admin/queue/{cursor}` | No body; admin paginated review/applying rows; start cursor `0` |
 | POST | `/api/admin/approve` | `order_id`, `channel` (`sandbox`, `wechat`, `alipay`), `receipt_ref` |
+| POST | `/api/admin/retry` | `order_id` only; reuse durable approval after restart |
 | POST | `/api/admin/reject` | `order_id`; authenticated admin, before reservation |
 
 The `wechat`/`alipay` identifiers permit isolated contract tests; **all results
@@ -102,8 +103,9 @@ retrying approval resumes it. Process death leaves a reclaimable lease. A stale
 worker cannot acknowledge or overwrite a newer lease. A new renewal cannot
 start until the prior job commits. External stale writes must also be prevented
 by the adapter's monotonic guarantee; SQLite alone cannot fence remote writes.
-There is no autonomous worker yet: an authenticated repeated approval is the
-recovery trigger, and queue state exposes unfinished jobs.
+There is no autonomous worker yet: authenticated admin POST retry with just the
+order ID is the recovery trigger. Paginated queue state exposes unfinished jobs;
+the operator need not retain the original receipt reference after a restart.
 
 Audit rows contain only order, actor, event and UTC milliseconds. Receipt and
 account association live in the private DB; keep it outside Git and protect it
@@ -156,4 +158,3 @@ non-payment PNG, and close the listener after each test.
 An empty local ledger must not be treated as an existing SFTPGo account's
 baseline. Production onboarding must reject an unmanaged account or explicitly
 import and validate its current entitlement before calculating any paid renewal.
-

@@ -284,6 +284,15 @@ class Orders:
             raise OrderError(503, 'ENTITLEMENT_RETRY_REQUIRED')
         return result
 
+    def retry(self, principal, oid):
+        # Only a trusted admin route reaches here. Do not require the operator
+        # to retain/re-enter a receipt or expose it through the queue.
+        with self.connect() as db:
+            row = self.owned(db, oid, principal)
+            if row['state'] not in ('applying', 'approved'):
+                raise OrderError(409, 'APPROVAL_NOT_RESERVED')
+        return self.approve(principal, oid, row['receipt_ref'], row['channel'])
+
     def dispatch(self, method, path, headers=None, body=None):
         """Transport-independent API. Hosting/auth integration is deliberately absent.
 
@@ -307,6 +316,7 @@ class Orders:
                 '/api/order/submit': ('POST', {'order_id'}, 'user'),
                 '/api/order/cancel': ('POST', {'order_id'}, 'user'),
                 '/api/admin/approve': ('POST', {'order_id', 'receipt_ref', 'channel'}, 'admin'),
+                '/api/admin/retry': ('POST', {'order_id'}, 'admin'),
                 '/api/admin/reject': ('POST', {'order_id'}, 'admin'),
                 '/api/admin/queue': ('GET', set(), 'admin'),
             }
@@ -346,6 +356,8 @@ class Orders:
                 result = self.close(principal, data['order_id'], 'rejected')
             elif path == '/api/admin/approve':
                 result = self.approve(principal, data['order_id'], data['receipt_ref'], data['channel'])
+            elif path == '/api/admin/retry':
+                result = self.retry(principal, data['order_id'])
             elif path == '/api/admin/queue' or path.startswith('/api/admin/queue/'):
                 cursor = path.removeprefix('/api/admin/queue/') if path != '/api/admin/queue' else '0'
                 if not re.fullmatch(r'[0-9]{1,18}', cursor):
