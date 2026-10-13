@@ -186,3 +186,8 @@ marks approved. Failure leaves applying and active=false without undoing the
 confirmed donation. Retry/restart never extends again. The CAS policy remains
 experimental; production should evaluate a per-request authenticated DAV write
 gate rather than assume SFTPGo supports atomic permission updates.
+
+The disabled [per-request write gate prototype](WRITE_GATE_PLAN.md) and fake
+HTTP tests now implement that decision boundary. Its plan records all three
+actual DAV proxy aliases and the unrestricted 8090 Compose publishing concern;
+no production networking or auth routing has been changed.
