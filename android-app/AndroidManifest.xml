@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="22"
-    android:versionName="0.5.1-root-test"
+    android:versionCode="23"
+    android:versionName="0.5.2-root-test"
     android:compileSdkVersion="36"
     android:compileSdkVersionCodename="16"
     package="io.github.xyz1001.pdsync.android"
