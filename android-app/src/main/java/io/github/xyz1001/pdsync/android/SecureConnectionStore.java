@@ -43,6 +43,10 @@ public final class SecureConnectionStore {
         public Connection(String str, String str2, String str3, String str4) {
             super(str, str2, str3, str4);
         }
+
+        public Connection(String endpoint, String username, String password, String profile, String provider) {
+            super(endpoint, username, password, profile, provider);
+        }
     }
 
     public boolean exists() {
@@ -67,7 +71,8 @@ public final class SecureConnectionStore {
         if (valueLoadOrMigrate == null) {
             return null;
         }
-        return new Connection(valueLoadOrMigrate.endpoint, valueLoadOrMigrate.username, valueLoadOrMigrate.password, valueLoadOrMigrate.profile);
+        return new Connection(valueLoadOrMigrate.endpoint, valueLoadOrMigrate.username, valueLoadOrMigrate.password,
+                valueLoadOrMigrate.profile, valueLoadOrMigrate.provider);
     }
 
     /* JADX INFO: Access modifiers changed from: private */

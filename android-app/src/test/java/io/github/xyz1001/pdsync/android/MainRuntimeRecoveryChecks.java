@@ -40,6 +40,7 @@ public final class MainRuntimeRecoveryChecks {
         readinessAndDiagnostics();
         packageTrust();
         connectionPersistence();
+        connectionProviderMetadata();
         endpointPolicy();
         legacyConnection();
         autoSyncPolicy();
@@ -188,7 +189,8 @@ public final class MainRuntimeRecoveryChecks {
             check(!store.exists(), "absent configuration reported absent");
             equal(null, store.load(), "absent configuration loads as null, not corrupt");
             equal(null, store.loadOrMigrate(() -> null), "absent legacy configuration is not an error");
-            WebDavConnectionFile.Value old = new WebDavConnectionFile.Value("https://dav.example.test/path", "old-user", "old-password", "profile");
+            WebDavConnectionFile.Value old = new WebDavConnectionFile.Value("https://dav.example.test/path", "old-user", "old-password", "profile",
+                    WebDavConnectionFile.Value.PROVIDER_OFFICIAL);
             store.save(old);
             equal("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(root.resolve(WebDavConnectionFile.FILE_NAME))), "saved credentials are owner-only");
             sameConnection(old, store.load());
@@ -221,6 +223,7 @@ public final class MainRuntimeRecoveryChecks {
                 if (mode == 3) fails(AssertionError.class, () -> broken.save(updated));
                 else fails(IOException.class, () -> broken.save(updated));
                 check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "failed save preserves exact old bytes");
+                sameConnection(old, new WebDavConnectionFile(root.toFile()).load());
                 check(suppliedBytes[0] != null, "writer exercised");
                 check(Arrays.equals(new byte[suppliedBytes[0].length], suppliedBytes[0]), "serialized credential buffer wiped after failure");
                 try (java.util.stream.Stream<Path> children = Files.list(root)) {
@@ -229,7 +232,10 @@ public final class MainRuntimeRecoveryChecks {
             }
             WebDavConnectionFile.Value temporary = new WebDavConnectionFile.Value("http://127.0.0.1:8765/dav", "", "", "test");
             fails(IOException.class, () -> store.save(temporary));
+            fails(IOException.class, () -> store.save(new WebDavConnectionFile.Value(temporary.endpoint, "", "", "test",
+                    WebDavConnectionFile.Value.PROVIDER_OFFICIAL)));
             check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "loopback test cannot overwrite saved HTTPS");
+            sameConnection(old, store.load());
             ConnectionUpdatePolicy.apply(true, false, () -> {}, () -> store.save(updated));
             sameConnection(updated, store.load());
             check(!updated.toString().contains(updated.endpoint), "connection string hides endpoint and credentials");
@@ -271,6 +277,54 @@ public final class MainRuntimeRecoveryChecks {
         equal(expected.username, actual.username, "username round trip including empty");
         equal(expected.password, actual.password, "password round trip including empty");
         equal(expected.profile, actual.profile, "profile round trip");
+        equal(expected.provider, actual.provider, "provider round trip");
+    }
+
+    static void connectionProviderMetadata() throws Exception {
+        Path root = Files.createTempDirectory("pdsync-provider-check-");
+        try {
+            Path config = root.resolve(WebDavConnectionFile.FILE_NAME);
+            WebDavConnectionFile store = new WebDavConnectionFile(root.toFile());
+            WebDavConnectionFile.Value custom = new WebDavConnectionFile.Value("https://dav.example.test/path", "user", "", "profile");
+            equal(WebDavConnectionFile.Value.PROVIDER_CUSTOM, custom.provider, "four-argument constructor defaults to custom");
+            custom.validate();
+            store.save(custom);
+            check(Files.readString(config).contains("provider=custom"), "saved custom connection includes provider");
+            sameConnection(custom, new WebDavConnectionFile(root.toFile()).load());
+
+            WebDavConnectionFile.Value official = new WebDavConnectionFile.Value(custom.endpoint, custom.username, "synthetic-password", custom.profile,
+                    WebDavConnectionFile.Value.PROVIDER_OFFICIAL);
+            store.save(official);
+            check(Files.readString(config).contains("provider=official"), "saved official connection includes provider");
+            sameConnection(official, new WebDavConnectionFile(root.toFile()).load());
+            // Both providers can describe identical connection coordinates; URLs never choose the marker.
+            equal(custom.endpoint, official.endpoint, "provider does not rewrite endpoint");
+            equal(custom.profile, official.profile, "provider does not rewrite profile");
+
+            String legacy = "version=1\nendpoint=https://dav.example.test/path\nusername=user\npassword=\nprofile=profile\n";
+            Files.writeString(config, legacy);
+            sameConnection(custom, store.load());
+            equal(legacy, Files.readString(config), "reading an old unmarked file does not rewrite it");
+            for (String unknown : new String[]{"", "future-provider", "OFFICIAL", "official ", "https://dav.example.test/path"}) {
+                Files.writeString(config, legacy + "provider=" + unknown + "\n");
+                sameConnection(custom, store.load());
+                equal(WebDavConnectionFile.Value.PROVIDER_CUSTOM,
+                        new WebDavConnectionFile.Value(custom.endpoint, custom.username, custom.password, custom.profile, unknown).provider,
+                        "unrecognized constructor marker safely defaults to custom");
+            }
+            equal(WebDavConnectionFile.Value.PROVIDER_CUSTOM,
+                    new WebDavConnectionFile.Value(custom.endpoint, custom.username, custom.password, custom.profile, null).provider,
+                    "null provider defaults to custom");
+            store.forget();
+            sameConnection(custom, store.loadOrMigrate(() -> custom));
+            sameConnection(custom, new WebDavConnectionFile(root.toFile()).load());
+            check(Files.readString(config).contains("provider=custom"), "legacy four-field migration persists custom metadata");
+
+            for (String provider : new String[]{WebDavConnectionFile.Value.PROVIDER_CUSTOM, WebDavConnectionFile.Value.PROVIDER_OFFICIAL}) {
+                fails(IOException.class, () -> new WebDavConnectionFile.Value("http://example.test", "user", "password", "profile", provider).validate());
+                fails(IOException.class, () -> new WebDavConnectionFile.Value(custom.endpoint, "user", "password", "../bad", provider).validate());
+            }
+        } finally { deleteTree(root); }
     }
     static void deleteTree(Path root) throws Exception {
         try (java.util.stream.Stream<Path> paths = Files.walk(root)) {

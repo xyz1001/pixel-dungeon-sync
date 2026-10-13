@@ -62,16 +62,26 @@ final class WebDavConnectionFile {
     }
 
     static class Value {
+        public static final String PROVIDER_CUSTOM = "custom";
+        public static final String PROVIDER_OFFICIAL = "official";
         public final String endpoint;
         public final String password;
         public final String profile;
         public final String username;
+        // UI origin only. This is not authentication, trust, or part of sync identity.
+        public final String provider;
 
         Value(String str, String str2, String str3, String str4) {
+            this(str, str2, str3, str4, PROVIDER_CUSTOM);
+        }
+
+        Value(String str, String str2, String str3, String str4, String provider) {
             this.endpoint = str.trim();
             this.username = str2;
             this.password = str3;
             this.profile = str4.trim();
+            // Missing or unrecognized optional metadata must not hide a valid saved account.
+            this.provider = PROVIDER_OFFICIAL.equals(provider) ? PROVIDER_OFFICIAL : PROVIDER_CUSTOM;
         }
 
         public void validate() throws IOException {
@@ -136,7 +146,8 @@ final class WebDavConnectionFile {
                     .decode(ByteBuffer.wrap(bytes)).toString()));
             if (!"1".equals(properties.getProperty("version"))) throw new IOException();
             Value value = new Value(required(properties, "endpoint"), required(properties, "username"),
-                    required(properties, "password"), required(properties, "profile"));
+                    required(properties, "password"), required(properties, "profile"),
+                    properties.getProperty("provider"));
             value.validate();
             if (value.isTemporary()) throw new IOException();
             return value;
@@ -175,6 +186,7 @@ final class WebDavConnectionFile {
         properties.setProperty("username", value.username);
         properties.setProperty("password", value.password);
         properties.setProperty("profile", value.profile);
+        properties.setProperty("provider", value.provider);
         StringWriter stringWriter = new StringWriter();
         properties.store(stringWriter, "PD Sync WebDAV settings. Plaintext; keep private. Do not share or export.");
         byte[] bytes = stringWriter.toString().getBytes(StandardCharsets.UTF_8);
