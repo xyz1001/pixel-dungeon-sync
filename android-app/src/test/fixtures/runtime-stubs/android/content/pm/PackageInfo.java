@@ -1,7 +1,10 @@
 // Host-only test double. Never package this fixture into an APK.
 package android.content.pm;
 public class PackageInfo {
- public String packageName, sharedUserId;
+ public String packageName, sharedUserId, versionName;
+ public String[] splitNames;
+ public ProviderInfo[] providers;
+ public long firstInstallTime, lastUpdateTime;
  public ApplicationInfo applicationInfo;
  public SigningInfo signingInfo;
  public Signature[] signatures;

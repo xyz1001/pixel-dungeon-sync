@@ -3,6 +3,7 @@ package android.content;
 import java.io.File;
 import android.content.pm.PackageManager;
 public abstract class Context {
+ public Context getApplicationContext() { return this; }
  public static final int RECEIVER_NOT_EXPORTED=4;
  public String receiverPermission;
  public int receiverFlags, registrations;

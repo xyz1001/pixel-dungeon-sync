@@ -3,7 +3,7 @@ package android.content.pm;
 public class ApplicationInfo {
  public int uid;
  public boolean enabled;
- public String sourceDir;
+ public String sourceDir, dataDir, packageName;
  public String[] splitSourceDirs;
  public android.os.Bundle metaData;
 }
