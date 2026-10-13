@@ -77,6 +77,7 @@ public final class RootRestoreJob {
     }
     static Response failure(Request request,Throwable failure,DiagnosticStage stage) {
         Status status=request.command==Command.RECOVER?Status.RECOVERY_FAILED:Status.RESTORE_FAILED;
+        DiagnosticStage logicalStage=stage;
         DiagnosticCategory category=DiagnosticCategory.IO;int errno=0;
         if(failure instanceof RootFailure){status=((RootFailure)failure).status;
             switch(status){case INVALID_REQUEST:category=DiagnosticCategory.MALFORMED;break;case TOO_LARGE:category=DiagnosticCategory.LIMIT;break;
@@ -94,10 +95,11 @@ public final class RootRestoreJob {
             case TOO_LARGE:status=Status.TOO_LARGE;category=DiagnosticCategory.LIMIT;break;default:status=Status.UNSAFE_PATH;category=DiagnosticCategory.CHANGED;break;}}
         // Wrapped transaction failures retain the original bounded kernel category and errno.
         for(Throwable cause=failure;cause!=null;cause=cause.getCause())if(cause instanceof MutationOs.Failure){MutationOs.Failure kernel=(MutationOs.Failure)cause;errno=kernel.errno;
+            stage=RootService.kernelStage(kernel.operation,stage);
             switch(kernel.error){case PERMISSION:category=DiagnosticCategory.PERMISSION;break;case CROSS_DEVICE:category=DiagnosticCategory.CROSS_DEVICE;break;
             case EXISTS:category=DiagnosticCategory.EXISTS;break;case UNSUPPORTED:category=DiagnosticCategory.UNSUPPORTED;if(status==Status.RESTORE_FAILED||status==Status.RECOVERY_FAILED)status=Status.MUTATION_UNAVAILABLE;break;
             case BUSY:status=Status.BUSY;break;default:category=DiagnosticCategory.IO;break;}break;}
-        if(category==DiagnosticCategory.UNSUPPORTED&&stage==DiagnosticStage.ATTRIBUTES_APPLY)status=Status.ATTRIBUTES_UNSUPPORTED;
+        if(category==DiagnosticCategory.UNSUPPORTED&&logicalStage==DiagnosticStage.ATTRIBUTES_APPLY)status=Status.ATTRIBUTES_UNSUPPORTED;
         try{return Response.failure(status,request).withDiagnostic(stage,category,errno);}
         catch(IOException impossible){return Response.failure(Status.INVALID_REQUEST,"").withDiagnostic(stage,category,errno);}
     }

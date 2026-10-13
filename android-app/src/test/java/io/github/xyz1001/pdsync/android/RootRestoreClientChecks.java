@@ -111,6 +111,12 @@ public final class RootRestoreClientChecks {
             RootProtocol.Response detail=receipt.withDiagnostic(stage,RootProtocol.DiagnosticCategory.PERMISSION,13);
             wire.reset();RootProtocol.writeResponse(wire,detail);RootProtocol.Response read=RootProtocol.readResponse(new ByteArrayInputStream(wire.toByteArray()),null);
             check(read.diagnosticStage==stage,"stage enumerated roundtrip");
+            Throwable diagnostic=BridgeDiagnostics.rootDetail(stage.name(),"IO",22);
+            check(diagnostic!=null,"main client accepts exact kernel diagnostic enum");
+            String report=BridgeDiagnostics.report(new BridgeDiagnostics.Failure(BridgeDiagnostics.Stage.SAVE_READINESS,
+                    "ROOT_IO_ERROR","Root read failed",diagnostic),36,"test",23,"com.example.game","","root");
+            check(report.contains("root_operation_stage="+stage.name())&&report.contains("root_operation_errno=22"),
+                    "copyable diagnostic preserves operation and errno");
         }
     }
     static final class FakeExchange implements RootProcessTransport.Exchange {

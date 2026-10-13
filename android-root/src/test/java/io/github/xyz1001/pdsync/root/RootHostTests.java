@@ -292,13 +292,14 @@ public final class RootHostTests {
         final FakeFs fs = new FakeFs(); int euid, pmCalls, observeCalls;
         RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
         int guardOpens, guardChecks, guardRevalidates, guardCloses;
+        IOException guardFailure;
         FakeRuntime() throws IOException { installed = binding(); fs.file("rankings.dat","synthetic"); }
         public int effectiveUid() { return euid; }
         public RootBinding installed(RootBinding request) throws IOException {
             pmCalls++; return changeBinding && pmCalls > 1 ? binding("com.example.game",0,UID,request.dataDir,repeat('b',64)) : installed;
         }
-        public ReadGuard openReadGuard(RootBinding binding) {
-            guardOpens++;
+        public ReadGuard openReadGuard(RootBinding binding) throws IOException {
+            guardOpens++;if(guardFailure!=null)throw guardFailure;
             return new ReadGuard() {
                 public void requireClear()throws IOException {guardChecks++;if(pending)throw new RootFailure(RootProtocol.Status.RECOVERY_REQUIRED);}
                 public void revalidate()throws IOException {guardRevalidates++;if(guardChanged)throw new RootFailure(RootProtocol.Status.CHANGED);}
@@ -333,6 +334,20 @@ public final class RootHostTests {
             check(runtime.pmCalls==2,"PM binding checked before and after " + command);
             check(response.bindingFingerprint.equals(binding().fingerprint()),"response identity echo");
             check(command==RootProtocol.Command.EXPORT ? response.archiveLength>0 : response.archiveLength==0,"archive command bounded");
+        }
+        for(io.github.xyz1001.pdsync.root.mutation.MutationOs.Operation operation:io.github.xyz1001.pdsync.root.mutation.MutationOs.Operation.values()) {
+            FakeRuntime kernel=new FakeRuntime();
+            kernel.guardFailure=new io.github.xyz1001.pdsync.root.mutation.MutationOs.Failure(
+                    io.github.xyz1001.pdsync.root.mutation.MutationOs.Error.IO,operation,22,null);
+            RootProtocol.Request query=request(RootProtocol.Command.INSPECT);
+            RootProtocol.Response error=new RootService(kernel).execute(query);
+            check(error.status==RootProtocol.Status.IO_ERROR&&error.errno==22,"bounded kernel errno retained "+operation);
+            check(error.diagnosticStage==RootService.kernelStage(operation,RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE),"exact kernel operation "+operation);
+            ByteArrayOutputStream output=new ByteArrayOutputStream();RootProtocol.writeResponse(output,error);
+            RootProtocol.Response decoded=RootProtocol.readResponse(new ByteArrayInputStream(output.toByteArray()),null);
+            RootProtocol.requireReplyMatches(query,decoded);
+            check(decoded.diagnosticStage==error.diagnosticStage&&decoded.errno==22,"kernel diagnostic wire roundtrip "+operation);
+            check(kernel.fs.operations==0,"failing private workspace never reads saves "+operation);
         }
         FakeRuntime changed=new FakeRuntime(); changed.changeBinding=true;
         check(new RootService(changed).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.BINDING_MISMATCH,"PM changes reject export");

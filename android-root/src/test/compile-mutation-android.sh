@@ -9,6 +9,6 @@ SRC="$BASE/src/main/java/io/github/xyz1001/pdsync/root"
 SHARED="$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge"
 java com.sun.tools.javac.Main -source 8 -target 8 -cp "$SDK" -d "$OUT" \
   "$SHARED"/{SaveArchive,SaveDirectoryPolicy,BridgeFailure}.java \
-  "$SRC"/{RootBinding,RootProtocol,RootFileSystem,RootAtomicRename}.java \
+  "$SRC"/{RootBinding,RootProtocol,RootFileSystem,RootAtomicRename,RootOpenFlags}.java \
   "$SRC"/mutation/*.java
 printf '%s\n' 'Android mutation sources compile-checked only. No runner/native/root/device execution.'

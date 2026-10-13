@@ -9,15 +9,25 @@ public interface MutationOs {
     interface Handle extends AutoCloseable { @Override void close() throws IOException; }
     interface Lock extends AutoCloseable { @Override void close() throws IOException; }
     enum Error { MISSING, EXISTS, BUSY, PERMISSION, CROSS_DEVICE, UNSUPPORTED, IO }
+    /** Fixed diagnostics only; never carries a path, basename, or descriptor number. */
+    enum Operation { NONE, OPEN_DIRECTORY, OPEN_REGULAR, DUP, FCNTL, FSTAT, LSTAT, READDIR,
+        MKDIR, PREAD, PWRITE, FCHMOD, FCHOWN, FSYNC, GETXATTR, SETXATTR, RENAME, LINK, REMOVE,
+        LOCK, TIMESTAMP }
     final class Failure extends IOException {
         public final Error error;
+        public final Operation operation;
         /** Bounded Linux errno, or zero when this failure has no trustworthy kernel errno. */
         public final int errno;
         public Failure(Error error) { this(error, 0, null); }
         public Failure(Error error, Throwable cause) { this(error, 0, cause); }
         public Failure(Error error, int errno) { this(error, errno, null); }
         public Failure(Error error, int errno, Throwable cause) {
-            super(error.name(), cause); this.error = error; this.errno = errno >= 1 && errno <= 4095 ? errno : 0;
+            this(error, Operation.NONE, errno, cause);
+        }
+        public Failure(Error error, Operation operation, int errno, Throwable cause) {
+            super(error.name(), cause); this.error = error;
+            this.operation = operation == null ? Operation.NONE : operation;
+            this.errno = errno >= 1 && errno <= 4095 ? errno : 0;
         }
     }
     int effectiveUid() throws IOException;

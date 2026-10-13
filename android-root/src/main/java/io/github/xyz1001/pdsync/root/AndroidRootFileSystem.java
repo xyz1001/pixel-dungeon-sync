@@ -8,6 +8,8 @@ import android.system.OsConstants;
 import android.system.StructStat;
 import io.github.xyz1001.pdsync.bridge.SaveArchive;
 import io.github.xyz1001.pdsync.bridge.SaveDirectoryPolicy;
+import io.github.xyz1001.pdsync.root.mutation.MutationOs;
+import io.github.xyz1001.pdsync.root.mutation.MutationOs.Operation;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -22,8 +24,6 @@ import java.util.List;
 
 /** Android-only descriptor-anchored reader. No unanchored fallback if proc/FD access is denied. */
 final class AndroidRootFileSystem implements RootFileSystem {
-    private static final int DIRECTORY_FLAG = 00200000; // Linux O_DIRECTORY, absent from public Android stubs.
-    private static final int CLOEXEC = 02000000; // Linux flag is valid on API26; Java constant arrived in API27.
     private static final long MAX_APK_BYTES = 536870912L;
     private final class Pinned implements Directory, RegularFile {
         final ParcelFileDescriptor descriptor;
@@ -32,28 +32,31 @@ final class AndroidRootFileSystem implements RootFileSystem {
         String path() { return "/proc/self/fd/" + descriptor.getFd(); }
         @Override public Stat stat() throws IOException {
             try { return convert(Os.fstat(descriptor.getFileDescriptor())); }
-            catch (ErrnoException error) { throw unsafe(error); }
+            catch (ErrnoException error) { throw unsafe(syscall(Operation.FSTAT, error)); }
         }
         @Override public InputStream input() throws IOException {
             if (directory) throw unsafe(null);
             // The returned stream owns a duplicate. The pinned file remains open for fstat checks.
-            return new ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(descriptor.getFileDescriptor()));
+            return new ParcelFileDescriptor.AutoCloseInputStream(duplicate(descriptor.getFileDescriptor()));
         }
         @Override public void close() throws IOException { descriptor.close(); }
     }
     private Pinned pin(String path, boolean directory) throws IOException {
         FileDescriptor fd = null;
+        Operation operation = directory ? Operation.OPEN_DIRECTORY : Operation.OPEN_REGULAR;
         try {
             // NONBLOCK ensures a raced FIFO cannot hang before fstat rejects it.
-            fd = Os.open(path, OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | CLOEXEC | OsConstants.O_NONBLOCK
-                    | (directory ? DIRECTORY_FLAG : 0), 0);
+            fd = Os.open(path, OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | RootOpenFlags.CLOEXEC | OsConstants.O_NONBLOCK
+                    | (directory ? RootOpenFlags.directory(OsConstants.O_NOFOLLOW) : 0), 0);
+            operation = Operation.FSTAT;
             StructStat stat = Os.fstat(fd);
             if (directory ? !OsConstants.S_ISDIR(stat.st_mode) : !OsConstants.S_ISREG(stat.st_mode)) throw unsafe(null);
-            ParcelFileDescriptor owned = ParcelFileDescriptor.dup(fd);
+            ParcelFileDescriptor owned = duplicate(fd);
             return new Pinned(owned, directory);
         } catch (ErrnoException error) {
-            if (error.errno == OsConstants.ENOENT) throw new RootFailure(RootProtocol.Status.MISSING_DIRECTORY, error);
-            throw unsafe(error);
+            MutationOs.Failure cause = syscall(operation, error);
+            if (error.errno == OsConstants.ENOENT) throw new RootFailure(RootProtocol.Status.MISSING_DIRECTORY, cause);
+            throw unsafe(cause);
         } finally { if (fd != null) try { Os.close(fd); } catch (ErrnoException ignored) { } }
     }
     private String child(Directory parent, String name) throws IOException {
@@ -105,8 +108,9 @@ final class AndroidRootFileSystem implements RootFileSystem {
     @Override public Stat childStat(Directory parent, String name) throws IOException {
         try { return convert(Os.lstat(child(parent, name))); }
         catch (ErrnoException error) {
-            if (error.errno == OsConstants.ENOENT) throw new RootFailure(RootProtocol.Status.MISSING_DIRECTORY, error);
-            throw unsafe(error);
+            MutationOs.Failure cause = syscall(Operation.LSTAT, error);
+            if (error.errno == OsConstants.ENOENT) throw new RootFailure(RootProtocol.Status.MISSING_DIRECTORY, cause);
+            throw unsafe(cause);
         }
     }
     @Override public Directory openDirectory(Directory parent, String name) throws IOException { return pin(child(parent, name), true); }
@@ -175,6 +179,22 @@ final class AndroidRootFileSystem implements RootFileSystem {
     }
     private static final class NewTimes {
         static String get(StructStat stat) { return stat.st_mtim.tv_sec + ":" + stat.st_mtim.tv_nsec + ":" + stat.st_ctim.tv_sec + ":" + stat.st_ctim.tv_nsec; }
+    }
+    private static ParcelFileDescriptor duplicate(FileDescriptor fd) throws IOException {
+        try { return ParcelFileDescriptor.dup(fd); }
+        catch (IOException e) {
+            Throwable cause = e.getCause();
+            for (int i = 0; cause != null && i < 8; i++, cause = cause.getCause())
+                if (cause instanceof ErrnoException) throw syscall(Operation.DUP, (ErrnoException) cause);
+            throw new MutationOs.Failure(MutationOs.Error.IO, Operation.DUP, 0, e);
+        }
+    }
+    private static MutationOs.Failure syscall(Operation operation, ErrnoException e) {
+        MutationOs.Error code = e.errno == OsConstants.ENOENT ? MutationOs.Error.MISSING
+                : e.errno == OsConstants.EACCES || e.errno == OsConstants.EPERM ? MutationOs.Error.PERMISSION
+                : e.errno == OsConstants.ENOSYS || e.errno == OsConstants.EOPNOTSUPP ? MutationOs.Error.UNSUPPORTED
+                : MutationOs.Error.IO;
+        return new MutationOs.Failure(code, operation, e.errno, e);
     }
     private static RootFailure unsafe(Throwable cause) { return new RootFailure(RootProtocol.Status.UNSAFE_PATH, cause); }
 }

@@ -104,6 +104,7 @@ public final class RootService {
         for(int i=0;cause!=null&&i<8;i++,cause=cause.getCause()) {
             if(cause instanceof MutationOs.Failure) {
                 MutationOs.Failure os=(MutationOs.Failure)cause;errno=os.errno;
+                stage=kernelStage(os.operation,stage);
                 switch(os.error) {
                     case PERMISSION:category=RootProtocol.DiagnosticCategory.PERMISSION;break;
                     case CROSS_DEVICE:category=RootProtocol.DiagnosticCategory.CROSS_DEVICE;break;
@@ -117,6 +118,10 @@ public final class RootService {
         }
         RootProtocol.Response result=RootProtocol.Response.failure(status,binding).withDiagnostic(stage,category,errno);
         return request==null?result:result.withRequest(request,RootProtocol.Outcome.UNKNOWN);
+    }
+    static RootProtocol.DiagnosticStage kernelStage(MutationOs.Operation operation,RootProtocol.DiagnosticStage fallback) {
+        if(operation==null||operation==MutationOs.Operation.NONE)return fallback;
+        return RootProtocol.DiagnosticStage.valueOf("KERNEL_"+operation.name());
     }
     private void requireBinding(RootBinding expected)throws IOException {
         if(!expected.matchesInstalled(runtime.installed(expected)))throw new RootFailure(RootProtocol.Status.BINDING_MISMATCH);

@@ -181,7 +181,10 @@ kernels, replaced targets, incomplete archives and unknown concurrent entries.
 and separate host syscall/JNI tests; passing them is not Android root execution.
 
 Android-only sources are compile-checked with SDK36, with API27 timestamp access
-isolated behind an API-level branch and Linux O_CLOEXEC/O_DIRECTORY constants used
-where public API26 stubs omit names. Reflection-based PackageManager user context,
+isolated behind an API-level branch. `RootOpenFlags` selects the actual process ABI
+from the platform O_NOFOLLOW value where public stubs omit O_DIRECTORY; ARM/arm64
+and x86/x86_64 use different flag layouts. It rejects unknown layouts rather than
+passing the x86 O_DIRECTORY bit as ARM O_DIRECT. Fixed KERNEL_* diagnostic stages
+preserve the failed operation and bounded errno without exposing paths. Reflection-based PackageManager user context,
 root-manager launch, `/proc/self/fd`, SELinux, and Android lifecycle behavior still
 need authorized real-device testing. No `runtimeVerified=true` flag exists here.
