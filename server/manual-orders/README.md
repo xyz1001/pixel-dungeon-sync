@@ -173,3 +173,8 @@ The separate [upload-policy module](UPLOAD_POLICY.md) now provides explicit
 sandbox enrollment, dry-run and reconciliation against this ledger. It rejects
 unsupported inheritance/subpath policy and unfenced adapters. Production SFTPGo
 writes and scheduled enforcement remain disabled.
+
+New-account policy uses `new_account_policy` plus `enroll_new_account`: create
+read-only immediately, retain a separate trusted activation template without
+`*`, and treat missing entitlement as read-only. The current online registration
+service is unchanged; these are tested integration seams, not deployed enforcement.

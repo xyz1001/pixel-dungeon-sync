@@ -62,10 +62,27 @@ def checked_permissions(account):
 
 
 def desired_permissions(baseline, expires_ms, now_ms):
-    if type(expires_ms) is not int or expires_ms <= 0:
-        raise PolicyError('MISSING_ENTITLEMENT_BASELINE')
+    if type(expires_ms) is not int or expires_ms < 0:
+        raise PolicyError('INVALID_ENTITLEMENT')
     # Never invent or widen active permissions; expiration is an exact boundary.
     return {'/': list(baseline) if expires_ms > now_ms else sorted(READ)}
+
+
+def new_account_policy(activation_permissions):
+    """Trusted server configuration only, never a client-supplied permission list.
+
+    The provisioning caller must use initial_permissions in its CREATE request,
+    then persist activation_permissions with enroll_new_account. No writable
+    interval is needed, even if registration crashes before local enrollment.
+    """
+    if not isinstance(activation_permissions, (list, tuple)) or any(
+            not isinstance(p, str) or p not in READ | WRITE for p in activation_permissions):
+        raise PolicyError('INVALID_ACTIVATION_TEMPLATE')
+    template = sorted(set(activation_permissions))
+    if not (READ | {'upload'}).issubset(template):
+        raise PolicyError('ACTIVATION_TEMPLATE_MUST_ALLOW_READ_UPLOAD')
+    return {'initial_permissions': {'/': sorted(READ)},
+            'activation_permissions': {'/': template}}
 
 
 class UploadPolicy:
@@ -115,7 +132,7 @@ class UploadPolicy:
             raise PolicyError('UPLOAD_POLICY_DISABLED')
 
     def enroll(self, owner):
-        """Explicit sandbox enrollment; stores permission baseline, no remote writes."""
+        """Legacy sandbox inspection only; new provisioning uses enroll_new_account."""
         self.guard()
         account = self.adapter.read(owner)
         if account.username != owner:
@@ -128,6 +145,27 @@ class UploadPolicy:
             db.execute('INSERT INTO managed_upload_policy(owner,baseline) VALUES(?,?)',
                        (owner, json.dumps(baseline)))
 
+    def enroll_new_account(self, owner, activation_permissions):
+        """Record a trusted activation template for an already-created READ-ONLY user.
+
+        No remote creation/write, no implicit migration, and no recapturing a
+        read-only current profile as the paid activation template.
+        """
+        self.guard()
+        plan = new_account_policy(activation_permissions)
+        account = self.adapter.read(owner)
+        if account.username != owner:
+            raise PolicyError('ACCOUNT_IDENTITY_MISMATCH')
+        if checked_permissions(account) != sorted(READ):
+            raise PolicyError('NEW_ACCOUNT_MUST_START_READ_ONLY')
+        with self.tx() as db:
+            if db.execute('SELECT 1 FROM managed_upload_policy WHERE owner=?', (owner,)).fetchone():
+                raise PolicyError('ALREADY_MANAGED')
+            if db.execute('SELECT 1 FROM entitlements WHERE owner=?', (owner,)).fetchone():
+                raise PolicyError('NEW_ACCOUNT_ALREADY_HAS_ENTITLEMENT')
+            db.execute('INSERT INTO managed_upload_policy(owner,baseline) VALUES(?,?)',
+                       (owner, json.dumps(plan['activation_permissions']['/'])))
+
     def observation(self, db, owner, account):
         current = checked_permissions(account)
         if account.username != owner:
@@ -139,12 +177,11 @@ class UploadPolicy:
         if current not in (baseline, sorted(READ)):
             raise PolicyError('EXTERNAL_PERMISSION_CHANGE')
         expiry = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (owner,)).fetchone()
-        if expiry is None:
-            raise PolicyError('MISSING_ENTITLEMENT_BASELINE')
+        expires_ms = expiry[0] if expiry is not None else 0
         now = self.clock()
-        desired = desired_permissions(baseline, expiry[0], now)
-        return row, {'owner': owner, 'expires_ms': expiry[0], 'observed_ms': now,
-                     'active': expiry[0] > now, 'before': {'/': current}, 'after': desired,
+        desired = desired_permissions(baseline, expires_ms, now)
+        return row, {'owner': owner, 'expires_ms': expires_ms, 'observed_ms': now,
+                     'active': expires_ms > now, 'before': {'/': current}, 'after': desired,
                      'changes_permissions': current != desired['/'],
                      'preserves_login_and_password': True}
 

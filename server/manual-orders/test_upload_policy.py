@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 
-from upload_policy import AccountSnapshot, UploadPolicy, PolicyError, READ, WRITE
+from upload_policy import AccountSnapshot, UploadPolicy, PolicyError, READ, WRITE, new_account_policy
 
 
 class FencedFake:
@@ -211,9 +211,57 @@ class UploadPolicyTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             db.execute('DELETE FROM entitlements WHERE owner=?', ('alice',))
             db.commit()
-        with self.assertRaisesRegex(PolicyError, 'MISSING_ENTITLEMENT_BASELINE'):
-            self.worker.reconcile('alice')
+        result = self.worker.reconcile('alice')
+        self.assertFalse(result['active'])
+        self.assertEqual({'/': sorted(READ)}, self.fake.account.permissions)
+
+    def test_new_readonly_account_first_donation_expiry_and_renewal(self):
+        template = ['list', 'download', 'upload', 'create_dirs']
+        plan = new_account_policy(template)
+        self.assertEqual({'/': sorted(READ)}, plan['initial_permissions'])
+        self.assertNotIn('*', plan['activation_permissions']['/'])
+        # Simulate provisioning directly with the pure plan's read-only CREATE
+        # permissions. There has never been an unpaid writable remote profile.
+        self.fake.account = replace(self.fake.account, username='new-user',
+                                    permissions=plan['initial_permissions'])
+        self.worker.enroll_new_account('new-user', template)
         self.assertEqual(0, self.fake.calls)
+        self.assertFalse(self.worker.dry_run('new-user')['active'])
+        self.worker.reconcile('new-user')
+        self.assertEqual(plan['initial_permissions'], self.fake.account.permissions)
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute('INSERT INTO entitlements VALUES(?,?)', ('new-user', 2000))
+            db.commit()
+        self.make().reconcile('new-user')
+        self.assertEqual(plan['activation_permissions'], self.fake.account.permissions)
+        self.now = 2000
+        self.worker.reconcile('new-user')
+        self.assertEqual(plan['initial_permissions'], self.fake.account.permissions)
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute('UPDATE entitlements SET expires_ms=3000 WHERE owner=?', ('new-user',))
+            db.commit()
+        self.make().reconcile('new-user')
+        self.assertEqual(plan['activation_permissions'], self.fake.account.permissions)
+        self.assertNotIn('overwrite', self.fake.account.permissions['/'])
+        self.assertNotIn('rename', self.fake.account.permissions['/'])
+
+    def test_new_account_rejects_writable_start_star_or_untrusted_shape(self):
+        template = ['list', 'download', 'upload']
+        self.fake.account = replace(self.fake.account, username='unpaid')
+        with self.assertRaisesRegex(PolicyError, 'NEW_ACCOUNT_MUST_START_READ_ONLY'):
+            self.worker.enroll_new_account('unpaid', template)
+        for bad in (['*'], ['list', 'download'], ['list', 'download', 'upload', '*'],
+                    {'/': template}, ['list', 'download', 'unknown']):
+            with self.assertRaises(PolicyError):
+                new_account_policy(bad)
+        self.assertEqual(0, self.fake.calls)
+
+    def test_new_account_template_cannot_be_replaced_by_a_repeat_registration(self):
+        template = ['list', 'download', 'upload']
+        self.fake.account = replace(self.fake.account, username='new-user', permissions={'/': sorted(READ)})
+        self.worker.enroll_new_account('new-user', template)
+        with self.assertRaisesRegex(PolicyError, 'ALREADY_MANAGED'):
+            self.make().enroll_new_account('new-user', template + ['overwrite'])
 
 
 if __name__ == '__main__':
