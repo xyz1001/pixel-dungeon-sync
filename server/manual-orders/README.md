@@ -168,3 +168,8 @@ channel is a WeChat appreciation code: its ability to accept a remark is unprove
 Never require a four-digit remark; use the independent order ID plus manual
 verification and binding of the actual transaction reference. See
 [SFTPGo write-only restriction research](SFTPGO_UPLOAD_POLICY.md).
+
+The separate [upload-policy module](UPLOAD_POLICY.md) now provides explicit
+sandbox enrollment, dry-run and reconciliation against this ledger. It rejects
+unsupported inheritance/subpath policy and unfenced adapters. Production SFTPGo
+writes and scheduled enforcement remain disabled.
