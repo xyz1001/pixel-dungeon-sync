@@ -324,6 +324,45 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertIn("this.busy", complete)
         self.assertLess(complete.index("AndroidUiFlowPolicy.canFinishEmpty("), complete.index("work("))
 
+    def test_comparison_completion_is_exclusive_and_preserves_unavailable_actions(self):
+        render = body(MAIN, "private void renderComparison()")
+        empty = body(render, "if (showEmptyCompletion())")
+        keep_guard = "if (inspection != null && inspection.getCanKeepLocalProgress())"
+        ready_guard = "else if (inspection != null && inspection.getCanCompleteWithoutTransfer())"
+        adopt_guard = "else if (!inspection2.getCanKeepLocalProgress() && !inspection2.getCanCompleteWithoutTransfer())"
+        keep = body(render, keep_guard)
+        ready = body(render, ready_guard)
+        adopt = body(render, adopt_guard)
+
+        # BOTH_EMPTY returns early; local-progress and SAME_TIP completion are
+        # mutually exclusive. Adoption must not add a second completion button
+        # when either earlier branch already supplied one.
+        self.assertRegex(empty, r"return;\s*}$")
+        self.assertIn('foot("完成", this::completeLocalProgress)', keep)
+        self.assertIn('foot("完成", this::completeReadyComparison)', ready)
+        self.assertRegex(render, re.escape(keep) + r"\s*" + re.escape(ready_guard))
+        self.assertIn('foot("完成", new Runnable()', adopt)
+        self.assertIn("MainActivity.this.adopt()", adopt)
+        self.assertEqual(1, adopt.count('foot("完成"'))
+        remainder = render
+        for section in (empty, keep, ready, adopt):
+            remainder = remainder.replace(section, "", 1)
+        self.assertNotIn('foot("完成"', remainder)
+
+        # NONE/ANCESTOR adoption still exists, but null or non-adoptable
+        # inspections take the original restore branch without dereferencing
+        # inspection2. Missing cloud proof still returns before any choices.
+        unavailable = body(render, "if (inspection2 == null || !inspection2.getCanAdoptRemote())")
+        self.assertRegex(render, re.escape(unavailable) + r"\s*" + re.escape(adopt_guard))
+        restore = body(unavailable, "if (inspection3 != null && !inspection3.getRemoteVersions().isEmpty())")
+        self.assertIn('foot("恢复所选云端存档", this::requestRestore).setEnabled(restoreSupported() && this.selected != null && kind() != OnboardingKind.BLOCKED)', restore)
+        unverified = body(render, "if (!this.cloudVerified && kind() != OnboardingKind.BLOCKED)")
+        self.assertEqual(["上一步", "重新比较"], re.findall(r'foot\("([^"]+)"', unverified))
+        self.assertRegex(unverified, r"return;\s*}$")
+        self.assertLess(render.index(unverified), render.index(keep_guard))
+        self.assertIn('foot("完成", this::completeEmpty).setEnabled(!this.busy && this.onboardingActive && this.connection != null)', empty)
+        self.assertIn("this::upload).setEnabled(kind() != OnboardingKind.BLOCKED || this.inspection.isRetryablePending())", render)
+
     def test_empty_finish_revalidates_and_records_only_a_real_no_transfer_decision(self):
         finish = body(MAIN, "Object m29xb53dc5d7()")
         self.assertLess(finish.index("readComparison()"), finish.index("showEmptyCompletion()"))
