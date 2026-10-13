@@ -127,6 +127,28 @@ public final class MainActivity extends Activity {
     private String selected;
     private TextView status;
     private String testedDraft;
+    private ConnectionEntryModel connectionEntry;
+    private String officialUser = "";
+    private String officialPassword = "";
+    private SecureConnectionStore.Connection verifiedOfficial;
+    private ConnectionAuthAttempt<SecureConnectionStore.Connection> officialAttempt;
+    private RetainedConnectionUi retainedConnectionUi;
+
+    /** Memory-only rotation state; never saved to Bundle, logs, or the connection file. */
+    private static final class RetainedConnectionUi {
+        final boolean onboarding;
+        final ConnectionEntryModel entry;
+        final String endpoint, user, password, profile, officialUser, officialPassword, testedProof;
+        final ConnectionAuthAttempt<SecureConnectionStore.Connection> attempt;
+        final SecureConnectionStore.Connection verified;
+        RetainedConnectionUi(MainActivity activity) {
+            onboarding = activity.onboardingActive;
+            entry = ConnectionEntryModel.restore(activity.connectionEntry.origin(), activity.connectionEntry.mode(), activity.connectionEntry.selectedService());
+            endpoint = activity.draftEndpoint; user = activity.draftUser; password = activity.draftPassword;
+            profile = activity.draftProfile; officialUser = activity.officialUser; officialPassword = activity.officialPassword;
+            attempt = activity.officialAttempt; verified = activity.verifiedOfficial; testedProof = activity.testedDraft;
+        }
+    }
     private EditText userInput;
 
     /* renamed from: io, reason: collision with root package name */
@@ -171,6 +193,8 @@ public final class MainActivity extends Activity {
         this.preparation = new GamePreparationService(this);
         this.installer = new InstallCoordinator(this);
         this.secrets = new SecureConnectionStore(this);
+        Object retained = getLastNonConfigurationInstance();
+        if (retained instanceof RetainedConnectionUi) this.retainedConnectionUi = (RetainedConnectionUi) retained;
         if (bundle != null) {
             try {
                 this.page = SyncPage.valueOf(bundle.getString("page", "DISCOVERY"));
@@ -184,7 +208,26 @@ public final class MainActivity extends Activity {
             this.installedPickerState.setQuery(bundle.getString("installedPicker.query", ""));
             this.installedPickerState.setShowAll(bundle.getBoolean("installedPicker.showAll", false));
         }
+        if (this.retainedConnectionUi != null) restoreConnectionUi(this.retainedConnectionUi);
         render();
+    }
+
+    @Override public Object onRetainNonConfigurationInstance() {
+        if (this.page != SyncPage.CONNECTION || this.connectionEntry == null) return null;
+        captureDraft();
+        return new RetainedConnectionUi(this);
+    }
+
+    private void restoreConnectionUi(RetainedConnectionUi retained) {
+        this.onboardingActive = retained.onboarding;
+        this.connectionEntry = retained.entry;
+        this.draftEndpoint = retained.endpoint; this.draftUser = retained.user;
+        this.draftPassword = retained.password; this.draftProfile = retained.profile;
+        this.officialUser = retained.officialUser; this.officialPassword = retained.officialPassword;
+        this.officialAttempt = retained.attempt; this.verifiedOfficial = retained.verified;
+        this.draftLoaded = true;
+        this.testedDraft = retained.testedProof;
+        this.page = SyncPage.CONNECTION;
     }
 
     @Override // android.app.Activity
@@ -248,7 +291,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (this.page == SyncPage.CONNECTION) {
-            navigate(this.onboardingActive ? SyncPage.PATH : SyncPage.SETTINGS);
+            backFromConnection();
             return;
         }
         if (this.page == SyncPage.PATH) {
@@ -347,6 +390,7 @@ public final class MainActivity extends Activity {
     }
 
     private void reportError(Exception exc) {
+        if (this.officialAttempt != null && this.officialAttempt.isDone()) this.officialAttempt = null;
         captureDiagnostic(exc);
         this.feedbackError = true;
         String strCode = BridgeDiagnostics.code(exc);
@@ -725,6 +769,13 @@ public final class MainActivity extends Activity {
             this.page = this.onboardingActive ? SyncPage.COMPARISON : SyncPage.HOME;
         }
         if (!this.feedbackError) this.notice = !readyForSaves() ? this.readinessState.statusDescription() : "";
+        if (this.retainedConnectionUi != null && canRequestSaveAccess()) {
+            RetainedConnectionUi retained = this.retainedConnectionUi;
+            this.retainedConnectionUi = null;
+            restoreConnectionUi(retained);
+            if (this.officialAttempt != null) resumeOfficialAttempt();
+            return;
+        }
         if (this.connectionLoadError.isEmpty()) {
             return;
         }
@@ -2122,24 +2173,35 @@ public final class MainActivity extends Activity {
         this.draftPassword = connection3 != null ? connection3.password : "";
         SecureConnectionStore.Connection connection4 = this.connection;
         this.draftProfile = connection4 == null ? "default" : connection4.profile;
+        boolean official = connection != null && SecureConnectionStore.Connection.PROVIDER_OFFICIAL.equals(connection.provider);
+        this.connectionEntry = new ConnectionEntryModel(connection == null ? ConnectionEntryModel.Origin.SETUP : ConnectionEntryModel.Origin.SETTINGS,
+                connection == null ? null : official ? ConnectionEntryModel.Mode.OFFICIAL : ConnectionEntryModel.Mode.CUSTOM);
+        this.officialUser = official ? connection.username : "";
+        this.officialPassword = official ? connection.password : "";
+        this.verifiedOfficial = null;
+        this.officialAttempt = null;
         this.draftLoaded = true;
         this.testedDraft = null;
     }
 
     /* JADX INFO: Access modifiers changed from: private */
     public void captureDraft() {
-        EditText editText;
-        if (this.renderedPage != SyncPage.CONNECTION || (editText = this.endpointInput) == null) {
-            return;
+        if (this.renderedPage != SyncPage.CONNECTION || this.connectionEntry == null || this.userInput == null || this.passwordInput == null) return;
+        if (this.connectionEntry.mode() == ConnectionEntryModel.Mode.OFFICIAL) {
+            this.officialUser = this.userInput.getText().toString();
+            this.officialPassword = this.passwordInput.getText().toString();
+        } else if (this.connectionEntry.mode() == ConnectionEntryModel.Mode.CUSTOM && this.endpointInput != null) {
+            this.draftEndpoint = this.endpointInput.getText().toString();
+            this.draftUser = this.userInput.getText().toString();
+            this.draftPassword = this.passwordInput.getText().toString();
         }
-        this.draftEndpoint = editText.getText().toString();
-        this.draftUser = this.userInput.getText().toString();
-        this.draftPassword = this.passwordInput.getText().toString();
     }
 
     /* JADX INFO: Access modifiers changed from: private */
     public String draftFingerprint() {
-        return this.draftEndpoint + "\u0000" + this.draftUser + "\u0000" + this.draftPassword + "\u0000" + this.draftProfile;
+        if (this.connectionEntry != null && this.connectionEntry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
+            return "official\u0000" + this.officialUser + "\u0000" + this.officialPassword + "\u0000" + this.draftProfile;
+        return "custom\u0000" + this.draftEndpoint + "\u0000" + this.draftUser + "\u0000" + this.draftPassword + "\u0000" + this.draftProfile;
     }
 
     private EditText field(String str, String str2, boolean z) {
@@ -2155,10 +2217,21 @@ public final class MainActivity extends Activity {
     }
 
     private void renderConnection() {
-        if (!this.draftLoaded) {
-            loadDraft();
-        }
+        if (!this.draftLoaded || this.connectionEntry == null) loadDraft();
         heading(this.onboardingActive ? "3 / 4  连接云端" : "连接设置");
+        if (this.connectionEntry.mode() == ConnectionEntryModel.Mode.CHOICE) {
+            button("使用官方服务", () -> chooseConnectionService(ConnectionEntryModel.Mode.OFFICIAL));
+            button("自定义 WebDAV", () -> chooseConnectionService(ConnectionEntryModel.Mode.CUSTOM));
+            foot(this.onboardingActive ? "上一步" : "返回", this::backFromConnection);
+            return;
+        }
+        if (this.connectionEntry.mode() == ConnectionEntryModel.Mode.OFFICIAL) renderOfficialConnection();
+        else renderCustomConnection();
+        if (this.connectionEntry.origin() == ConnectionEntryModel.Origin.SETTINGS)
+            button("更换服务", this::showConnectionChoice);
+    }
+
+    private void renderCustomConnection() {
         EditText editTextField = field("WebDAV 地址", this.draftEndpoint, false);
         this.endpointInput = editTextField;
         editTextField.setHint("https://example.com/dav");
@@ -2175,6 +2248,20 @@ public final class MainActivity extends Activity {
         if (!this.connectionLoadError.isEmpty() || (this.connection != null && this.connection.isTemporary() && this.secrets.exists())) {
             button(this.connectionLoadError.isEmpty() ? "恢复已保存连接" : "重试读取已保存连接", this::reloadSavedConnection);
         }
+        watchConnectionFields(renderConnectionFooter());
+    }
+
+    private void renderOfficialConnection() {
+        this.userInput = field("用户名", this.officialUser, false);
+        this.passwordInput = field("密码", this.officialPassword, true);
+        LinearLayout actions = row();
+        this.body.addView(actions);
+        addButton(actions, "登录", () -> authenticateOfficial(false), true);
+        addButton(actions, "注册", () -> authenticateOfficial(true), true);
+        watchConnectionFields(renderConnectionFooter());
+    }
+
+    private Button renderConnectionFooter() {
         LinearLayout linearLayoutRow = row();
         this.footer.addView(linearLayoutRow);
         addButton(linearLayoutRow, this.onboardingActive ? "上一步" : "返回", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda129
@@ -2183,13 +2270,17 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m89x4f84e35a();
             }
         }, true);
-        final Button buttonAddButton = addButton(linearLayoutRow, this.onboardingActive ? "下一步" : "保存", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda130
+        Button buttonAddButton = addButton(linearLayoutRow, this.onboardingActive ? "下一步" : "保存", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda130
             @Override // java.lang.Runnable
             public final void run() {
                 MainActivity.this.m90xc4ff099b();
             }
         }, true);
         buttonAddButton.setEnabled(AndroidUiFlowPolicy.canContinue(this.testedDraft, draftFingerprint(), this.busy));
+        return buttonAddButton;
+    }
+
+    private void watchConnectionFields(final Button buttonAddButton) {
         TextWatcher textWatcher = new TextWatcher() { // from class: io.github.xyz1001.pdsync.android.MainActivity.2
             @Override // android.text.TextWatcher
             public void afterTextChanged(Editable editable) {
@@ -2203,6 +2294,7 @@ public final class MainActivity extends Activity {
             public void onTextChanged(CharSequence charSequence, int i, int i2, int i3) {
                 String before = MainActivity.this.draftFingerprint();
                 MainActivity.this.captureDraft();
+                if (!before.equals(MainActivity.this.draftFingerprint())) MainActivity.this.verifiedOfficial = null;
                 MainActivity.this.testedDraft = AndroidUiFlowPolicy.invalidateProofOnEdit(
                         MainActivity.this.testedDraft, before, MainActivity.this.draftFingerprint());
                 buttonAddButton.setEnabled(AndroidUiFlowPolicy.canContinue(
@@ -2213,9 +2305,75 @@ public final class MainActivity extends Activity {
                 }
             }
         };
-        this.endpointInput.addTextChangedListener(textWatcher);
+        if (this.endpointInput != null) this.endpointInput.addTextChangedListener(textWatcher);
         this.userInput.addTextChangedListener(textWatcher);
         this.passwordInput.addTextChangedListener(textWatcher);
+    }
+
+    private void chooseConnectionService(ConnectionEntryModel.Mode service) {
+        if (this.busy || this.connectionEntry == null) return;
+        captureDraft();
+        if (!this.connectionEntry.choose(service, false)) return;
+        this.testedDraft = null;
+        this.notice = ""; this.details = ""; this.diagnosticReport = ""; this.feedbackError = false;
+        render();
+    }
+
+    private void showConnectionChoice() {
+        if (this.busy || this.connectionEntry == null) return;
+        captureDraft();
+        if (!this.connectionEntry.showChooser(false)) return;
+        this.testedDraft = null;
+        this.notice = ""; this.details = ""; this.diagnosticReport = ""; this.feedbackError = false;
+        render();
+    }
+
+    private void backFromConnection() {
+        if (this.busy) return;
+        captureDraft();
+        this.testedDraft = null;
+        ConnectionEntryModel.Back destination = this.connectionEntry == null
+                ? ConnectionEntryModel.Back.SETTINGS : this.connectionEntry.back(false);
+        if (destination == ConnectionEntryModel.Back.CHOICE) {
+            this.notice = ""; this.details = ""; this.diagnosticReport = ""; this.feedbackError = false;
+            render();
+        } else if (destination != ConnectionEntryModel.Back.STAY) {
+            // A saved connection can be edited either in the wizard or in standalone settings.
+            navigate(this.onboardingActive ? SyncPage.PATH : SyncPage.SETTINGS);
+        }
+    }
+
+    private void authenticateOfficial(final boolean register) {
+        if (this.busy || this.connectionEntry == null || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return;
+        captureDraft();
+        final String username = this.officialUser, password = this.officialPassword, profile = this.draftProfile;
+        final android.content.Context app = getApplicationContext();
+        this.testedDraft = null;
+        this.verifiedOfficial = null;
+        this.officialAttempt = new ConnectionAuthAttempt<>(draftFingerprint(), () -> {
+            OfficialServiceRegistrationClient client = new OfficialServiceRegistrationClient();
+            OfficialServiceRegistrationClient.Account account = register ? client.register(username, password) : client.login(username, password);
+            SecureConnectionStore.Connection candidate = new SecureConnectionStore.Connection(account.endpoint, account.username,
+                    account.password, profile, SecureConnectionStore.Connection.PROVIDER_OFFICIAL);
+            candidate.validate();
+            MainActivity.lambda$applyConnection$55(SyncRuntime.facade(app, candidate));
+            return candidate;
+        });
+        resumeOfficialAttempt();
+    }
+
+    private void resumeOfficialAttempt() {
+        final ConnectionAuthAttempt<SecureConnectionStore.Connection> attempt = this.officialAttempt;
+        if (attempt == null || this.busy) return;
+        work("正在连接…", attempt::await, candidate -> {
+            if (this.officialAttempt != attempt) return;
+            this.officialAttempt = null;
+            if (this.connectionEntry == null || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL
+                    || !attempt.proof.equals(draftFingerprint())) return;
+            this.verifiedOfficial = candidate;
+            this.testedDraft = attempt.proof;
+            this.notice = "连接成功。";
+        });
     }
 
     /* renamed from: lambda$renderConnection$52$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -2225,7 +2383,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderConnection$53$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m89x4f84e35a() {
-        navigate(this.onboardingActive ? SyncPage.PATH : SyncPage.SETTINGS);
+        backFromConnection();
     }
 
     /* renamed from: lambda$renderConnection$54$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -2234,13 +2392,17 @@ public final class MainActivity extends Activity {
     }
 
     private void applyConnection(final boolean z) {
+        if (this.connectionEntry == null || this.connectionEntry.mode() == ConnectionEntryModel.Mode.CHOICE) return;
+        if (!z && this.connectionEntry.mode() != ConnectionEntryModel.Mode.CUSTOM) return;
         captureDraft();
         final String strDraftFingerprint = draftFingerprint();
         if (z && !strDraftFingerprint.equals(this.testedDraft)) {
             this.notice = "请先测试当前连接。";
             render();
         } else {
-            final SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection(this.draftEndpoint, this.draftUser, this.draftPassword, this.draftProfile);
+            final SecureConnectionStore.Connection connection = this.connectionEntry.mode() == ConnectionEntryModel.Mode.OFFICIAL
+                    ? this.verifiedOfficial : new SecureConnectionStore.Connection(this.draftEndpoint, this.draftUser, this.draftPassword, this.draftProfile);
+            if (connection == null) return;
             this.testedDraft = null;
             work(z ? "正在应用连接设置…" : "正在测试连接…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda116
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
@@ -4100,6 +4262,7 @@ public final class MainActivity extends Activity {
         if (!this.draftPassword.isEmpty()) {
             str = str.replace(this.draftPassword, "[已隐藏]");
         }
+        if (!this.officialPassword.isEmpty()) str = str.replace(this.officialPassword, "[已隐藏]");
         String strReplaceAll = str.replaceAll("(?i)(authorization|password|passwd|token)\\s*[:=]\\s*\\S+", "$1=[已隐藏]");
         if (strReplaceAll.length() <= 1500) {
             return strReplaceAll;
@@ -4108,6 +4271,8 @@ public final class MainActivity extends Activity {
     }
 
     private String safeError(Exception exc) {
+        if (exc instanceof OfficialServiceRegistrationClient.RegistrationException)
+            return ((OfficialServiceRegistrationClient.RegistrationException) exc).userMessage();
         InstallDiagnostics.Failure installFailure = InstallDiagnostics.find(exc);
         if (installFailure != null) return installFailure.userMessage();
         PreparationDiagnostics.Failure failureFind = PreparationDiagnostics.find(exc);

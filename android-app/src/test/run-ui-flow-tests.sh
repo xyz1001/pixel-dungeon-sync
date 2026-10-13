@@ -18,4 +18,6 @@ CP="$CORE:$(find "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
   "$SRC"/{AndroidUiFlowPolicy,ConnectionEndpointPolicy,ConnectionUpdatePolicy}.java \
   "$HERE/java/io/github/xyz1001/pdsync/android/AndroidUiFlowChecks.java"
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.AndroidUiFlowChecks
+"$HERE/run-connection-entry-tests.sh"
+"$HERE/run-connection-auth-attempt-tests.sh"
 python3 -m unittest discover -s "$HERE/python" -p 'test_ui_flow_contract.py'
