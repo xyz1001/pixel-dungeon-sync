@@ -2708,7 +2708,7 @@ public final class MainActivity extends Activity {
             if (inspection3 != null && !inspection3.getRemoteVersions().isEmpty()) {
                 foot("恢复所选云端存档", this::requestRestore).setEnabled(restoreSupported() && this.selected != null && kind() != OnboardingKind.BLOCKED);
             }
-        } else {
+        } else if (!inspection2.getCanKeepLocalProgress() && !inspection2.getCanCompleteWithoutTransfer()) {
             foot("完成", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda139
                 @Override // java.lang.Runnable
                 public final void run() {
