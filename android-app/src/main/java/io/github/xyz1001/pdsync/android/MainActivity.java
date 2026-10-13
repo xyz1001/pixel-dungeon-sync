@@ -169,6 +169,9 @@ public final class MainActivity extends Activity {
     private String draftProfile = "default";
     private final InstalledAppPickerModel.State installedPickerState = new InstalledAppPickerModel.State();
     private String connectionLoadError = "";
+    // Default-off: only same-process sandbox tooling may inject a session. No production
+    // authenticator, Intent switch, endpoint or credential forwarding is installed here.
+    private ManualPaymentSession sandboxPaymentSession;
     private final BroadcastReceiver installChanged = new BroadcastReceiver() { // from class: io.github.xyz1001.pdsync.android.MainActivity.1
         @Override // android.content.BroadcastReceiver
         public void onReceive(Context context, Intent intent) {
@@ -244,6 +247,7 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         this.resumed = true;
+        if (this.sandboxPaymentSession != null) this.sandboxPaymentSession.foreground(true);
         if (!this.receiverRegistered) {
             RuntimePlatformCompat.registerInternalReceiver(this, this.installChanged, new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED"));
             this.receiverRegistered = true;
@@ -258,12 +262,14 @@ public final class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onPause() {
         this.resumed = false;
+        if (this.sandboxPaymentSession != null) this.sandboxPaymentSession.foreground(false);
         AutoSyncService.recordDeparture(this);
         super.onPause();
     }
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        closeSandboxPayment();
         if (this.receiverRegistered) {
             unregisterReceiver(this.installChanged);
         }
@@ -854,6 +860,7 @@ public final class MainActivity extends Activity {
             return;
         }
         captureDraft();
+        if (syncPage != SyncPage.CONNECTION) closeSandboxPayment();
         if (this.page == SyncPage.CONNECTION && syncPage != SyncPage.CONNECTION) this.testedDraft = null;
         if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
         this.detailsExpanded = false;
@@ -2227,7 +2234,7 @@ public final class MainActivity extends Activity {
         }
         if (this.connectionEntry.mode() == ConnectionEntryModel.Mode.OFFICIAL) renderOfficialConnection();
         else renderCustomConnection();
-        if (this.connectionEntry.origin() == ConnectionEntryModel.Origin.SETTINGS)
+        if (this.sandboxPaymentSession == null && this.connectionEntry.origin() == ConnectionEntryModel.Origin.SETTINGS)
             button("更换服务", this::showConnectionChoice);
     }
 
@@ -2252,6 +2259,11 @@ public final class MainActivity extends Activity {
     }
 
     private void renderOfficialConnection() {
+        if (this.sandboxPaymentSession != null) {
+            ManualPaymentPanel.render(this, this.body, this.footer, this.sandboxPaymentSession,
+                    this.onboardingActive ? "上一步" : "返回", this::returnFromSandboxPayment, this::returnFromSandboxPayment);
+            return;
+        }
         this.userInput = field("用户名", this.officialUser, false);
         this.passwordInput = field("密码", this.officialPassword, true);
         LinearLayout actions = row();
@@ -2259,6 +2271,35 @@ public final class MainActivity extends Activity {
         addButton(actions, "登录", () -> authenticateOfficial(false), true);
         addButton(actions, "注册", () -> authenticateOfficial(true), true);
         watchConnectionFields(renderConnectionFooter());
+    }
+
+    /** Development-only injection; normal login and saved connections never enable this feature. */
+    void showSandboxPaymentPreview(ManualPaymentSession session, String accountScope) {
+        if (this.busy || this.page != SyncPage.CONNECTION || this.connectionEntry == null
+                || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL
+                || session == null || !session.view().sandbox)
+            throw new IllegalStateException("Official sandbox preview is not available");
+        captureDraft();
+        closeSandboxPayment();
+        this.testedDraft = null;
+        this.sandboxPaymentSession = session;
+        session.listener(() -> { if (!isDestroyed() && this.sandboxPaymentSession == session) render(); });
+        session.enter(accountScope);
+        if (!this.resumed) session.foreground(false);
+        render();
+    }
+
+    private void closeSandboxPayment() {
+        ManualPaymentSession session = this.sandboxPaymentSession;
+        this.sandboxPaymentSession = null;
+        if (session != null) session.close();
+    }
+
+    private void returnFromSandboxPayment() {
+        closeSandboxPayment();
+        // Sandbox entitlement/DAV proof is never a production connection-test proof.
+        this.testedDraft = null;
+        render();
     }
 
     private Button renderConnectionFooter() {
@@ -2329,6 +2370,7 @@ public final class MainActivity extends Activity {
     }
 
     private void backFromConnection() {
+        if (this.sandboxPaymentSession != null) { returnFromSandboxPayment(); return; }
         if (this.busy) return;
         captureDraft();
         this.testedDraft = null;
