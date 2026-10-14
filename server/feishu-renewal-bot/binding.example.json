@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "app_id": "REPLACE_WITH_APP_ID",
+  "tenant_key": "REPLACE_WITH_TENANT_KEY",
+  "chat_id": "REPLACE_WITH_DEDICATED_GROUP_CHAT_ID",
+  "admin_open_ids": ["REPLACE_WITH_AUTHORIZED_ADMIN_OPEN_ID"],
+  "bot_open_id": "REPLACE_WITH_BOT_OPEN_ID"
+}

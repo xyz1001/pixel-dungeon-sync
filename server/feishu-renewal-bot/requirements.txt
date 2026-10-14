@@ -1,0 +1,3 @@
+# Production transport only; offline core tests use the Python standard library.
+# The SDK pin is intentional. Transitive dependency lock/audit is a deployment gate.
+lark-oapi==1.7.4
