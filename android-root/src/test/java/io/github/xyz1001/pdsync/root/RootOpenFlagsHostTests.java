@@ -78,7 +78,8 @@ public final class RootOpenFlagsHostTests {
 
     private static void boundedFailureMetadata() {
         String fixedOperations = "NONE,OPEN_DIRECTORY,OPEN_REGULAR,DUP,FCNTL,FSTAT,LSTAT,READDIR,"
-                + "MKDIR,PREAD,PWRITE,FCHMOD,FCHOWN,FSYNC,GETXATTR,SETXATTR,RENAME,LINK,REMOVE,LOCK,TIMESTAMP";
+                + "MKDIR,PREAD,PWRITE,FCHMOD,FCHOWN,FSYNC,GETXATTR,SETXATTR,RENAME,LINK,REMOVE,LOCK,TIMESTAMP,"
+                + "LSTAT_DATA_PACKAGE,LSTAT_SAVE_FILES,LSTAT_WORKSPACE";
         check(Arrays.toString(Operation.values()).replace(" ", "")
                 .equals("[" + fixedOperations + "]"), "fixed operation allowlist");
         Throwable cause = new IOException("private test cause /data/user/0/not-for-diagnostics");
