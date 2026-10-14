@@ -327,6 +327,7 @@ class AndroidUiFlowContract(unittest.TestCase):
     def test_comparison_completion_is_exclusive_and_preserves_unavailable_actions(self):
         render = body(MAIN, "private void renderComparison()")
         empty = body(render, "if (showEmptyCompletion())")
+        identical = body(render, "if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE)")
         keep_guard = "if (inspection != null && inspection.getCanKeepLocalProgress())"
         ready_guard = "else if (inspection != null && inspection.getCanCompleteWithoutTransfer())"
         adopt_guard = "else if (!inspection2.getCanKeepLocalProgress() && !inspection2.getCanCompleteWithoutTransfer())"
@@ -345,7 +346,7 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertIn("MainActivity.this.adopt()", adopt)
         self.assertEqual(1, adopt.count('foot("完成"'))
         remainder = render
-        for section in (empty, keep, ready, adopt):
+        for section in (empty, identical, keep, ready, adopt):
             remainder = remainder.replace(section, "", 1)
         self.assertNotIn('foot("完成"', remainder)
 
@@ -362,6 +363,32 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertLess(render.index(unverified), render.index(keep_guard))
         self.assertIn('foot("完成", this::completeEmpty).setEnabled(!this.busy && this.onboardingActive && this.connection != null)', empty)
         self.assertIn("this::upload).setEnabled(kind() != OnboardingKind.BLOCKED || this.inspection.isRetryablePending())", render)
+
+    def test_exact_identical_state_renders_only_one_completion_before_any_choice(self):
+        render = body(MAIN, "private void renderComparison()")
+        identical = body(render, "if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE)")
+        self.assertEqual(["完成"], re.findall(r'foot\("([^\"]+)"', identical))
+        self.assertIn("identical == AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM", identical)
+        self.assertIn("? this::completeReadyComparison : this::adopt", identical)
+        self.assertRegex(identical, r"return;\s*}$")
+        before = render[:render.index(identical)]
+        for evidence in ("AndroidUiFlowPolicy.identicalCompletion(",
+                         "kind() == null ? null : kind().name(), this.cloudVerified",
+                         "observed.getNeedsRestoreRecovery()", "observed.isRetryablePending()",
+                         "observed.getCanCompleteWithoutTransfer()", "observed.getCanAdoptRemote()"):
+            self.assertIn(evidence, before)
+        for remaining in ('text("本机 · "', "versionChoice(", "LinearLayout linearLayoutRow = row()",
+                          '"上传本机，保留两份"', 'foot("恢复所选云端存档"', 'foot("稍后处理"'):
+            self.assertLess(render.index(identical), render.index(remaining))
+        self.assertNotIn("getLocalFileCount()", before[before.index("AndroidSyncFacade.Inspection observed"):])
+        # Completion callbacks keep their original locked core revalidation;
+        # rendering a single button cannot fabricate or advance a baseline.
+        confirm = body(MAIN, "private void completeReadyComparison()")
+        self.assertIn("owner.completeOnboarding(observed)", confirm)
+        self.assertLess(confirm.index("owner.completeOnboarding(observed)"),
+                        confirm.index("SyncRuntime.setOnboardingProgress"))
+        self.assertIn("sync().adoptIdentical(inspection)",
+                      body(MAIN, "AndroidSyncFacade.OperationResult m15lambda$adopt$72$"))
 
     def test_empty_finish_revalidates_and_records_only_a_real_no_transfer_decision(self):
         finish = body(MAIN, "Object m29xb53dc5d7()")

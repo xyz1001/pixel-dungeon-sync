@@ -2706,6 +2706,18 @@ public final class MainActivity extends Activity {
             foot("重新比较", () -> refreshComparison(SyncPage.COMPARISON));
             return;
         }
+        AndroidSyncFacade.Inspection observed = this.inspection;
+        AndroidUiFlowPolicy.IdenticalCompletion identical = AndroidUiFlowPolicy.identicalCompletion(
+                kind() == null ? null : kind().name(), this.cloudVerified,
+                observed != null && observed.getNeedsRestoreRecovery(),
+                observed != null && observed.isRetryablePending(),
+                observed != null && observed.getCanCompleteWithoutTransfer(),
+                observed != null && observed.getCanAdoptRemote());
+        if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE) {
+            foot("完成", identical == AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM
+                    ? this::completeReadyComparison : this::adopt);
+            return;
+        }
         if (this.inspection != null) {
             text("本机 · " + Build.MODEL + "\n" + OnboardingGate.localFileCountLabel(kind(), this.inspection.getLocalFileCount(), this.inspection.isRetryablePending()));
             Iterator<AndroidSyncFacade.Version> it = this.inspection.getRemoteVersions().iterator();

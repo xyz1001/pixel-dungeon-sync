@@ -94,6 +94,38 @@ public final class AndroidUiFlowChecks {
         check("配置完成".equals(EmptySetupCompletion.message), "Empty completion uses the PC success message");
     }
 
+    private static void identicalCompletionUsesExactCoreProofAndOneAction() {
+        String[] kinds = {null, "", "UNKNOWN", "BOTH_EMPTY", "LOCAL_ONLY", "REMOTE_ONLY", "IDENTICAL", "DIFFERENT", "BRANCHED", "BLOCKED"};
+        for (String kind : kinds) {
+            for (int flags = 0; flags < 32; flags++) {
+                boolean verified = (flags & 1) != 0;
+                boolean recovery = (flags & 2) != 0;
+                boolean pending = (flags & 4) != 0;
+                boolean confirm = (flags & 8) != 0;
+                boolean adopt = (flags & 16) != 0;
+                AndroidUiFlowPolicy.IdenticalCompletion expected = AndroidUiFlowPolicy.IdenticalCompletion.NONE;
+                if ("IDENTICAL".equals(kind) && verified && !recovery && !pending) {
+                    if (confirm) expected = AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM;
+                    else if (adopt) expected = AndroidUiFlowPolicy.IdenticalCompletion.ADOPT;
+                }
+                check(AndroidUiFlowPolicy.identicalCompletion(kind, verified, recovery, pending, confirm, adopt) == expected,
+                        "Exact hash identity and valid core lineage must select one completion: " + kind + "/" + flags);
+            }
+        }
+        check(AndroidUiFlowPolicy.identicalCompletion("IDENTICAL", true, false, false, true, true)
+                        == AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM,
+                "SAME_TIP chooses confirmation once even when adoption is also possible");
+        check(AndroidUiFlowPolicy.identicalCompletion("IDENTICAL", true, false, false, false, true)
+                        == AndroidUiFlowPolicy.IdenticalCompletion.ADOPT,
+                "NONE/ANCESTOR uses explicit association rather than fabricating a baseline");
+        check(AndroidUiFlowPolicy.identicalCompletion("IDENTICAL", true, false, false, false, false)
+                        == AndroidUiFlowPolicy.IdenticalCompletion.NONE,
+                "Equal bytes alone do not permit completing an unrelated blocked lineage");
+        check(AndroidUiFlowPolicy.identicalCompletion("DIFFERENT", true, false, false, true, true)
+                        == AndroidUiFlowPolicy.IdenticalCompletion.NONE,
+                "Similar labels, timestamps or counts never suppress genuinely different bytes");
+    }
+
     private static void startupUsesExistingBaselinePolicy() {
         check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, true) == OnboardingProgress.COMPLETE,
                 "Configured trusted target with baseline resumes completed/Home");
@@ -123,6 +155,7 @@ public final class AndroidUiFlowChecks {
         connectionProofRequiresSuccessfulCurrentTest();
         passwordMayBeEmptyAndFailedDavDoesNotSave();
         onlyVerifiedEmptyComparisonOffersFinish();
+        identicalCompletionUsesExactCoreProofAndOneAction();
         startupUsesExistingBaselinePolicy();
         fourStepPresentationMatchesPc();
         System.out.println("Android UI flow: " + checks + " checks passed");

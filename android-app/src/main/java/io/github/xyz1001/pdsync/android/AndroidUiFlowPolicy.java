@@ -15,6 +15,19 @@ final class AndroidUiFlowPolicy {
         return !busy && proof != null && proof.equals(currentFingerprint);
     }
 
+    enum IdenticalCompletion { NONE, CONFIRM, ADOPT }
+
+    /** Hash identity comes only from the core inspection, never labels or file counts.
+     * A missing/unrelated baseline needs the core's explicit association capability. */
+    static IdenticalCompletion identicalCompletion(String kind, boolean cloudVerified,
+            boolean needsRestoreRecovery, boolean retryablePending,
+            boolean canCompleteWithoutTransfer, boolean canAdoptRemote) {
+        if (!"IDENTICAL".equals(kind) || !cloudVerified || needsRestoreRecovery || retryablePending)
+            return IdenticalCompletion.NONE;
+        if (canCompleteWithoutTransfer) return IdenticalCompletion.CONFIRM;
+        return canAdoptRemote ? IdenticalCompletion.ADOPT : IdenticalCompletion.NONE;
+    }
+
     /** Missing, blocked, stale, or interrupted observations are never presented as empty success. */
     static boolean showEmptyCompletion(String kind, boolean cloudVerified,
             boolean needsRestoreRecovery, boolean retryablePending) {
