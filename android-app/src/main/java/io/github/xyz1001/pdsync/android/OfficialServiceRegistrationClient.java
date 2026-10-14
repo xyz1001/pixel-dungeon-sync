@@ -56,7 +56,10 @@ final class OfficialServiceRegistrationClient {
     }
 
     enum FailureKind {
-        INVALID_INPUT, INVALID_CREDENTIALS, USERNAME_TAKEN, REGISTRATION_RETRY_REQUIRED, REQUEST_TOO_LARGE,
+        REGISTRATION_USERNAME_INVALID, LOGIN_USERNAME_INVALID, REGISTRATION_PASSWORD_LENGTH,
+        LOGIN_PASSWORD_LENGTH, PASSWORD_CHARACTERS_INVALID, REGISTRATION_PASSWORD_PREFIX,
+        PASSWORD_REJECTED, REQUEST_FORMAT_REJECTED, INVALID_CREDENTIALS, USERNAME_TAKEN,
+        REGISTRATION_RETRY_REQUIRED, REQUEST_TOO_LARGE,
         UNSUPPORTED_MEDIA_TYPE, RATE_LIMITED, UPSTREAM_ERROR, SERVER_ERROR, REQUEST_REJECTED,
         REDIRECT_REJECTED, INVALID_RESPONSE, RESPONSE_TOO_LARGE,
         TIMEOUT, NETWORK_ERROR, TLS_ERROR
@@ -145,23 +148,29 @@ final class OfficialServiceRegistrationClient {
 
     private static void validateCredentials(String username, String password, boolean registration)
             throws RegistrationException {
-        if (username == null || password == null || username.isEmpty()
-                || username.length() > 1024 || password.length() > 4096
-                || username.indexOf(':') >= 0 || hasControl(username) || hasControl(password)
-                || hasUnpairedSurrogate(username) || hasUnpairedSurrogate(password)) {
-            throw failure(FailureKind.INVALID_INPUT, false);
+        if (username == null || !username.matches(registration
+                ? "[a-z][a-z0-9_-]{2,31}" : "[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")) {
+            throw failure(registration ? FailureKind.REGISTRATION_USERNAME_INVALID
+                    : FailureKind.LOGIN_USERNAME_INVALID, false);
         }
-        if (registration && (!username.matches("[a-z][a-z0-9_-]{2,31}")
-                || password.codePointCount(0, password.length()) < 8
-                || password.codePointCount(0, password.length()) > 128
-                || password.startsWith("$") || password.startsWith("{"))) {
-            throw failure(FailureKind.INVALID_INPUT, false);
+        if (password == null || password.isEmpty() || password.length() > 4096) {
+            throw failure(registration ? FailureKind.REGISTRATION_PASSWORD_LENGTH
+                    : FailureKind.LOGIN_PASSWORD_LENGTH, false);
         }
-        // The v2 login contract permits legacy naming, short passwords and $/{ prefixes.
-        // Its password limit is UTF-8 bytes, not Java UTF-16 units or registration characters.
-        if (!registration && (!username.matches("[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")
-                || password.isEmpty() || password.getBytes(StandardCharsets.UTF_8).length > 512)) {
-            throw failure(FailureKind.INVALID_INPUT, false);
+        if (hasControl(password) || hasUnpairedSurrogate(password)) {
+            throw failure(FailureKind.PASSWORD_CHARACTERS_INVALID, false);
+        }
+        if (registration && (password.codePointCount(0, password.length()) < 8
+                || password.codePointCount(0, password.length()) > 128)) {
+            throw failure(FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
+        }
+        if (registration && (password.startsWith("$") || password.startsWith("{"))) {
+            throw failure(FailureKind.REGISTRATION_PASSWORD_PREFIX, false);
+        }
+        // Login permits legacy naming, short passwords and $/{ prefixes. Never trim,
+        // lowercase or otherwise change a submitted credential to make it acceptable.
+        if (!registration && password.getBytes(StandardCharsets.UTF_8).length > 512) {
+            throw failure(FailureKind.LOGIN_PASSWORD_LENGTH, false);
         }
     }
 
@@ -190,6 +199,9 @@ final class OfficialServiceRegistrationClient {
             }
             int status = response.code();
             if (status != 200) {
+                if (status == 400) {
+                    throw failure(inputFailure(response.body(), registration), false);
+                }
                 if (registration && isRecoverableTrialFailure(status, response.body())) {
                     throw failure(FailureKind.REGISTRATION_RETRY_REQUIRED, true);
                 }
@@ -218,7 +230,6 @@ final class OfficialServiceRegistrationClient {
     }
 
     private static RegistrationException httpFailure(int status) {
-        if (status == 400) return failure(FailureKind.INVALID_INPUT, false);
         if (status == 401) return failure(FailureKind.INVALID_CREDENTIALS, false);
         if (status == 409) return failure(FailureKind.USERNAME_TAKEN, false);
         if (status == 413) return failure(FailureKind.REQUEST_TOO_LARGE, false);
@@ -232,27 +243,41 @@ final class OfficialServiceRegistrationClient {
         return failure(FailureKind.INVALID_RESPONSE, true);
     }
 
-    /** Only the opt-in registration contract can change status-based recovery guidance. */
-    private static boolean isRecoverableTrialFailure(int status, ResponseBody body) {
-        if ((status != 409 && status != 503) || body == null) return false;
+    /** Only validated public error codes identify a field; never echo server text. */
+    private static FailureKind inputFailure(ResponseBody body, boolean registration) {
+        String error = publicError(400, body);
+        if ("INVALID_USERNAME".equals(error)) return registration
+                ? FailureKind.REGISTRATION_USERNAME_INVALID : FailureKind.LOGIN_USERNAME_INVALID;
+        if ("INVALID_PASSWORD".equals(error)) return FailureKind.PASSWORD_REJECTED;
+        if ("INVALID_REQUEST".equals(error)) return FailureKind.REQUEST_FORMAT_REJECTED;
+        // Proxy/protocol/upstream 400 responses do not prove that credentials are malformed.
+        return FailureKind.REQUEST_REJECTED;
+    }
+
+    private static String publicError(int status, ResponseBody body) {
+        if (body == null) return null;
         try {
             String text = readBoundedUtf8(body);
             checkNesting(text);
             AppendOnlyKt.requireUniqueJsonKeys(text);
             JsonObject root = object(Json.Default.parseToJsonElement(text));
             validateJsonValues(root);
-            if (integer(root, "code") != status) return false;
+            if (integer(root, "code") != status) return null;
             string(root, "message", 1024, true); // Validate only; never display server text.
-            String error = string(root, "error", 64, false);
-            if (status == 409) return "REGISTRATION_IN_PROGRESS".equals(error);
-            return "REGISTRATION_TRIAL_RETRY_REQUIRED".equals(error)
-                    || "REGISTRATION_DATABASE_UNAVAILABLE".equals(error)
-                    || "REGISTRATION_UPSTREAM_UNAVAILABLE".equals(error);
+            return string(root, "error", 64, false);
         } catch (IOException | RuntimeException invalid) {
-            // Missing, malformed, oversized, unreadable or unknown errors keep the old
-            // status-only fallback. Never surface raw response/transport diagnostics.
-            return false;
+            return null;
         }
+    }
+
+    /** Only the opt-in registration contract can change status-based recovery guidance. */
+    private static boolean isRecoverableTrialFailure(int status, ResponseBody body) {
+        if ((status != 409 && status != 503) || body == null) return false;
+        String error = publicError(status, body);
+        if (status == 409) return "REGISTRATION_IN_PROGRESS".equals(error);
+        return "REGISTRATION_TRIAL_RETRY_REQUIRED".equals(error)
+                || "REGISTRATION_DATABASE_UNAVAILABLE".equals(error)
+                || "REGISTRATION_UPSTREAM_UNAVAILABLE".equals(error);
     }
 
     private static String readBoundedUtf8(ResponseBody body) throws IOException {
@@ -436,7 +461,16 @@ final class OfficialServiceRegistrationClient {
     private static String messageFor(FailureKind kind, boolean accountMayHaveBeenCreated) {
         String message;
         switch (kind) {
-            case INVALID_INPUT: message = "账号或密码格式不符合服务要求。"; break;
+            case REGISTRATION_USERNAME_INVALID:
+                message = "用户名需3–32位，小写字母开头，仅含小写字母、数字、_或-。"; break;
+            case LOGIN_USERNAME_INVALID:
+                message = "用户名需1–64位字母、数字、_、.或-，且不能以.或-开头。"; break;
+            case REGISTRATION_PASSWORD_LENGTH: message = "注册密码需8–128个字符。"; break;
+            case LOGIN_PASSWORD_LENGTH: message = "密码不能为空，且不能超过512字节。"; break;
+            case PASSWORD_CHARACTERS_INVALID: message = "密码不能包含控制字符或无效字符。"; break;
+            case REGISTRATION_PASSWORD_PREFIX: message = "密码不能以$或{开头。"; break;
+            case PASSWORD_REJECTED: message = "服务未接受密码格式，请检查密码的长度和字符。"; break;
+            case REQUEST_FORMAT_REJECTED: message = "服务不支持这次请求的格式。"; break;
             case INVALID_CREDENTIALS: message = "账号或密码不正确。"; break;
             case USERNAME_TAKEN: message = "账号已被使用，请登录或更换账号。"; break;
             case REGISTRATION_RETRY_REQUIRED:

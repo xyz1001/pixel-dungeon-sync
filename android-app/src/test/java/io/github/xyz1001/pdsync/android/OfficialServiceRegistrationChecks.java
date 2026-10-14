@@ -40,6 +40,7 @@ public final class OfficialServiceRegistrationChecks {
         inputValidationAndLegacyLogin();
         transportPolicy();
         httpFailures();
+        fieldSpecificInputFailures();
         recoverableTrialRegistrationFailures();
         trialErrorValidationAndFallback();
         trialErrorBodyLimitsAndClosure();
@@ -110,19 +111,25 @@ public final class OfficialServiceRegistrationChecks {
         });
         for (String username : new String[] {null, "", "ab", "Aname", "0name", "a.name", " abc", "abc ",
                 "a:b", "中文账号", "a".repeat(33), "bad\nname", "bad\u0000name", "\ud800"}) {
-            expectFailure(() -> forbidden.register(username, PASSWORD), FailureKind.INVALID_INPUT, false);
+            expectFailure(() -> forbidden.register(username, PASSWORD), FailureKind.REGISTRATION_USERNAME_INVALID, false);
         }
-        for (String password : new String[] {null, "", "1234567", "x".repeat(129), "$password", "{password",
-                "bad\rpassword", "bad\u007fpassword", "bad\u0085password", "\ud800"}) {
-            expectFailure(() -> forbidden.register(USER, password), FailureKind.INVALID_INPUT, false);
+        for (String password : new String[] {null, "", "1234567", "x".repeat(129)}) {
+            expectFailure(() -> forbidden.register(USER, password), FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
+        }
+        for (String password : new String[] {"$password", "{password"}) {
+            expectFailure(() -> forbidden.register(USER, password), FailureKind.REGISTRATION_PASSWORD_PREFIX, false);
+        }
+        for (String password : new String[] {"bad\rpassword", "bad\u007fpassword", "bad\u0085password", "\ud800"}) {
+            expectFailure(() -> forbidden.register(USER, password), FailureKind.PASSWORD_CHARACTERS_INVALID, false);
+            expectFailure(() -> forbidden.login(USER, password), FailureKind.PASSWORD_CHARACTERS_INVALID, false);
         }
         for (String username : new String[] {null, "", "a:b", "bad\nname", "x".repeat(65), "\ud800",
                 ".legacy", "-legacy", "Legacy+Name", "用户账号"}) {
-            expectFailure(() -> forbidden.login(username, PASSWORD), FailureKind.INVALID_INPUT, false);
+            expectFailure(() -> forbidden.login(username, PASSWORD), FailureKind.LOGIN_USERNAME_INVALID, false);
         }
-        for (String password : new String[] {null, "", "bad\npassword", "x".repeat(513), "\ud800",
+        for (String password : new String[] {null, "", "x".repeat(513),
                 "中".repeat(171), "\ud83d\ude00".repeat(129)}) {
-            expectFailure(() -> forbidden.login(USER, password), FailureKind.INVALID_INPUT, false);
+            expectFailure(() -> forbidden.login(USER, password), FailureKind.LOGIN_PASSWORD_LENGTH, false);
         }
         check(calls.get() == 0, "all invalid inputs rejected before transport");
         for (String username : new String[] {"abc", "a_-", "a".repeat(32)}) {
@@ -184,7 +191,7 @@ public final class OfficialServiceRegistrationChecks {
 
     private static void httpFailures() throws Exception {
         failResponse(429, "{\"code\":429,\"message\":\"" + PASSWORD + "\"}", FailureKind.RATE_LIMITED, false);
-        failResponse(400, PASSWORD, FailureKind.INVALID_INPUT, false);
+        failResponse(400, PASSWORD, FailureKind.REQUEST_REJECTED, false);
         failResponse(409, PASSWORD, FailureKind.USERNAME_TAKEN, false);
         failResponse(413, PASSWORD, FailureKind.REQUEST_TOO_LARGE, false);
         failResponse(415, PASSWORD, FailureKind.UNSUPPORTED_MEDIA_TYPE, false);
@@ -216,6 +223,59 @@ public final class OfficialServiceRegistrationChecks {
         expectFailure(() -> new OfficialServiceRegistrationClient(request -> response(
                 request.newBuilder().url("https://other.invalid/api/register").build(), 200, VALID)).register(USER, PASSWORD),
                 FailureKind.REDIRECT_REJECTED, true);
+    }
+
+    private static void fieldSpecificInputFailures() throws Exception {
+        for (boolean registration : new boolean[] {true, false}) {
+            for (String code : new String[] {"INVALID_USERNAME", "INVALID_PASSWORD", "INVALID_REQUEST"}) {
+                FailureKind kind = "INVALID_USERNAME".equals(code)
+                        ? (registration ? FailureKind.REGISTRATION_USERNAME_INVALID : FailureKind.LOGIN_USERNAME_INVALID)
+                        : "INVALID_PASSWORD".equals(code) ? FailureKind.PASSWORD_REJECTED : FailureKind.REQUEST_FORMAT_REJECTED;
+                AtomicInteger calls = new AtomicInteger();
+                TrackingBody body = new TrackingBody(errorJson(400, code).getBytes(StandardCharsets.UTF_8), -1);
+                OfficialServiceRegistrationClient client = new OfficialServiceRegistrationClient(request -> {
+                    calls.incrementAndGet();
+                    return response(request, 400, body);
+                });
+                expectFailure(() -> {
+                    if (registration) client.register(USER, PASSWORD); else client.login(USER, PASSWORD);
+                }, kind, false);
+                check(calls.get() == 1 && body.closed && body.bytesRead > 0,
+                        "field error is bounded, read once, closed and never automatically retried");
+            }
+        }
+        String valid = errorJson(400, "INVALID_PASSWORD");
+        for (String invalid : new String[] {"", "not JSON", "[]", "null", valid + " trailing",
+                valid.replace("400", "401"), valid.replace("400", "\"400\""),
+                valid.replace("\"code\":400", "\"code\":401,\"code\":400"),
+                valid.replace("\"error\":", "\"error\":\"INVALID_USERNAME\",\"error\":"),
+                valid.replace("INVALID_PASSWORD", "INVALID_PASSWORD_EXTRA"),
+                valid.replace("INVALID_PASSWORD", "REGISTRATION_REJECTED"),
+                valid.replace("INVALID_PASSWORD", "INVALID_HOST"),
+                valid.replace("\"INVALID_PASSWORD\"", "true"),
+                valid.replace(",\"message\":\"" + PASSWORD + "\"", "")}) {
+            RegistrationException error = expectFailure(() -> new OfficialServiceRegistrationClient(
+                    request -> response(request, 400, invalid)).register(USER, PASSWORD), FailureKind.REQUEST_REJECTED, false);
+            check(!error.userMessage().contains("密码"), "unknown 400 cannot accuse password or username format");
+        }
+        for (TrackingBody body : new TrackingBody[] {
+                new TrackingBody(new byte[1], MAX_RESPONSE_BYTES + 1),
+                new TrackingBody(new byte[MAX_RESPONSE_BYTES * 3], -1),
+                new TrackingBody(new byte[] {(byte) 0xc3, (byte) 0x28}, -1)}) {
+            expectFailure(() -> new OfficialServiceRegistrationClient(request -> response(request, 400, body))
+                    .register(USER, PASSWORD), FailureKind.REQUEST_REJECTED, false);
+            check(body.closed && body.bytesRead <= MAX_RESPONSE_BYTES + 8192, "bad 400 body remains bounded and closed");
+        }
+        check(echoingClient().register(USER, " 中文密码 空格和表情😀 ").password.equals(" 中文密码 空格和表情😀 "),
+                "valid non-ASCII and spaces retained exactly; no credential rewriting");
+        RegistrationException username = expectFailure(() -> echoingClient().register("UpperCase", PASSWORD),
+                FailureKind.REGISTRATION_USERNAME_INVALID, false);
+        check(username.userMessage().contains("小写字母") && !username.userMessage().contains("密码"),
+                "username failure says the actual naming rule only");
+        RegistrationException length = expectFailure(() -> echoingClient().register(USER, "1234567"),
+                FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
+        check(length.userMessage().contains("8–128") && !length.userMessage().contains("用户名"),
+                "password length error identifies its own field");
     }
 
     private static String errorJson(int status, String error) {
