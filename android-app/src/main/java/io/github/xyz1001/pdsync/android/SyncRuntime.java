@@ -231,6 +231,11 @@ final class SyncRuntime {
         return context.getSharedPreferences("sync-presentation-v2", 0);
     }
 
+    /** Non-secret account/profile/game binding for a persisted automatic session. */
+    static String connectionScope(Context context, SecureConnectionStore.Connection connection) throws Exception {
+        return scope(context, connection);
+    }
+
     private static String scope(Context context, SecureConnectionStore.Connection connection2) throws Exception {
         String origin = currentOrigin(context);
         if (connection2 == null) {

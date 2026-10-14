@@ -121,6 +121,7 @@ public final class MainActivity extends Activity {
     private boolean previewAttempted;
     private boolean readinessRefreshPending;
     private boolean receiverRegistered;
+    private AutomaticHistoryState automaticHistoryState = new AutomaticHistoryState();
     private SyncPage renderedPage;
     private volatile boolean resumed;
     private LinearLayout root;
@@ -162,7 +163,9 @@ public final class MainActivity extends Activity {
         final String endpoint, user, password, profile, officialUser, officialPassword, testedProof;
         final ConnectionAuthAttempt<OfficialAuthResult> attempt;
         final SecureConnectionStore.Connection verified, managedAccountSource;
+        final AutomaticHistoryState automaticHistory;
         RetainedConnectionUi(MainActivity activity) {
+            automaticHistory = activity.automaticHistoryState;
             onboarding = activity.onboardingActive;
             draftLoaded = activity.draftLoaded;
             page = activity.page;
@@ -200,7 +203,11 @@ public final class MainActivity extends Activity {
     private final BroadcastReceiver installChanged = new BroadcastReceiver() { // from class: io.github.xyz1001.pdsync.android.MainActivity.1
         @Override // android.content.BroadcastReceiver
         public void onReceive(Context context, Intent intent) {
-            MainActivity.this.requestReadinessRefresh();
+            if (AutoSyncService.HISTORY_CHANGED.equals(intent.getAction())) {
+                MainActivity.this.drainAutomaticHistoryRefresh();
+            } else {
+                MainActivity.this.requestReadinessRefresh();
+            }
         }
     };
 
@@ -241,12 +248,14 @@ public final class MainActivity extends Activity {
     }
 
     @Override public Object onRetainNonConfigurationInstance() {
-        if ((this.page != SyncPage.CONNECTION || this.connectionEntry == null) && this.managedAccountFlow == null) return null;
+        if ((this.page != SyncPage.CONNECTION || this.connectionEntry == null) && this.managedAccountFlow == null
+                && this.automaticHistoryState.outcome == null && !this.automaticHistoryState.inFlight) return null;
         captureDraft();
         return new RetainedConnectionUi(this);
     }
 
     private void restoreConnectionUi(RetainedConnectionUi retained) {
+        this.automaticHistoryState = retained.automaticHistory;
         this.onboardingActive = retained.onboarding;
         this.connectionEntry = retained.entry;
         this.draftEndpoint = retained.endpoint; this.draftUser = retained.user;
@@ -255,7 +264,7 @@ public final class MainActivity extends Activity {
         this.officialAttempt = retained.attempt; this.verifiedOfficial = retained.verified;
         this.draftLoaded = retained.draftLoaded;
         this.testedDraft = retained.testedProof;
-        this.page = retained.page;
+        this.page = retained.page == SyncPage.CONFIRM ? SyncPage.HOME : retained.page;
         if (retained.managedAccountSource != null) {
             closeManagedAccount();
             this.managedAccountSource = retained.managedAccountSource;
@@ -284,7 +293,9 @@ public final class MainActivity extends Activity {
             render();
         }
         if (!this.receiverRegistered) {
-            RuntimePlatformCompat.registerInternalReceiver(this, this.installChanged, new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED"));
+            IntentFilter changes = new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED");
+            changes.addAction(AutoSyncService.HISTORY_CHANGED);
+            RuntimePlatformCompat.registerInternalReceiver(this, this.installChanged, changes);
             this.receiverRegistered = true;
         }
         try {
@@ -351,9 +362,14 @@ public final class MainActivity extends Activity {
     }
 
     private <T> void work(String str, final Task<T> task, final Done<T> done) {
+        work(str, task, done, false);
+    }
+
+    private <T> void work(String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory) {
         if (this.busy || isDestroyed()) {
             return;
         }
+        if (!preserveAutomaticHistory) this.automaticHistoryState.outcome = null;
         captureDraft();
         this.diagnosticReport = "";
         this.details = "";
@@ -402,11 +418,13 @@ public final class MainActivity extends Activity {
         this.busy = false;
         try {
             done.accept(obj);
+            rememberCurrentAutomaticHistory();
         } catch (Exception e) {
             reportError(e);
         }
         render();
         drainReadinessRefresh();
+        drainAutomaticHistoryRefresh();
     }
 
     /* renamed from: lambda$work$1$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -416,8 +434,10 @@ public final class MainActivity extends Activity {
         }
         this.busy = false;
         reportError(exc);
+        rememberCurrentAutomaticHistory();
         render();
         drainReadinessRefresh();
+        drainAutomaticHistoryRefresh();
     }
 
     private void disable(View view) {
@@ -737,6 +757,7 @@ public final class MainActivity extends Activity {
             return;
         }
         this.readinessRefreshPending = false;
+        if (this.automaticHistoryState.outcome != null) this.automaticHistoryState.outcome.applied = false;
         final boolean z = this.initialLoad;
         this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
         this.localPreview = null;
@@ -754,7 +775,7 @@ public final class MainActivity extends Activity {
             public final void accept(Object obj) throws Exception {
                 MainActivity.this.m69xebc6eee5(z, obj);
             }
-        });
+        }, true);
     }
 
     /* renamed from: lambda$refreshReadiness$3$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -774,7 +795,7 @@ public final class MainActivity extends Activity {
         if (connection != null) {
             this.progress = SyncRuntime.onboardingProgress(this, connection);
         }
-        if (z && this.rootGame == null && readyForSaves() && this.connection != null) {
+        if (z && this.rootGame == null && readyForSaves() && this.connection != null && !hasAutomaticHistoryRefresh()) {
             try {
                 this.facade = null;
                 readComparison();
@@ -796,7 +817,7 @@ public final class MainActivity extends Activity {
         boolean z2 = false;
         if (!z) {
             this.notice = this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).statusDescription();
-            if (this.rootGame == null && this.page == SyncPage.HOME && readyForSaves() && this.connection != null) {
+            if (this.rootGame == null && this.page == SyncPage.HOME && readyForSaves() && this.connection != null && !hasAutomaticHistoryRefresh()) {
                 refreshComparison(SyncPage.HOME, false);
                 return;
             }
@@ -912,6 +933,7 @@ public final class MainActivity extends Activity {
             loadDraft();
         }
         render();
+        if (syncPage == SyncPage.HOME) drainAutomaticHistoryRefresh();
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -2832,6 +2854,132 @@ public final class MainActivity extends Activity {
             this.facade = SyncRuntime.facade(this, connection);
         }
         return this.facade;
+    }
+
+    /** Shared only across Activity rotation; never writes credentials or save data to a Bundle. */
+    private static final class AutomaticHistoryState {
+        final AutoSyncHistoryRefresh refresh = new AutoSyncHistoryRefresh();
+        AutoSyncHistoryRefresh.Ticket ticket;
+        SecureConnectionStore.Connection connection;
+        volatile AutomaticHistoryOutcome outcome;
+        volatile boolean inFlight;
+    }
+
+    private static final class AutomaticHistoryOutcome {
+        final AutoSyncHistoryRefresh.Ticket ticket;
+        final SecureConnectionStore.Connection connection;
+        AndroidSyncFacade facade;
+        AndroidSyncFacade.Inspection inspection;
+        SyncHistory history;
+        Exception error;
+        boolean applied;
+        AutomaticHistoryOutcome(AutoSyncHistoryRefresh.Ticket ticket, SecureConnectionStore.Connection connection) {
+            this.ticket = ticket; this.connection = connection;
+        }
+    }
+
+    private boolean hasAutomaticHistoryRefresh() {
+        try {
+            AutoSyncStatusPolicy.Record record = AutoSyncService.historyRefreshRecord(this);
+            return this.connection != null && this.connection == SyncRuntime.connection(this)
+                    && (this.automaticHistoryState.outcome != null || (this.automaticHistoryState.refresh.needsRead(record)
+                            && AutoSyncService.historyRefreshPending(this, record)))
+                    && AutoSyncHistoryRefresh.matches(record, SyncRuntime.currentSelectionToken(this),
+                            SyncRuntime.currentNamespace(this), SyncRuntime.connectionScope(this, this.connection));
+        } catch (Exception unavailable) { return false; }
+    }
+
+    private boolean currentAutomaticHistory(AutoSyncHistoryRefresh.Ticket ticket, SecureConnectionStore.Connection connection) {
+        try {
+            return connection != null && this.connection == connection && SyncRuntime.connection(this) == connection
+                    && this.automaticHistoryState.refresh.accepts(ticket, AutoSyncService.historyRefreshRecord(this),
+                            SyncRuntime.currentSelectionToken(this), SyncRuntime.currentNamespace(this),
+                            SyncRuntime.connectionScope(this, connection));
+        } catch (Exception unavailable) { return false; }
+    }
+
+    /** A deliberate operation may produce a newer comparison. Cache that observation, not the old one. */
+    private void rememberCurrentAutomaticHistory() {
+        AutomaticHistoryState state = this.automaticHistoryState;
+        if (this.busy || state.outcome != null || !this.cloudVerified || this.inspection == null || this.history == null
+                || this.facade == null || !currentAutomaticHistory(state.ticket, state.connection)) return;
+        AutomaticHistoryOutcome current = new AutomaticHistoryOutcome(state.ticket, state.connection);
+        current.facade = this.facade; current.inspection = this.inspection; current.history = this.history;
+        current.applied = true;
+        state.outcome = current;
+    }
+
+    /** Terminal-session notification/resume only: one read, never a polling loop or another upload. */
+    private void drainAutomaticHistoryRefresh() {
+        if (!this.resumed || this.busy || isDestroyed() || this.page != SyncPage.HOME
+                || this.connection == null || !canRequestSaveAccess() || this.installer.hasActiveRequest()
+                || this.readinessState.restorePending) return;
+        AutomaticHistoryOutcome completed = this.automaticHistoryState.outcome;
+        if (completed != null) {
+            if (currentAutomaticHistory(completed.ticket, completed.connection)) {
+                if (!completed.applied) {
+                    completed.applied = true;
+                    if (completed.error != null) {
+                        this.cloudVerified = false;
+                        this.inspection = null;
+                        this.history = null;
+                        reportError(completed.error);
+                    } else {
+                        this.facade = completed.facade;
+                        this.inspection = completed.inspection;
+                        this.history = completed.history;
+                        this.cloudVerified = completed.history != null;
+                        if (this.rootGame != null && this.cloudVerified)
+                            this.readinessState = this.readinessState.withAccessCode("READY");
+                        if (this.history != null) {
+                            boolean found = false;
+                            for (AppendCommit commit : this.history.getCloud())
+                                if (commit.getSnapshot().getId().equals(this.selected)) found = true;
+                            if (!found) this.selected = this.history.getDefaultSnapshot();
+                        } else this.selected = null;
+                        this.notice = comparisonCopy();
+                        this.details = this.inspection == null ? "" : safeText(this.inspection.getMessage());
+                    }
+                    render();
+                }
+                return;
+            }
+            this.automaticHistoryState.outcome = null;
+        }
+        if (this.automaticHistoryState.inFlight) return;
+        final SecureConnectionStore.Connection captured = this.connection;
+        final AutoSyncHistoryRefresh.Ticket ticket;
+        try {
+            if (captured != SyncRuntime.connection(this)) return;
+            AutoSyncStatusPolicy.Record record = AutoSyncService.historyRefreshRecord(this);
+            if (!AutoSyncService.historyRefreshPending(this, record)) return;
+            ticket = this.automaticHistoryState.refresh.begin(record,
+                    SyncRuntime.currentSelectionToken(this), SyncRuntime.currentNamespace(this),
+                    SyncRuntime.connectionScope(this, captured), this.resumed && this.page == SyncPage.HOME, !this.busy);
+        } catch (Exception unavailable) { return; }
+        if (ticket == null) return;
+        final AutomaticHistoryState state = this.automaticHistoryState;
+        state.ticket = ticket; state.connection = captured; state.inFlight = true;
+        work("正在检查存档…", () -> {
+            // work() holds the global operation lock. A task paused before any read is deferred.
+            // Rotation shares this holder, so the replacement Activity receives the same result.
+            try {
+                if (!this.resumed || !currentAutomaticHistory(ticket, captured)) {
+                    state.refresh.deferBeforeRead(ticket);
+                    return null;
+                }
+                if (!AutoSyncService.claimHistoryRefresh(this, ticket)) return null;
+                AutomaticHistoryOutcome result = new AutomaticHistoryOutcome(ticket, captured);
+                try {
+                    result.facade = SyncRuntime.facade(this, captured);
+                    result.inspection = result.facade.inspect();
+                    if (!"BLOCKED".equals(result.inspection.getKind()))
+                        result.history = result.facade.historyPresentation(result.inspection);
+                } catch (Exception error) { result.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error); }
+                state.outcome = result;
+                return null;
+            } finally { state.inFlight = false; }
+        }, ignored -> { /* Only drainAutomaticHistoryRefresh applies the scoped foreground result. */ }, true);
     }
 
     private void readComparison() throws Exception {

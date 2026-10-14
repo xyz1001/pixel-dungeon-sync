@@ -8,9 +8,13 @@ final class AutoSyncStatusPolicy {
     private AutoSyncStatusPolicy() {}
 
     static final class Record {
-        final String token, state, result, gameSelection, namespace;
+        final String token, state, result, gameSelection, namespace, connectionScope;
         final long startedAt;
         Record(String token, String state, String result, String gameSelection, String namespace, long startedAt) {
+            this(token, state, result, gameSelection, namespace, startedAt, "");
+        }
+        Record(String token, String state, String result, String gameSelection, String namespace, long startedAt, String connectionScope) {
+            this.connectionScope = safe(connectionScope);
             this.token = safe(token); this.state = safe(state); this.result = safe(result);
             this.gameSelection = safe(gameSelection); this.namespace = safe(namespace); this.startedAt = startedAt;
         }
@@ -21,7 +25,7 @@ final class AutoSyncStatusPolicy {
                     && gameSelection.equals(selection) && namespace.equals(space);
         }
         String key() {
-            return part(token) + part(state) + part(result) + part(gameSelection) + part(namespace) + startedAt;
+            return part(token) + part(state) + part(result) + part(gameSelection) + part(namespace) + part(connectionScope) + startedAt;
         }
     }
 

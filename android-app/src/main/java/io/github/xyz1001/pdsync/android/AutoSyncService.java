@@ -20,6 +20,7 @@ import pdsync.android.app.AndroidSyncFacade;
 
 /* loaded from: classes.dex */
 public final class AutoSyncService extends Service {
+    static final String HISTORY_CHANGED = "io.github.xyz1001.pdsync.android.AUTO_SYNC_FINISHED";
     private static final String ARM = "pdsync.ARM";
     private static final String CHANNEL = "game-exit-sync";
     private static final int NOTIFICATION = 7301;
@@ -54,7 +55,8 @@ public final class AutoSyncService extends Service {
             }
             String strSelectionToken = SyncRuntime.currentSelectionToken(context);
             String strCurrentNamespace = SyncRuntime.currentNamespace(context);
-            if (isActive(sharedPreferences) && (!strSelectionToken.equals(sharedPreferences.getString("gameSelection", "")) || !strCurrentNamespace.equals(sharedPreferences.getString("gameNamespace", "")))) {
+            String connectionScope = SyncRuntime.connectionScope(context, SyncRuntime.connection(context));
+            if (isActive(sharedPreferences) && (!strSelectionToken.equals(sharedPreferences.getString("gameSelection", "")) || !strCurrentNamespace.equals(sharedPreferences.getString("gameNamespace", "")) || !connectionScope.equals(sharedPreferences.getString("connectionScope", "")))) {
                 cancelForConnectionChange(context);
             }
             if (isActive(sharedPreferences) && !sharedPreferences.getString("token", "").isEmpty()) {
@@ -65,7 +67,7 @@ public final class AutoSyncService extends Service {
                 return string;
             }
             String string2 = controlledToken == null ? UUID.randomUUID().toString() : controlledToken;
-            if (!sharedPreferences.edit().putString("token", string2).putString("state", "ARMED").putLong("startedAt", System.currentTimeMillis()).putString("gameSelection", strSelectionToken).putString("gameNamespace", strCurrentNamespace).putBoolean("departed", false).putBoolean("foregroundSeen", false).putString("result", "等待本次游戏退出后检查自动上传。").commit()) {
+            if (!sharedPreferences.edit().putString("token", string2).putString("state", "ARMED").putLong("startedAt", System.currentTimeMillis()).putString("gameSelection", strSelectionToken).putString("gameNamespace", strCurrentNamespace).putString("connectionScope", connectionScope).putBoolean("departed", false).putBoolean("foregroundSeen", false).putString("result", "等待本次游戏退出后检查自动上传。").commit()) {
                 throw new IllegalStateException("无法保存自动同步会话，本次不会后台上传。");
             }
             startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string2));
@@ -81,6 +83,7 @@ public final class AutoSyncService extends Service {
             cancelEvidence(context, sharedPreferences.getString("token", ""));
             sharedPreferences.edit().putString("state", "CANCELLED").putString("result", "连接设置已变更，旧连接的本次监听已停止。此前已提交的上传仍可能完成；下次启动游戏使用新设置。").commit();
             context.stopService(new Intent(context, (Class<?>) AutoSyncService.class));
+            notifyHistoryChanged(context);
         }
     }
 
@@ -95,6 +98,7 @@ public final class AutoSyncService extends Service {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         if (isActive(sharedPreferences) && System.currentTimeMillis() - sharedPreferences.getLong("startedAt", 0L) > 21600000) {
             sharedPreferences.edit().putString("state", "EXPIRED").putString("result", "上次监听已超出 Android 数据同步会话时限，请手动检查或重新启动游戏。").commit();
+            notifyHistoryChanged(context);
         } else if (isActive(sharedPreferences) && sharedPreferences.getBoolean("departed", false)) {
             startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.RETURN").putExtra("token", sharedPreferences.getString("token", "")));
         }
@@ -105,6 +109,7 @@ public final class AutoSyncService extends Service {
             context.startForegroundService(intent);
         } catch (RuntimeException e) {
             sharedPreferences.edit().putString("state", "BLOCKED").putString("result", "系统没有允许本次后台同步，请返回首页手动检查。").commit();
+            notifyHistoryChanged(context);
             throw e;
         }
     }
@@ -115,6 +120,7 @@ public final class AutoSyncService extends Service {
     }
 
     private static final String CHECKED_IDLE_FAILURE = "checkedIdleFailure";
+    private static final String READ_HISTORY = "readHistoryRecord";
 
     private static AutoSyncStatusPolicy.Record statusRecord(SharedPreferences preferences) {
         // One snapshot prevents mixing a previous token with a newer session's result.
@@ -123,7 +129,27 @@ public final class AutoSyncService extends Service {
         return new AutoSyncStatusPolicy.Record(statusString(values, "token", ""),
                 statusString(values, "state", ""), statusString(values, "result", "从本应用启动游戏后，正常退出且没有冲突时自动上传。"),
                 statusString(values, "gameSelection", ""), statusString(values, "gameNamespace", ""),
-                started instanceof Long ? (Long) started : 0L);
+                started instanceof Long ? (Long) started : 0L, statusString(values, "connectionScope", ""));
+    }
+
+    static AutoSyncStatusPolicy.Record historyRefreshRecord(Context context) {
+        return statusRecord(context.getSharedPreferences(PREFS, 0));
+    }
+
+    static boolean historyRefreshPending(Context context, AutoSyncStatusPolicy.Record record) {
+        return AutoSyncHistoryRefresh.unconsumed(record, context.getSharedPreferences(PREFS, 0).getString(READ_HISTORY, ""));
+    }
+
+    /** Persist the exact consumed terminal result before I/O, so restart cannot replay it. */
+    static synchronized boolean claimHistoryRefresh(Context context, AutoSyncHistoryRefresh.Ticket ticket) {
+        SharedPreferences preferences = context.getSharedPreferences(PREFS, 0);
+        AutoSyncStatusPolicy.Record current = statusRecord(preferences);
+        return ticket.recordKey.equals(current.key()) && historyRefreshPending(context, current)
+                && preferences.edit().putString(READ_HISTORY, ticket.recordKey).commit();
+    }
+
+    private static void notifyHistoryChanged(Context context) {
+        context.sendBroadcast(new Intent(HISTORY_CHANGED).setPackage(context.getPackageName()));
     }
 
     private static String statusString(java.util.Map<String, ?> values, String key, String fallback) {
@@ -158,10 +184,13 @@ public final class AutoSyncService extends Service {
         SharedPreferences preferences = context.getSharedPreferences(PREFS, 0);
         AutoSyncStatusPolicy.Record current = statusRecord(preferences);
         try {
+            if (!current.token.isEmpty() && (!current.gameSelection.equals(SyncRuntime.currentSelectionToken(context))
+                    || !current.namespace.equals(SyncRuntime.currentNamespace(context))
+                    || !current.connectionScope.equals(SyncRuntime.connectionScope(context, SyncRuntime.connection(context))))) return "";
             if (!SyncRuntime.rootMode(context)) return current.result;
             return AutoSyncStatusPolicy.visibleResult(current, preferences.getString(CHECKED_IDLE_FAILURE, ""),
                     SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context));
-        } catch (Exception unavailable) { return current.result; }
+        } catch (Exception unavailable) { return ""; }
     }
 
     @Override // android.app.Service
@@ -222,7 +251,7 @@ public final class AutoSyncService extends Service {
             this.connection = SyncRuntime.connection(this);
             this.selectedGameToken = SyncRuntime.currentSelectionToken(this);
             this.selectedNamespace = SyncRuntime.currentNamespace(this);
-            if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
+            if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.connectionScope(this, this.connection).equals(this.prefs.getString("connectionScope", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
                 throw new IllegalStateException("Game selection changed");
             }
             this.bridge = SyncRuntime.backend(this);
@@ -335,7 +364,8 @@ public final class AutoSyncService extends Service {
         try {
             String str = this.selectedGameToken;
             if (str != null && str.equals(SyncRuntime.currentSelectionToken(this)) && this.selectedNamespace.equals(SyncRuntime.currentNamespace(this))) {
-                if (SyncRuntime.automaticAllowed(this, this.connection)) {
+                if (SyncRuntime.connectionScope(this, SyncRuntime.connection(this)).equals(this.prefs.getString("connectionScope", ""))
+                        && SyncRuntime.automaticAllowed(this, this.connection)) {
                     return true;
                 }
             }
@@ -360,13 +390,14 @@ public final class AutoSyncService extends Service {
         this.stopped = true;
         cancelEvidence(this, this.token);
         String str3 = this.token;
+        boolean published = false;
         if (str3 == null || str3.equals(this.prefs.getString("token", ""))) {
-            this.prefs.edit().putString("state", str).putString("result", str2).commit();
+            published = this.prefs.edit().putString("state", str).putString("result", str2).commit();
         }
         this.executor.shutdownNow();
         stopForeground(1);
         stopSelf();
-        sendBroadcast(new Intent("io.github.xyz1001.pdsync.android.INSTALL_CHANGED").setPackage(getPackageName()));
+        if (published) notifyHistoryChanged(this);
     }
 
     public void onTimeout(int i, int i2) {
