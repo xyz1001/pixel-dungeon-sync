@@ -26,7 +26,7 @@ account creation, password handling, listener, secret or production cron job.
    Legacy `enroll(owner)` remains only for explicit old sandbox inspection; it
    is not the product registration path and must not determine new paid rights
    from a read-only current profile.
-4. `dry_run(owner)` reads the authoritative `entitlements` row and server clock,
+4. `dry_run(owner)` reads confirmed rights from the shared ledger and server clock,
    reports before/after permissions and expiry, and makes no remote writes or
    job reservations. `executable=false` means the adapter cannot enforce atomic
    fencing. This is the deployment-preflight/execution-preview API. The module
@@ -138,9 +138,33 @@ bypass review. No gate or network configuration is deployed by this module.
 
 OrderUploadAdapter exists solely to test the corrected sandbox ordering: Orders
 commits desired entitlements plus applying state first; ensure validates that
-reservation and invokes reconciliation using the latest ledger. It also accepts
+reservation and invokes reconciliation using that operation plus already
+confirmed rights. It does not promote a different unexecuted reservation from
+the global desired maximum. It also accepts
 a proved, applying registration trial from the trusted journal; pending
 registration intents are not grants. The trial confirms only after readback. observed_expiry
 checks a confirmed job and read-back permissions, not account expiration_date.
 On failure the order remains applying; renewed rights are not delayed by waiting
 for the very ledger entry the worker needs. Completion never adds another year.
+
+
+## Feishu grant compatibility
+
+The [Feishu renewal ledger](FEISHU_RENEWALS.md) shares this database. Normal
+reconciliation uses only confirmed trial/legacy-order/Feishu rights. The internal
+operation-scoped bridge may additionally apply its own fixed reserved target;
+other reservations remain arithmetic history, not confirmation evidence.
+
+The Feishu bridge requires `AccountSnapshot.account_id`,
+`atomic_account_identity=True` and
+`apply_account_permissions(owner, account_id, expected_revision, generation,
+permissions)`. The ID, revision and generation checks must be one atomic remote
+operation. The default adapter has no such implementation and refuses writes.
+`ensure_account` and readback check the same immutable ID. An ordinary username
+GET followed by a PUT does not implement this contract.
+
+Additive migration retains existing policy rows while adding nullable operation
+and account-ID columns. Legacy standalone sandbox fixtures without an order,
+trial or message journal keep their original confirmed-only entitlement-table
+semantics. A partially missing shared ledger never falls back to treating desired
+rows as confirmation.

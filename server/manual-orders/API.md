@@ -8,6 +8,26 @@ must start/stop it. `enabled=False` is the default and refuses construction.
 The underlying service defaults to `disabled` and returns `503 PAYMENTS_DISABLED`.
 Live mode is not implemented. Do not embed fixture prices/images in product UI.
 
+## Current Feishu renewal compatibility
+
+This v2 read-only shape remains unchanged for plans, payment images and the
+current user's entitlement. The new client flow does not call create, mine,
+submit, status or cancel. The mutation/review routes below remain for existing
+legacy records; they are not prerequisites for the new grant path.
+
+A verified designated-administrator username-only message in the dedicated
+Feishu group is processed through the internal [renewal ledger](FEISHU_RENEWALS.md),
+keyed by platform message ID and exact account identity. It does not require a
+transaction reference, user payment claim or order ID, and is not exposed as a
+public username-to-grant endpoint. Bot verification never manufactures a user
+or administrator `Principal` from message text.
+
+`GET /api/order/entitlement` and the DAV write gate read the same maximum of
+confirmed registration trial, approved legacy order and confirmed Feishu grant.
+New reserved/applying targets do not appear as active entitlement. Existing
+legacy rows, states and response shapes are preserved. No production adapter
+or deployment is enabled by this compatibility addition.
+
 ## Authentication and transport
 
 Every endpoint including plan images delegates to `service.auth.authenticate`.

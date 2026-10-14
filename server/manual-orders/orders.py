@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS registration_trials (
        (state IN ('applying','confirmed') AND created_ms IS NOT NULL AND expires_ms IS NOT NULL AND
         created_ms >= 0 AND expires_ms=created_ms+259200000))
 );
+CREATE TABLE IF NOT EXISTS feishu_renewals (
+ operation_id TEXT PRIMARY KEY,
+ app_id TEXT NOT NULL, tenant_key TEXT NOT NULL, message_id TEXT NOT NULL,
+ chat_id TEXT NOT NULL, sender_id TEXT NOT NULL, owner TEXT NOT NULL,
+ account_id TEXT, received_ms INTEGER NOT NULL, target_ms INTEGER,
+ state TEXT NOT NULL CHECK(state IN ('unknown_user','reserved','applying','confirmed')),
+ attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until_ms INTEGER,
+ UNIQUE(app_id,tenant_key,message_id),
+ CHECK((state='unknown_user' AND account_id IS NULL AND target_ms IS NULL) OR
+       (state IN ('reserved','applying','confirmed') AND account_id IS NOT NULL AND target_ms IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS feishu_renewals_owner ON feishu_renewals(owner,state);
 CREATE TABLE IF NOT EXISTS audit (
  seq INTEGER PRIMARY KEY, order_id TEXT NOT NULL, actor TEXT NOT NULL,
  event TEXT NOT NULL, at_ms INTEGER NOT NULL
@@ -116,23 +128,69 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 
+def _has_table(db, table):
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
+def paid_expiry(db, owner, *, include_reserved=False):
+    """Paid arithmetic only. Authorized reservations survive application failure.
+
+    Trials and the denormalized desired-entitlements row are never a paid base.
+    Optional tables allow read-only queries against compatible pre-migration DBs.
+    """
+    states = "('applying','approved')" if include_reserved else "('approved')"
+    queries = [f"SELECT target_ms AS expires_ms FROM orders WHERE owner=? AND state IN {states}"]
+    if _has_table(db, 'feishu_renewals'):
+        states = "('reserved','applying','confirmed')" if include_reserved else "('confirmed')"
+        queries.append(f"SELECT target_ms AS expires_ms FROM feishu_renewals WHERE owner=? AND state IN {states}")
+    return db.execute('SELECT MAX(expires_ms) FROM (' + ' UNION ALL '.join(queries) + ')',
+                      (owner,) * len(queries)).fetchone()[0]
+
+
 def confirmed_paid_expiry(db, owner):
-    """Only a previously approved donation may carry time into a paid renewal."""
-    return db.execute("SELECT MAX(target_ms) FROM orders WHERE owner=? AND state='approved'",
-                      (owner,)).fetchone()[0]
+    return paid_expiry(db, owner)
+
+
+def reserved_paid_expiry(db, owner):
+    """Use inside the SAME BEGIN IMMEDIATE transaction that reserves a year."""
+    return paid_expiry(db, owner, include_reserved=True)
 
 
 def confirmed_expiry(db, owner):
-    """Confirmed registration trial OR approved donation, never desired targets.
+    """Confirmed trial OR confirmed paid grant; desired targets grant no writes."""
+    paid = confirmed_paid_expiry(db, owner)
+    trial = None
+    if _has_table(db, 'registration_trials'):
+        trial = db.execute("SELECT expires_ms FROM registration_trials WHERE owner=? AND state='confirmed'",
+                           (owner,)).fetchone()
+    values = [value for value in (paid, trial[0] if trial else None) if value is not None]
+    return max(values) if values else None
 
-    An applying renewal cannot revoke an older confirmed trial/donation or make
-    its own extension usable. Trial time never changes paid renewal arithmetic.
+
+def application_expiry(db, owner, operation_id):
+    """Only this operation plus already confirmed rights may be applied.
+
+    Do not consume the global desired maximum: a different reserved operation
+    might never have run. Its time is a paid arithmetic base, not confirmation.
     """
-    return db.execute("""SELECT MAX(expires_ms) FROM (
-        SELECT target_ms AS expires_ms FROM orders WHERE owner=? AND state='approved'
-        UNION ALL
-        SELECT expires_ms FROM registration_trials WHERE owner=? AND state='confirmed'
-    )""", (owner, owner)).fetchone()[0]
+    candidates = []
+    row = db.execute("SELECT owner,target_ms FROM orders WHERE id=? AND state IN ('applying','approved')",
+                     (operation_id,)).fetchone()
+    if row:
+        candidates.append(row)
+    if _has_table(db, 'registration_trials'):
+        row = db.execute("SELECT owner,expires_ms FROM registration_trials WHERE operation_id=? AND state IN ('applying','confirmed')",
+                         (operation_id,)).fetchone()
+        if row:
+            candidates.append(row)
+    if _has_table(db, 'feishu_renewals'):
+        row = db.execute("SELECT owner,target_ms FROM feishu_renewals WHERE operation_id=? AND state IN ('applying','confirmed')",
+                         (operation_id,)).fetchone()
+        if row:
+            candidates.append(row)
+    if len(candidates) != 1 or candidates[0][0] != owner:
+        raise OrderError(409, 'ENTITLEMENT_NOT_RESERVED')
+    return max(candidates[0][1], confirmed_expiry(db, owner) or 0)
 
 
 class Orders:
@@ -273,7 +331,7 @@ class Orders:
             elif row['state'] == 'review':
                 if db.execute('SELECT 1 FROM orders WHERE channel=? AND receipt_ref=?', (channel, receipt_ref)).fetchone():
                     raise OrderError(409, 'RECEIPT_ALREADY_USED')
-                current = confirmed_paid_expiry(db, row['owner'])
+                current = reserved_paid_expiry(db, row['owner'])
                 target = extend_ms(max(self.clock(), current or 0), row['term'], row['days'])
                 db.execute("UPDATE orders SET state='applying',target_ms=?,reviewer=?,receipt_ref=?,channel=?,actual_amount_minor=?,actual_currency=? WHERE id=?",
                            (target, principal.subject, receipt_ref, channel, actual_amount_minor, actual_currency, oid))

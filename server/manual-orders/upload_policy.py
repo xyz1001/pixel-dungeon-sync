@@ -8,6 +8,8 @@ import sqlite3
 from contextlib import contextmanager
 import time
 
+from orders import _has_table, confirmed_expiry, application_expiry
+
 
 class PolicyError(Exception):
     pass
@@ -31,6 +33,7 @@ class AccountSnapshot:
     virtual_folders: tuple = ()
     # Adapter must explicitly establish absence of inherited/external grants.
     effective_permissions_verified: bool = False
+    account_id: str = None
 
 
 class DisabledAdapter:
@@ -106,6 +109,17 @@ class UploadPolicy:
               PRIMARY KEY(owner,generation)
             );
             ''')
+            # Additive migration preserves old jobs, generations and baselines.
+            db.execute('BEGIN IMMEDIATE')
+            try:
+                columns = {r['name'] for r in db.execute('PRAGMA table_info(upload_policy_jobs)')}
+                for name in ('operation_id', 'account_id'):
+                    if name not in columns:
+                        db.execute('ALTER TABLE upload_policy_jobs ADD COLUMN ' + name + ' TEXT')
+                db.execute('COMMIT')
+            except BaseException:
+                db.execute('ROLLBACK')
+                raise
 
     @contextmanager
     def db(self):
@@ -166,8 +180,10 @@ class UploadPolicy:
             db.execute('INSERT INTO managed_upload_policy(owner,baseline) VALUES(?,?)',
                        (owner, json.dumps(plan['activation_permissions']['/'])))
 
-    def observation(self, db, owner, account):
+    def observation(self, db, owner, account, operation_id=None, expected_account_id=None):
         current = checked_permissions(account)
+        if expected_account_id is not None and account.account_id != expected_account_id:
+            raise PolicyError('ACCOUNT_IDENTITY_MISMATCH')
         if account.username != owner:
             raise PolicyError('ACCOUNT_IDENTITY_MISMATCH')
         row = db.execute('SELECT * FROM managed_upload_policy WHERE owner=?', (owner,)).fetchone()
@@ -176,8 +192,20 @@ class UploadPolicy:
         baseline = json.loads(row['baseline'])
         if current not in (baseline, sorted(READ)):
             raise PolicyError('EXTERNAL_PERMISSION_CHANGE')
-        expiry = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (owner,)).fetchone()
-        expires_ms = expiry[0] if expiry is not None else 0
+        if _has_table(db, 'orders'):
+            # Shared ledgers expose confirmed rights by default. Only a proved
+            # explicit application may consume its own reserved target.
+            expires_ms = (application_expiry(db, owner, operation_id) if operation_id else
+                          confirmed_expiry(db, owner)) or 0
+        else:
+            # Existing standalone sandbox policy fixtures use a confirmed-only
+            # entitlements table. This compatibility path is not a grant source
+            # once any shared order/trial/message journal has been initialized.
+            if (operation_id is not None or _has_table(db, 'registration_trials') or
+                    _has_table(db, 'feishu_renewals')):
+                raise PolicyError('ENTITLEMENT_NOT_RESERVED')
+            expiry = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (owner,)).fetchone()
+            expires_ms = expiry[0] if expiry is not None else 0
         now = self.clock()
         desired = desired_permissions(baseline, expires_ms, now)
         return row, {'owner': owner, 'expires_ms': expires_ms, 'observed_ms': now,
@@ -185,15 +213,15 @@ class UploadPolicy:
                      'changes_permissions': current != desired['/'],
                      'preserves_login_and_password': True}
 
-    def dry_run(self, owner):
+    def dry_run(self, owner, *, operation_id=None, expected_account_id=None):
         self.guard()
         account = self.adapter.read(owner)
         with self.db() as db:
-            _, result = self.observation(db, owner, account)
+            _, result = self.observation(db, owner, account, operation_id, expected_account_id)
         result['executable'] = self.adapter.atomic_fenced_permissions is True
         return result
 
-    def reconcile(self, owner):
+    def reconcile(self, owner, *, operation_id=None, expected_account_id=None):
         """No expiry/job policy accepted from callers: reread authoritative ledger.
 
         The injected sandbox adapter MUST atomically compare revision and reject
@@ -203,21 +231,28 @@ class UploadPolicy:
         self.guard()
         if self.adapter.atomic_fenced_permissions is not True:
             raise PolicyError('ATOMIC_FENCING_REQUIRED')
+        if expected_account_id is not None and getattr(self.adapter, 'atomic_account_identity', False) is not True:
+            raise PolicyError('ATOMIC_ACCOUNT_IDENTITY_REQUIRED')
         account = self.adapter.read(owner)
         with self.tx() as db:
-            row, result = self.observation(db, owner, account)
+            row, result = self.observation(db, owner, account, operation_id, expected_account_id)
             generation = row['generation'] + 1
             db.execute('UPDATE managed_upload_policy SET generation=? WHERE owner=?', (generation, owner))
-            db.execute('INSERT INTO upload_policy_jobs VALUES(?,?,?,?,?,?)',
+            db.execute('INSERT INTO upload_policy_jobs(owner,generation,expires_ms,observed_ms,desired,state,operation_id,account_id) VALUES(?,?,?,?,?,?,?,?)',
                        (owner, generation, result['expires_ms'], result['observed_ms'],
-                        json.dumps(result['after']), 'pending'))
+                        json.dumps(result['after']), 'pending', operation_id, expected_account_id))
         # No database lock during remote I/O. On unknown outcome, later attempts
         # get a NEW generation and current ledger, never replay an old expiry.
         try:
-            self.adapter.apply_permissions(owner, account.revision, generation, result['after'])
+            if expected_account_id is None:
+                self.adapter.apply_permissions(owner, account.revision, generation, result['after'])
+            else:
+                self.adapter.apply_account_permissions(owner, expected_account_id, account.revision,
+                                                       generation, result['after'])
             observed = self.adapter.read(owner)
             checked_permissions(observed)
-            if observed.username != owner or observed.permissions != result['after']:
+            if (observed.username != owner or observed.permissions != result['after'] or
+                    (expected_account_id is not None and observed.account_id != expected_account_id)):
                 raise PolicyError('POLICY_READBACK_MISMATCH')
         except Exception:
             with self.tx() as db:
@@ -238,28 +273,46 @@ class OrderUploadAdapter:
     def __init__(self, policy):
         self.policy = policy
 
-    def ensure(self, username, expires_at_ms, operation_id):
+    def _ensure(self, username, expires_at_ms, operation_id, account_id=None):
         self.policy.guard()
         with self.policy.db() as db:
             order = db.execute('SELECT owner,state,target_ms FROM orders WHERE id=?', (operation_id,)).fetchone()
             trial = db.execute('SELECT owner,state,expires_ms FROM registration_trials WHERE operation_id=?', (operation_id,)).fetchone()
+            renewal = db.execute('SELECT owner,state,target_ms,account_id FROM feishu_renewals WHERE operation_id=?', (operation_id,)).fetchone()
             ledger = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (username,)).fetchone()
             paid_reserved = (order is not None and order['owner'] == username and
                              order['state'] in ('applying', 'approved') and order['target_ms'] == expires_at_ms)
             trial_reserved = (trial is not None and trial['owner'] == username and
                               trial['state'] in ('applying', 'confirmed') and trial['expires_ms'] == expires_at_ms)
-            if (not (paid_reserved or trial_reserved) or ledger is None or ledger[0] < expires_at_ms):
+            message_reserved = (renewal is not None and renewal['owner'] == username and
+                                renewal['state'] in ('applying', 'confirmed') and renewal['target_ms'] == expires_at_ms and
+                                account_id is not None and renewal['account_id'] == account_id)
+            if account_id is not None and not message_reserved:
+                raise PolicyError('ACCOUNT_IDENTITY_MISMATCH')
+            if (not (paid_reserved or trial_reserved or message_reserved) or ledger is None or ledger[0] < expires_at_ms):
                 raise PolicyError('ENTITLEMENT_NOT_RESERVED')
-        # Reread current desired ledger rather than replay an old job target.
-        self.policy.reconcile(username)
+        self.policy.reconcile(username, operation_id=operation_id, expected_account_id=account_id)
+
+    def ensure(self, username, expires_at_ms, operation_id):
+        self._ensure(username, expires_at_ms, operation_id)
+
+    def ensure_account(self, identity, expires_at_ms, operation_id):
+        self._ensure(identity.username, expires_at_ms, operation_id, identity.account_id)
 
     def observed_expiry(self, username):
         self.policy.guard()
-        preview = self.policy.dry_run(username)
         with self.policy.db() as db:
             job = db.execute('SELECT * FROM upload_policy_jobs WHERE owner=? ORDER BY generation DESC LIMIT 1', (username,)).fetchone()
-            if (job is None or job['state'] != 'confirmed' or
-                job['expires_ms'] != preview['expires_ms'] or
-                json.loads(job['desired']) != preview['after'] or preview['before'] != preview['after']):
+            if job is None or job['state'] != 'confirmed':
                 raise PolicyError('PERMISSIONS_NOT_CONFIRMED')
+        preview = self.policy.dry_run(username, operation_id=job['operation_id'], expected_account_id=job['account_id'])
+        if (job['expires_ms'] != preview['expires_ms'] or
+                json.loads(job['desired']) != preview['after'] or preview['before'] != preview['after']):
+            raise PolicyError('PERMISSIONS_NOT_CONFIRMED')
         return job['expires_ms']
+
+    def observed_account_expiry(self, identity):
+        account = self.policy.adapter.read(identity.username)
+        if account.username != identity.username or account.account_id != identity.account_id:
+            raise PolicyError('ACCOUNT_IDENTITY_MISMATCH')
+        return self.observed_expiry(identity.username)

@@ -1,4 +1,22 @@
-# Manual payment order foundation (phase one, sandbox only)
+# Entitlement ledger (Feishu renewal and legacy sandbox orders)
+
+## Current renewal path
+
+A designated administrator sends the exact existing username in the dedicated
+Feishu group. The authorized bot worker calls the disabled-by-default
+[Feishu renewal ledger](FEISHU_RENEWALS.md); the new flow does not require a user
+order claim, payment transaction number, amount or remark. Each distinct verified
+platform message reserves one year. Redelivery/restart/reply failure retries the
+same fixed target. Unknown users receive a persisted rejection and are not created.
+The account lookup and account-ID-bound permission adapters are still unimplemented
+for production. Nothing is deployed or enabled by this source change.
+
+The client retains read-only plans/payment-image/entitlement APIs. The order
+creation/claim/review endpoints described below remain only for legacy-record
+compatibility. Public rights use the maximum confirmed trial, approved legacy
+order or confirmed Feishu grant. Desired/reserved rows are never confirmation.
+
+## Legacy order foundation (sandbox compatibility)
 
 This isolated Python/SQLite module models a manually reviewed order attached to
 an existing authenticated account. It does not automatically listen on a
@@ -93,7 +111,8 @@ not a reliable delivery queue; the admin queue is authoritative.
 Approval commits reviewer, channel/reference, the absolute desired entitlement
 and the durable applying order together in one SQLite transaction.
 The first donation starts at approval, ignoring any remaining trial. Paid
-renewal starts at `max(now, confirmed paid expiry)`. Calendar-year terms use UTC
+renewal starts at `max(now, authorized paid reserved expiry)` across both
+legacy orders and Feishu grants, within the same SQLite reservation transaction. Calendar-year terms use UTC
 anniversaries with Feb 29 clamped to Feb 28.
 No local timezone/DST calculation or floating-point price arithmetic is used.
 The quota snapshot describes desired limits; phase one does not apply real
@@ -107,8 +126,8 @@ the transaction. It must use bounded I/O and implement idempotent, monotonic
 order becomes approved. It does not mean SFTPGo account expiration_date. The default adapter always refuses. Only the tests contain
 a fake adapter. A timed-out call keeps the same order ID and frozen target;
 retrying approval resumes it. Process death leaves a reclaimable lease. A stale
-worker cannot acknowledge or overwrite a newer lease. A new renewal cannot
-start until the prior job commits. External stale writes must also be prevented
+worker cannot acknowledge or overwrite a newer lease. The legacy order UI retains one pending order per owner. Independent authorized
+Feishu messages can reserve additional years while a prior apply is unfinished. External stale writes must also be prevented
 by the adapter's monotonic guarantee; SQLite alone cannot fence remote writes.
 There is no autonomous worker yet: authenticated admin POST retry with just the
 order ID is the recovery trigger. Paginated queue state exposes unfinished jobs;
@@ -116,8 +135,8 @@ the operator need not retain the original receipt reference after a restart.
 
 Audit rows contain only order, actor, event and UTC milliseconds. Receipt and
 account association live in the private DB; keep it outside Git and protect it
-with host ACLs and backups. Database/schema migrations are not supplied yet; this donation revision requires
-a fresh sandbox database and must not be opened against old price-based fixtures.
+with host ACLs and backups. Compatible donation schemas receive additive trial/Feishu tables and retain all
+existing history. Old price-based fixtures remain unsupported and are not rewritten.
 
 ## SFTPGo 2.7.6 compatibility and production blockers
 
@@ -186,7 +205,8 @@ worker: payment reservation writes the ledger before ensure runs; success only
 marks approved, publishing its fixed target as confirmed service rights.
 Failure leaves applying without undoing the recorded donation. First activation
 remains inactive; an unconfirmed renewal retains only the prior confirmed
-expiry. The API and write gate use the same confirmed-trial/approved-donation query. Retry/restart never extends again. The CAS policy remains
+expiry. The API and write gate use the same confirmed-trial/approved-legacy-donation/
+confirmed-Feishu query. Retry/restart never extends again. The CAS policy remains
 experimental; production should evaluate a per-request authenticated DAV write
 gate rather than assume SFTPGo supports atomic permission updates.
 
@@ -231,7 +251,8 @@ usable only to its original expiry. Expiry does not disable login/download.
 
 The normal authenticated entitlement API is unchanged. It reads the maximum
 confirmed trial/approved donation expiry. A trial does not carry into the first
-paid year; paid renewals carry only an existing approved paid expiry. Desired
+paid year; paid renewals carry authorized paid reservations, including approved/confirmed
+and applying entries, without exposing unconfirmed time as service rights. Desired
 ledger updates are monotonic, so late trial recovery cannot overwrite a donation.
 Registration recovery repeats the same named registration and credentials after
 backoff; login never repairs or renews a pending trial. There is no recovery route
