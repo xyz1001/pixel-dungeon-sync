@@ -182,6 +182,22 @@ class AndroidSyncFacade internal constructor(
   if(published?.result is AppendPushResult.Diverged)pushResult(published.result)
   else OperationResult(if(session.hasPending())"Selected version restored and verified in the game. A restore revision is pending; Upload publishes it." else "Selected version restored and verified in the game.",false,session.hasPending(),snapshotId)
  }
+ /** Explicit caller-selected download mode, e.g. an authenticated expired official account.
+  * Account eligibility is the caller's responsibility; transport errors never select this mode. */
+ fun restoreSelectedReadOnly(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean)=locked {
+  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles)
+  val history=session.syncHistory();val commit=history.graph.commits.values.singleOrNull {it.snapshot.id==snapshotId}
+  val snapshot=if(commit!=null)AppendRepository(session.directory.resolve("append-v2"),adapter,config.profile).download(store,commit) else session.loadSnapshot(snapshotId)
+  versions.checkRestore(snapshot,config.targetGame)
+  require(allowUniqueReplacement || comparison.localFiles.isEmpty() || history.currentProtected){"Current game progress has no verified cloud copy. Explicit replacement confirmation is required."}
+  prepareGameRestore(comparison.localFiles,snapshot.manifest.files,"read-only-restore") {
+   session.restoreSelectedReadOnly(comparison,snapshotId,store,allowUniqueReplacement,mirrorStopped)
+  }
+  requireNoRecovery();checkActualUnchanged(snapshot.manifest.files)
+  val conflict=comparison.observedTips.size>1
+  OperationResult(if(conflict)"Selected version downloaded, restored and verified in the game. Cloud branches remain unresolved."
+   else "Selected version downloaded, restored and verified in the game.",conflict,false,snapshotId)
+ }
  fun resolveConflict(inspection:Inspection,snapshotId:String)=locked {
   val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);val conflict=currentConflict(comparison)
   val branch=conflict.branches.singleOrNull {it.snapshot.manifest.id==snapshotId} ?: error("Select a snapshot from the currently observed conflict branches.")
@@ -245,7 +261,7 @@ class AndroidSyncFacade internal constructor(
     before -> clearCompletedJournal()
     else -> error("Unexpected staged files. Recovery is required; game files were not changed.")
    }
-  }catch(e:Exception){if(currentFiles()==after && !Files.exists(session.directory.resolve("append-v2/apply-required.txt")))writeJournal(journal.copy(ready=true)) else if(currentFiles()==before)Files.deleteIfExists(journalPath);throw e}
+  }catch(e:Exception){val coreRecovery=Files.exists(session.directory.resolve("append-v2/apply-required.txt"));if(currentFiles()==after && !coreRecovery)writeJournal(journal.copy(ready=true)) else if(currentFiles()==before && !coreRecovery)Files.deleteIfExists(journalPath);throw e}
  }
  private fun applyPrepared(journal:RestoreJournal) {
   val staged=versions.annotate(Snapshots.capture(mirror,adapter,config.profile,"Android staged restore",null))

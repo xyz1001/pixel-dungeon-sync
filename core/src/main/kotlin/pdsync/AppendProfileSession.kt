@@ -70,6 +70,45 @@ class AppendProfileSession(
   }
   requireNotNull(restored)
  }
+ /** Explicit download-only restore. It never publishes, resolves branches or creates an upload
+  * plan. An observed tip can become the exact verified baseline; older/local history remains new
+  * local work relative to the existing baseline, so a later upload still detects remote siblings. */
+ fun restoreSelectedReadOnly(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,stopped:()->Boolean):RestoreResult = local.locked {
+  var graph=revalidateComparison(comparison,store,stopped)
+  val selected=graph.commits.values.singleOrNull { it.snapshot.id==snapshotId }
+  val chosen=if(selected!=null)repository.download(store,selected) else local.loadSnapshot(snapshotId)
+  Snapshots.verify(chosen,adapter);local.checkRestore(chosen)
+  require(allowUniqueReplacement || comparison.localFiles.isEmpty() || graph.commits.values.any {it.snapshot.files==comparison.localFiles}) {
+   "本机有独有进度，请明确确认覆盖；恢复前原始数据会保存在本机备份中"
+  }
+  if(selected!=null)local.remember(chosen,"只读下载 · 已校验选择",repository.observedAt(selected.id))
+  // A legacy snapshot without portable identity must not erase a still-proven local run identity.
+  // Only exact complete-run bytes, checked against both before and after, can retain that proof.
+  val prior=(local.directoryMetadata.read() as? SidecarRead.Valid)?.value
+  val beforeRuns=runContentHashes(comparison.localFiles)
+  val afterRuns=runContentHashes(chosen.manifest.files)
+  val source=chosen.manifest.directoryMetadata
+  val used=source?.runs?.values?.mapNotNull {it.runUUID}?.toMutableSet() ?: mutableSetOf<String>()
+  val runs=afterRuns.mapValues { (slot,digest) ->
+   val remote=source?.runs?.get(slot)
+   val known=prior?.runs?.get(slot)?.takeIf {it.runUUID!=null && it.contentSha256==digest && beforeRuns[slot]==digest && it.runUUID !in used}
+   if(remote?.runUUID!=null || known==null)remote ?: RunIdentity(null,digest)
+   else known.also {used.add(requireNotNull(it.runUUID))}
+  }
+  val metadata=DirectorySnapshotMetadata(displayName=source?.displayName ?: "",contentSha256=contentSha256(chosen.manifest.files),runs=runs).validated(chosen.manifest.files)
+  val staged=chosen.copy(manifest=chosen.manifest.copy(directoryMetadata=metadata))
+  graph=revalidateComparison(comparison,store,stopped)
+  SafePaths.atomicWrite(applyMarker,"read-only-restore".encodeToByteArray())
+  // Any failed/uncertain local apply retains this real recovery gate and original backup. There
+  // is deliberately no pending upload to archive, retry or publish after an expired-account read.
+  val restored=local.restore(staged,stopped,comparison.localFiles)
+  if(selected!=null && selected.id in graph.tips) {
+   repository.setBaseline(selected.id,graph)
+   markDirectorySynced(selected)
+  }
+  SafePaths.checked(applyMarker).deleteExisting()
+  restored
+ }
  fun deviceIdentity() = local.deviceIdentity()
  fun directoryStatus(): SidecarRead = local.locked { local.directoryMetadata.read() }
  fun inspectDirectory(stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
