@@ -26,7 +26,11 @@ data class AndroidGameTarget @JvmOverloads constructor(
 }
 
 class AndroidConnection @JvmOverloads constructor(
- val endpoint: String, val username: String, val password: String, val profile: String = "default"
+ val endpoint: String, val username: String, val password: String, val profile: String = "default",
+ retainLegacyOfficialScope: Boolean = false
 ) {
+ // This narrow migration changes transport only. No arbitrary endpoint/account alias is accepted.
+ init { require(!retainLegacyOfficialScope || endpoint == "https://webdav.xyz1001.top:8443/") }
+ val stateEndpoint = if(retainLegacyOfficialScope) "https://webdav.xyz1001.top:8443/dav/" else endpoint
  override fun toString() = "AndroidConnection(profile=$profile, credentials=<redacted>)"
 }

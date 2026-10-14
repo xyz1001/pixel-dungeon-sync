@@ -1,4 +1,10 @@
-# WebDAV `/dav/` prefix repair: review-only deployment example
+# Optional WebDAV `/dav/` prefix alternative: not selected
+
+This earlier second-listener proposal is retained for reference only. The
+selected approach is the existing origin-root DAV URL described in
+[`README.md`](README.md#webdav-root-url), with no new listener or port. Do not
+apply the 8091/second-binding examples below as part of the root-URL correction.
+They require a separate explicit deployment decision and authorization.
 
 This document proposes configuration changes only. It does not deploy, restart,
 change accounts, obtain user passwords, or relax client URL validation. Apply it

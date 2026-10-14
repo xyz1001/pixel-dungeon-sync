@@ -41,6 +41,8 @@ public final class MainRuntimeRecoveryChecks {
         packageTrust();
         connectionPersistence();
         connectionProviderMetadata();
+        officialRootMigration();
+        officialMigrationCannotOverwriteLaterSave();
         endpointPolicy();
         legacyConnection();
         autoSyncPolicy();
@@ -326,6 +328,105 @@ public final class MainRuntimeRecoveryChecks {
             }
         } finally { deleteTree(root); }
     }
+    static void officialRootMigration() throws Exception {
+        Path root = Files.createTempDirectory("pdsync-official-root-check-");
+        try {
+            Path config = root.resolve(WebDavConnectionFile.FILE_NAME);
+            String old = WebDavConnectionFile.LEGACY_OFFICIAL_ENDPOINT;
+            String current = WebDavConnectionFile.OFFICIAL_ROOT_ENDPOINT;
+            String fields = "version=1\nendpoint=" + old + "\nusername=synthetic\npassword=test-only\nprofile=hero\nextraSetting=preserve-me\n";
+            WebDavConnectionFile store = new WebDavConnectionFile(root.toFile());
+            for (String provider : new String[]{"", "provider=custom\n", "provider=OFFICIAL\n", "provider=official \n"}) {
+                String original = fields + provider;
+                Files.writeString(config, original);
+                WebDavConnectionFile.Value value = store.load();
+                equal(old, value.endpoint, "unmarked and custom old URL remain unchanged");
+                equal(original, Files.readString(config), "unmarked and custom settings retain exact bytes");
+                check(!value.retainsLegacyOfficialScope(), "custom source never receives an alias");
+            }
+            for (String endpoint : new String[]{old + "child/", "https://other.invalid/dav/", "https://webdav.xyz1001.top:8443/dav", old + " "}) {
+                String original = fields.replace(old, endpoint) + "provider=official\n";
+                Files.writeString(config, original); store.load();
+                equal(original, Files.readString(config), "nearby or other official-marked endpoint is not migrated");
+            }
+            String original = fields + "provider=official\n";
+            for (boolean failReplace : new boolean[]{false, true}) {
+                Files.writeString(config, original);
+                WebDavConnectionFile broken = new WebDavConnectionFile(root.toFile(), new WebDavConnectionFile.FileWriter() {
+                    public void writeAndSync(Path path, byte[] bytes) throws IOException {
+                        if (!failReplace) throw new IOException("Synthetic write failure");
+                        WebDavConnectionFile.SYSTEM_WRITER.writeAndSync(path, bytes);
+                    }
+                    public void replace(Path from, Path to) throws IOException { throw new IOException("Synthetic replace failure"); }
+                });
+                fails(IOException.class, broken::load);
+                equal(original, Files.readString(config), "failed migration retains original record exactly");
+                try (java.util.stream.Stream<Path> files = Files.list(root)) {
+                    equal(1L, files.count(), "failed migration cleans temporary record");
+                }
+            }
+            WebDavConnectionFile.Value migrated = store.load();
+            equal(current, migrated.endpoint, "official exact old endpoint migrates to root");
+            equal(old, migrated.stateEndpoint(), "official root keeps original local identity");
+            equal("synthetic", migrated.username, "username preserved");
+            equal("test-only", migrated.password, "password preserved");
+            equal("hero", migrated.profile, "profile and namespace are not reset");
+            java.util.Properties saved = new java.util.Properties();
+            saved.load(new java.io.StringReader(Files.readString(config)));
+            equal("preserve-me", saved.getProperty("extraSetting"), "unrelated saved settings preserved");
+            byte[] once = Files.readAllBytes(config); sameConnection(migrated, store.load());
+            check(Arrays.equals(once, Files.readAllBytes(config)), "migration is idempotent");
+            WebDavConnectionFile.Value relogin = new WebDavConnectionFile.Value(current, "synthetic", "new-test-only", "hero", "official");
+            store.save(relogin);
+            equal(old, store.load().stateEndpoint(), "official relogin/save naturally preserves local identity");
+            WebDavConnectionFile.Value custom = new WebDavConnectionFile.Value(current, "synthetic", "test-only", "hero");
+            store.save(custom); byte[] customBytes = Files.readAllBytes(config);
+            equal(current, store.load().stateEndpoint(), "custom root does not inherit official local identity");
+            check(Arrays.equals(customBytes, Files.readAllBytes(config)), "custom root settings retain exact bytes");
+        } finally { deleteTree(root); }
+    }
+
+    static void officialMigrationCannotOverwriteLaterSave() throws Exception {
+        Path root = Files.createTempDirectory("pdsync-migration-race-");
+        java.util.concurrent.CountDownLatch migrationWriting = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseMigration = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch saveStarted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread migration = null, save = null;
+        try {
+            Files.writeString(root.resolve(WebDavConnectionFile.FILE_NAME), "version=1\nendpoint="
+                    + WebDavConnectionFile.LEGACY_OFFICIAL_ENDPOINT
+                    + "\nusername=old-user\npassword=test-only\nprofile=hero\nprovider=official\n");
+            WebDavConnectionFile reader = new WebDavConnectionFile(root.toFile(), new WebDavConnectionFile.FileWriter() {
+                public void writeAndSync(Path path, byte[] bytes) throws IOException {
+                    WebDavConnectionFile.SYSTEM_WRITER.writeAndSync(path, bytes);
+                    migrationWriting.countDown();
+                    try {
+                        if (!releaseMigration.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new IOException("Synthetic latch timed out");
+                    } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException(e); }
+                }
+                public void replace(Path from, Path to) throws IOException { WebDavConnectionFile.SYSTEM_WRITER.replace(from, to); }
+            });
+            WebDavConnectionFile writer = new WebDavConnectionFile(root.toFile());
+            WebDavConnectionFile.Value updated = new WebDavConnectionFile.Value("https://custom.invalid/", "new-user", "test-only", "other");
+            migration = new Thread(() -> { try { reader.load(); } catch (Throwable e) { failure.set(e); } });
+            migration.start(); check(migrationWriting.await(5, java.util.concurrent.TimeUnit.SECONDS), "migration reaches write barrier");
+            save = new Thread(() -> { saveStarted.countDown(); try { writer.save(updated); } catch (Throwable e) { failure.set(e); } });
+            save.start(); check(saveStarted.await(5, java.util.concurrent.TimeUnit.SECONDS), "later save starts on another store instance");
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (save.isAlive() && save.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.yield();
+            check(save.getState() == Thread.State.BLOCKED, "later save serializes behind in-flight migration");
+            releaseMigration.countDown(); migration.join(5000); save.join(5000);
+            check(!migration.isAlive() && !save.isAlive(), "serialized migration and save finish");
+            raise(failure.get()); sameConnection(updated, new WebDavConnectionFile(root.toFile()).load());
+        } finally {
+            releaseMigration.countDown();
+            if (migration != null) migration.join(5000);
+            if (save != null) save.join(5000);
+            deleteTree(root);
+        }
+    }
+
     static void deleteTree(Path root) throws Exception {
         try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);

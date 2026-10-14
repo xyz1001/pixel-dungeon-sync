@@ -28,7 +28,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 username = "syntheticuserneverregister"
 env = {"SFTPGO_API_URL": "https://upstream.invalid", "get_admin_token": lambda: "",
-       "PUBLIC_WEBDAV_HOST": "https://webdav.xyz1001.top:8443/dav/"}
+       "PUBLIC_WEBDAV_HOST": "https://webdav.xyz1001.top:8443/"}
 fixtures = []
 with patch("socket.socket", side_effect=AssertionError("Host fixture must not open sockets")):
     for quota, upload, download in [(5242880, 100, 100), (0, 0, 0), (1, 7, 13), (5242881, 100, 50)]:

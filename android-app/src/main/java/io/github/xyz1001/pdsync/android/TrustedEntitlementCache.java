@@ -13,7 +13,8 @@ import java.security.MessageDigest;
 
 /** Private, display-only history of authenticated account metadata. Never grants DAV access. */
 final class TrustedEntitlementCache {
-    static final String OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/dav/";
+    static final String OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/";
+    private static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/dav/";
     private static final Object LOCK = new Object();
     private static final int VERSION = 1;
     private final Path directory;
@@ -54,17 +55,25 @@ final class TrustedEntitlementCache {
 
     Record read(String endpoint, String username) {
         synchronized (LOCK) {
-            try {
-                Path file = path(endpoint, username);
-                if (!Files.isRegularFile(file) || Files.size(file) > 4096) return null;
-                try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(Files.readAllBytes(file)))) {
-                    if (in.readInt() != VERSION) return null;
-                    Record record = new Record(in.readUTF(), in.readUTF(), nullable(in), in.readBoolean(),
-                            nullable(in), in.readLong(), in.readInt());
-                    return in.available() == 0 && record.matches(endpoint, username) ? record : null;
-                }
-            } catch (IOException | RuntimeException invalid) { return null; }
+            // Only the current exact official identity can consume authenticated legacy history.
+            if (!OFFICIAL_ENDPOINT.equals(endpoint)) return null;
+            Record current = readFile(endpoint, username);
+            return current != null ? current : readFile(LEGACY_OFFICIAL_ENDPOINT, username);
         }
+    }
+
+    private Record readFile(String storedEndpoint, String username) {
+        try {
+            Path file = path(storedEndpoint, username);
+            if (!Files.isRegularFile(file) || Files.size(file) > 4096) return null;
+            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(Files.readAllBytes(file)))) {
+                if (in.readInt() != VERSION || !storedEndpoint.equals(in.readUTF())
+                        || !username.equals(in.readUTF())) return null;
+                Record record = new Record(OFFICIAL_ENDPOINT, username, nullable(in), in.readBoolean(),
+                        nullable(in), in.readLong(), in.readInt());
+                return in.available() == 0 ? record : null;
+            }
+        } catch (IOException | RuntimeException invalid) { return null; }
     }
 
     /** Call only with a successfully authenticated response, never form input or an HTTP failure. */
@@ -90,7 +99,7 @@ final class TrustedEntitlementCache {
     }
 
     private Path path(String endpoint, String username) throws IOException {
-        if (!OFFICIAL_ENDPOINT.equals(endpoint) || username == null
+        if (!(OFFICIAL_ENDPOINT.equals(endpoint) || LEGACY_OFFICIAL_ENDPOINT.equals(endpoint)) || username == null
                 || !username.matches("[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")) throw new IOException("Invalid account identity");
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")

@@ -80,6 +80,39 @@ public final class TrustedEntitlementCacheChecks {
             }
         }
     }
+    private static void legacyOfficialRootHistory() throws Exception {
+        Path directory = Files.createTempDirectory("synthetic-legacy-entitlement-");
+        try {
+            String old = "https://webdav.xyz1001.top:8443/dav/", user = "account-a";
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((old + "\n" + user).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder key = new StringBuilder();
+            for (byte b : digest) key.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
+            Path legacy = directory.resolve(key + ".bin");
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (java.io.DataOutputStream out = new java.io.DataOutputStream(bytes)) {
+                out.writeInt(1); out.writeUTF(old); out.writeUTF(user);
+                out.writeBoolean(true); out.writeLong(200); out.writeBoolean(true);
+                out.writeBoolean(true); out.writeLong(100); out.writeLong(10); out.writeInt(2);
+            }
+            byte[] original = bytes.toByteArray(); Files.write(legacy, original);
+            TrustedEntitlementCache cache = new TrustedEntitlementCache(directory);
+            TrustedEntitlementCache.Record restored = cache.read(ENDPOINT, user);
+            check(restored != null && restored.matches(ENDPOINT, user) && restored.expiresMs == 200
+                    && restored.serverTimeMs == 100 && restored.elapsedMs == 10 && restored.bootCount == 2,
+                    "Exact official old record retains trusted expiry fields at root");
+            check(cache.read(old, user) == null && cache.read(ENDPOINT, "account-b") == null
+                    && cache.read("https://other.invalid/", user) == null, "Legacy cache cannot be consumed under another identity");
+            cache.write(record(user, 500L, true, 101L, 20, 2));
+            check(cache.read(ENDPOINT, user).expiresMs == 500, "Current verified response takes precedence over legacy history");
+            check(Arrays.equals(original, Files.readAllBytes(legacy)), "Legacy cache bytes are retained unchanged");
+        } finally {
+            try (Stream<Path> files = Files.walk(directory)) {
+                for (Path path : files.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new)) Files.delete(path);
+            }
+        }
+    }
+
     private static void displayNeverCreatesAuthority() {
         AtomicLong now = new AtomicLong(10);
         ManagedAccountFlow.Clock clock = new ManagedAccountFlow.Clock() {
@@ -104,7 +137,7 @@ public final class TrustedEntitlementCacheChecks {
         check(flow.view().expiresMs == null && flow.refresh() == null, "Closed page cannot resurrect cache or callbacks");
     }
     public static void main(String[] args) throws Exception {
-        trustedClockOnly(); atomicPrivateRecords(); displayNeverCreatesAuthority();
+        trustedClockOnly(); atomicPrivateRecords(); legacyOfficialRootHistory(); displayNeverCreatesAuthority();
         System.out.println("TrustedEntitlementCacheChecks: " + checks + " checks passed; no network used.");
     }
 }

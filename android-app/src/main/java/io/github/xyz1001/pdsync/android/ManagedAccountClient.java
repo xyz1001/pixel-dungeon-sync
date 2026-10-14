@@ -44,7 +44,7 @@ import pdsync.AppendOnlyKt;
  */
 final class ManagedAccountClient {
     static final String ORIGIN = "https://webdav.xyz1001.top:8443";
-    static final String DAV_URL = ORIGIN + "/dav/";
+    static final String DAV_URL = ORIGIN + "/";
     static final String ENTITLEMENT_URL = ORIGIN + "/api/account/entitlement";
     static final String APPRECIATION_URL = ORIGIN + "/api/account/appreciation";
     static final String IMAGE_PATH = "/api/account/appreciation/image";

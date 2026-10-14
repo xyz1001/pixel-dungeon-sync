@@ -497,7 +497,11 @@ public final class OfficialServiceRegistrationChecks {
     }
 
     private static void endpointAndCredentialPolicy() throws Exception {
-        for (String endpoint : new String[] {"http://webdav.xyz1001.top:8443/dav/",
+        for (String endpoint : new String[] {"https://webdav.xyz1001.top:8443/dav/",
+                "https://webdav.xyz1001.top:8443", "https://webdav.xyz1001.top:8443//",
+                "http://webdav.xyz1001.top:8443/", "https://webdav.xyz1001.top/",
+                "https://user@webdav.xyz1001.top:8443/", "https://WEBDAV.xyz1001.top:8443/",
+                "http://webdav.xyz1001.top:8443/dav/",
                 "https://other.invalid:8443/dav/", "https://webdav.xyz1001.top.evil.invalid:8443/dav/",
                 "https://webdav.xyz1001.top/dav/", "https://webdav.xyz1001.top:443/dav/",
                 "https://user@webdav.xyz1001.top:8443/dav/", DAV_URL + "?query=value", DAV_URL + "#part",

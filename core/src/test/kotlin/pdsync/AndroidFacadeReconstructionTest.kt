@@ -97,6 +97,79 @@ class AndroidFacadeReconstructionTest {
         assertEquals("UPLOADED", it.facade.autoUpload().status)
     }
 
+    @Test fun officialRootTransportRetainsBaselineHistoryAndExactLocalScopes() {
+        val root = temp.resolve("official-root-migration")
+        val bridge = FakeBridge(); val store = MemoryAppendStore()
+        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        fun facade(connection: AndroidConnection) = AndroidSyncFacade(root, connection, bridge, identity, store, 0)
+        val first = facade(old)
+        assertEquals("UPLOADED", first.autoUpload().status)
+        val commit = store.latest(); val beforeMirror = mirror(root)
+        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, "changed-test-only", old.profile, true)
+        val migrated = facade(current)
+        assertEquals("UNCHANGED", migrated.autoUpload().status)
+        val inspection = migrated.inspect()
+        assertTrue(inspection.canCompleteWithoutTransfer)
+        assertTrue(inspection.remoteVersions.any { it.commitId == commit.id })
+        assertEquals(beforeMirror, mirror(root))
+        assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
+        bridge.files = fixture(2)
+        assertEquals("UPLOADED", migrated.autoUpload().status)
+        assertEquals(listOf(commit.id), store.latest().parents)
+        assertEquals(current.endpoint, "https://webdav.xyz1001.top:8443/")
+        assertEquals(old.endpoint, current.stateEndpoint)
+        // No implicit origin alias: the same URL without explicit official provenance is isolated.
+        facade(AndroidConnection(current.endpoint, old.username, old.password, old.profile))
+        assertEquals(2L, Files.list(root.resolve("connections")).use { it.count() })
+        facade(AndroidConnection(current.endpoint, "other-account", old.password, old.profile, true))
+        facade(AndroidConnection(current.endpoint, old.username, old.password, "other-profile", true))
+        assertEquals(4L, Files.list(root.resolve("connections")).use { it.count() })
+        for (endpoint in listOf("https://other.invalid/", old.endpoint, current.endpoint + "child/", current.endpoint + "?q=1"))
+            assertFailsWith<IllegalArgumentException> { AndroidConnection(endpoint, old.username, old.password, old.profile, true) }
+    }
+
+    @Test fun officialRootTransportRetainsFrozenPendingPublication() {
+        val root = temp.resolve("official-root-pending")
+        val bridge = FakeBridge(); val store = MemoryAppendStore()
+        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        val before = AndroidSyncFacade(root, old, bridge, identity, store, 0)
+        val inspection = before.inspect()
+        store.beforeObject = { throw java.io.IOException("Synthetic interruption") }
+        assertFails { before.upload(inspection) }
+        assertEquals(0, store.writes)
+        val files = Files.walk(root).use { paths -> paths.filter { Files.isRegularFile(it) }.toList() }
+        val marker = files.single { it.fileName.toString() == "active-plan.txt" }
+        val pendingId = marker.readText()
+        val pending = marker.parent.resolve("uploads/$pendingId.json")
+        val frozen = pending.readBytes()
+        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
+        val migrated = AndroidSyncFacade(root, current, bridge, identity, store, 0)
+        assertContentEquals(frozen, pending.readBytes())
+        val retry = migrated.inspect(); assertTrue(retry.isRetryablePending)
+        assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
+        assertEquals(0, store.writes)
+        migrated.upload(retry)
+        assertEquals(pendingId, store.latest().id)
+        assertContentEquals(frozen, store.commits.getValue(pendingId))
+    }
+
+    @Test fun officialRootTransportRetainsUnresolvedRestoreJournal() {
+        val store = MemoryAppendStore(); publish(FakeBridge(), store)
+        val root = temp.resolve("official-root-recovery"); val bridge = FakeBridge(emptyMap())
+        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        val before = AndroidSyncFacade(root, old, bridge, identity, store, 0)
+        val inspection = before.inspect(); bridge.failRestore = true
+        assertFails { before.restoreSelected(inspection, store.latest().snapshot.id, false) }
+        val journalBytes = journal(root).readBytes()
+        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
+        val migrated = AndroidSyncFacade(root, current, bridge, identity, store, 0)
+        assertTrue(migrated.hasUnresolvedRestore()); assertTrue(migrated.inspect().needsRestoreRecovery)
+        assertContentEquals(journalBytes, journal(root).readBytes())
+        bridge.failRestore = false; migrated.recoverRestore()
+        assertFalse(migrated.hasUnresolvedRestore())
+        assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
+    }
+
     @Test fun freshEmptyMirrorWithThreeLocalSlotsAndEmptyDavComparesWithoutAnyPut() {
         val slots=(1..3).associate { slot -> "game$slot/game.dat" to fixture(slot).getValue("game1/game.dat") }
         val bridge=FakeBridge(slots)

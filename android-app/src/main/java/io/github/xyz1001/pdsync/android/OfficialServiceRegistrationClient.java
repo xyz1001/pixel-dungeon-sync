@@ -44,7 +44,7 @@ import pdsync.AppendOnlyKt;
  */
 final class OfficialServiceRegistrationClient {
     static final String REGISTER_URL = "https://webdav.xyz1001.top:8443/api/register";
-    static final String DAV_URL = "https://webdav.xyz1001.top:8443/dav/";
+    static final String DAV_URL = "https://webdav.xyz1001.top:8443/";
     static final int MAX_RESPONSE_BYTES = 32 * 1024;
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Pattern JSON_NUMBER = Pattern.compile("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?");
@@ -339,7 +339,7 @@ final class OfficialServiceRegistrationClient {
             if (!"https".equals(uri.getScheme()) || !"webdav.xyz1001.top".equals(uri.getHost())
                     || uri.getPort() != 8443 || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null
-                    || !"/dav/".equals(uri.getRawPath()) || !DAV_URL.equals(endpoint)) {
+                    || !"/".equals(uri.getRawPath()) || !DAV_URL.equals(endpoint)) {
                 throw failure(FailureKind.INVALID_RESPONSE, true);
             }
         } catch (java.net.URISyntaxException invalid) {

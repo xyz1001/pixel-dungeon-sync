@@ -257,6 +257,41 @@ class NamespaceCreationTest {
   assertRequests(server, "PROPFIND" to "/", "PROPFIND" to "/other-game/", "PROPFIND" to "/other-game/isolated_profile/")
  }
 
+ @Test fun originRootCreatesOnlyGameAndProfileCollectionsWithMatchingRootHref() = MockWebServer().use { server ->
+  server.enqueue(collection("/"))
+  server.enqueue(status(404)); server.enqueue(status(201)); server.enqueue(collection("/shattered/"))
+  server.enqueue(status(404)); server.enqueue(status(201)); server.enqueue(collection("/shattered/hero/"))
+  server.start()
+  AppendOnlyWebDav(server.url("/").toString(), "shattered", "hero", "player", "test-secret").ensureNamespace()
+  assertRequests(server, "PROPFIND" to "/", "PROPFIND" to "/shattered/", "MKCOL" to "/shattered/",
+   "PROPFIND" to "/shattered/", "PROPFIND" to "/shattered/hero/", "MKCOL" to "/shattered/hero/", "PROPFIND" to "/shattered/hero/")
+ }
+
+ @Test fun originRootAppendTrafficStaysBelowGameProfileWithoutApiOrUploadRoutes() = MockWebServer().use { server ->
+  val folder = "/shattered/hero/"
+  val id = "11111111-1111-4111-8111-111111111111"
+  val objectPath = folder + "pdsync-v2-object-$id.zip"
+  val commitPath = folder + "pdsync-v2-commit-$id.json"
+  server.enqueue(status(201)); server.enqueue(status(201))
+  server.enqueue(body(xml(entry(folder), entry(commitPath, false))))
+  server.enqueue(MockResponse().setBody("object")); server.enqueue(MockResponse().setBody("commit"))
+  server.start()
+  val dav = AppendOnlyWebDav(server.url("/").toString(), "shattered", "hero", "player", "test-secret")
+  dav.writeObject(id, "object".encodeToByteArray()); dav.writeCommit(id, "commit".encodeToByteArray())
+  assertEquals(listOf(id), dav.listCommits().ids)
+  assertContentEquals("object".encodeToByteArray(), dav.readObject(id))
+  assertContentEquals("commit".encodeToByteArray(), dav.readCommit(id))
+  val expected = listOf("PUT" to objectPath, "PUT" to commitPath, "PROPFIND" to folder, "GET" to objectPath, "GET" to commitPath)
+  assertEquals(expected.size, server.requestCount)
+  expected.forEach { (method, path) ->
+   val request = server.takeRequest(1, TimeUnit.SECONDS)!!
+   assertEquals(method, request.method); assertEquals(path, request.path)
+   assertEquals(Credentials.basic("player", "test-secret"), request.getHeader("Authorization"))
+   if (method == "PROPFIND") assertEquals("1", request.getHeader("Depth"))
+   assertFalse(request.path!!.startsWith("/api/")); assertFalse(request.path!!.startsWith("/upload/"))
+  }
+ }
+
  @Test fun baseWithoutTrailingSlashAndMatchingAbsoluteHrefsAreSupported() = MockWebServer().use { server ->
   server.start()
   server.enqueue(collection(server.url("/dav").toString())); server.enqueue(collection(server.url(game).toString())); server.enqueue(collection(profile))

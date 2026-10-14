@@ -11,6 +11,32 @@ The service uses the same SFTPGo username/password as the existing version-2
 account contract. It does not add a browser session, token issuer, payment SDK,
 order-review API, or public Feishu event endpoint.
 
+## WebDAV root URL
+
+The selected deployment uses the existing HTTPS origin root as the DAV base:
+`https://webdav.xyz1001.top:8443/`. Keep nginx's existing root mapping to the
+empty-prefix SFTPGo listener and its separate `/api/` and `/upload/` handlers.
+No new DAV listener or port is needed. Set the external `public_webdav_url` to
+that root together with the matching official-client endpoint update; the
+example uses a placeholder HTTPS root and remains disabled.
+
+The actual client accepts a root Depth:0 response with `href` `/`. It creates
+only its game/profile children, such as `/shattered/<profile>/` or
+`/android-<source-identity>/<profile>/`; snapshot objects and commits remain
+inside that collection, away from `/api/` and `/upload/`. The configured root
+must already exist, and exact same-origin/path response checks stay enabled.
+
+If the prior `/dav/` alias stripped that prefix before reaching the same user's
+empty-prefix SFTPGo backend, `/dav/shattered/<profile>/` and
+`/shattered/<profile>/` address the same physical files. This URL correction
+does not require moving cloud data or changing accounts. Client-side connection
+and history scopes include the endpoint, so preserve existing local history and
+pending operations and revalidate the connection; do not assume that changing
+the URL automatically migrates local state. The older
+[`/dav/` prefix proposal](dav-prefix-routing.example.md) is an optional,
+unselected alternative, not the default rollout. These source/example changes
+do not change production configuration or prove live authenticated behavior.
+
 ## Native account expiry (new policy; explicit migration required)
 
 `account_expiry: {"enabled": true, "single_writer": true}` selects SFTPGo's

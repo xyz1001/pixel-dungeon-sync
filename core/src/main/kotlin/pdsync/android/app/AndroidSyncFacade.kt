@@ -19,10 +19,11 @@ class AndroidSyncFacade internal constructor(
  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
   this(root,connection,bridge,identity,null,0)
  private val validatedConnection=AppConfig(endpoint=connection.endpoint,profile=connection.profile,username=connection.username).validated()
+ private val validatedStateConnection=validatedConnection.copy(endpoint=connection.stateEndpoint).validated()
  private val adapter=AndroidGameAdapter(identity)
- private val currentScope=hash(listOf(validatedConnection.endpoint,validatedConnection.profile,connection.username,identity.packageName,identity.originalSourceIdentity,identity.namespace).joinToString("\n").encodeToByteArray())
+ private val currentScope=hash(listOf(validatedStateConnection.endpoint,validatedConnection.profile,connection.username,identity.packageName,identity.originalSourceIdentity,identity.namespace).joinToString("\n").encodeToByteArray())
  private val base=SafePaths.checked(workspaceRoot).also { Files.createDirectories(it) }
- private val legacyScope=hash(listOf(validatedConnection.endpoint,validatedConnection.profile,connection.username).joinToString("\n").encodeToByteArray())
+ private val legacyScope=hash(listOf(validatedStateConnection.endpoint,validatedConnection.profile,connection.username).joinToString("\n").encodeToByteArray())
  private val legacyJournalPath=base.resolve("android-restore.json")
  private val legacyWorkspacePath=base.resolve("connections").resolve(legacyScope)
  private val legacyBindingPath=base.resolve("legacy-workspaces").resolve("$currentScope.json")
@@ -35,11 +36,11 @@ class AndroidSyncFacade internal constructor(
  private val journals=SafePaths.checked(base.resolve("restore-journals")).also { Files.createDirectories(it) }
  private val journalPath=if(legacyRecoveryActive)legacyJournalPath else journals.resolve("${identity.originalSourceIdentity}.json")
  private val owner=Any()
- private val config=validatedConnection.copy(saveRoot=mirror.toString(),targetGame="android-package:${identity.packageName}")
+ private val config=validatedStateConnection.copy(saveRoot=mirror.toString(),targetGame="android-package:${identity.packageName}")
  private var pinnedTarget:AndroidGameTarget?=null
  private val versions=AndroidProfileVersions(identity,adapter,::verifiedTarget)
  private val store:AppendStore by lazy {
-  val delegate=suppliedStore ?: AppendOnlyWebDav(config.endpoint,adapter.id,config.profile,connection.username,connection.password)
+  val delegate=suppliedStore ?: AppendOnlyWebDav(validatedConnection.endpoint,adapter.id,config.profile,connection.username,connection.password)
   object:AppendStore by delegate {
    override fun writeObject(id:String,bytes:ByteArray) { verifiedTarget();delegate.writeObject(id,bytes) }
    override fun writeCommit(id:String,bytes:ByteArray) { verifiedTarget();delegate.writeCommit(id,bytes) }
@@ -78,7 +79,8 @@ class AndroidSyncFacade internal constructor(
    val graph=AppendRepository(state.resolve("connection-probe"),adapter,config.profile).discover(store).also {it.requireSettled()}
    ConnectionStatus(true,"Connection verified.",graph.commits.isNotEmpty())
   } else {
-   val setup=ConnectionSetup(config,adapter.id);setup.update(config,connection.password)
+   val transportConfig=config.copy(endpoint=validatedConnection.endpoint)
+   val setup=ConnectionSetup(transportConfig,adapter.id);setup.update(transportConfig,connection.password)
    when(val result=if(create)setup.connect() else setup.testConnection()) {
     is ConnectionTestResult.Success -> ConnectionStatus(true,if(create)"WebDAV connected; the sync folders are ready." else "WebDAV connection verified.",result.hasRemote)
     is ConnectionTestResult.Failure -> ConnectionStatus(false,result.message,false)

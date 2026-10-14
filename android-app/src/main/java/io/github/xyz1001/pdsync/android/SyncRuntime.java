@@ -224,7 +224,7 @@ final class SyncRuntime {
         }
         connection2.validate();
         AndroidGameIdentity androidGameIdentityGameIdentity = currentGameIdentity(context);
-        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile), backend(context), androidGameIdentityGameIdentity);
+        return new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile, connection2.retainsLegacyOfficialScope()), backend(context), androidGameIdentityGameIdentity);
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -236,7 +236,7 @@ final class SyncRuntime {
         if (connection2 == null) {
             throw new IOException("No configured connection");
         }
-        return PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest((origin + "\n" + currentNamespace(context) + "\n" + connection2.endpoint + "\n" + connection2.username + "\n" + connection2.profile).getBytes(StandardCharsets.UTF_8)));
+        return PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest((origin + "\n" + currentNamespace(context) + "\n" + connection2.stateEndpoint() + "\n" + connection2.username + "\n" + connection2.profile).getBytes(StandardCharsets.UTF_8)));
     }
 
     static OnboardingProgress onboardingProgress(Context context, SecureConnectionStore.Connection connection2) {

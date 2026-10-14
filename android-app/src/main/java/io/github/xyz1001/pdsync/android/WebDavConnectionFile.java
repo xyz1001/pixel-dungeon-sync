@@ -23,7 +23,11 @@ import java.util.Properties;
 /* loaded from: classes.dex */
 final class WebDavConnectionFile {
     static final String FILE_NAME = "webdav.properties";
+    static final String OFFICIAL_ROOT_ENDPOINT = "https://webdav.xyz1001.top:8443/";
+    static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/dav/";
     private static final int MAX_BYTES = 65536;
+    // All instances share the app-private connection record; migrations must not race user saves.
+    private static final Object FILE_LOCK = new Object();
     static final FileWriter SYSTEM_WRITER = new FileWriter() { // from class: io.github.xyz1001.pdsync.android.WebDavConnectionFile.1
         @Override // io.github.xyz1001.pdsync.android.WebDavConnectionFile.FileWriter
         public void writeAndSync(Path path, byte[] bArr) throws IOException {
@@ -68,8 +72,13 @@ final class WebDavConnectionFile {
         public final String password;
         public final String profile;
         public final String username;
-        // UI origin only. This is not authentication, trust, or part of sync identity.
+        // Explicit UI provenance, not authentication. Only the exact official root retains its old local key.
         public final String provider;
+
+        public boolean retainsLegacyOfficialScope() {
+            return PROVIDER_OFFICIAL.equals(provider) && OFFICIAL_ROOT_ENDPOINT.equals(endpoint);
+        }
+        public String stateEndpoint() { return retainsLegacyOfficialScope() ? LEGACY_OFFICIAL_ENDPOINT : endpoint; }
 
         Value(String str, String str2, String str3, String str4) {
             this(str, str2, str3, str4, PROVIDER_CUSTOM);
@@ -114,79 +123,99 @@ final class WebDavConnectionFile {
     }
 
     Value load() throws IOException {
-        byte[] bytes = null;
-        try {
-            final BasicFileAttributes attributes;
+        synchronized (FILE_LOCK) {
+            byte[] bytes = null;
             try {
-                attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            } catch (NoSuchFileException missing) {
-                return null;
-            }
-            if (!attributes.isRegularFile() || attributes.size() > MAX_BYTES) {
-                throw new IOException();
-            }
-            try (InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS);
-                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[4096];
+                final BasicFileAttributes attributes;
                 try {
-                    int count;
-                    while ((count = input.read(buffer)) != -1) {
-                        if (output.size() + count > MAX_BYTES) throw new IOException();
-                        output.write(buffer, 0, count);
-                    }
-                    bytes = output.toByteArray();
-                } finally {
-                    Arrays.fill(buffer, (byte) 0);
+                    attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                } catch (NoSuchFileException missing) {
+                    return null;
                 }
+                if (!attributes.isRegularFile() || attributes.size() > MAX_BYTES) {
+                    throw new IOException();
+                }
+                try (InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS);
+                     ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[4096];
+                    try {
+                        int count;
+                        while ((count = input.read(buffer)) != -1) {
+                            if (output.size() + count > MAX_BYTES) throw new IOException();
+                            output.write(buffer, 0, count);
+                        }
+                        bytes = output.toByteArray();
+                    } finally {
+                        Arrays.fill(buffer, (byte) 0);
+                    }
+                }
+                Properties properties = new Properties();
+                properties.load(new StringReader(StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes)).toString()));
+                if (!"1".equals(properties.getProperty("version"))) throw new IOException();
+                Value value = new Value(required(properties, "endpoint"), required(properties, "username"),
+                        required(properties, "password"), required(properties, "profile"),
+                        properties.getProperty("provider"));
+                value.validate();
+                if (value.isTemporary()) throw new IOException();
+                // Never infer provenance from the URL. Unmarked/custom and near-match URLs stay intact.
+                if (Value.PROVIDER_OFFICIAL.equals(value.provider)
+                        && LEGACY_OFFICIAL_ENDPOINT.equals(properties.getProperty("endpoint"))) {
+                    Value migrated = new Value(OFFICIAL_ROOT_ENDPOINT, value.username, value.password,
+                            value.profile, value.provider);
+                    properties.setProperty("endpoint", migrated.endpoint);
+                    // Preserve all other settings; commit atomically before exposing the new endpoint.
+                    writeProperties(properties);
+                    return migrated;
+                }
+                return value;
+            } catch (IOException | RuntimeException invalid) {
+                throw new IOException("无法读取已保存的连接文件。原文件已保留；请重试读取，或重新填写并测试后保存。");
+            } finally {
+                if (bytes != null) Arrays.fill(bytes, (byte) 0);
             }
-            Properties properties = new Properties();
-            properties.load(new StringReader(StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes)).toString()));
-            if (!"1".equals(properties.getProperty("version"))) throw new IOException();
-            Value value = new Value(required(properties, "endpoint"), required(properties, "username"),
-                    required(properties, "password"), required(properties, "profile"),
-                    properties.getProperty("provider"));
-            value.validate();
-            if (value.isTemporary()) throw new IOException();
-            return value;
-        } catch (IOException | RuntimeException invalid) {
-            throw new IOException("无法读取已保存的连接文件。原文件已保留；请重试读取，或重新填写并测试后保存。");
-        } finally {
-            if (bytes != null) Arrays.fill(bytes, (byte) 0);
         }
     }
 
     Value loadOrMigrate(LegacyReader legacyReader) throws Exception {
-        Value valueLoad = load();
-        if (valueLoad != null) {
-            return valueLoad;
-        }
-        try {
-            Value valueLoad2 = legacyReader.load();
-            if (valueLoad2 == null) {
-                return null;
+        synchronized (FILE_LOCK) {
+            Value valueLoad = load();
+            if (valueLoad != null) {
+                return valueLoad;
             }
-            save(valueLoad2);
-            return valueLoad2;
-        } catch (Exception unused) {
-            throw new IOException("旧版连接迁移失败，原加密文件已保留。请重试读取，或重新填写并测试后保存。");
+            try {
+                Value valueLoad2 = legacyReader.load();
+                if (valueLoad2 == null) {
+                    return null;
+                }
+                save(valueLoad2);
+                return valueLoad2;
+            } catch (Exception unused) {
+                throw new IOException("旧版连接迁移失败，原加密文件已保留。请重试读取，或重新填写并测试后保存。");
+            }
         }
     }
 
     void save(Value value) throws IOException {
-        value.validate();
-        if (value.isTemporary()) {
-            throw new IOException("本机 HTTP 测试仅本次使用，不覆盖已保存的连接。");
+        synchronized (FILE_LOCK) {
+            value.validate();
+            if (value.isTemporary()) {
+                throw new IOException("本机 HTTP 测试仅本次使用，不覆盖已保存的连接。");
+            }
+            Properties properties = new Properties();
+            properties.setProperty("version", "1");
+            properties.setProperty("endpoint", value.endpoint);
+            properties.setProperty("username", value.username);
+            properties.setProperty("password", value.password);
+            properties.setProperty("profile", value.profile);
+            properties.setProperty("provider", value.provider);
+            writeProperties(properties);
         }
-        Properties properties = new Properties();
-        properties.setProperty("version", "1");
-        properties.setProperty("endpoint", value.endpoint);
-        properties.setProperty("username", value.username);
-        properties.setProperty("password", value.password);
-        properties.setProperty("profile", value.profile);
-        properties.setProperty("provider", value.provider);
+    }
+
+    private void writeProperties(Properties properties) throws IOException {
         StringWriter stringWriter = new StringWriter();
         properties.store(stringWriter, "PD Sync WebDAV settings. Plaintext; keep private. Do not share or export.");
         byte[] bytes = stringWriter.toString().getBytes(StandardCharsets.UTF_8);
@@ -212,7 +241,9 @@ final class WebDavConnectionFile {
     }
 
     void forget() throws IOException {
-        Files.deleteIfExists(this.path);
+        synchronized (FILE_LOCK) {
+            Files.deleteIfExists(this.path);
+        }
     }
 
     private static String required(Properties properties, String str) throws IOException {
