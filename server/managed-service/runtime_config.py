@@ -1,12 +1,15 @@
 """Strict non-secret JSON configuration; validation never opens a network socket."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import re
 import stat
+import struct
 from urllib.parse import urlsplit
+import zlib
 
 
 PREREQUISITES = (
@@ -15,6 +18,9 @@ PREREQUISITES = (
     'other_write_protocols_closed',
 )
 MAX_CONFIG_BYTES = 32768
+MAX_APPRECIATION_BYTES = 1024 * 1024
+MAX_APPRECIATION_DIMENSION = 2048
+MAX_APPRECIATION_PIXELS = 2_000_000
 
 
 class ConfigurationError(ValueError):
@@ -112,11 +118,12 @@ class RuntimeConfig:
     sftpgo: dict
     prerequisites: dict
     feishu: dict
+    appreciation: dict = field(default_factory=lambda: {'enabled': False})
 
     @classmethod
     def parse(cls, value):
         value = _object(value, ('version', 'listen', 'database_path', 'public_webdav_url', 'sftpgo', 'prerequisites', 'feishu'),
-                        ('enabled', 'mutations_enabled'))
+                        ('enabled', 'mutations_enabled', 'appreciation'))
         if type(value['version']) is not int or value['version'] != 1:
             raise ConfigurationError('CONFIG_VERSION_UNSUPPORTED')
         enabled, mutations = _bool(value.get('enabled', False)), _bool(value.get('mutations_enabled', False))
@@ -161,8 +168,18 @@ class RuntimeConfig:
                 raise ConfigurationError('FEISHU_REQUIRES_MUTATIONS_AND_COMPLETE_CONFIGURATION')
             if feishu['queue_path'] == value['database_path']:
                 raise ConfigurationError('SEPARATE_FEISHU_QUEUE_PATH_REQUIRED')
+        appreciation = _object(value.get('appreciation', {'enabled': False}), ('enabled',),
+                               ('asset_path', 'expected_sha256'))
+        _bool(appreciation['enabled'])
+        if 'asset_path' in appreciation:
+            _path(appreciation['asset_path'])
+        if 'expected_sha256' in appreciation and (type(appreciation['expected_sha256']) is not str
+                or not re.fullmatch(r'[0-9a-f]{64}', appreciation['expected_sha256'])):
+            raise ConfigurationError('APPRECIATION_SHA256_REQUIRED')
+        if appreciation['enabled'] and not {'asset_path', 'expected_sha256'} <= set(appreciation):
+            raise ConfigurationError('APPRECIATION_ASSET_CONFIGURATION_REQUIRED')
         return cls(enabled, mutations, dict(listen), value['database_path'], value['public_webdav_url'],
-                   dict(sftpgo), dict(prerequisites), dict(feishu))
+                   dict(sftpgo), dict(prerequisites), dict(feishu), dict(appreciation))
 
     @classmethod
     def load(cls, path):
@@ -176,6 +193,134 @@ class RuntimeConfig:
             raise
         except (OSError, ValueError, UnicodeError, RecursionError):
             raise ConfigurationError('CONFIGURATION_UNREADABLE_OR_INVALID') from None
+
+
+@dataclass(frozen=True)
+class AppreciationAsset:
+    png: bytes = field(repr=False)
+    sha256: str
+
+
+def _validate_appreciation_png(raw):
+    """Bounded PNG structure, CRC, IHDR and decoded scanline validation.
+
+    This is not a payment/QR verifier or a visual review of the image.
+    """
+    if not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise ConfigurationError('APPRECIATION_PNG_INVALID')
+    offset, chunks, image_data = 8, [], bytearray()
+    width = height = depth = color = interlace = None
+    while offset < len(raw):
+        if offset + 12 > len(raw):
+            raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        size = struct.unpack_from('>I', raw, offset)[0]
+        kind = raw[offset + 4:offset + 8]
+        end = offset + 12 + size
+        if (end > len(raw) or not re.fullmatch(b'[A-Za-z]{4}', kind)
+                or kind[2] & 32 or zlib.crc32(raw[offset + 4:end - 4]) != struct.unpack_from('>I', raw, end - 4)[0]):
+            raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        data = raw[offset + 8:end - 4]
+        if not chunks and kind != b'IHDR':
+            raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        if kind == b'IHDR':
+            if chunks or size != 13:
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+            width, height, depth, color, compression, filtering, interlace = struct.unpack('>IIBBBBB', data)
+            if (not 1 <= width <= MAX_APPRECIATION_DIMENSION or not 1 <= height <= MAX_APPRECIATION_DIMENSION
+                    or width * height > MAX_APPRECIATION_PIXELS):
+                raise ConfigurationError('APPRECIATION_PNG_DIMENSIONS_INVALID')
+            valid_depths = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+            if depth not in valid_depths.get(color, ()) or compression or filtering or interlace not in (0, 1):
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        elif kind == b'PLTE':
+            if b'PLTE' in chunks or b'IDAT' in chunks or color in (0, 4) or not size or size % 3 or size > 768:
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+            if color == 3 and size // 3 > 2**depth:
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        elif kind == b'IDAT':
+            if (b'IDAT' in chunks and chunks[-1] != b'IDAT') or (color == 3 and b'PLTE' not in chunks):
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+            image_data.extend(data)
+        elif kind == b'IEND':
+            if size or b'IDAT' not in chunks or end != len(raw):
+                raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        elif not kind[0] & 32 or kind in (b'acTL', b'fcTL', b'fdAT'):
+            # A fixed still PNG only; reject unknown critical chunks and APNG.
+            raise ConfigurationError('APPRECIATION_PNG_INVALID')
+        chunks.append(kind)
+        offset = end
+    if not chunks or chunks[-1] != b'IEND':
+        raise ConfigurationError('APPRECIATION_PNG_INVALID')
+    samples = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color]
+    passes = ((0, 0, 1, 1),) if not interlace else (
+        (0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4),
+        (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2))
+    rows = []
+    for x, y, dx, dy in passes:
+        columns, count = max(0, (width - x + dx - 1) // dx), max(0, (height - y + dy - 1) // dy)
+        if columns and count:
+            rows.extend([1 + (columns * samples * depth + 7) // 8] * count)
+    expected = sum(rows)
+    try:
+        decoder = zlib.decompressobj()
+        pixels = decoder.decompress(image_data, expected + 1)
+        if len(pixels) != expected or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+            raise ValueError()
+        offset = 0
+        for row in rows:
+            if pixels[offset] > 4:
+                raise ValueError()
+            offset += row
+    except (ValueError, zlib.error):
+        raise ConfigurationError('APPRECIATION_PNG_INVALID') from None
+
+
+def load_appreciation_asset(settings):
+    """Load once before listening; requests never open a caller-selected file.
+
+    Disabled means no file is opened. Every path component must be nonsymlink;
+    the final descriptor must be a regular file. Reading is size-bounded even if
+    the file changes. Only immutable, hash-matched bytes are retained in memory.
+    """
+    if not settings['enabled']:
+        return None
+    try:
+        parts = Path(_path(settings['asset_path'])).parts
+        directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for part in parts[1:-1]:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        finally:
+            os.close(directory)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                raise ConfigurationError('APPRECIATION_ASSET_REGULAR_FILE_REQUIRED')
+            if not 1 <= info.st_size <= MAX_APPRECIATION_BYTES:
+                raise ConfigurationError('APPRECIATION_ASSET_SIZE_INVALID')
+            raw = bytearray()
+            while len(raw) <= MAX_APPRECIATION_BYTES:
+                piece = os.read(descriptor, min(65536, MAX_APPRECIATION_BYTES + 1 - len(raw)))
+                if not piece:
+                    break
+                raw.extend(piece)
+        finally:
+            os.close(descriptor)
+        raw = bytes(raw)
+        if not 1 <= len(raw) <= MAX_APPRECIATION_BYTES:
+            raise ConfigurationError('APPRECIATION_ASSET_SIZE_INVALID')
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != settings['expected_sha256']:
+            raise ConfigurationError('APPRECIATION_ASSET_HASH_MISMATCH')
+        _validate_appreciation_png(raw)
+        return AppreciationAsset(raw, digest)
+    except ConfigurationError:
+        raise
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ConfigurationError('APPRECIATION_ASSET_UNAVAILABLE') from None
 
 
 def load_runtime_secret(source):

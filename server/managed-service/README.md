@@ -21,8 +21,9 @@ python server/managed-service/service.py validate-config server/managed-service/
 python -m unittest discover -s server/managed-service -p 'test_*.py' -v
 ```
 
-Validation is offline. It reads the selected non-secret config and, if Feishu is
-enabled, its selected binding file; it never reads runtime secret sources, probes
+Validation is offline. It reads the selected non-secret config, the configured
+appreciation PNG if enabled, and the selected Feishu binding file if enabled;
+it never reads runtime secret sources, probes
 SFTPGo, starts the SDK, or proves proxy enforcement. Unknown fields, duplicate
 JSON keys, non-JSON numbers, nonboolean flags, invalid URLs, and nonloopback
 listeners are rejected. The example must validate as disabled. `serve` refuses
@@ -81,6 +82,44 @@ accounts. Existing accounts are never rewritten to this template.
   one configured bot instance should process this binding/queue. Do not launch
   a second bot independently in parallel with this composition.
 
+### Optional appreciation resource
+
+`appreciation` is optional and defaults to `{"enabled":false}`. Both appreciation
+routes return 404 while disabled. To enable it, the operator must supply the
+actual reviewed still PNG outside Git and configure all three fields:
+
+```json
+{
+  "enabled": true,
+  "asset_path": "/etc/managed-account-service/assets/appreciation.png",
+  "expected_sha256": "<actual 64-character lowercase SHA-256 of that PNG>"
+}
+```
+
+The example config deliberately leaves this disabled and uses an all-zero
+placeholder digest. Replace that digest with the independently reviewed asset's
+actual hash before enabling; there is no embedded QR image, fallback image,
+remote image fetch or successful metadata-only mode without a valid asset.
+The image is a public donation asset, so it must not contain account secrets or
+private user data. Keep its source file and parent directories under trusted
+operator control, readable by the service and not writable by untrusted users.
+
+`validate-config` and application startup validate a canonical absolute path
+with no symlink components, a regular file of 1 byte through 1 MiB, its exact
+SHA-256, PNG signature/chunk structure/CRC, valid IHDR parameters, and bounded
+decoded scanline lengths/filter bytes. Width and height must each be 1–2048,
+with at most 2,000,000 pixels. Still PNG only; APNG is rejected. This validates
+the file's format, not the QR's recipient, payment meaning or visual content;
+those require the operator's independent review and a client rendering check.
+No credentials, network calls, payment-provider verification or production route
+checks occur during offline validation. A missing or invalid enabled asset
+fails startup before the listener opens. Disabled assets are not opened.
+
+The process retains the verified immutable bytes in memory and serves only those
+bytes at the one fixed image route. Replacing/removing the file later does not
+change the live image; a reviewed config/hash update and service restart are
+required. The metadata hash and served bytes therefore cannot drift per request.
+
 Secret source checks happen only on `serve`; missing credentials fail before the
 listener is opened. No upstream readiness claim is made until actual requests
 succeed. Database, SDK or listener startup failure exits nonzero without dumping
@@ -101,6 +140,21 @@ All responses are noncacheable. The only supported public routes are:
 - `GET /api/account/entitlement`, existing Basic credentials. Returns the
   authenticated account's confirmed expiry, active/managed flags, and
   `source: "managed_ledger"`. It does not expose the sandbox order API.
+- `GET /api/account/appreciation`, existing valid Basic credentials, only when
+  appreciation is enabled. Exact success contract:
+  `{"code":200,"data":{"version":1,"payment_mode":"donation","image_path":"/api/account/appreciation/image","image_sha256":"<verified lowercase SHA-256>","term":"calendar_year","remark":"username"}}`.
+  `remark` is the literal instruction `username`, not a username value. The
+  client must take its account username from authenticated entitlement data.
+  Metadata contains no account data, credential or server filesystem path.
+- `GET /api/account/appreciation/image`, public raw `image/png`, only when enabled.
+  Clients fetch this exact same-origin path without credentials and verify its
+  bytes against `image_sha256` before displaying it. Response includes
+  `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, with no redirect.
+  There is no directory, arbitrary path/query parameter, alternate filename,
+  HEAD route, upload, order creation or payment confirmation endpoint. The image
+  route does not authenticate or access the ledger. Displaying or scanning the
+  asset does not grant or extend an entitlement; existing manual renewal remains
+  separate. Disabled metadata and image routes return 404 even with valid auth.
 
 Proxy-only: `GET /_internal/dav-authorize` takes Authorization plus
 `X-Original-Method` **overwritten by trusted nginx**, captured from the original
@@ -207,6 +261,13 @@ renewal message. Keep the fixed drop control separate. Exercise at least:
   Expired valid credentials still log in/download; unauthenticated downloads fail
   at SFTPGo even if the gate path is misused. Every allowed read remains subject
   to SFTPGo file permissions.
+- If appreciation is enabled, verify metadata is 401 without valid Basic auth,
+  authenticated JSON exactly matches the documented contract, and anonymous
+  image GET returns the independently reviewed PNG with its matching SHA-256,
+  `image/png`, `no-store` and no redirects. Confirm encoded/double-slash/query
+  aliases and directory paths cannot retrieve it. With appreciation disabled,
+  both routes must return 404. Merge only the two exact nginx locations;
+  never expose the external asset directory or proxy arbitrary filesystem paths.
 - Before, at and after expiry, test PUT/POST/MKCOL/MOVE/COPY/DELETE/PROPPATCH/
   LOCK/UNLOCK via `/dav`, `/dav/`, root and every discovered alias. Overwrite and
   destination-changing operations cannot evade the original source account.

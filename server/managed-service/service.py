@@ -24,7 +24,7 @@ from auth_v2 import ApiError, MAX_BODY, credentials
 from bot import Binding
 from ledger_gate import AccountWriteGate, ManagedLedger, SftpgoBasicAuthenticator
 from orders import OrderError
-from runtime_config import ConfigurationError, RuntimeConfig, load_runtime_secret, strict_json
+from runtime_config import ConfigurationError, RuntimeConfig, load_appreciation_asset, load_runtime_secret, strict_json
 from sftpgo_client import NewAccountTemplate, RuntimeAdminCredentials, SftpgoClient, SftpgoError
 from write_gate import READ_METHODS, WRITE_METHODS
 
@@ -64,6 +64,7 @@ class ManagedApplication:
         self.gate = AccountWriteGate(enabled=config.enabled, authenticator=self.authenticator,
                                      ledger=ledger, clock=clock)
         self.login_limit, self.registration_limit = BurstLimit(), BurstLimit(30, 3600)
+        self.appreciation_asset = load_appreciation_asset(config.appreciation)
 
     def registration(self, body):
         action, username, password = credentials(body)
@@ -86,6 +87,17 @@ class ManagedApplication:
         identity = self.authenticator.authenticate(headers)
         # Entitlement accepts an adapter identity, not username supplied in JSON.
         return self.ledger.entitlement(identity)
+
+    def appreciation(self, headers):
+        if self.appreciation_asset is None:
+            raise ApiError(404, 'NOT_FOUND')
+        self.authenticator.authenticate(headers)
+        # No username, credential, account identity or filesystem path belongs
+        # in this static contract. The client gets its username from entitlement.
+        return {'version': 1, 'payment_mode': 'donation',
+                'image_path': '/api/account/appreciation/image',
+                'image_sha256': self.appreciation_asset.sha256,
+                'term': 'calendar_year', 'remark': 'username'}
 
 
 class BoundedHTTPServer(ThreadingHTTPServer):
@@ -159,9 +171,12 @@ def create_server(application, *, host='127.0.0.1', port=None):
 
         def send(self, status, payload=None):
             raw = b'' if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            self.send_bytes(status, raw, 'application/json; charset=utf-8')
+
+        def send_bytes(self, status, raw, content_type):
             self.close_connection = True
             self.send_response(status)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(raw)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
@@ -199,7 +214,10 @@ def create_server(application, *, host='127.0.0.1', port=None):
                 length = int(length)
                 if length > MAX_BODY:
                     return self.error(413, 'REQUEST_TOO_LARGE')
-                if (len(self.path) > 2048 or not self.path.startswith('/')
+                # BaseHTTPRequestHandler normalizes a leading // to /; reject
+                # that alias using the original request target as well.
+                if (self.requestline.split()[1] != self.path
+                        or len(self.path) > 2048 or not self.path.startswith('/')
                         or any(c in self.path for c in ('?', '#', '%', '\\')) or self.path.startswith('//')):
                     return self.error(400, 'INVALID_PATH')
                 if self.command not in ('GET', 'POST'):
@@ -242,6 +260,14 @@ def create_server(application, *, host='127.0.0.1', port=None):
                     return self.send(200, {'code': 200, 'message': 'success', 'data': data})
                 if self.path == '/api/account/entitlement' and self.command == 'GET':
                     return self.send(200, {'code': 200, 'data': application.entitlement(self.headers)})
+                if self.path in ('/api/account/appreciation', '/api/account/appreciation/image') and self.command == 'GET':
+                    if application.appreciation_asset is None:
+                        return self.error(404, 'NOT_FOUND')
+                    if self.path == '/api/account/appreciation':
+                        return self.send(200, {'code': 200, 'data': application.appreciation(self.headers)})
+                    # Public fixed asset: no auth lookup, redirect, filesystem
+                    # access, directory serving, or user-controlled image path.
+                    return self.send_bytes(200, application.appreciation_asset.png, 'image/png')
                 return self.error(404, 'NOT_FOUND')
             except (ApiError, OrderError, SftpgoError) as error:
                 code = error.code if error.code in _PUBLIC_ERRORS else 'SERVICE_UNAVAILABLE'
@@ -323,11 +349,14 @@ def main(argv=None):
     try:
         config = RuntimeConfig.load(args.config)
         if args.command == 'validate-config':
+            load_appreciation_asset(config.appreciation)
             if config.feishu['enabled']:
                 binding = Binding.load(config.feishu['binding_file'])
                 if not binding.enabled or not binding.complete():
                     raise ConfigurationError('FEISHU_BINDING_DISABLED_OR_INCOMPLETE')
             print('Configuration valid; service ' + ('enabled.' if config.enabled else 'disabled.'))
+            print('Appreciation asset validated offline.' if config.appreciation['enabled'] else
+                  'Appreciation disabled; no asset opened.')
             print('Offline validation only: no credentials read, network calls, or deployment verification.')
             return 0
         serve(config)

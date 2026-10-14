@@ -2,6 +2,11 @@
   "version": 1,
   "enabled": false,
   "mutations_enabled": false,
+  "appreciation": {
+    "enabled": false,
+    "asset_path": "/etc/managed-account-service/assets/appreciation.png",
+    "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "listen": {
     "host": "127.0.0.1",
     "port": 8089,
