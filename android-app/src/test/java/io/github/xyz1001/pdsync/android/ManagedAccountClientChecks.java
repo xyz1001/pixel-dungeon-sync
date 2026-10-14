@@ -44,6 +44,7 @@ public final class ManagedAccountClientChecks {
 
     public static void main(String[] args) throws Exception {
         constructionAndEntitlement();
+        accountExpiryAndPublicAccess();
         invalidInputs();
         strictEntitlement();
         strictJson();
@@ -84,12 +85,54 @@ public final class ManagedAccountClientChecks {
         Entitlement unlimited = success(VALID.replace("1800000000000", "null"));
         check(unlimited.expiresMs == null && unlimited.active, "null expiration supported without inventing date");
         Entitlement expired = success(VALID.replace("1800000000000", "1").replace("\"active\":true", "\"active\":false"));
-        check(expired.expiresMs == 1L && !expired.active, "expired upload eligibility remains ordinary metadata");
+        check(expired.expiresMs == 1L && !expired.active, "inactive remains ordinary metadata until a synchronization attempt");
         Entitlement unmanaged = success(VALID.replace("\"managed\":true", "\"managed\":false"));
-        check(!unmanaged.managed && unmanaged.active, "no invented login or download policy for unmanaged account");
+        check(!unmanaged.managed && unmanaged.active, "unmanaged account preserves server-reported active status");
         check(success(VALID.replace("1800000000000", Long.toString(Long.MAX_VALUE))).expiresMs == Long.MAX_VALUE,
                 "expiration integer upper boundary");
         check(success(VALID.replace("1800000000000", "0")).expiresMs == 0, "expiration zero retained");
+    }
+
+    private static void accountExpiryAndPublicAccess() throws Exception {
+        Entitlement active = success(VALID);
+        active.requireSyncAccess();
+        check(active.serverTimeMs == null, "legacy response does not invent a server clock");
+        Entitlement inactive = success(VALID.replace("\"active\":true", "\"active\":false"));
+        fail(inactive::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        Entitlement expired = success(VALID.replace("\"active\":true", "\"active\":false")
+                .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1800000000000"));
+        check(expired.serverTimeMs == 1800000000000L, "authenticated server clock retained");
+        fail(expired::requireSyncAccess, FailureKind.ACCOUNT_EXPIRED);
+        try { expired.requireSyncAccess(); throw new AssertionError(); }
+        catch (ManagedAccountException e) { check(e.userMessage().equals("服务已到期"), "confirmed expiry has exact short copy"); }
+        for (String value : new String[] {"null", "-1", "1.0", "\"1\"", "true", "9223372036854775808"})
+            invalid(VALID.replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":" + value));
+        Entitlement noDate = success(VALID.replace("1800000000000", "null")
+                .replace("\"active\":true", "\"active\":false")
+                .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1800000000000"));
+        fail(noDate::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        Entitlement notYetExpired = success(VALID.replace("\"active\":true", "\"active\":false")
+                .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1"));
+        fail(notYetExpired::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        AtomicInteger calls = new AtomicInteger();
+        byte[] png = png(1, 1);
+        String metadata = appreciationJson(png);
+        ManagedAccountClient publicClient = ManagedAccountClient.publicAppreciation(request -> {
+            calls.incrementAndGet();
+            check(request.header("Authorization") == null, "public client cannot transmit credentials");
+            return APPRECIATION_URL.equals(request.url().toString()) ? json(request, metadata)
+                    : response(request, 200, ResponseBody.create(png, MediaType.get("image/png")));
+        });
+        check(!publicClient.canReadEntitlement(), "unverified input has no private account authority");
+        fail(publicClient::entitlement, FailureKind.AUTHENTICATION_REQUIRED);
+        check(calls.get() == 0, "no private request for unverified form input");
+        check(Arrays.equals(png, publicClient.paymentImage(publicClient.appreciation())), "public QR is available without login");
+        check(calls.get() == 2, "exactly public metadata and image reads");
+        try { client(r -> response(r, 401, ResponseBody.create("", MediaType.get("application/json")))).entitlement(); }
+        catch (ManagedAccountException e) {
+            check(e.kind == FailureKind.AUTHENTICATION_REQUIRED && e.userMessage().equals("无法登录，请检查账号或续期状态。"),
+                    "401 does not guess expired or wrong password");
+        }
     }
 
     private static void invalidInputs() throws Exception {
@@ -218,8 +261,8 @@ public final class ManagedAccountClientChecks {
         String valid = appreciationJson(png);
         Appreciation value = client(r -> {
             check(APPRECIATION_URL.equals(r.url().toString()), "real appreciation metadata path");
-            check("GET".equals(r.method()) && r.body() == null && AUTH.equals(r.header("Authorization")),
-                    "authenticated read-only appreciation metadata");
+            check("GET".equals(r.method()) && r.body() == null && r.header("Authorization") == null,
+                    "public read-only appreciation metadata never sends credentials");
             return json(r, valid);
         }).appreciation();
         check(value.version == 1 && value.paymentMode.equals("donation") && value.term.equals("calendar_year")

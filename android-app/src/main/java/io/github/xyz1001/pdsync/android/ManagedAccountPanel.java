@@ -12,7 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-/** Minimal child page for the current authenticated official account. */
+/** Minimal appreciation page; local usernames are explicitly distinct from authenticated metadata. */
 final class ManagedAccountPanel {
     private ManagedAccountPanel() { }
 
@@ -20,8 +20,9 @@ final class ManagedAccountPanel {
                        ManagedAccountFlow flow, Runnable refresh, Runnable back) {
         ManagedAccountFlow.View view = flow.view();
         if (view.image != null) image(activity, body, view.image);
-        if (view.username != null) {
-            label(activity, body, "用户名 " + view.username);
+        if (view.localUsername != null) {
+            label(activity, body, view.entitlementLoaded ? "用户名 " + view.username
+                    : "用户名（未验证） " + view.localUsername);
             button(activity, body, "复制用户名", () -> flow.copyUsername(view.generation, username -> {
                 ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
                 if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("用户名", username));
@@ -29,6 +30,8 @@ final class ManagedAccountPanel {
             label(activity, body, "赞赏时请备注用户名");
         }
         label(activity, body, ManagedAccountFlow.expiry(view));
+        String accessStatus = ManagedAccountFlow.accessStatus(view);
+        if (!accessStatus.isEmpty()) label(activity, body, accessStatus);
         if (!view.message.isEmpty()) label(activity, body, view.message);
         if (view.busy) body.addView(new ProgressBar(activity));
         LinearLayout actions = new LinearLayout(activity);

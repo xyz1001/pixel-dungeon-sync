@@ -471,7 +471,7 @@ final class OfficialServiceRegistrationClient {
             case REGISTRATION_PASSWORD_PREFIX: message = "密码不能以$或{开头。"; break;
             case PASSWORD_REJECTED: message = "服务未接受密码格式，请检查密码的长度和字符。"; break;
             case REQUEST_FORMAT_REJECTED: message = "服务不支持这次请求的格式。"; break;
-            case INVALID_CREDENTIALS: message = "账号或密码不正确。"; break;
+            case INVALID_CREDENTIALS: message = "无法登录，请检查账号或续期状态。"; break;
             case USERNAME_TAKEN: message = "账号已被使用，请登录或更换账号。"; break;
             case REGISTRATION_RETRY_REQUIRED:
                 return "注册尚未完成，请稍后用相同账号和密码重试注册。";

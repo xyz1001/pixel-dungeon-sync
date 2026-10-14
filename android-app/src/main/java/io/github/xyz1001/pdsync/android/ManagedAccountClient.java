@@ -36,10 +36,11 @@ import okhttp3.ResponseBody;
 import pdsync.AppendOnlyKt;
 
 /**
- * Read-only official-account metadata. Construct only with an already authenticated account;
+ * Read-only official account metadata and public appreciation assets;
  * construction performs no I/O. Invoke reads on a background thread. This client never logs,
  * stores credentials, registers accounts, contacts DAV, creates orders, or uploads anything.
- * Entitlement.active describes upload eligibility only: it must not gate login or downloads.
+ * Entitlement.active gates all official-account DAV synchronization, including downloads.
+ * Public appreciation reads never send credentials. A 401 alone does not prove expiry.
  */
 final class ManagedAccountClient {
     static final String ORIGIN = "https://webdav.xyz1001.top:8443";
@@ -64,7 +65,7 @@ final class ManagedAccountClient {
     }
 
     enum FailureKind {
-        INVALID_INPUT, AUTHENTICATION_REQUIRED, FORBIDDEN, NOT_AVAILABLE, RATE_LIMITED,
+        INVALID_INPUT, AUTHENTICATION_REQUIRED, ACCOUNT_EXPIRED, ACCOUNT_INACTIVE, FORBIDDEN, NOT_AVAILABLE, RATE_LIMITED,
         SERVER_ERROR, REQUEST_REJECTED, REDIRECT_REJECTED, INVALID_RESPONSE,
         RESPONSE_TOO_LARGE, IMAGE_INTEGRITY_ERROR, TIMEOUT, TLS_ERROR, NETWORK_ERROR
     }
@@ -83,14 +84,21 @@ final class ManagedAccountClient {
         final String source;
         final String username;
         final Long expiresMs;
+        final Long serverTimeMs;
         final boolean active;
         final boolean managed;
-        private Entitlement(String username, Long expiresMs, boolean active, boolean managed) {
+        private Entitlement(String username, Long expiresMs, boolean active, boolean managed, Long serverTimeMs) {
             this.source = "managed_ledger";
             this.username = username;
             this.expiresMs = expiresMs;
+            this.serverTimeMs = serverTimeMs;
             this.active = active;
             this.managed = managed;
+        }
+        /** Metadata authentication is separate from permission to perform DAV I/O. */
+        void requireSyncAccess() throws ManagedAccountException {
+            if (!active) throw failure(expiresMs != null && serverTimeMs != null && serverTimeMs >= expiresMs
+                    ? FailureKind.ACCOUNT_EXPIRED : FailureKind.ACCOUNT_INACTIVE);
         }
         @Override public String toString() { return "Official entitlement [private fields hidden]"; }
     }
@@ -130,6 +138,20 @@ final class ManagedAccountClient {
         this.authorization = Credentials.basic(username, password, StandardCharsets.UTF_8);
         this.transport = Objects.requireNonNull(transport, "Transport required");
     }
+
+    static ManagedAccountClient publicAppreciation() { return publicAppreciation(defaultTransport()); }
+
+    static ManagedAccountClient publicAppreciation(Transport transport) {
+        return new ManagedAccountClient(transport);
+    }
+
+    private ManagedAccountClient(Transport transport) {
+        this.username = null;
+        this.authorization = null;
+        this.transport = Objects.requireNonNull(transport, "Transport required");
+    }
+
+    boolean canReadEntitlement() { return authorization != null; }
 
     /** No inherited DAV client, credentials, cookie jar, cache, logging or TLS overrides. */
     static OkHttpClient newHttpClient() {
@@ -171,17 +193,19 @@ final class ManagedAccountClient {
     }
 
     Entitlement entitlement() throws ManagedAccountException {
+        if (!canReadEntitlement()) throw failure(FailureKind.AUTHENTICATION_REQUIRED);
         return execute(request(ENTITLEMENT_URL, true, "application/json"), response -> {
             JsonObject data = data(response);
             if (!"managed_ledger".equals(string(data, "source", 64))
                     || !username.equals(string(data, "username", 64))) throw invalid();
             Long expires = data.get("expires_ms") == JsonNull.INSTANCE ? null : integer(data, "expires_ms");
-            return new Entitlement(username, expires, bool(data, "active"), bool(data, "managed"));
+            Long serverTime = data.containsKey("server_time_ms") ? integer(data, "server_time_ms") : null;
+            return new Entitlement(username, expires, bool(data, "active"), bool(data, "managed"), serverTime);
         });
     }
 
     Appreciation appreciation() throws ManagedAccountException {
-        return execute(request(APPRECIATION_URL, true, "application/json"), response -> {
+        return execute(request(APPRECIATION_URL, false, "application/json"), response -> {
             JsonObject data = data(response);
             if (integer(data, "version") != 1 || !"donation".equals(string(data, "payment_mode", 32))
                     || !IMAGE_PATH.equals(string(data, "image_path", 256))
@@ -221,7 +245,7 @@ final class ManagedAccountClient {
                     || uri.getPort() != 8443 || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null
                     || !(ENTITLEMENT_URL.equals(url) || APPRECIATION_URL.equals(url) || IMAGE_URL.equals(url))
-                    || (authenticated && IMAGE_URL.equals(url))) throw failure(FailureKind.INVALID_INPUT);
+                    || (authenticated && !ENTITLEMENT_URL.equals(url))) throw failure(FailureKind.INVALID_INPUT);
         } catch (java.net.URISyntaxException invalid) { throw failure(FailureKind.INVALID_INPUT); }
         Request.Builder builder = new Request.Builder().url(url).get().header("Accept", accept)
                 .header("Cache-Control", "no-store");
@@ -496,7 +520,9 @@ final class ManagedAccountClient {
     private static String messageFor(FailureKind kind) {
         switch (kind) {
             case INVALID_INPUT: return "官方账号配置无效。";
-            case AUTHENTICATION_REQUIRED: return "无法验证当前官方账号。";
+            case AUTHENTICATION_REQUIRED: return "无法登录，请检查账号或续期状态。";
+            case ACCOUNT_EXPIRED: return "服务已到期";
+            case ACCOUNT_INACTIVE: return "暂时无法同步，请检查账号或续期状态。";
             case FORBIDDEN: return "服务未允许读取这项信息。";
             case NOT_AVAILABLE: return "此项服务暂不可用。";
             case RATE_LIMITED: return "操作过于频繁，请稍后刷新。";

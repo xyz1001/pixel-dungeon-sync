@@ -259,7 +259,7 @@ public final class MainActivity extends Activity {
         if (retained.managedAccountSource != null) {
             closeManagedAccount();
             this.managedAccountSource = retained.managedAccountSource;
-            this.managedAccountFlow = new ManagedAccountFlow(retained.managedAccountSource.username);
+            this.managedAccountFlow = managedAccountFlow(retained.managedAccountSource);
             this.managedAccountFlow.foreground(this.resumed);
         }
     }
@@ -967,7 +967,7 @@ public final class MainActivity extends Activity {
         this.endpointInput = null;
         this.officialAppreciationButton = null;
         if (this.managedAccountFlow != null) {
-            heading("赞赏");
+            heading(this.managedAccountFlow.view().expired ? "赞赏续期" : "赞赏");
             ManagedAccountPanel.render(this, this.body, this.footer, this.managedAccountFlow,
                     this::refreshManagedAccount, this::returnFromManagedAccount);
         } else switch (AnonymousClass3.$SwitchMap$pdsync$presentation$SyncPage[this.page.ordinal()]) {
@@ -2318,11 +2318,11 @@ public final class MainActivity extends Activity {
         this.body.addView(actions);
         addButton(actions, "登录", () -> authenticateOfficial(false), true);
         addButton(actions, "注册", () -> authenticateOfficial(true), true);
-        this.officialAppreciationButton = button("赞赏", () -> {
+        this.officialAppreciationButton = button(officialAppreciationLabel(), () -> {
             captureDraft();
-            showManagedAccount(officialAccountForDraft());
+            showManagedAccount(appreciationAccountForDraft());
         });
-        this.officialAppreciationButton.setEnabled(officialAccountForDraft() != null);
+        this.officialAppreciationButton.setEnabled(appreciationAccountForDraft() != null);
         watchConnectionFields(renderConnectionFooter());
     }
 
@@ -2343,13 +2343,60 @@ public final class MainActivity extends Activity {
                 && candidate.password.equals(this.officialPassword) ? candidate : null;
     }
 
+    /** Unverified input opens only public appreciation; it never becomes a saved/login candidate. */
+    private SecureConnectionStore.Connection appreciationAccountForDraft() {
+        SecureConnectionStore.Connection verified = officialAccountForDraft();
+        if (verified != null) return verified;
+        if (this.connectionEntry == null || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL
+                || !this.officialUser.matches("[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")) return null;
+        return new SecureConnectionStore.Connection(OfficialServiceRegistrationClient.DAV_URL,
+                this.officialUser, "", this.draftProfile, SecureConnectionStore.Connection.PROVIDER_OFFICIAL);
+    }
+
+    private static TrustedEntitlementCache entitlementCache(android.content.Context app) {
+        return new TrustedEntitlementCache(new File(app.getFilesDir(), "managed-account-expiry-v1").toPath());
+    }
+
+    private static int bootCount(android.content.Context app) {
+        try { return Math.max(-1, android.provider.Settings.Global.getInt(app.getContentResolver(), "boot_count", -1)); }
+        catch (RuntimeException unavailable) { return -1; }
+    }
+
+    private static void rememberEntitlement(android.content.Context app, SecureConnectionStore.Connection source,
+                                            ManagedAccountClient.Entitlement entitlement) {
+        if (!isOfficialAccount(source) || !source.username.equals(entitlement.username)) return;
+        try {
+            entitlementCache(app).write(new TrustedEntitlementCache.Record(source.endpoint, entitlement.username,
+                    entitlement.expiresMs, entitlement.active, entitlement.serverTimeMs,
+                    android.os.SystemClock.elapsedRealtime(), bootCount(app)));
+        } catch (IOException | RuntimeException unavailable) { /* Optional display cache never grants or blocks access. */ }
+    }
+
+    private ManagedAccountFlow managedAccountFlow(SecureConnectionStore.Connection source) {
+        final android.content.Context app = getApplicationContext();
+        return new ManagedAccountFlow(source.username, entitlementCache(app).read(source.endpoint, source.username),
+                new ManagedAccountFlow.Clock() {
+                    public long elapsedMs() { return android.os.SystemClock.elapsedRealtime(); }
+                    public int bootCount() { return MainActivity.bootCount(app); }
+                });
+    }
+
+    private String officialAppreciationLabel() { return officialAppreciationLabel(this.officialUser); }
+
+    private String officialAppreciationLabel(String username) {
+        TrustedEntitlementCache.Record cached = entitlementCache(getApplicationContext())
+                .read(OfficialServiceRegistrationClient.DAV_URL, username);
+        return cached != null && cached.expired(android.os.SystemClock.elapsedRealtime(), bootCount(getApplicationContext()))
+                ? "赞赏续期" : "赞赏";
+    }
+
     private void showManagedAccount(SecureConnectionStore.Connection source) {
         if (this.busy || !isOfficialAccount(source) || isDestroyed()) return;
         captureDraft();
         closeManagedAccount();
         closeSandboxPayment();
         this.managedAccountSource = source;
-        this.managedAccountFlow = new ManagedAccountFlow(source.username);
+        this.managedAccountFlow = managedAccountFlow(source);
         this.managedAccountFlow.foreground(this.resumed);
         this.notice = "";
         this.details = "";
@@ -2366,27 +2413,24 @@ public final class MainActivity extends Activity {
         final ManagedAccountFlow.Ticket ticket = flow.refresh();
         if (ticket == null) return;
         cancelManagedAccountRequest();
-        final ManagedAccountClient client;
+        ManagedAccountClient selectedClient;
+        String configurationMessage = null;
         try {
-            client = new ManagedAccountClient(source.endpoint, source.username, source.password);
+            selectedClient = source.password.isEmpty() ? ManagedAccountClient.publicAppreciation()
+                    : new ManagedAccountClient(source.endpoint, source.username, source.password);
         } catch (ManagedAccountClient.ManagedAccountException failure) {
-            flow.fail(ticket, failure.userMessage());
-            render();
-            return;
+            selectedClient = ManagedAccountClient.publicAppreciation();
+            configurationMessage = failure.userMessage();
         }
+        final ManagedAccountClient client = selectedClient;
+        final String initialMessage = configurationMessage;
         this.managedAccountClient = client;
         if (this.managedAccountIo == null) this.managedAccountIo = Executors.newSingleThreadExecutor();
         render();
         try {
             this.managedAccountRequest = this.managedAccountIo.submit(() -> {
+                String message = initialMessage;
                 try {
-                    if (!flow.accepts(ticket) || Thread.currentThread().isInterrupted()) return;
-                    final ManagedAccountClient.Entitlement account = client.entitlement();
-                    runOnUiThread(() -> {
-                        if (!currentManagedRequest(flow, client, ticket)) return;
-                        flow.entitlement(ticket, account.username, account.expiresMs, account.active, account.managed);
-                        render();
-                    });
                     if (!flow.accepts(ticket) || Thread.currentThread().isInterrupted()) return;
                     ManagedAccountClient.Appreciation appreciation = client.appreciation();
                     if (!flow.accepts(ticket) || Thread.currentThread().isInterrupted()) return;
@@ -2396,19 +2440,29 @@ public final class MainActivity extends Activity {
                         flow.image(ticket, image);
                         render();
                     });
-                } catch (ManagedAccountClient.ManagedAccountException failure) {
-                    runOnUiThread(() -> {
-                        if (!currentManagedRequest(flow, client, ticket)) return;
-                        flow.fail(ticket, failure.userMessage());
-                        render();
-                    });
-                } catch (RuntimeException failure) {
-                    runOnUiThread(() -> {
-                        if (!currentManagedRequest(flow, client, ticket)) return;
-                        flow.fail(ticket, "暂时无法读取，请刷新。");
-                        render();
-                    });
+                } catch (ManagedAccountClient.ManagedAccountException failure) { message = failure.userMessage(); }
+                  catch (RuntimeException failure) { message = "暂时无法读取，请刷新。"; }
+                // Private account data is optional and cannot hide an already loaded public QR.
+                if (client.canReadEntitlement()) {
+                    try {
+                        if (!flow.accepts(ticket) || Thread.currentThread().isInterrupted()) return;
+                        final ManagedAccountClient.Entitlement account = client.entitlement();
+                        if (!flow.accepts(ticket) || Thread.currentThread().isInterrupted()) return;
+                        rememberEntitlement(getApplicationContext(), source, account);
+                        runOnUiThread(() -> {
+                            if (!currentManagedRequest(flow, client, ticket)) return;
+                            flow.entitlement(ticket, account.username, account.expiresMs, account.active, account.managed, account.serverTimeMs);
+                            render();
+                        });
+                    } catch (ManagedAccountClient.ManagedAccountException failure) { message = failure.userMessage(); }
+                      catch (RuntimeException failure) { message = "暂时无法读取，请刷新。"; }
                 }
+                final String resultMessage = message;
+                runOnUiThread(() -> {
+                    if (!currentManagedRequest(flow, client, ticket)) return;
+                    if (resultMessage == null) flow.complete(ticket); else flow.fail(ticket, resultMessage);
+                    render();
+                });
             });
         } catch (RejectedExecutionException failure) {
             flow.fail(ticket, "暂时无法读取，请刷新。");
@@ -2445,13 +2499,15 @@ public final class MainActivity extends Activity {
         render();
     }
 
-    /** Upload entitlement selects a write-capable or read-only DAV probe; both must really pass. */
+    /** An active account still needs a successful real DAV probe before Next or save. */
     private static ManagedAccountClient.Entitlement verifyOfficialConnection(
-            SecureConnectionStore.Connection account, AndroidSyncFacade facade) throws Exception {
+            SecureConnectionStore.Connection account, AndroidSyncFacade facade, android.content.Context app) throws Exception {
         if (!isOfficialAccount(account)) throw new IOException("请重新登录官方账号。");
         ManagedAccountClient.Entitlement entitlement = new ManagedAccountClient(
                 account.endpoint, account.username, account.password).entitlement();
-        AndroidSyncFacade.ConnectionStatus result = entitlement.active ? facade.connect() : facade.testConnection();
+        rememberEntitlement(app, account, entitlement);
+        entitlement.requireSyncAccess();
+        AndroidSyncFacade.ConnectionStatus result = facade.connect();
         if (!result.isSuccess()) throw new IOException("连接测试未通过，请重试。");
         return entitlement;
     }
@@ -2522,8 +2578,10 @@ public final class MainActivity extends Activity {
                     MainActivity.this.verifiedOfficial = null;
                     MainActivity.this.closeManagedAccount();
                 }
-                if (MainActivity.this.officialAppreciationButton != null)
-                    MainActivity.this.officialAppreciationButton.setEnabled(MainActivity.this.officialAccountForDraft() != null);
+                if (MainActivity.this.officialAppreciationButton != null) {
+                    MainActivity.this.officialAppreciationButton.setEnabled(MainActivity.this.appreciationAccountForDraft() != null);
+                    MainActivity.this.officialAppreciationButton.setText(MainActivity.this.officialAppreciationLabel());
+                }
                 MainActivity.this.testedDraft = AndroidUiFlowPolicy.invalidateProofOnEdit(
                         MainActivity.this.testedDraft, before, MainActivity.this.draftFingerprint());
                 buttonAddButton.setEnabled(AndroidUiFlowPolicy.canContinue(
@@ -2593,7 +2651,7 @@ public final class MainActivity extends Activity {
                     account.password, profile, SecureConnectionStore.Connection.PROVIDER_OFFICIAL);
             candidate.validate();
             try {
-                ManagedAccountClient.Entitlement entitlement = verifyOfficialConnection(candidate, SyncRuntime.facade(app, candidate));
+                ManagedAccountClient.Entitlement entitlement = verifyOfficialConnection(candidate, SyncRuntime.facade(app, candidate), app);
                 String message = "连接成功。";
                 if (register && entitlement.expiresMs != null)
                     message += "有效至 " + new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT)
@@ -2672,7 +2730,7 @@ public final class MainActivity extends Activity {
         ConnectionUpdatePolicy.apply(z, connection.isTemporary(), new ConnectionUpdatePolicy.Operation() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda155
             @Override // io.github.xyz1001.pdsync.android.ConnectionUpdatePolicy.Operation
             public final void run() throws Exception {
-                if (isOfficialAccount(connection)) verifyOfficialConnection(connection, androidSyncFacadeFacade);
+                if (isOfficialAccount(connection)) verifyOfficialConnection(connection, androidSyncFacadeFacade, getApplicationContext());
                 else MainActivity.lambda$applyConnection$55(androidSyncFacadeFacade);
             }
         }, new ConnectionUpdatePolicy.Operation() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda156
@@ -3257,18 +3315,18 @@ public final class MainActivity extends Activity {
         return restoreForCurrentAccount(inspection, str, true);
     }
 
-    /** Expired official accounts may restore verified files without publishing a cloud revision. */
+    /** Expired official accounts cannot download or restore; renewal re-enables the usual path. */
     private AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection inspection,
                                                                        String snapshotId, boolean replace) throws Exception {
         final SecureConnectionStore.Connection account = this.connection;
-        final AndroidSyncFacade facade = sync();
         if (isOfficialAccount(account)) {
             ManagedAccountClient.Entitlement entitlement = new ManagedAccountClient(
                     account.endpoint, account.username, account.password).entitlement();
             if (this.connection != account) throw new IOException("连接已变化，请重新比较。");
-            if (!entitlement.active) return facade.restoreSelectedReadOnly(inspection, snapshotId, replace);
+            rememberEntitlement(getApplicationContext(), account, entitlement);
+            entitlement.requireSyncAccess();
         }
-        return facade.restoreSelected(inspection, snapshotId, replace);
+        return sync().restoreSelected(inspection, snapshotId, replace);
     }
 
     /* renamed from: lambda$requestRestore$75$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3644,7 +3702,7 @@ public final class MainActivity extends Activity {
                 MainActivity.this.m131xb9d46b71();
             }
         });
-        if (isOfficialAccount(this.connection)) button("赞赏", () -> showManagedAccount(this.connection));
+        if (isOfficialAccount(this.connection)) button(officialAppreciationLabel(this.connection.username), () -> showManagedAccount(this.connection));
         button("重新检查四步引导", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda81
             @Override // java.lang.Runnable
             public final void run() {
@@ -4548,6 +4606,8 @@ public final class MainActivity extends Activity {
     }
 
     private String safeError(Exception exc) {
+        if (exc instanceof ManagedAccountClient.ManagedAccountException)
+            return ((ManagedAccountClient.ManagedAccountException) exc).userMessage();
         if (exc instanceof OfficialServiceRegistrationClient.RegistrationException)
             return ((OfficialServiceRegistrationClient.RegistrationException) exc).userMessage();
         InstallDiagnostics.Failure installFailure = InstallDiagnostics.find(exc);
@@ -4579,7 +4639,8 @@ public final class MainActivity extends Activity {
             return "本机或云端状态已变化，请重新比较后选择。";
         }
         if (lowerCase.contains("401") || lowerCase.contains("403") || lowerCase.contains("unauthorized")) {
-            return "连接失败，请检查用户名、密码和访问权限。";
+            return isOfficialAccount(this.connection) ? "无法登录，请检查账号或续期状态。"
+                    : "连接失败，请检查用户名、密码和访问权限。";
         }
         return NoviceCopy.feedback(strSafeText, "操作未完成，请查看详细信息后重试。");
     }
