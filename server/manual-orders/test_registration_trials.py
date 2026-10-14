@@ -120,6 +120,51 @@ class RegistrationTrialTests(unittest.TestCase):
             self.assertEqual(1, db.execute("SELECT count(*) FROM audit WHERE event='trial_confirmed'").fetchone()[0])
             self.assertNotIn('password', ' '.join(r[1] for r in db.execute('PRAGMA table_info(registration_trials)')))
 
+    def test_new_registration_rules_reject_before_reservation_or_upstream_io(self):
+        for owner in ('ab', '12', 'Aname', 'XYZ1001', 'abc_def', 'abc-def', 'a_-', 'abc.def',
+                      ' abc', 'abc ', 'a' * 33):
+            with self.subTest(owner=owner), self.assertRaises(OrderError) as caught:
+                self.register(owner, '123456')
+            self.assertEqual('INVALID_USERNAME', caught.exception.code)
+        for password in ('12345', '😀' * 5, 'x' * 129, '😀' * 129, '$12345', '{12345',
+                         'bad\npassword', 'bad\x7fpassword', 'bad\x85password', 'bad\ud800password'):
+            with self.subTest(length=len(password)), self.assertRaises(OrderError) as caught:
+                self.register('xyz1001', password)
+            self.assertEqual('INVALID_PASSWORD', caught.exception.code)
+        self.assertEqual([], self.upstream.calls)
+        with self.orders.connect() as db:
+            self.assertEqual(0, db.execute('SELECT count(*) FROM registration_trials').fetchone()[0])
+
+    def test_new_numeric_names_and_six_code_point_passwords(self):
+        for owner, password in (('xyz1001', '123456'), ('0name', '😀' * 6), ('123', '中' * 6),
+                                ('000', ' 1234 '), ('a' * 32, 'x' * 128), ('1' * 32, '😀' * 128)):
+            with self.subTest(owner=owner):
+                grant = self.register(owner, password)
+                self.assertEqual(self.now + TRIAL_MS, grant['expires_ms'])
+                self.assertEqual(grant, self.register(owner, password))
+
+    def test_historical_underscore_and_hyphen_records_recover_same_operation(self):
+        for index, owner in enumerate(('legacy_name', 'legacy-name')):
+            operation = 'registration_historical_' + str(index)
+            password = 'Synthetic-password-42'
+            with self.orders.transaction() as db:
+                db.execute("INSERT INTO registration_trials(owner,operation_id,requested_ms,state) VALUES(?,?,?,'pending')",
+                           (owner, operation, self.now))
+            proof = self.upstream.register(owner, password, operation)
+            self.now += 1000
+            self.restart()
+            grant = self.register(owner, password)
+            self.assertEqual(proof.created_ms + TRIAL_MS, grant['expires_ms'])
+            self.assertEqual(grant, self.register(owner, password))
+            with self.assertRaises(OrderError) as caught:
+                self.register(owner, 'Wrong-password-42')
+            self.assertEqual('INVALID_CREDENTIALS', caught.exception.code)
+            with self.orders.connect() as db:
+                row = db.execute('SELECT * FROM registration_trials WHERE owner=?', (owner,)).fetchone()
+                self.assertEqual(operation, row['operation_id'])
+                self.assertEqual('confirmed', row['state'])
+            self.assertTrue(all(call == (owner, operation) for call in self.upstream.calls))
+
     def test_exact_expiry_preserves_all_reads_and_retry_does_not_renew(self):
         grant = self.register()
         self.now = grant['expires_ms']

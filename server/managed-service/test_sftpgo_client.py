@@ -387,6 +387,33 @@ class ClientTests(unittest.TestCase):
         self.error('INVALID_REGISTRATION_OPERATION', self.client.create_or_recover, 'alice', self.fixture.user_password, 'short')
         self.assertEqual([], self.fixture.calls)
 
+    def test_new_registration_rejects_legacy_names_and_five_code_point_passwords_before_io(self):
+        for username in ('ab', '12', 'a' * 33, 'Aname', 'XYZ1001', 'abc_def', 'abc-def', 'a_-',
+                         'abc.def', ' abc', 'abc '):
+            self.error('INVALID_USERNAME', self.client.create_or_recover, username, '123456', self.operation)
+        for password in ('12345', '😀' * 5, 'x' * 129, '😀' * 129, '$12345', '{12345',
+                         'bad\npassword', 'bad\x7fpassword', 'bad\x85password', 'bad\ud800password'):
+            self.error('INVALID_PASSWORD', self.client.create_or_recover, 'xyz1001', password, self.operation)
+        self.assertEqual([], self.fixture.calls)
+
+    def test_new_registration_accepts_numeric_names_and_six_unicode_code_points(self):
+        for username, password in (('xyz1001', '123456'), ('0name', '😀' * 6), ('123', '中' * 6),
+                                   ('000', ' 1234 '), ('a' * 32, 'x' * 128), ('1' * 32, '😀' * 128)):
+            with self.subTest(username=username):
+                account = self.client.create_or_recover(username, password, self.operation)
+                self.assertEqual(username, account.username)
+                self.assertEqual(password, self.fixture.creates[-1]['password'])
+                self.assertEqual(account, self.client.authenticate_basic(username, password))
+        self.assertEqual(6, len(self.fixture.creates))
+
+    def test_legacy_names_still_lookup_and_authenticate_without_normalization(self):
+        for username in ('legacy_name', 'legacy-name', 'Legacy.Account-One', '_', '12'):
+            self.fixture.put_account(username, password='$old')
+            with self.subTest(username=username):
+                self.assertEqual(username, self.client.lookup(username).username)
+                self.assertEqual(username, self.client.authenticate_basic(username, '$old').username)
+        self.assertEqual([], self.fixture.creates)
+
 
 class NativeExpiryTests(unittest.TestCase):
     operation = ClientTests.operation

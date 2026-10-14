@@ -63,6 +63,8 @@ class RegistrationTrials:
         with self.orders.transaction() as db:
             row = db.execute('SELECT * FROM registration_trials WHERE owner=?', (owner,)).fetchone()
             if row is None:
+                if not re.fullmatch(r'[a-z0-9]{3,32}', owner):
+                    raise OrderError(400, 'INVALID_USERNAME')
                 operation = 'registration_' + secrets.token_hex(16)
                 db.execute("INSERT INTO registration_trials(owner,operation_id,requested_ms,state) VALUES(?,?,?,'pending')",
                            (owner, operation, self.orders.clock()))
@@ -123,11 +125,27 @@ class RegistrationTrials:
     def register(self, owner, password):
         """No caller timestamp, term, account event ID, or expiry is accepted."""
         self.guard()
-        if not isinstance(owner, str) or not re.fullmatch(r'[a-z][a-z0-9_-]{2,31}', owner):
+        if not isinstance(owner, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{2,31}', owner):
             raise OrderError(400, 'INVALID_USERNAME')
         if not isinstance(password, str) or not password:
             raise OrderError(400, 'INVALID_PASSWORD')
         try:
+            try:
+                valid_password = (6 <= len(password) <= 128 and len(password.encode('utf-8')) <= 512
+                                  and not password.startswith(('$', '{'))
+                                  and not any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in password))
+            except UnicodeError:
+                valid_password = False
+            new_error = ('INVALID_USERNAME' if not re.fullmatch(r'[a-z0-9]{3,32}', owner)
+                         else 'INVALID_PASSWORD' if not valid_password else None)
+            if new_error:
+                # Journals are retained permanently. Historical _/- entries
+                # may retry their original operation and credentials; rejected
+                # new input must never reserve a row or reach the adapter.
+                with self.orders.connect() as db:
+                    existing = db.execute('SELECT 1 FROM registration_trials WHERE owner=?', (owner,)).fetchone()
+                if existing is None:
+                    raise OrderError(400, new_error)
             row = self._reserve(owner)
             # Always authenticate on retry, even if this trial already confirmed.
             proof = self.registrations.register(owner, password, row['operation_id'])

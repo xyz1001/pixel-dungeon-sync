@@ -6,8 +6,8 @@ Content-Type: application/json
 注册：{"version":2,"action":"register","username":"<username>","password":"<password>"}
 登录：{"version":2,"action":"login","username":"<username>","password":"<password>"}
 
-注册用户名：3–32 位小写英文字母、数字、下划线或短横线，首位必须小写字母。
-注册密码：8–128 个字符、UTF-8 不超过 512 字节，不含控制字符，首位不能是 $ 或 {（防止被管理 API 解释为预先计算的密码哈希）。不裁剪或改写密码。
+注册用户名：3–32 位小写英文字母或数字，可数字开头、可纯数字，不接受大写字母、下划线或短横线。不裁剪或转换大小写。
+注册密码：6–128 个 Unicode 码点、UTF-8 不超过 512 字节，不含控制字符，首位不能是 $ 或 {（防止被管理 API 解释为预先计算的密码哈希）。不裁剪或改写密码。
 登录接受已有用户名（1–64 位 ASCII 字母数字、下划线、点、短横线，首位字母数字或下划线），密码按原值交 SFTPGo 验证。
 用户名密码同时用于 WebDAV Basic Auth；网关不另存密码，不建立新的身份数据库。
 

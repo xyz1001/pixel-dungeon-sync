@@ -129,6 +129,45 @@ class ManagedIntegrationTests(unittest.TestCase):
         self.assertEqual(1, len(self.upstream.creates))
         self.assertEqual(204, self.gate())
 
+    def test_registration_rule_boundaries_through_real_http_and_rest_adapter(self):
+        for username in ('legacy_name', 'legacy-name', 'UpperCase', 'ab', '123' + '4' * 30):
+            status, error = self.account(username=username, password='123456')
+            self.assertEqual((400, 'INVALID_USERNAME'), (status, error['error']))
+        for password in ('12345', '😀' * 5, 'x' * 129, '$12345', '{12345', 'abc\x85def'):
+            status, error = self.account(username='xyz1001', password=password)
+            self.assertEqual((400, 'INVALID_PASSWORD'), (status, error['error']))
+        self.assertEqual([], self.upstream.creates)
+        for username, password in (('xyz1001', '123456'), ('0name', '😀' * 6), ('123', ' 1234 ')):
+            with self.subTest(username=username):
+                status, response = self.account(username=username, password=password)
+                self.assertEqual(200, status)
+                self.assertEqual(username, response['data']['username'])
+                self.assertEqual(200, self.account('login', username, password)[0])
+        self.assertEqual(3, len(self.upstream.creates))
+
+    def test_legacy_names_keep_login_feishu_annual_renewal_and_entitlement(self):
+        binding = Binding(True, 'cli_fixture', 'tenant_fixture', 'oc_fixture', ('ou_admin',), 'ou_bot')
+        queue = DurableQueue(Path(self.temp.name) / 'legacy-queue.sqlite', clock=lambda: self.now)
+        worker = RenewalBot(binding, queue, self.ledger, object())
+        for index, username in enumerate(('legacy_name', 'legacy-name', 'Legacy.Account-One')):
+            self.upstream.put_account(username)
+            self.assertEqual(200, self.account('login', username)[0])
+            self.assertFalse(self.entitlement(username)['active'])
+            event = NS(schema='2.0', header=NS(app_id=binding.app_id, tenant_key=binding.tenant_key,
+                       event_type='im.message.receive_v1'), event=NS(sender=NS(sender_type='user',
+                       tenant_key=binding.tenant_key, sender_id=NS(open_id='ou_admin')), message=NS(
+                       message_id='om_legacy_' + str(index), chat_id=binding.chat_id, chat_type='group',
+                       message_type='text', content=json.dumps({'text': username}), mentions=[])))
+            self.assertTrue(worker.accept_sdk_event(event))
+            self.assertTrue(worker.process_one())
+            self.assertEqual(extend_ms(self.now, 'calendar_year', 0), self.entitlement(username)['expires_ms'])
+            self.assertTrue(self.entitlement(username)['active'])
+            self.assertEqual(200, self.account('login', username)[0])
+            self.assertEqual(204, self.gate(username=username))
+            # The new naming policy must never silently rewrite a legacy identity.
+            self.assertEqual(username, self.upstream.accounts[username]['username'])
+        self.assertEqual([], self.upstream.creates)
+
     def test_trial_application_failure_reports_registration_recovery_not_login(self):
         with patch.object(self.ledger.applications, 'ensure', side_effect=OSError('private fixture detail')):
             status, error = self.account()

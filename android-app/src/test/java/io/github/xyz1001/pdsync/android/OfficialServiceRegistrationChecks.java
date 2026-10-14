@@ -29,7 +29,7 @@ import static io.github.xyz1001.pdsync.android.OfficialServiceRegistrationClient
 /** Every HTTP response here is synthetic. Even the production transport-policy test opens no socket. */
 public final class OfficialServiceRegistrationChecks {
     private static int checks;
-    private static final String USER = "synthetic-user-never-register";
+    private static final String USER = "syntheticuserneverregister";
     private static final String PASSWORD = "synthetic-password-never-secret";
     private static final String VALID = "{\"code\":200,\"message\":\"success\",\"data\":{"
             + "\"webdav_url\":\"" + DAV_URL + "\",\"username\":\"" + USER
@@ -109,11 +109,11 @@ public final class OfficialServiceRegistrationChecks {
             calls.incrementAndGet();
             throw new AssertionError("Invalid input must not reach transport");
         });
-        for (String username : new String[] {null, "", "ab", "Aname", "0name", "a.name", " abc", "abc ",
+        for (String username : new String[] {null, "", "ab", "12", "Aname", "XYZ1001", "abc_def", "abc-def", "a_-", "a.name", " abc", "abc ",
                 "a:b", "中文账号", "a".repeat(33), "bad\nname", "bad\u0000name", "\ud800"}) {
             expectFailure(() -> forbidden.register(username, PASSWORD), FailureKind.REGISTRATION_USERNAME_INVALID, false);
         }
-        for (String password : new String[] {null, "", "1234567", "x".repeat(129)}) {
+        for (String password : new String[] {null, "", "12345", "\ud83d\ude00".repeat(5), "x".repeat(129), "\ud83d\ude00".repeat(129)}) {
             expectFailure(() -> forbidden.register(USER, password), FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
         }
         for (String password : new String[] {"$password", "{password"}) {
@@ -132,14 +132,18 @@ public final class OfficialServiceRegistrationChecks {
             expectFailure(() -> forbidden.login(USER, password), FailureKind.LOGIN_PASSWORD_LENGTH, false);
         }
         check(calls.get() == 0, "all invalid inputs rejected before transport");
-        for (String username : new String[] {"abc", "a_-", "a".repeat(32)}) {
-            Account account = echoingClient().register(username, "12345678");
+        for (String username : new String[] {"abc", "0name", "123", "000", "xyz1001", "a".repeat(32), "1".repeat(32)}) {
+            Account account = echoingClient().register(username, "123456");
             check(username.equals(account.username), "registration username boundaries");
         }
         check(echoingClient().register(USER, "x".repeat(128)).password.length() == 128, "registration maximum password");
-        check(echoingClient().register(USER, "\ud83d\ude00".repeat(8)).password.codePointCount(0, 16) == 8,
-                "registration length counts Unicode characters");
-        for (String username : new String[] {"A", "12", "Legacy.Account-One", "_", "a".repeat(64)}) {
+        check(echoingClient().register(USER, "\ud83d\ude00".repeat(6)).password.codePointCount(0, 12) == 6,
+                "registration minimum counts Unicode code points rather than UTF-16 units");
+        check(echoingClient().register(USER, "\ud83d\ude00".repeat(128)).password.codePointCount(0, 256) == 128,
+                "registration maximum counts Unicode code points");
+        check(echoingClient().register(USER, " 1234 ").password.equals(" 1234 "),
+                "registration never trims a valid six-code-point password");
+        for (String username : new String[] {"A", "12", "Legacy.Account-One", "legacy_name", "legacy-name", "_", "a".repeat(64)}) {
             for (String password : new String[] {"x", "$legacy", "{legacy", " keep spaces ", "x".repeat(129)}) {
                 Account account = echoingClient().login(username, password);
                 check(username.equals(account.username) && password.equals(account.password), "legacy login rules kept separate");
@@ -270,11 +274,12 @@ public final class OfficialServiceRegistrationChecks {
                 "valid non-ASCII and spaces retained exactly; no credential rewriting");
         RegistrationException username = expectFailure(() -> echoingClient().register("UpperCase", PASSWORD),
                 FailureKind.REGISTRATION_USERNAME_INVALID, false);
-        check(username.userMessage().contains("小写字母") && !username.userMessage().contains("密码"),
+        check(username.userMessage().contains("小写字母") && username.userMessage().contains("纯数字")
+                        && !username.userMessage().contains("字母开头") && !username.userMessage().contains("密码"),
                 "username failure says the actual naming rule only");
-        RegistrationException length = expectFailure(() -> echoingClient().register(USER, "1234567"),
+        RegistrationException length = expectFailure(() -> echoingClient().register(USER, "12345"),
                 FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
-        check(length.userMessage().contains("8–128") && !length.userMessage().contains("用户名"),
+        check(length.userMessage().contains("6–128") && !length.userMessage().contains("用户名"),
                 "password length error identifies its own field");
     }
 

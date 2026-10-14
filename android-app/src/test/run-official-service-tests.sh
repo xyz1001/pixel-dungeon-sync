@@ -26,7 +26,7 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("pdsync_auth_v2_host_fixture", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-username = "synthetic-user-never-register"
+username = "syntheticuserneverregister"
 env = {"SFTPGO_API_URL": "https://upstream.invalid", "get_admin_token": lambda: "",
        "PUBLIC_WEBDAV_HOST": "https://webdav.xyz1001.top:8443/dav/"}
 fixtures = []

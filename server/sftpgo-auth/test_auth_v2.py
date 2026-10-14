@@ -84,4 +84,28 @@ class Tests(unittest.TestCase):
    self.assertEqual((status,{'code':status,'error':code,'message':code}),self.request(self.body('register','newuser')))
   self.assertEqual([],self.created);self.assertEqual([],self.calls)
 
+class CredentialRulesTests(unittest.TestCase):
+ def body(self,action='register',user='xyz1001',password='123456'):
+  return {'version':2,'action':action,'username':user,'password':password}
+ def reject(self,code,**kwargs):
+  with self.assertRaises(api.ApiError) as caught:api.credentials(self.body(**kwargs))
+  self.assertEqual((400,code),(caught.exception.status,caught.exception.code))
+ def test_new_username_boundaries_and_exact_values(self):
+  for user in ('abc','xyz1001','0name','123','000','a'*32,'1'*32):
+   with self.subTest(user=user):self.assertEqual(('register',user,'123456'),api.credentials(self.body(user=user)))
+  for user in ('','ab','12','a'*33,'Aname','XYZ1001','abc_def','abc-def','a_-','abc.def',' abc','abc ','中文账号'):
+   with self.subTest(user=user):self.reject('INVALID_USERNAME',user=user)
+ def test_password_five_six_and_unicode_code_point_boundaries(self):
+  for password in ('123456','😀'*6,'中'*6,'x'*128,'😀'*128,' 1234 '):
+   with self.subTest(length=len(password)):
+    self.assertEqual(password,api.credentials(self.body(password=password))[2])
+  for password in ('','12345','😀'*5,'x'*129,'😀'*129,'$12345','{12345','bad\npassword','bad\x7fpassword','bad\x85password','bad\ud800password'):
+   with self.subTest(length=len(password)):self.reject('INVALID_PASSWORD',password=password)
+ def test_legacy_login_keeps_identity_password_and_case(self):
+  for user in ('A','12','Legacy.Account-One','legacy_name','legacy-name','_','a'*64):
+   for password in ('x','$legacy','{legacy',' keep spaces ','x'*512,'😀'*128):
+    self.assertEqual(('login',user,password),api.credentials(self.body('login',user,password)))
+  self.reject('INVALID_USERNAME',action='login',user=' legacy_name')
+  self.reject('INVALID_PASSWORD',action='login',password='bad\ud800password')
+
 if __name__=='__main__':unittest.main()

@@ -41,7 +41,7 @@ MAX_CREDENTIAL_FILE_BYTES = 4096
 TRIAL_DURATION_MS = 72 * 60 * 60 * 1000
 REGISTRATION_NAMESPACE = 'pixel-dungeon-sync.registration.v1'
 _USERNAME = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}')
-_NEW_USERNAME = re.compile(r'[a-z][a-z0-9_-]{2,31}')
+_NEW_USERNAME = re.compile(r'[a-z0-9]{3,32}')
 _OPERATION = re.compile(r'[A-Za-z0-9_-]{16,128}')
 _INSTANCE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 
@@ -92,7 +92,8 @@ def _validate_credentials(username, password, *, registration=False):
                  and not any(ord(char) < 32 or ord(char) == 127 for char in password))
     except UnicodeError:
         valid = False
-    if not valid or (registration and (not 8 <= len(password) <= 128 or password.startswith(('$', '{')))):
+    if not valid or (registration and (not 6 <= len(password) <= 128 or password.startswith(('$', '{'))
+                                      or any(128 <= ord(char) <= 159 for char in password))):
         # SFTPGo accepts pre-hashed strings; user input must always be plaintext.
         raise SftpgoError(400, 'INVALID_PASSWORD')
 

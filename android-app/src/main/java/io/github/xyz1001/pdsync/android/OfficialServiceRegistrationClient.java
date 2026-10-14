@@ -149,7 +149,7 @@ final class OfficialServiceRegistrationClient {
     private static void validateCredentials(String username, String password, boolean registration)
             throws RegistrationException {
         if (username == null || !username.matches(registration
-                ? "[a-z][a-z0-9_-]{2,31}" : "[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")) {
+                ? "[a-z0-9]{3,32}" : "[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")) {
             throw failure(registration ? FailureKind.REGISTRATION_USERNAME_INVALID
                     : FailureKind.LOGIN_USERNAME_INVALID, false);
         }
@@ -160,7 +160,7 @@ final class OfficialServiceRegistrationClient {
         if (hasControl(password) || hasUnpairedSurrogate(password)) {
             throw failure(FailureKind.PASSWORD_CHARACTERS_INVALID, false);
         }
-        if (registration && (password.codePointCount(0, password.length()) < 8
+        if (registration && (password.codePointCount(0, password.length()) < 6
                 || password.codePointCount(0, password.length()) > 128)) {
             throw failure(FailureKind.REGISTRATION_PASSWORD_LENGTH, false);
         }
@@ -462,10 +462,10 @@ final class OfficialServiceRegistrationClient {
         String message;
         switch (kind) {
             case REGISTRATION_USERNAME_INVALID:
-                message = "用户名需3–32位，小写字母开头，仅含小写字母、数字、_或-。"; break;
+                message = "用户名需3–32位，仅含小写字母或数字，可用数字开头或纯数字。"; break;
             case LOGIN_USERNAME_INVALID:
                 message = "用户名需1–64位字母、数字、_、.或-，且不能以.或-开头。"; break;
-            case REGISTRATION_PASSWORD_LENGTH: message = "注册密码需8–128个字符。"; break;
+            case REGISTRATION_PASSWORD_LENGTH: message = "注册密码需6–128个字符。"; break;
             case LOGIN_PASSWORD_LENGTH: message = "密码不能为空，且不能超过512字节。"; break;
             case PASSWORD_CHARACTERS_INVALID: message = "密码不能包含控制字符或无效字符。"; break;
             case REGISTRATION_PASSWORD_PREFIX: message = "密码不能以$或{开头。"; break;

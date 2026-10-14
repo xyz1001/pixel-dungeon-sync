@@ -59,12 +59,18 @@ def credentials(body):
     action, user, password = body['action'], body['username'], body['password']
     if action not in ('register', 'login') or not isinstance(user, str) or not isinstance(password, str):
         raise ApiError(400, 'INVALID_REQUEST')
-    pattern = r'[a-z][a-z0-9_-]{2,31}' if action == 'register' else r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}'
+    pattern = r'[a-z0-9]{3,32}' if action == 'register' else r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}'
     if not re.fullmatch(pattern, user):
         raise ApiError(400, 'INVALID_USERNAME')
-    if not 1 <= len(password.encode('utf-8')) <= 512 or any(ord(c) < 32 or ord(c) == 127 for c in password):
+    try:
+        valid_password = (1 <= len(password.encode('utf-8')) <= 512
+                          and not any(ord(c) < 32 or ord(c) == 127 for c in password))
+    except UnicodeError:
+        valid_password = False
+    if not valid_password:
         raise ApiError(400, 'INVALID_PASSWORD')
-    if action == 'register' and not 8 <= len(password) <= 128:
+    if action == 'register' and (not 6 <= len(password) <= 128
+                                 or any(128 <= ord(c) <= 159 for c in password)):
         raise ApiError(400, 'INVALID_PASSWORD')
     if action == 'register' and password.startswith(('$', '{')):
         # SFTPGo accepts pre-hashed strings in its management API; never treat user input as a hash.
