@@ -122,7 +122,7 @@ class DesktopDiagnosticsTest {
   assertNotEquals(collision, savedPath)
   assertEquals("existing export must survive", Files.readString(collision))
   val archive = entries(Files.readAllBytes(savedPath))
-  assertEquals(setOf("metadata.json", "events.jsonl"), archive.keys)
+  assertEquals(setOf("metadata.json", "events.jsonl", "应用.log"), archive.keys)
   val events = archive.getValue("events.jsonl")
   assertContains(events, "\"automatic\":true")
   assertContains(events, "\"httpStatus\":503")

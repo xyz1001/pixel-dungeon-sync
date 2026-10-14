@@ -201,8 +201,76 @@ object DiagnosticLog {
    }
    entry("metadata.json", codec.encodeToString(metadata) + "\n")
    entry("events.jsonl", records.joinToString("") { codec.encodeToString(it) + "\n" })
+   entry("应用.log", readableLog(metadata, records))
   }
   bytes.toByteArray()
+ }
+ /** A human-readable view of the same validated snapshot, never arbitrary exception/logcat text. */
+ private fun readableLog(metadata: Metadata, records: List<Record>): String = buildString {
+  appendLine("# PD Sync 应用日志")
+  appendLine("# version=${metadata.appVersion} platform=${metadata.platform} exportedAt=${metadata.generatedAtUtc} zone=${metadata.zone}")
+  appendLine("# records=${metadata.recordCount} storageAvailable=${metadata.storageAvailable} retentionDays=${metadata.retentionDays}")
+  if (!metadata.storageAvailable) appendLine("# 日志存储不可用或读取不完整。")
+  if (records.isEmpty()) appendLine("# 没有可导出的已记录事件。")
+  for (record in records.sortedBy { Instant.parse(it.timestampUtc) }) {
+   val level = when (record.result) {
+    DiagnosticResult.FAILED -> "ERROR"
+    DiagnosticResult.REJECTED, DiagnosticResult.CONFLICT -> "WARN"
+    else -> "INFO"
+   }
+   val explanation = if (record.stage == DiagnosticStage.HTTP && record.httpStatus != null && record.result == DiagnosticResult.SUCCEEDED)
+    "收到 HTTP 响应" else resultText(record.result)
+   append("${record.timestampUtc} $level [${record.operationId}] ${actionText(record.action)} / ${stageText(record.stage)}：$explanation")
+   append(" action=${record.action} stage=${record.stage} result=${record.result} automatic=${record.automatic} elapsedMs=${record.elapsedMs}")
+   record.httpMethod?.let { append(" method=$it") }
+   record.httpStatus?.let { append(" status=$it") }
+   if (record.failure != DiagnosticFailure.NONE) append(" error=${record.failure} (${failureText(record.failure)})")
+   appendLine(" version=${record.appVersion} platform=${record.platform} zone=${record.zone} offsetMinutes=${record.offsetMinutes}")
+  }
+ }
+ private fun actionText(value: DiagnosticAction): String = when (value) {
+  DiagnosticAction.APP_START -> "应用启动"; DiagnosticAction.CONFIGURE -> "配置"
+  DiagnosticAction.CONNECT -> "连接服务"; DiagnosticAction.INSPECT -> "检查存档"
+  DiagnosticAction.HISTORY -> "读取历史"; DiagnosticAction.PREPARE -> "准备游戏"
+  DiagnosticAction.INSTALL -> "安装游戏"; DiagnosticAction.ACCESS_CHECK -> "检查存档访问"
+  DiagnosticAction.LAUNCH -> "启动游戏"; DiagnosticAction.CAPTURE -> "创建快照"
+  DiagnosticAction.PUSH -> "上传存档"; DiagnosticAction.RESTORE -> "恢复存档"
+  DiagnosticAction.RECOVERY -> "处理中断操作"; DiagnosticAction.RESOLVE -> "处理冲突"
+  DiagnosticAction.MERGE -> "合并存档"; DiagnosticAction.ARCHIVE -> "归档操作"
+  DiagnosticAction.EXPORT_LOGS -> "导出日志"; DiagnosticAction.AUTOMATIC_SYNC -> "自动同步"
+  DiagnosticAction.OTHER -> "其他操作"
+ }
+ private fun stageText(value: DiagnosticStage): String = when (value) {
+  DiagnosticStage.QUEUED -> "排队"; DiagnosticStage.STARTED -> "开始"
+  DiagnosticStage.CONFIRMATION -> "确认"; DiagnosticStage.GUARD -> "条件检查"
+  DiagnosticStage.WORK -> "执行"; DiagnosticStage.REFRESH -> "刷新"
+  DiagnosticStage.FINISHED -> "结束"; DiagnosticStage.RUNTIME -> "运行状态"
+  DiagnosticStage.CONNECTION -> "连接检查"; DiagnosticStage.NAMESPACE -> "同步目录"
+  DiagnosticStage.HTTP -> "HTTP"; DiagnosticStage.PREPARATION -> "安装准备"
+  DiagnosticStage.INSTALLATION -> "系统安装"; DiagnosticStage.BRIDGE -> "存档访问"
+  DiagnosticStage.READINESS -> "存档就绪检查"; DiagnosticStage.GAME_LAUNCH -> "游戏启动"
+  DiagnosticStage.BACKUP -> "备份"; DiagnosticStage.RESTORE -> "写入恢复"
+  DiagnosticStage.RECOVERY -> "中断恢复"; DiagnosticStage.VERIFY -> "完整性校验"
+  DiagnosticStage.EXPORT -> "导出"
+ }
+ private fun resultText(value: DiagnosticResult): String = when (value) {
+  DiagnosticResult.STARTED -> "开始"; DiagnosticResult.SUCCEEDED -> "成功"
+  DiagnosticResult.FAILED -> "失败"; DiagnosticResult.CANCELED -> "已取消"
+  DiagnosticResult.REJECTED -> "未满足操作条件"; DiagnosticResult.SKIPPED -> "已跳过"
+  DiagnosticResult.PENDING -> "等待处理"; DiagnosticResult.CONFLICT -> "存在冲突"
+ }
+ private fun failureText(value: DiagnosticFailure): String = when (value) {
+  DiagnosticFailure.NONE -> "无错误"; DiagnosticFailure.BUSY -> "游戏或存档忙碌"
+  DiagnosticFailure.NOT_READY -> "存档尚未就绪"; DiagnosticFailure.RECOVERY_REQUIRED -> "需要处理中断操作"
+  DiagnosticFailure.IDENTITY_MISMATCH -> "应用身份不匹配"; DiagnosticFailure.UNAVAILABLE -> "所需能力不可用"
+  DiagnosticFailure.CANCELED -> "操作取消"; DiagnosticFailure.AUTHENTICATION -> "身份验证失败"
+  DiagnosticFailure.AUTHORIZATION -> "访问未获允许"; DiagnosticFailure.HTTP -> "HTTP 请求未通过"
+  DiagnosticFailure.TIMEOUT -> "网络超时"; DiagnosticFailure.DNS -> "域名解析失败"
+  DiagnosticFailure.CONNECT -> "网络连接失败"; DiagnosticFailure.TLS -> "安全连接失败"
+  DiagnosticFailure.EOF -> "连接提前结束"; DiagnosticFailure.CONNECTION -> "连接中断"
+  DiagnosticFailure.INTERRUPTED -> "网络操作中断"; DiagnosticFailure.NETWORK_IO -> "网络读写失败"
+  DiagnosticFailure.STORAGE -> "文件读写失败"; DiagnosticFailure.VALIDATION -> "数据或操作条件校验失败"
+  DiagnosticFailure.OTHER -> "未分类错误"
  }
  @JvmStatic fun suggestedFilename(): String = synchronized(lock) {
   "pd-sync-diagnostics-${filenameTime.format(configuration?.clock?.instant() ?: Instant.now())}.zip"

@@ -50,7 +50,7 @@ class DiagnosticLogTest {
   }
   configure(zone = ZoneId.of("Asia/Shanghai"))
   val archive = unzip(); val events = records(archive)
-  assertEquals(setOf("metadata.json", "events.jsonl"), archive.keys)
+  assertEquals(setOf("metadata.json", "events.jsonl", "应用.log"), archive.keys)
   assertEquals(3, events.size)
   assertTrue(events.all { field(it, "operationId") == trace.id })
   assertEquals(trace.id, UUID.fromString(trace.id).toString())
@@ -72,6 +72,58 @@ class DiagnosticLogTest {
   val text = unzip().values.joinToString()
   listOf("SECRET", "private", "user@example.com", "game.dat", "malformed").forEach { assertFalse(it in text) }
   assertTrue(records().all { field(it, "appVersion") == "unknown" && field(it, "platform") == "unknown" })
+ }
+
+ @Test fun readableLogContainsTheSameRealEventsWithFixedDescriptionsAndSafeHttpSemantics() {
+  configure(zone = ZoneId.of("Asia/Shanghai"))
+  val trace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true)
+  DiagnosticLog.bind(trace).use {
+   DiagnosticLog.http(DiagnosticHttpMethod.GET, 404)
+   DiagnosticLog.http(DiagnosticHttpMethod.PUT, 201)
+   trace.failure(DiagnosticStage.WORK, SocketTimeoutException("password=SECRET https://private.invalid/save"))
+   trace.record(DiagnosticStage.FINISHED, DiagnosticResult.FAILED, DiagnosticFailure.TIMEOUT)
+  }
+  val archive = unzip()
+  val lines = archive.getValue("应用.log").lineSequence().filter { it.isNotBlank() && !it.startsWith('#') }.toList()
+  assertEquals(records(archive).size, lines.size)
+  assertTrue(lines.all { it.startsWith(fixed.toString()) && "[${trace.id}]" in it && "自动同步" in it && "automatic=true" in it && "zone=Asia/Shanghai offsetMinutes=480" in it })
+  assertContains(lines[1], " INFO ")
+  assertContains(lines[1], "收到 HTTP 响应")
+  assertContains(lines[1], "method=GET status=404")
+  assertContains(lines[2], "method=PUT status=201")
+  assertContains(lines[3], " ERROR ")
+  assertContains(lines[3], "error=TIMEOUT (网络超时)")
+  listOf("SECRET", "password", "private.invalid", "/save").forEach { assertFalse(it in archive.values.joinToString()) }
+ }
+
+ @Test fun readableLogIsChronologicalAfterClockChangesAndReportsEmptyStorageWithoutInventingEvents() {
+  configure(now = fixed.plusSeconds(10)); val later = DiagnosticLog.begin(DiagnosticAction.INSPECT, false)
+  configure(now = fixed); val earlier = DiagnosticLog.begin(DiagnosticAction.APP_START, false)
+  val archive = unzip(); val text = archive.getValue("应用.log")
+  assertTrue(text.indexOf(earlier.id) < text.indexOf(later.id))
+  assertEquals(2, records(archive).size)
+  configure(now = fixed.plusSeconds(20 * 86400))
+  val empty = unzip()
+  assertContains(empty.getValue("应用.log"), "没有可导出的已记录事件")
+  assertTrue(records(empty).isEmpty())
+  val blocker = directory.resolve("blocked-readable"); blocker.writeText("keep")
+  DiagnosticLog.configure(blocker, "development", "linux")
+  assertContains(unzip().getValue("应用.log"), "日志存储不可用或读取不完整")
+ }
+
+ @Test fun everyClosedLabelHasAReadableDescriptionWithoutAddingSyntheticEvents() {
+  configure()
+  DiagnosticAction.entries.forEach { DiagnosticLog.begin(it, false) }
+  val trace = DiagnosticLog.begin(DiagnosticAction.EXPORT_LOGS, false)
+  DiagnosticStage.entries.forEach { trace.record(it, DiagnosticResult.SUCCEEDED) }
+  DiagnosticResult.entries.forEach { trace.record(DiagnosticStage.WORK, it) }
+  DiagnosticFailure.entries.forEach { trace.record(DiagnosticStage.WORK, DiagnosticResult.FAILED, it) }
+  val archive = unzip(); val text = archive.getValue("应用.log")
+  DiagnosticAction.entries.forEach { assertContains(text, "action=$it ") }
+  DiagnosticStage.entries.forEach { assertContains(text, "stage=$it ") }
+  DiagnosticResult.entries.forEach { assertContains(text, "result=$it ") }
+  DiagnosticFailure.entries.filter { it != DiagnosticFailure.NONE }.forEach { assertContains(text, "error=$it (") }
+  assertEquals(records(archive).size, text.lineSequence().count { it.isNotBlank() && !it.startsWith('#') })
  }
 
  @Test fun exactSanitizedTransportLabelsClassifyWithoutChangingOriginalExceptions() {
@@ -191,7 +243,7 @@ class DiagnosticLogTest {
   val first = DiagnosticLog.exportToDirectory(target); val second = DiagnosticLog.exportToDirectory(target)
   assertNotEquals(first, second); assertNotEquals(occupied, first)
   assertEquals("existing-private-file", occupied.readText())
-  assertEquals(setOf("metadata.json", "events.jsonl"), unzip(Files.readAllBytes(first)).keys)
+  assertEquals(setOf("metadata.json", "events.jsonl", "应用.log"), unzip(Files.readAllBytes(first)).keys)
  }
 
  @Test fun storageFailuresAreBestEffortAndExportsNeverIncludeLegacyFiles() {
