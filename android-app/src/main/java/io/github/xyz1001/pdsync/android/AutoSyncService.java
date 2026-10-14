@@ -114,8 +114,54 @@ public final class AutoSyncService extends Service {
         return string.equals("ARMED") || string.equals("PLAYING") || string.equals("SYNCING");
     }
 
+    private static final String CHECKED_IDLE_FAILURE = "checkedIdleFailure";
+
+    private static AutoSyncStatusPolicy.Record statusRecord(SharedPreferences preferences) {
+        // One snapshot prevents mixing a previous token with a newer session's result.
+        java.util.Map<String, ?> values = preferences.getAll();
+        Object started = values.get("startedAt");
+        return new AutoSyncStatusPolicy.Record(statusString(values, "token", ""),
+                statusString(values, "state", ""), statusString(values, "result", "从本应用启动游戏后，正常退出且没有冲突时自动上传。"),
+                statusString(values, "gameSelection", ""), statusString(values, "gameNamespace", ""),
+                started instanceof Long ? (Long) started : 0L);
+    }
+
+    private static String statusString(java.util.Map<String, ?> values, String key, String fallback) {
+        Object value = values.get(key);
+        return value instanceof String ? (String) value : fallback;
+    }
+
+    static AutoSyncStatusPolicy.Record beginManualInspection(Context context) {
+        try {
+            if (!SyncRuntime.rootMode(context)) return null;
+            return AutoSyncStatusPolicy.capture(statusRecord(context.getSharedPreferences(PREFS, 0)),
+                    SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context));
+        } catch (Exception unavailable) { return null; }
+    }
+
+    static void verifiedManualInspection(Context context, AutoSyncStatusPolicy.Record before,
+            AndroidSyncFacade.Inspection inspection) {
+        if (before == null || inspection == null) return;
+        try {
+            if (!SyncRuntime.rootMode(context)) return;
+            SharedPreferences preferences = context.getSharedPreferences(PREFS, 0);
+            String acknowledgment = AutoSyncStatusPolicy.acknowledgment(before, statusRecord(preferences),
+                    SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context),
+                    inspection.getKind(), inspection.getNeedsRestoreRecovery(), inspection.isRetryablePending());
+            // Separate exact-record acknowledgment cannot overwrite a concurrently started
+            // listener or a newer failure. The original terminal state/result remain intact.
+            if (acknowledgment != null) preferences.edit().putString(CHECKED_IDLE_FAILURE, acknowledgment).commit();
+        } catch (Exception unavailable) { /* Keep the historical warning if the scope cannot be proved. */ }
+    }
+
     public static String status(Context context) {
-        return context.getSharedPreferences("auto-sync-session-v1", 0).getString("result", "从本应用启动游戏后，正常退出且没有冲突时自动上传。");
+        SharedPreferences preferences = context.getSharedPreferences(PREFS, 0);
+        AutoSyncStatusPolicy.Record current = statusRecord(preferences);
+        try {
+            if (!SyncRuntime.rootMode(context)) return current.result;
+            return AutoSyncStatusPolicy.visibleResult(current, preferences.getString(CHECKED_IDLE_FAILURE, ""),
+                    SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context));
+        } catch (Exception unavailable) { return current.result; }
     }
 
     @Override // android.app.Service
@@ -208,7 +254,7 @@ public final class AutoSyncService extends Service {
             boolean reliableForAutomatic = reliableForAutomaticObservation(this.bridge.mode(), observationObserveLifecycle);
             AutoSyncPolicy.Step stepObserve = this.policy.observe(reliableForAutomatic, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
-                finish("BLOCKED", "多次无法可靠确认游戏已空闲，已停止本次监听。请正常退出游戏后返回首页检查。");
+                finish("BLOCKED", AutoSyncStatusPolicy.IDLE_FAILURE);
                 return;
             }
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNOBSERVED) {

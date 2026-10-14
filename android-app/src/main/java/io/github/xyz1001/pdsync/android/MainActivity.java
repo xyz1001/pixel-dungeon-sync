@@ -2578,6 +2578,7 @@ public final class MainActivity extends Activity {
         // One facade and one observation own both the action proof and its timeline.
         // Drawing, paging, selecting, or dismissing the timeline must never re-export saves.
         SyncInspectionDiagnostics.Stage stage = SyncInspectionDiagnostics.Stage.RUNTIME;
+        AutoSyncStatusPolicy.Record oldIdleFailure = AutoSyncService.beginManualInspection(this);
         try {
             AndroidSyncFacade activeFacade = sync();
             stage = SyncInspectionDiagnostics.Stage.INSPECT;
@@ -2589,6 +2590,7 @@ public final class MainActivity extends Activity {
             stage = SyncInspectionDiagnostics.Stage.HISTORY;
             this.history = activeFacade.historyPresentation(inspectionInspect);
             this.cloudVerified = true;
+            AutoSyncService.verifiedManualInspection(this, oldIdleFailure, inspectionInspect);
             HashSet hashSet = new HashSet();
             Iterator<AppendCommit> it = this.history.getCloud().iterator();
             while (it.hasNext()) {
