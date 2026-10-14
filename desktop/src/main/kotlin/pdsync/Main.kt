@@ -48,6 +48,7 @@ internal fun runSyncApplication(
  processStatus: (TargetGame?) -> GameProcessStatus = productionProcessCheck(),
  title: String = "像素地牢 · 存档同步"
 ) = application {
+ remember { configureDesktopDiagnostics(workspace.resolve(".local")) }
  var busy by remember { mutableStateOf(false) }
  var closeBlocked by remember { mutableStateOf(false) }
  var connectingAtStartup by remember { mutableStateOf(true) }
@@ -104,6 +105,8 @@ internal fun runSyncApplication(
   var confirm by remember { mutableStateOf<OperationTrace?>(null) }
   var confirmationFiles by remember { mutableStateOf<Map<String,String>?>(null) }
   val operationEvents = remember { OperationEvents(workspace.resolve(".local/operation-events.log")) }
+  val diagnosticExport = remember { DesktopDiagnosticExport() }
+  var diagnosticExportNotice by remember { mutableStateOf<String?>(null) }
   var confirmationNotice by remember { mutableStateOf<String?>(null) }
   var restoreIssue by remember { mutableStateOf<String?>("请选择快照") }
   var conflictRestoreIssue by remember { mutableStateOf<String?>("尚未校验") }
@@ -127,7 +130,7 @@ internal fun runSyncApplication(
    pageGeneration++; page = next; closeBlocked = false
   }
   suspend fun reconnectSaved(saved: AppConfig) {
-   when (val restored = withContext(Dispatchers.IO) { restoreSavedConnection(saved) }) {
+   when (val restored = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONNECT, result = { if (it is SavedConnectionResult.Connected) DiagnosticResult.SUCCEEDED else DiagnosticResult.FAILED }) { restoreSavedConnection(saved) } }) {
     is SavedConnectionResult.Connected -> { password = restored.connection.password; connected = true; connectionNotice = null }
     is SavedConnectionResult.Retry -> { password = restored.connection.password; settingsMode = SettingsMode.UNLOCK; connectionNotice = restored.message }
     is SavedConnectionResult.NeedsInput -> { settingsMode = SettingsMode.UNLOCK; connectionNotice = restored.message }
@@ -203,7 +206,9 @@ internal fun runSyncApplication(
    busy = true; launchingGame = true; launchNotice = "正在启动游戏…"
    scope.launch {
     try {
-     val result = withContext(Dispatchers.IO) { gameLauncher.launch(saved.targetGame, saved.selectedSaveRoot) }
+     val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.LAUNCH, result = {
+      when (it) { is GameLaunchResult.Started, is GameLaunchResult.AlreadyRunning -> DiagnosticResult.SUCCEEDED; else -> DiagnosticResult.FAILED }
+     }) { gameLauncher.launch(saved.targetGame, saved.selectedSaveRoot) } }
      if (!appClosed) {
       launchNotice = result.message
       when (result) {
@@ -215,6 +220,19 @@ internal fun runSyncApplication(
     } catch (e: CancellationException) { throw e }
     catch (_: Exception) { launchNotice = "启动失败，请重试。" }
     finally { launchingGame = false; busy = false }
+   }
+  }
+  fun exportDiagnosticLogs() {
+   if (busy || connectingAtStartup || appClosed) return
+   busy = true; diagnosticExportNotice = null
+   scope.launch {
+    try {
+     when (val result = diagnosticExport.export(System.getProperty("user.home"))) {
+      is DiagnosticExportResult.Saved -> diagnosticExportNotice = "日志已导出：${result.filename}"
+      is DiagnosticExportResult.Failed -> diagnosticExportNotice = result.message
+      DiagnosticExportResult.Canceled, DiagnosticExportResult.Ignored -> Unit
+     }
+    } finally { busy = false }
    }
   }
   fun authenticationFailed(e: Exception) {
@@ -267,7 +285,7 @@ internal fun runSyncApplication(
    scope.launch {
     trace.record(OperationEvent.OPERATION_STARTED)
     try {
-     val result = withContext(Dispatchers.IO) {
+     val result = withContext(Dispatchers.IO) { trace.withDiagnostics {
       trace.record(OperationEvent.WORK_STARTED)
       val target = manager.targetInfo()
       val stopped = {
@@ -300,7 +318,7 @@ internal fun runSyncApplication(
       }
       trace.record(OperationEvent.WORK_SUCCEEDED)
       completed
-     }
+     } }
      status = result.message; conflict = result.conflict
      conflictSelection=if(action==Action.PUSH)result.conflict?.let {value->value.branches.firstOrNull {it.snapshot.manifest.files==value.observedLocalFiles}?.snapshot?.manifest?.id} else null
      remoteReadAt = 0L
@@ -334,7 +352,7 @@ internal fun runSyncApplication(
     finally {
      try {
       trace.record(OperationEvent.HISTORY_REFRESH_STARTED)
-      val data = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) }
+      val data = withContext(Dispatchers.IO) { trace.withDiagnostics { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) } }
       history = data.first; pending = data.second; saveInfo = data.third
       graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
       if (selected == null) selected = graphHistory?.defaultSnapshot
@@ -378,7 +396,7 @@ internal fun runSyncApplication(
    busy = true; remoteReadAt = monotonicMillis(); remoteInspectionReady = false; status = "正在读取并校验云端快照…"
    scope.launch {
     try {
-     val entries = withContext(Dispatchers.IO) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) }
+     val entries = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) } }
      remoteTips = entries.map { it.entry.manifest.id }.toSet(); remoteInspectionReady = true
      remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
      if (selected == null && entries.size == 1) selected = entries.single().entry.manifest.id
@@ -483,12 +501,12 @@ internal fun runSyncApplication(
     try {
      refreshProfile(config)
      val manager = session ?: error(locationIssue ?: "默认存档尚未就绪")
-     val result = withContext(Dispatchers.IO) {
+     val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT, result = { if (it.kind == OnboardingKind.BLOCKED) DiagnosticResult.REJECTED else DiagnosticResult.SUCCEEDED }) {
       val target = manager.targetInfo()
       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
        gameLauncher.status(target) is GameProcessStatus.Stopped
       }
-     }
+     } }
      if (appClosed) return@launch
      comparison = result; comparisonCheckedAt = java.time.Instant.now().toString(); comparisonSelection = result.remoteEntries.singleOrNull()?.entry?.manifest?.id
      remoteTips = result.remoteEntries.map { it.entry.manifest.id }.toSet()
@@ -585,7 +603,12 @@ internal fun runSyncApplication(
    busy = true; setupConfirm = null; comparisonNotice = "正在重新校验并处理所选进度…"
    scope.launch {
     try {
-     withContext(Dispatchers.IO) {
+     withContext(Dispatchers.IO) { diagnosticWork(when (action) {
+      SetupAction.UPLOAD -> DiagnosticAction.PUSH
+      SetupAction.RESTORE -> DiagnosticAction.RESTORE
+      SetupAction.ADOPT -> DiagnosticAction.CONFIGURE
+      SetupAction.MERGE -> DiagnosticAction.MERGE
+     }) {
       val target = manager.targetInfo()
       val stopped = {
        val state = gameLauncher.status(target)
@@ -600,7 +623,7 @@ internal fun runSyncApplication(
        SetupAction.ADOPT -> manager.adoptOnboardingRemote(observed, store, stopped)
        SetupAction.MERGE -> manager.mergeCurrent(store,stopped)
       }
-     }
+     } }
      comparisonNotice = "操作已完成，正在重新比较。"
     } catch (e: CancellationException) { throw e }
     catch (e: Exception) { comparisonNotice = "操作未完成：${e.message}。已有快照与备份保留。"; authenticationFailed(e) }
@@ -709,7 +732,7 @@ internal fun runSyncApplication(
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
       if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || !connected || appClosed) continue
       if (!retryable && files == baseline) automatic.succeeded(files)
-      else execute(operationEvents.begin(Action.PUSH), isAutomatic = true)
+      else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true)
      } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
     } catch (e: CancellationException) { throw e }
     catch (_: Exception) { automaticStatus = "存档正在变化或暂不可读，自动上传等待中。" }
@@ -966,6 +989,9 @@ internal fun runSyncApplication(
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH) }) { Text("修改存档路径") }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery() }) { Text("重新检查四步引导") }
          if (pending) TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("检查并归档中断的待上传操作") }
+         Divider()
+         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { exportDiagnosticLogs() }) { Text("导出日志") }
+         diagnosticExportNotice?.let { Text(it, style = MaterialTheme.typography.body2) }
         }
        }
        Page.CONNECTION -> key(pageGeneration) {
@@ -1086,16 +1112,16 @@ private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: 
    var finished = false
    try {
     controller.update(submitted.config, submitted.password)
-    when (val checked = if(apply)ConnectionTestResult.Success(false) else withContext(Dispatchers.IO) { controller.connect() }) {
+    when (val checked = if(apply)ConnectionTestResult.Success(false) else withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONNECT, result = { if (it is ConnectionTestResult.Success) DiagnosticResult.SUCCEEDED else DiagnosticResult.FAILED }) { controller.connect() } }) {
      is ConnectionTestResult.Failure -> if (lifetime.isCurrent(ticket)) { message = checked.message; failed = true }
      is ConnectionTestResult.Success -> {
       verified = true
       connectionVerified=true;message="连接测试通过。"
-      if(apply)applied = withContext(Dispatchers.IO) {
+      if(apply)applied = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONFIGURE) {
        lifetime.persist(ticket) {
         controller.applyFilePassword(configFile)
        }
-      }
+      } }
      }
     }
    } catch (e: CancellationException) { throw e }

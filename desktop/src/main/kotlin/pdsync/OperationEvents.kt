@@ -42,7 +42,7 @@ internal enum class OperationFailure { CANCELED, AUTHENTICATION, AUTHORIZATION, 
  * this check's guarantee. The shared lock also serializes separate recorders within this process.
  */
 internal class OperationEvents(private val path: Path) {
- fun begin(action: OperationAction): OperationTrace = OperationTrace(this, UUID.randomUUID(), action).also {
+ fun begin(action: OperationAction, automatic: Boolean = false): OperationTrace = OperationTrace(this, UUID.randomUUID(), action, automatic).also {
   it.record(OperationEvent.CONFIRMATION_ENTERED)
  }
 
@@ -98,11 +98,54 @@ internal class OperationEvents(private val path: Path) {
 }
 
 internal class OperationTrace internal constructor(
- private val recorder: OperationEvents, private val uuid: UUID, val action: OperationAction
+ private val recorder: OperationEvents, private val uuid: UUID, val action: OperationAction, automatic: Boolean = false
 ) {
+ private val diagnostics = DiagnosticLog.begin(when (action) {
+  OperationAction.CAPTURE -> DiagnosticAction.CAPTURE
+  OperationAction.PUSH -> DiagnosticAction.PUSH
+  OperationAction.RESTORE, OperationAction.CLOUD_HISTORY, OperationAction.REMOTE_TIP -> DiagnosticAction.RESTORE
+  OperationAction.RESOLVE -> DiagnosticAction.RESOLVE
+  OperationAction.MERGE, OperationAction.MERGE_CURRENT -> DiagnosticAction.MERGE
+  OperationAction.ARCHIVE -> DiagnosticAction.ARCHIVE
+ }, automatic)
  val id: String get() = uuid.toString()
- fun record(event: OperationEvent, guard: OperationGuard? = null, failure: OperationFailure? = null): Boolean =
-  recorder.record(this, event, guard, failure)
+ fun <T> withDiagnostics(block: () -> T): T = DiagnosticLog.bind(diagnostics).use { block() }
+ fun record(event: OperationEvent, guard: OperationGuard? = null, failure: OperationFailure? = null): Boolean {
+  val (stage, result) = when (event) {
+   OperationEvent.CONFIRMATION_ENTERED -> DiagnosticStage.CONFIRMATION to DiagnosticResult.STARTED
+   OperationEvent.CONFIRMATION_CANCELED -> DiagnosticStage.CONFIRMATION to DiagnosticResult.CANCELED
+   OperationEvent.CONFIRMATION_SUBMITTED -> DiagnosticStage.CONFIRMATION to DiagnosticResult.SUCCEEDED
+   OperationEvent.GUARD_REJECTED -> DiagnosticStage.GUARD to DiagnosticResult.REJECTED
+   OperationEvent.OPERATION_QUEUED -> DiagnosticStage.QUEUED to DiagnosticResult.PENDING
+   OperationEvent.OPERATION_STARTED -> DiagnosticStage.STARTED to DiagnosticResult.STARTED
+   OperationEvent.WORK_STARTED -> DiagnosticStage.WORK to DiagnosticResult.STARTED
+   OperationEvent.WORK_SUCCEEDED -> DiagnosticStage.WORK to DiagnosticResult.SUCCEEDED
+   OperationEvent.WORK_FAILED -> DiagnosticStage.WORK to DiagnosticResult.FAILED
+   OperationEvent.HISTORY_REFRESH_STARTED -> DiagnosticStage.REFRESH to DiagnosticResult.STARTED
+   OperationEvent.HISTORY_REFRESH_SUCCEEDED -> DiagnosticStage.REFRESH to DiagnosticResult.SUCCEEDED
+   OperationEvent.HISTORY_REFRESH_FAILED -> DiagnosticStage.REFRESH to DiagnosticResult.FAILED
+   OperationEvent.OPERATION_CANCELED -> DiagnosticStage.FINISHED to DiagnosticResult.CANCELED
+   OperationEvent.OPERATION_FINISHED -> DiagnosticStage.FINISHED to when (failure) {
+    null -> DiagnosticResult.SUCCEEDED
+    OperationFailure.CANCELED -> DiagnosticResult.CANCELED
+    else -> DiagnosticResult.FAILED
+   }
+  }
+  diagnostics.record(stage, result, when (failure) {
+   null -> DiagnosticFailure.NONE
+   OperationFailure.CANCELED -> DiagnosticFailure.CANCELED
+   OperationFailure.AUTHENTICATION -> DiagnosticFailure.AUTHENTICATION
+   OperationFailure.AUTHORIZATION -> DiagnosticFailure.AUTHORIZATION
+   OperationFailure.NETWORK -> DiagnosticFailure.NETWORK_IO
+   OperationFailure.STORAGE -> DiagnosticFailure.STORAGE
+   OperationFailure.VALIDATION -> DiagnosticFailure.VALIDATION
+   OperationFailure.OTHER -> DiagnosticFailure.OTHER
+  })
+  if (event == OperationEvent.CONFIRMATION_CANCELED || event == OperationEvent.GUARD_REJECTED) {
+   diagnostics.record(DiagnosticStage.FINISHED, result)
+  }
+  return recorder.record(this, event, guard, failure)
+ }
 }
 
 /** Classify only typed failures and protocol status enums, never message text or stack traces. */
