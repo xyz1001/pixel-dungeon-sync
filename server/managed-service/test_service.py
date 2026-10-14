@@ -102,6 +102,31 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             RuntimeConfig.parse(raw)
 
+    def test_native_expiry_is_opt_in_and_requires_single_account_writer(self):
+        raw = example()
+        del raw['account_expiry']
+        self.assertEqual({'enabled': False, 'single_writer': False}, RuntimeConfig.parse(raw).account_expiry)
+        raw.update(enabled=True, mutations_enabled=True)
+        raw['sftpgo']['instance_id'] = 'test-instance'
+        raw['prerequisites'] = dict.fromkeys(PREREQUISITES, True)
+        for settings in ({}, {'enabled': True}, {'enabled': 1, 'single_writer': True},
+                         {'enabled': True, 'single_writer': False},
+                         {'enabled': True, 'single_writer': True, 'unknown': True}):
+            with self.subTest(settings=settings), self.assertRaises(ConfigurationError):
+                RuntimeConfig.parse({**raw, 'account_expiry': settings})
+        raw['account_expiry'] = {'enabled': True, 'single_writer': True}
+        self.assertTrue(RuntimeConfig.parse(raw).account_expiry['enabled'])
+        raw['prerequisites']['all_managed_aliases_gated'] = False
+        self.assertTrue(RuntimeConfig.parse(raw).account_expiry['enabled'])
+        raw['mutations_enabled'] = False
+        with self.assertRaisesRegex(ConfigurationError, 'NATIVE_EXPIRY_REQUIRES_ENABLED_SINGLE_WRITER'):
+            RuntimeConfig.parse(raw)
+
+    def test_native_migration_command_refuses_disabled_policy(self):
+        with patch.object(service, 'build_application', side_effect=AssertionError('runtime opened')), \
+             redirect_stderr(io.StringIO()):
+            self.assertEqual(2, service.main(['migrate-native-expiry', str(Path(__file__).with_name('config.example.json'))]))
+
     def test_feishu_requires_mutations_and_complete_config(self):
         raw = example()
         raw['feishu']['enabled'] = True

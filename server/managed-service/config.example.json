@@ -2,6 +2,7 @@
   "version": 1,
   "enabled": false,
   "mutations_enabled": false,
+  "account_expiry": {"enabled": false, "single_writer": false},
   "appreciation": {
     "enabled": false,
     "asset_path": "/etc/managed-account-service/assets/appreciation.png",

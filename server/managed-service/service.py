@@ -96,9 +96,10 @@ class ManagedApplication:
         return account.public_info(self.config.public_webdav_url)
 
     def entitlement(self, headers):
-        identity = self.authenticator.authenticate(headers)
-        # Entitlement accepts an adapter identity, not username supplied in JSON.
-        return self.ledger.entitlement(identity)
+        account = self.authenticator.authenticate_account(headers)
+        # Carry the authenticated provider snapshot, not only its public identity.
+        # Native expiry also verifies status and the observed remote deadline.
+        return self.ledger.entitlement(account)
 
     def appreciation(self, headers):
         if self.appreciation_asset is None:
@@ -312,13 +313,18 @@ def build_application(config):
                            admin_credentials=runtime_credentials,
                            template=NewAccountTemplate(**account_config['new_account']),
                            no_username_reuse=config.prerequisites['no_delete_or_reuse_managed_usernames'],
-                           allow_loopback_http=account_config['allow_loopback_http'], timeout=account_config['timeout_seconds'])
-    ledger = ManagedLedger(config.database_path, accounts=accounts, enabled=config.mutations_enabled)
+                           allow_loopback_http=account_config['allow_loopback_http'], timeout=account_config['timeout_seconds'],
+                           native_expiry_enabled=config.account_expiry['enabled'],
+                           no_external_account_writers=config.account_expiry['single_writer'])
+    ledger = ManagedLedger(config.database_path, accounts=accounts, enabled=config.mutations_enabled,
+                           native_expiry=config.account_expiry['enabled'])
     return ManagedApplication(config, accounts=accounts, ledger=ledger)
 
 
 def serve(config):
     application = build_application(config)
+    if config.account_expiry['enabled']:
+        application.ledger.assert_native_migration_ready()
     binding = secret = sdk = None
     if config.feishu['enabled']:
         binding = Binding.load(config.feishu['binding_file'])
@@ -356,7 +362,7 @@ def serve(config):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('validate-config', 'serve'))
+    parser.add_argument('command', choices=('validate-config', 'migrate-native-expiry', 'serve'))
     parser.add_argument('config', help='Explicit external JSON configuration; no embedded credentials')
     args = parser.parse_args(argv)
     try:
@@ -371,6 +377,24 @@ def main(argv=None):
             print('Appreciation asset validated offline.' if config.appreciation['enabled'] else
                   'Appreciation disabled; no asset opened.')
             print('Offline validation only: no credentials read, network calls, or deployment verification.')
+            return 0
+        if args.command == 'migrate-native-expiry':
+            if not config.account_expiry['enabled']:
+                raise ConfigurationError('NATIVE_EXPIRY_MIGRATION_DISABLED')
+            application = build_application(config)
+            cursor = None
+            while True:
+                result = application.ledger.reconcile_native_accounts(limit=100, after_owner=cursor)
+                # No usernames, account IDs, original rows or upstream errors in CLI output.
+                print(json.dumps({key: result[key] for key in ('processed', 'applied', 'failed') if key in result}))
+                if result.get('failed', 0):
+                    print('Migration incomplete; keep the old gate and retry the same frozen targets.', file=sys.stderr)
+                    return 2
+                cursor = result.get('next_owner')
+                if cursor is None:
+                    break
+            application.ledger.assert_native_migration_ready()
+            print('Native account expiries migrated and read back. No file data changed.')
             return 0
         serve(config)
         return 0

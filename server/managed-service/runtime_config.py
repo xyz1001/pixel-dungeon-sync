@@ -119,11 +119,12 @@ class RuntimeConfig:
     prerequisites: dict
     feishu: dict
     appreciation: dict = field(default_factory=lambda: {'enabled': False})
+    account_expiry: dict = field(default_factory=lambda: {'enabled': False, 'single_writer': False})
 
     @classmethod
     def parse(cls, value):
         value = _object(value, ('version', 'listen', 'database_path', 'public_webdav_url', 'sftpgo', 'prerequisites', 'feishu'),
-                        ('enabled', 'mutations_enabled', 'appreciation'))
+                        ('enabled', 'mutations_enabled', 'appreciation', 'account_expiry'))
         if type(value['version']) is not int or value['version'] != 1:
             raise ConfigurationError('CONFIG_VERSION_UNSUPPORTED')
         enabled, mutations = _bool(value.get('enabled', False)), _bool(value.get('mutations_enabled', False))
@@ -149,12 +150,20 @@ class RuntimeConfig:
         _path(template['home_root'])
         for key in ('quota_bytes', 'upload_bandwidth_kb', 'download_bandwidth_kb'):
             _integer(template[key], 1, 2**63 - 1)
+        account_expiry = _object(value.get('account_expiry', {'enabled': False, 'single_writer': False}),
+                                 ('enabled', 'single_writer'))
+        _bool(account_expiry['enabled'])
+        _bool(account_expiry['single_writer'])
+        if account_expiry['enabled'] and (not enabled or not mutations or not account_expiry['single_writer']):
+            raise ConfigurationError('NATIVE_EXPIRY_REQUIRES_ENABLED_SINGLE_WRITER')
         prerequisites = _object(value['prerequisites'], PREREQUISITES)
         for acknowledged in prerequisites.values():
             _bool(acknowledged)
         if enabled and not prerequisites['no_delete_or_reuse_managed_usernames']:
             raise ConfigurationError('ACCOUNT_LIFECYCLE_ATTESTATION_REQUIRED')
-        if mutations and (not enabled or not all(prerequisites.values())):
+        required = [value for key, value in prerequisites.items()
+                    if key != 'all_managed_aliases_gated' or not account_expiry['enabled']]
+        if mutations and (not enabled or not all(required)):
             raise ConfigurationError('MUTATION_READINESS_ATTESTATIONS_REQUIRED')
         feishu = _object(value['feishu'], ('enabled',), ('binding_file', 'app_secret', 'queue_path'))
         _bool(feishu['enabled'])
@@ -179,7 +188,7 @@ class RuntimeConfig:
         if appreciation['enabled'] and not {'asset_path', 'expected_sha256'} <= set(appreciation):
             raise ConfigurationError('APPRECIATION_ASSET_CONFIGURATION_REQUIRED')
         return cls(enabled, mutations, dict(listen), value['database_path'], value['public_webdav_url'],
-                   dict(sftpgo), dict(prerequisites), dict(feishu), dict(appreciation))
+                   dict(sftpgo), dict(prerequisites), dict(feishu), dict(appreciation), dict(account_expiry))
 
     @classmethod
     def load(cls, path):

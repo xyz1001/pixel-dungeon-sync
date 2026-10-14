@@ -11,6 +11,90 @@ The service uses the same SFTPGo username/password as the existing version-2
 account contract. It does not add a browser session, token issuer, payment SDK,
 order-review API, or public Feishu event endpoint.
 
+## Native account expiry (new policy; explicit migration required)
+
+`account_expiry: {"enabled": true, "single_writer": true}` selects SFTPGo's
+native `expiration_date`. The omitted/default-disabled setting retains the old
+upload-only gate solely for rolling migration. Do not remove that gate until the
+migration below succeeds. No second password database or expiry bypass is added.
+
+- New registrations start with a finite server-time deadline, then the durable
+  journal applies exactly the original SFTPGo `created_at + 72 hours`. Retries
+  keep the original account, operation and deadline. Both processes must share
+  the same trusted system clock (as with the service and container on one host).
+- The existing Feishu message ID remains the idempotency key. The first donation
+  starts one calendar year from processing time; a currently paid term extends
+  by one calendar year. Trial time is never added to the paid base.
+- A remote expiry is confirmed only after PUT and GET readback for the exact
+  account incarnation, followed by the existing durable operation confirmation.
+  A failed/unknown write retains its frozen target; retry does not add a year.
+- Native expiry blocks **new** SFTPGo authentication and every new DAV request,
+  including cached-user requests. Expiry does not delete files or change the
+  stored password. Renewal extends the date and uses `disconnect=1` so stale
+  connections reauthenticate. `status=0` is separate manual suspension and is
+  not silently cleared by this service.
+- A transfer already in flight is not cut off at the exact millisecond. SFTPGo
+  checks open connections approximately every three minutes only when
+  `common.idle_timeout > 0`; DAV close may allow a further short I/O deadline.
+  This is not a promise of zero bytes after the deadline.
+- Admin PUT replaces the whole account and has no compare-and-swap. This service
+  serializes writes in the ledger transaction, fetches the current account and
+  changes only expiry (omitting password). `single_writer` attests there are no
+  concurrent WebAdmin/other-process account changes. Pause this service before
+  manual managed-account edits. The existing runtime admin needs `edit_users`
+  in addition to view/create permissions; any permission change is a separate
+  operator-approved deployment step.
+- No unbound/nonmanaged account, including the fixed drop account, is enrolled
+  by a migration or an unsolicited Feishu username. Existing bindings and
+  source-confirmed operations are required; old username-only rows still need
+  their original explicit identity review.
+
+Before switching production, stop the existing composition, consistently back
+up its SQLite and configuration, enable the new policy in the external config,
+and explicitly run:
+
+```sh
+python server/managed-service/service.py migrate-native-expiry /etc/managed-account-service/config.json
+```
+
+This is a **mutating** operator command, not offline validation. It applies only
+existing bound/confirmed absolute deadlines, in bounded pages, without adding
+trial/paid time or changing file data. Failed pages keep the fixed targets and
+can be retried. Old unfinished operations require repair using their original
+operation before migration; the new service refuses incomplete migration at
+startup. New native-origin interrupted registrations retain their original
+finite deadline and can recover normally after restart.
+
+After migration succeeds, start the service and verify live register/login,
+DAV before/after expiry, duplicate Feishu delivery, renewal/login and file
+preservation. Then the per-request ledger gate can be removed from the existing
+DAV locations: retain TLS, original URI mapping, private upstream listeners and
+isolated fixed-drop routes. The internal auth endpoint remains compatible but
+native mode performs ordinary SFTPGo authentication only, with no separate
+read/write entitlement decision. `all_managed_aliases_gated` may be false only
+in native mode after this reviewed change. No nginx edits are performed here.
+
+Rollback requires restoring the old service/config **and reviewing the remote
+expiry values already written**; restoring only SQLite does not undo SFTPGo
+updates. Never blindly clear expiry or restore old full user records. Keep the
+original upload-only gate until any intended access restoration is reviewed.
+
+SFTPGo does not expose password validation that ignores expiry. An expired
+user cannot authenticate to private entitlement data. The donation metadata and
+image are public fixed assets; an app may display its local/input username as
+an unverified remark. A previously authenticated expiry/time anchor may explain
+expiry locally but never grants access. A new device with no trusted record
+cannot distinguish expired, nonexistent and wrong-password accounts from 401;
+show neutral login/renewal guidance. A successful login after administrator
+renewal refreshes the trusted state. No temporary unblocking or password hash
+copy is used.
+
+Official behavior checked against SFTPGo v2.7.6: `internal/dataprovider/user.go`,
+`internal/dataprovider/dataprovider.go`, `internal/httpd/api_user.go`,
+`internal/common/common.go`, and `openapi/openapi.yaml` in
+https://github.com/drakkan/sftpgo/tree/v2.7.6 . Production enforcement and open
+connection timing must still be verified on the deployed binary/configuration.
+
 ## Run and validate
 
 Python 3.10+; HTTP/account/ledger code uses the standard library. From this
@@ -47,7 +131,7 @@ A port bound to 127.0.0.1 alone is not a boundary against other local users.
 `enabled: true` starts the listener. `mutations_enabled: false` permits validation
 of authentication, confirmed existing entitlements and the gate, but rejects new
 registrations and cannot start the Feishu worker. Login/download remain possible
-for expired accounts. The account-lifecycle acknowledgement must already be true
+for expired accounts only in the legacy upload-only mode. The account-lifecycle acknowledgement must already be true
 for any enabled runtime because SFTPGo user-token authentication does not prove
 an immutable account incarnation. All six acknowledgements must be true before
 `mutations_enabled` or the bot can be enabled.
@@ -139,7 +223,9 @@ All responses are noncacheable. The only supported public routes are:
   admin token, upstream object, account-generation key or registration marker.
 - `GET /api/account/entitlement`, existing Basic credentials. Returns the
   authenticated account's confirmed expiry, active/managed flags, and
-  `source: "managed_ledger"`. It does not expose the sandbox order API.
+  `source: "managed_ledger"` and `server_time_ms` (trusted display-time anchor).
+  It does not expose the sandbox order API. Native-expired accounts cannot
+  authenticate this private route.
 - `GET /api/account/appreciation`, public static metadata, only when
   appreciation is enabled. Exact success contract:
   `{"code":200,"data":{"version":1,"payment_mode":"donation","image_path":"/api/account/appreciation/image","image_sha256":"<verified lowercase SHA-256>","term":"calendar_year","remark":"username"}}`.
