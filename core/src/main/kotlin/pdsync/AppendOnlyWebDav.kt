@@ -226,10 +226,19 @@ class AppendOnlyWebDav(
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
  private fun <T> execute(request: Request, requestClient: OkHttpClient = client, block: (Response) -> T): T = try {
-  requestClient.newCall(request).execute().use(block)
- } catch (e: NamespaceProvisioningException) { throw e }
+  requestClient.newCall(request).execute().use { response ->
+   // The recorder accepts only a closed method enum and status, never URL, headers or payload.
+   DiagnosticLog.http(diagnosticMethod(request.method), response.code)
+   block(response)
+  }
+ } catch (e: NamespaceProvisioningException) {
+  // The namespace interceptor rejects bad statuses before execute can expose its response.
+  e.statusCode?.let { DiagnosticLog.http(diagnosticMethod(request.method), it) }
+  throw e
+ }
  catch (e: WebDavException) { throw e }
  catch (error: IOException) {
+  DiagnosticLog.networkFailure(error)
   // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
   // Never copy transport text, causes or suppressed exceptions, which can contain credentials/URLs.
   val category = when (error) {
@@ -244,6 +253,16 @@ class AppendOnlyWebDav(
    else -> "IO"
   }
   throw IOException("WebDAV network request failed [$category]")
+ }
+
+ private fun diagnosticMethod(method: String): DiagnosticHttpMethod = when (method) {
+  "GET" -> DiagnosticHttpMethod.GET
+  "PUT" -> DiagnosticHttpMethod.PUT
+  "PROPFIND" -> DiagnosticHttpMethod.PROPFIND
+  "MKCOL" -> DiagnosticHttpMethod.MKCOL
+  "HEAD" -> DiagnosticHttpMethod.HEAD
+  "POST" -> DiagnosticHttpMethod.POST
+  else -> DiagnosticHttpMethod.OTHER
  }
 
  private fun readBounded(response: Response, limit: Int): ByteArray {
