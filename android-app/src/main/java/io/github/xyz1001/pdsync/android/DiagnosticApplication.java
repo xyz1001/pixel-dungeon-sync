@@ -6,6 +6,7 @@ import android.app.Application;
 public final class DiagnosticApplication extends Application {
     @Override public void onCreate() {
         super.onCreate();
+        AndroidDiagnosticEnvironment.configure();
         AndroidDiagnosticLogging.configure(this);
     }
 }

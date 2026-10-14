@@ -38,7 +38,7 @@ import javax.net.ssl.SSLException
 @Serializable enum class DiagnosticAction { APP_START, CONFIGURE, CONNECT, INSPECT, HISTORY, PREPARE, INSTALL, ACCESS_CHECK, LAUNCH, CAPTURE, PUSH, RESTORE, RECOVERY, RESOLVE, MERGE, ARCHIVE, EXPORT_LOGS, AUTOMATIC_SYNC, OTHER }
 @Serializable enum class DiagnosticStage { QUEUED, STARTED, CONFIRMATION, GUARD, WORK, REFRESH, FINISHED, RUNTIME, CONNECTION, NAMESPACE, HTTP, PREPARATION, INSTALLATION, BRIDGE, READINESS, GAME_LAUNCH, BACKUP, RESTORE, RECOVERY, VERIFY, EXPORT }
 @Serializable enum class DiagnosticResult { STARTED, SUCCEEDED, FAILED, CANCELED, REJECTED, SKIPPED, PENDING, CONFLICT }
-@Serializable enum class DiagnosticFailure { NONE, BUSY, NOT_READY, RECOVERY_REQUIRED, IDENTITY_MISMATCH, UNAVAILABLE, CANCELED, AUTHENTICATION, AUTHORIZATION, HTTP, TIMEOUT, DNS, CONNECT, TLS, EOF, CONNECTION, INTERRUPTED, NETWORK_IO, STORAGE, VALIDATION, OTHER }
+@Serializable enum class DiagnosticFailure { NONE, GAME_NOT_SELECTED, NOT_CHECKED, FIRST_LAUNCH_NEEDED, UNRECOGNIZED_LAYOUT, SYSTEM_REQUEST_PENDING, CAPABILITY_UNAVAILABLE, BUSY, NOT_READY, RECOVERY_REQUIRED, IDENTITY_MISMATCH, UNAVAILABLE, CANCELED, AUTHENTICATION, AUTHORIZATION, HTTP, TIMEOUT, DNS, CONNECT, TLS, EOF, CONNECTION, INTERRUPTED, NETWORK_IO, STORAGE, VALIDATION, OTHER }
 @Serializable enum class DiagnosticHttpMethod { GET, PUT, PROPFIND, MKCOL, HEAD, POST, OTHER }
 
 class DiagnosticTrace internal constructor(val id: String, val action: DiagnosticAction, val automatic: Boolean) {
@@ -46,6 +46,8 @@ class DiagnosticTrace internal constructor(val id: String, val action: Diagnosti
  fun record(stage: DiagnosticStage, result: DiagnosticResult): Boolean = record(stage, result, DiagnosticFailure.NONE)
  fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure): Boolean =
   DiagnosticLog.write(this, stage, result, failure)
+ fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure, details: DiagnosticDetails): Boolean =
+  DiagnosticLog.write(this, stage, result, failure, details = details)
  fun failure(stage: DiagnosticStage, error: Throwable): Boolean = DiagnosticLog.writeFailure(this, stage, error)
 }
 
@@ -80,13 +82,14 @@ object DiagnosticLog {
   val appVersion: String, val platform: String, val operationId: String,
   val action: DiagnosticAction, val automatic: Boolean, val stage: DiagnosticStage,
   val result: DiagnosticResult, val failure: DiagnosticFailure = DiagnosticFailure.NONE,
-  val elapsedMs: Long, val httpMethod: DiagnosticHttpMethod? = null, val httpStatus: Int? = null
+  val elapsedMs: Long, val httpMethod: DiagnosticHttpMethod? = null, val httpStatus: Int? = null,
+  val details: DiagnosticDetails? = null
  )
  @Serializable private data class Metadata(
   val schema: Int = 1, val generatedAtUtc: String, val zone: String, val offsetMinutes: Int,
   val appVersion: String, val platform: String, val retentionDays: Long = RETENTION_DAYS,
   val maxStoredBytes: Int = MAX_TOTAL_BYTES, val recordCount: Int,
-  val storageAvailable: Boolean, val redaction: String = "closed-schema-no-payloads-identifiers-paths-urls-headers-messages-or-stacks"
+  val storageAvailable: Boolean, val environment: DiagnosticEnvironment.Snapshot = DiagnosticEnvironment.snapshot(), val redaction: String = "closed-schema-no-payloads-identifiers-paths-urls-headers-messages-or-stacks"
  )
 
  @JvmStatic fun configure(applicationPrivateDirectory: Path, version: String, platform: String) {
@@ -116,6 +119,8 @@ object DiagnosticLog {
  @JvmStatic fun record(stage: DiagnosticStage, result: DiagnosticResult): Boolean = record(stage, result, DiagnosticFailure.NONE)
  @JvmStatic fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure): Boolean =
   current.get()?.record(stage, result, failure) ?: false
+ @JvmStatic fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure, details: DiagnosticDetails): Boolean =
+  current.get()?.record(stage, result, failure, details) ?: false
  @JvmStatic fun failure(stage: DiagnosticStage, error: Throwable): Boolean = current.get()?.failure(stage, error) ?: false
 
  /** Status is diagnostic only: a protocol-accepted 404/405 is not automatically an operation failure. */
@@ -124,16 +129,23 @@ object DiagnosticLog {
   val trace = current.get() ?: begin(DiagnosticAction.CONNECT, false)
   return write(trace, DiagnosticStage.HTTP, DiagnosticResult.SUCCEEDED, DiagnosticFailure.NONE, method, status)
  }
+ @JvmStatic fun http(method: DiagnosticHttpMethod, status: Int, details: DiagnosticDetails): Boolean {
+  if (status !in 100..599) return false
+  val trace = current.get() ?: begin(DiagnosticAction.CONNECT, false)
+  return write(trace, DiagnosticStage.HTTP, DiagnosticResult.SUCCEEDED, DiagnosticFailure.NONE, method, status, details)
+ }
+ @JvmStatic fun networkFailure(error: Throwable, details: DiagnosticDetails): Boolean =
+  writeFailure(current.get() ?: begin(DiagnosticAction.CONNECT, false), DiagnosticStage.HTTP, error, details)
  @JvmStatic fun networkFailure(error: Throwable): Boolean =
   (current.get() ?: begin(DiagnosticAction.CONNECT, false)).failure(DiagnosticStage.HTTP, error)
 
- internal fun writeFailure(trace: DiagnosticTrace, stage: DiagnosticStage, error: Throwable): Boolean {
+ internal fun writeFailure(trace: DiagnosticTrace, stage: DiagnosticStage, error: Throwable, details: DiagnosticDetails? = null): Boolean {
   val category = classify(error)
   return write(trace, stage, if (category == DiagnosticFailure.CANCELED) DiagnosticResult.CANCELED else DiagnosticResult.FAILED,
-   category, null, httpStatus(error))
+   category, null, httpStatus(error), details)
  }
  internal fun write(trace: DiagnosticTrace, stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure,
-                    method: DiagnosticHttpMethod? = null, status: Int? = null): Boolean = synchronized(lock) {
+                    method: DiagnosticHttpMethod? = null, status: Int? = null, details: DiagnosticDetails? = null): Boolean = synchronized(lock) {
   try {
    val config = configuration ?: return@synchronized false
    prepare(config); prune(config)
@@ -142,7 +154,7 @@ object DiagnosticLog {
     offsetMinutes = zone.rules.getOffset(now).totalSeconds / 60, appVersion = config.version, platform = config.platform,
     operationId = trace.id, action = trace.action, automatic = trace.automatic, stage = stage, result = result, failure = failure,
     elapsedMs = ((System.nanoTime() - trace.startedNanos) / 1_000_000).coerceIn(0, 7 * 24 * 60 * 60 * 1000L),
-    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 })
+    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 }, details = details)
    var line = (codec.encodeToString(record) + "\n").toByteArray(Charsets.UTF_8)
    require(line.size <= MAX_LINE_BYTES)
    val file = SafePaths.checked(config.directory.resolve("events-${utcDate(now)}.jsonl"))
@@ -208,7 +220,10 @@ object DiagnosticLog {
  /** A human-readable view of the same validated snapshot, never arbitrary exception/logcat text. */
  private fun readableLog(metadata: Metadata, records: List<Record>): String = buildString {
   appendLine("# PD Sync 应用日志")
+  appendLine("# 导出快照不包含本次导出完成结果；不会补录旧版本未记录的历史。")
   appendLine("# version=${metadata.appVersion} platform=${metadata.platform} exportedAt=${metadata.generatedAtUtc} zone=${metadata.zone}")
+  val environment = metadata.environment
+  appendLine("# osVersion=${environment.osVersion ?: "unknown"} api=${environment.androidApiLevel ?: "unknown"} brand=${environment.brand ?: "unknown"} model=${environment.model ?: "unknown"} cpu=${environment.cpuArchitectures.joinToString(",")} locale=${environment.locale ?: "unknown"}")
   appendLine("# records=${metadata.recordCount} storageAvailable=${metadata.storageAvailable} retentionDays=${metadata.retentionDays}")
   if (!metadata.storageAvailable) appendLine("# 日志存储不可用或读取不完整。")
   if (records.isEmpty()) appendLine("# 没有可导出的已记录事件。")
@@ -225,6 +240,7 @@ object DiagnosticLog {
    record.httpMethod?.let { append(" method=$it") }
    record.httpStatus?.let { append(" status=$it") }
    if (record.failure != DiagnosticFailure.NONE) append(" error=${record.failure} (${failureText(record.failure)})")
+   record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) -> append(" ${field.name}=$value") }
    appendLine(" version=${record.appVersion} platform=${record.platform} zone=${record.zone} offsetMinutes=${record.offsetMinutes}")
   }
  }
@@ -260,6 +276,9 @@ object DiagnosticLog {
   DiagnosticResult.PENDING -> "等待处理"; DiagnosticResult.CONFLICT -> "存在冲突"
  }
  private fun failureText(value: DiagnosticFailure): String = when (value) {
+  DiagnosticFailure.GAME_NOT_SELECTED -> "尚未选择游戏"; DiagnosticFailure.NOT_CHECKED -> "尚未检查存档访问"
+  DiagnosticFailure.FIRST_LAUNCH_NEEDED -> "游戏尚未创建存档目录"; DiagnosticFailure.UNRECOGNIZED_LAYOUT -> "存档布局无法识别"
+  DiagnosticFailure.SYSTEM_REQUEST_PENDING -> "等待系统安装操作结束"; DiagnosticFailure.CAPABILITY_UNAVAILABLE -> "所需文件操作能力不可用"
   DiagnosticFailure.NONE -> "无错误"; DiagnosticFailure.BUSY -> "游戏或存档忙碌"
   DiagnosticFailure.NOT_READY -> "存档尚未就绪"; DiagnosticFailure.RECOVERY_REQUIRED -> "需要处理中断操作"
   DiagnosticFailure.IDENTITY_MISMATCH -> "应用身份不匹配"; DiagnosticFailure.UNAVAILABLE -> "所需能力不可用"
@@ -423,6 +442,7 @@ object DiagnosticLog {
     require(safeZone(zone).id == record.zone && record.offsetMinutes == zone.rules.getOffset(time).totalSeconds / 60)
     require(record.elapsedMs in 0..7 * 24 * 60 * 60 * 1000L)
     require(record.httpStatus == null || record.httpStatus in 100..599)
+    require(record.details == null || record.details.isValid())
     record
    } catch (_: Exception) { null }
   }
