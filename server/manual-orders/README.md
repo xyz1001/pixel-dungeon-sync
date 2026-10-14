@@ -13,7 +13,7 @@ It requires an ID and explicit sandbox quota/bandwidth limits. `amount_minor`
 and `currency` must be null; `payment_mode` is `donation`. Actual amount/currency
 are recorded only by an authenticated administrator after statement verification.
 The confirmed product duration is one UTC calendar year, starting at approval
-or extending the current unexpired ledger expiry; Feb 29 clamps to Feb 28.
+or extending the current unexpired approved-donation expiry; Feb 29 clamps to Feb 28.
 `expiry_policy` is `sandbox_upload_only`; no production permission effect exists.
 No minimum donation, fixed annual fee or customer-entered amount is inferred.
 Offer IDs version the limits; existing order snapshots remain immutable.
@@ -92,7 +92,8 @@ not a reliable delivery queue; the admin queue is authoritative.
 
 Approval commits reviewer, channel/reference, the absolute desired entitlement
 and the durable applying order together in one SQLite transaction.
-Renewal starts at `max(now, current ledger expiry)`. Calendar-year terms use UTC
+The first donation starts at approval, ignoring any remaining trial. Paid
+renewal starts at `max(now, confirmed paid expiry)`. Calendar-year terms use UTC
 anniversaries with Feb 29 clamped to Feb 28.
 No local timezone/DST calculation or floating-point price arithmetic is used.
 The quota snapshot describes desired limits; phase one does not apply real
@@ -185,7 +186,7 @@ worker: payment reservation writes the ledger before ensure runs; success only
 marks approved, publishing its fixed target as confirmed service rights.
 Failure leaves applying without undoing the recorded donation. First activation
 remains inactive; an unconfirmed renewal retains only the prior confirmed
-expiry. The API and write gate use the same approved-order ledger query. Retry/restart never extends again. The CAS policy remains
+expiry. The API and write gate use the same confirmed-trial/approved-donation query. Retry/restart never extends again. The CAS policy remains
 experimental; production should evaluate a per-request authenticated DAV write
 gate rather than assume SFTPGo supports atomic permission updates.
 
@@ -193,3 +194,59 @@ The disabled [per-request write gate prototype](WRITE_GATE_PLAN.md) and fake
 HTTP tests now implement that decision boundary. Its plan records all three
 actual DAV proxy aliases and the unrestricted 8090 Compose publishing concern;
 no production networking or auth routing has been changed.
+
+
+## One registration trial per account (disabled sandbox seam)
+
+`RegistrationTrials(orders)` is disabled by default; live mode is rejected.
+An explicit sandbox host may inject it as `auth_v2`'s `registration_trials`
+service. The legacy production creation callback is unchanged and is not an
+acceptable durable registration adapter. No actual account, listener, deployment,
+credential or production permission update is introduced.
+
+A newly registered account gets exactly 72 elapsed hours from its successful
+upstream server creation timestamp. `registration_trials` commits one stable
+operation per account **before** upstream creation. The injected trusted adapter
+must atomically bind that operation to the new account and its original server
+time, and recover the same proof after a lost response or local ledger failure.
+A callback followed by a journal insert does not meet this requirement. A
+production implementation without that atomic/recoverable proof is unsupported.
+A matching username or an “already exists” response is never registration proof.
+
+Every registration retry must verify the supplied password belongs to the same
+account and operation, including retries after confirmation. Existing accounts
+from another operation cannot claim a trial. Passwords are never stored in the
+local journal or audit; request bodies cannot supply a start time, duration,
+expiry or operation ID. Login does not call the trial service. Duplicate or
+late registration retries retain the original 72-hour expiry, even after it ends.
+
+The adapter must create accounts read-only with login/download retained and
+preserve a trusted activation template. It must idempotently finish template
+enrollment before returning proof. The journal transitions
+`pending -> applying -> confirmed`: validated creation proof and the fixed desired
+expiry commit together; only successful entitlement readback confirms the trial.
+The shared write gate accepts a current confirmed trial **or** approved donation.
+Unconfirmed desired rows grant no writes; an existing confirmed grant remains
+usable only to its original expiry. Expiry does not disable login/download.
+
+The normal authenticated entitlement API is unchanged. It reads the maximum
+confirmed trial/approved donation expiry. A trial does not carry into the first
+paid year; paid renewals carry only an existing approved paid expiry. Desired
+ledger updates are monotonic, so late trial recovery cannot overwrite a donation.
+Registration recovery repeats the same named registration and credentials after
+backoff; login never repairs or renews a pending trial. There is no recovery route
+that accepts an arbitrary account name and mints rights without credential proof.
+A process crash leaves a 30-second entitlement-application lease that can be
+reclaimed by a credential-verified retry. A stale worker cannot confirm a newer
+lease. Read-only upstream calls and writes happen outside SQLite transactions.
+
+The schema adds an empty trial journal to compatible donation sandbox databases;
+it does not import existing accounts, desired entitlements or applying orders as
+confirmed trials. Prior approved-donation history remains authoritative. Tests
+use a separate disposable upstream SQLite fixture to exercise the creation/ledger
+failure gap; this proves the seam's recovery contract, not SFTPGo atomic support.
+
+```sh
+python -m unittest discover -s server/manual-orders -v
+python -m unittest discover -s server/sftpgo-auth -v
+```

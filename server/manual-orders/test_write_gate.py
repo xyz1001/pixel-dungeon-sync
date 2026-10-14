@@ -27,6 +27,7 @@ class WriteGateTests(unittest.TestCase):
         self.path = Path(self.temp.name) / 'gate.sqlite'
         with closing(sqlite3.connect(self.path)) as db:
             db.execute('CREATE TABLE orders(owner TEXT, target_ms INTEGER, state TEXT)')
+            db.execute('CREATE TABLE registration_trials(owner TEXT, expires_ms INTEGER, state TEXT)')
             db.execute('INSERT INTO orders VALUES(?,?,?)', ('alice', 1001, 'approved'))
             db.commit()
         self.now = 1000

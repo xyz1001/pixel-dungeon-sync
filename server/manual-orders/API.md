@@ -134,7 +134,8 @@ currency and channel transaction number. Reapproving with different actual
 amount/currency conflicts; retry uses the persisted values.
 
 Each verified donation grants one UTC calendar year from manual approval, or
-from the current unexpired expiry, whichever is later. Feb 29 maps to Feb 28
+from the current unexpired approved-donation expiry, whichever is later.
+The first donation ignores remaining trial time and starts at manual approval. Feb 29 maps to Feb 28
 in the next year. The desired production expiry action is disabling uploads
 while retaining login/download and the same login-based renewal flow, not
 setting SFTPGo account `expiration_date`. No production enforcement is present.
@@ -151,11 +152,31 @@ Use a fresh sandbox DB for this schema change; no live DB migration was run.
 
 Approval atomically stores the fixed desired ledger expiry and the applying
 order before invoking a worker. Client entitlement and the DAV write gate both
-read the maximum target of approved orders as the confirmed ledger. Desired
-rows and applying orders never grant writes. First application failure returns
-expires_ms=null and active=false. During a failed renewal, the previous confirmed
-expiry remains visible and usable until it expires; then writes are denied.
+read the maximum of confirmed registration-trial expiry and approved-donation
+targets as the confirmed ledger. Desired rows and applying records never grant
+writes. Without an older confirmed grant, first application failure returns
+expires_ms=null and active=false. During a failed donation or renewal, any prior
+confirmed trial/donation remains visible and usable only until its original
+expiry; then writes are denied.
 Only successful confirmation publishes the fixed extension. Retry retains the
 same target. Response fields/routes are unchanged; pending desired expiry is
 available as the order's target_ms. observed_expiry on the internal adapter
 means confirmed ledger application, never the SFTPGo login expiration_date.
+
+
+## Registration trial boundary
+
+The optional sandbox registration service grants one exact 72-hour trial from
+successful upstream server creation time. It is not an order route or a
+client-supplied timestamp. The named-auth handler can explicitly inject it;
+login never invokes it. A durable operation precedes creation and a trusted
+adapter must recover original creation proof after upstream success/local
+failure, while verifying the same account's credentials on every retry.
+Existing accounts from other operations cannot claim a grant. No production
+adapter is implemented. See [registration contract](README.md#one-registration-trial-per-account-disabled-sandbox-seam).
+
+The existing entitlement response has no new fields: `expires_ms` is the latest
+confirmed trial or approved donation; `active` is strict server-time comparison.
+At equality, writes are expired; authenticated login/download remain available.
+Repeated registration and login never restart a trial. First donation runs one
+UTC calendar year from approval; later paid renewals retain paid carry-forward.

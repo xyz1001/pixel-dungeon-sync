@@ -91,7 +91,32 @@ def perform(env, action, username, password, ip):
         if not env['check_ip_rate_limit'](ip):
             raise ApiError(429, 'REGISTRATION_RATE_LIMITED')
         try:
-            env['create_sftpgo_user'](username, password)
+            trials = env.get('registration_trials')
+            if trials is None:
+                env['create_sftpgo_user'](username, password)
+            else:
+                # Explicit sandbox composition only. Never call the old CREATE
+                # callback first: it has no durable, recoverable success proof.
+                try:
+                    trials.register(username, password)
+                except Exception as error:
+                    # The injected boundary is trusted, but raw exception text
+                    # can contain upstream secrets. Expose only bounded codes.
+                    safe_errors = {
+                        'USERNAME_UNAVAILABLE': 409, 'INVALID_CREDENTIALS': 401,
+                        'INVALID_USERNAME': 400, 'INVALID_PASSWORD': 400,
+                        'REGISTRATION_IN_PROGRESS': 409,
+                        'REGISTRATION_PROOF_CONFLICT': 409,
+                        'REGISTRATION_TRIALS_DISABLED': 503,
+                        'DURABLE_REGISTRATION_PROOF_REQUIRED': 503,
+                        'INVALID_REGISTRATION_PROOF': 503,
+                        'REGISTRATION_DATABASE_UNAVAILABLE': 503,
+                        'REGISTRATION_UPSTREAM_UNAVAILABLE': 503,
+                    }
+                    code = getattr(error, 'code', None)
+                    if code in safe_errors:
+                        raise ApiError(safe_errors[code], code) from None
+                    raise ApiError(503, 'REGISTRATION_TRIAL_RETRY_REQUIRED') from None
         except urllib.error.HTTPError as error:
             if error.code == 409:
                 raise ApiError(409, 'USERNAME_UNAVAILABLE') from None

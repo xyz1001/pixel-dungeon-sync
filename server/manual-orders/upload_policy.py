@@ -231,8 +231,8 @@ class UploadPolicy:
 class OrderUploadAdapter:
     """Sandbox bridge for Orders.adapter; no use of account expiration_date.
 
-    The order service must reserve the donation in the same database before
-    invoking ensure. observed_expiry reports a confirmed permission-job ledger
+    The service must reserve a proved trial or donation in the same database
+    before invoking ensure. observed_expiry reports a confirmed permission-job ledger
     target, not the SFTPGo account's login expiration property.
     """
     def __init__(self, policy):
@@ -242,11 +242,14 @@ class OrderUploadAdapter:
         self.policy.guard()
         with self.policy.db() as db:
             order = db.execute('SELECT owner,state,target_ms FROM orders WHERE id=?', (operation_id,)).fetchone()
+            trial = db.execute('SELECT owner,state,expires_ms FROM registration_trials WHERE operation_id=?', (operation_id,)).fetchone()
             ledger = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (username,)).fetchone()
-            if (order is None or order['owner'] != username or
-                order['state'] not in ('applying', 'approved') or
-                order['target_ms'] != expires_at_ms or ledger is None or ledger[0] < expires_at_ms):
-                raise PolicyError('DONATION_NOT_RESERVED')
+            paid_reserved = (order is not None and order['owner'] == username and
+                             order['state'] in ('applying', 'approved') and order['target_ms'] == expires_at_ms)
+            trial_reserved = (trial is not None and trial['owner'] == username and
+                              trial['state'] in ('applying', 'confirmed') and trial['expires_ms'] == expires_at_ms)
+            if (not (paid_reserved or trial_reserved) or ledger is None or ledger[0] < expires_at_ms):
+                raise PolicyError('ENTITLEMENT_NOT_RESERVED')
         # Reread current desired ledger rather than replay an old job target.
         self.policy.reconcile(username)
 

@@ -100,6 +100,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_pending_per_owner ON orders(owner)
 CREATE TABLE IF NOT EXISTS entitlements (
  owner TEXT PRIMARY KEY, expires_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS registration_trials (
+ owner TEXT PRIMARY KEY, operation_id TEXT NOT NULL UNIQUE,
+ requested_ms INTEGER NOT NULL, created_ms INTEGER, expires_ms INTEGER,
+ state TEXT NOT NULL CHECK(state IN ('pending','applying','confirmed')),
+ lease_token TEXT, lease_until_ms INTEGER,
+ CHECK((state='pending' AND created_ms IS NULL AND expires_ms IS NULL) OR
+       (state IN ('applying','confirmed') AND created_ms IS NOT NULL AND expires_ms IS NOT NULL AND
+        created_ms >= 0 AND expires_ms=created_ms+259200000))
+);
 CREATE TABLE IF NOT EXISTS audit (
  seq INTEGER PRIMARY KEY, order_id TEXT NOT NULL, actor TEXT NOT NULL,
  event TEXT NOT NULL, at_ms INTEGER NOT NULL
@@ -107,15 +116,23 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 
-def confirmed_expiry(db, owner):
-    """Approved orders are the confirmed ledger; applying targets are desired only.
-
-    Derive from durable approval history so an unconfirmed renewal never revokes
-    an earlier grant or activates its extension. No migration of desired rows
-    into confirmed grants is safe or necessary.
-    """
+def confirmed_paid_expiry(db, owner):
+    """Only a previously approved donation may carry time into a paid renewal."""
     return db.execute("SELECT MAX(target_ms) FROM orders WHERE owner=? AND state='approved'",
                       (owner,)).fetchone()[0]
+
+
+def confirmed_expiry(db, owner):
+    """Confirmed registration trial OR approved donation, never desired targets.
+
+    An applying renewal cannot revoke an older confirmed trial/donation or make
+    its own extension usable. Trial time never changes paid renewal arithmetic.
+    """
+    return db.execute("""SELECT MAX(expires_ms) FROM (
+        SELECT target_ms AS expires_ms FROM orders WHERE owner=? AND state='approved'
+        UNION ALL
+        SELECT expires_ms FROM registration_trials WHERE owner=? AND state='confirmed'
+    )""", (owner, owner)).fetchone()[0]
 
 
 class Orders:
@@ -256,14 +273,14 @@ class Orders:
             elif row['state'] == 'review':
                 if db.execute('SELECT 1 FROM orders WHERE channel=? AND receipt_ref=?', (channel, receipt_ref)).fetchone():
                     raise OrderError(409, 'RECEIPT_ALREADY_USED')
-                current = db.execute('SELECT expires_ms FROM entitlements WHERE owner=?', (row['owner'],)).fetchone()
-                target = extend_ms(max(self.clock(), current[0] if current else 0), row['term'], row['days'])
+                current = confirmed_paid_expiry(db, row['owner'])
+                target = extend_ms(max(self.clock(), current or 0), row['term'], row['days'])
                 db.execute("UPDATE orders SET state='applying',target_ms=?,reviewer=?,receipt_ref=?,channel=?,actual_amount_minor=?,actual_currency=? WHERE id=?",
                            (target, principal.subject, receipt_ref, channel, actual_amount_minor, actual_currency, oid))
                 # The approved donation and durable application task commit
                 # together. The permission worker consumes this desired ledger.
                 # Remote failure cannot undo payment or add another term later.
-                db.execute('INSERT INTO entitlements VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET expires_ms=excluded.expires_ms',
+                db.execute('INSERT INTO entitlements VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET expires_ms=MAX(entitlements.expires_ms,excluded.expires_ms)',
                            (row['owner'], target))
                 self.audit(db, oid, principal.subject, 'approval_reserved')
             else:

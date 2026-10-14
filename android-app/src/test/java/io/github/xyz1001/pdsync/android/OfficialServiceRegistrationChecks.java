@@ -40,6 +40,9 @@ public final class OfficialServiceRegistrationChecks {
         inputValidationAndLegacyLogin();
         transportPolicy();
         httpFailures();
+        recoverableTrialRegistrationFailures();
+        trialErrorValidationAndFallback();
+        trialErrorBodyLimitsAndClosure();
         strictResponseTypes();
         quotaMetadataIsNotClientPolicy();
         quotaMbAllowsServerFloat();
@@ -213,6 +216,122 @@ public final class OfficialServiceRegistrationChecks {
         expectFailure(() -> new OfficialServiceRegistrationClient(request -> response(
                 request.newBuilder().url("https://other.invalid/api/register").build(), 200, VALID)).register(USER, PASSWORD),
                 FailureKind.REDIRECT_REJECTED, true);
+    }
+
+    private static String errorJson(int status, String error) {
+        return "{\"code\":" + status + ",\"error\":\"" + error + "\",\"message\":\"" + PASSWORD + "\"}";
+    }
+
+    private static void recoverableTrialRegistrationFailures() throws Exception {
+        for (String code : new String[] {"REGISTRATION_IN_PROGRESS", "REGISTRATION_TRIAL_RETRY_REQUIRED",
+                "REGISTRATION_DATABASE_UNAVAILABLE", "REGISTRATION_UPSTREAM_UNAVAILABLE"}) {
+            int status = "REGISTRATION_IN_PROGRESS".equals(code) ? 409 : 503;
+            for (boolean registration : new boolean[] {true, false}) {
+                AtomicInteger calls = new AtomicInteger();
+                TrackingBody body = new TrackingBody(errorJson(status, code).getBytes(StandardCharsets.UTF_8), -1);
+                OfficialServiceRegistrationClient client = new OfficialServiceRegistrationClient(request -> {
+                    calls.incrementAndGet();
+                    check(request.body().isOneShot(), "trial response cannot replay request body");
+                    check((registration ? "register" : "login").equals(field(requestJson(request), "action")),
+                            "trial response cannot switch requested action");
+                    return response(request, status, body).newBuilder().header("Retry-After", "0").build();
+                });
+                FailureKind expected = registration ? FailureKind.REGISTRATION_RETRY_REQUIRED
+                        : status == 409 ? FailureKind.USERNAME_TAKEN : FailureKind.SERVER_ERROR;
+                RegistrationException failure = expectFailure(() -> {
+                    if (registration) client.register(USER, PASSWORD);
+                    else client.login(USER, PASSWORD);
+                }, expected, registration);
+                check(calls.get() == 1, "recoverable trial failure never automatically retried");
+                check(body.closed, "trial error body closed for either action");
+                if (registration) {
+                    check(!failure.userMessage().contains("登录") && !failure.userMessage().contains("更换账号"),
+                            "pending trial is not username-taken and does not direct login");
+                    check(body.bytesRead > 0, "registration reads bounded error envelope");
+                } else {
+                    check(!failure.userMessage().contains("注册"), "login never claims an account was created");
+                    check(body.bytesRead == 0, "login behavior unchanged: error body not read");
+                }
+            }
+        }
+        failResponse(409, errorJson(409, "USERNAME_UNAVAILABLE"), FailureKind.USERNAME_TAKEN, false);
+    }
+
+    private static void trialErrorValidationAndFallback() throws Exception {
+        for (int status : new int[] {409, 503}) {
+            String code = status == 409 ? "REGISTRATION_IN_PROGRESS" : "REGISTRATION_TRIAL_RETRY_REQUIRED";
+            String valid = errorJson(status, code);
+            FailureKind fallback = status == 409 ? FailureKind.USERNAME_TAKEN : FailureKind.SERVER_ERROR;
+            for (String invalid : new String[] {"", "[]", "null", "true", "{", valid + " trailing",
+                    valid.replace("\"code\":" + status, "\"code\":200"),
+                    valid.replace("\"code\":" + status, "\"code\":\"" + status + "\""),
+                    valid.replace("\"code\":" + status, "\"code\":" + status + ".0"),
+                    valid.replace("\"code\":" + status, "\"code\":0" + status),
+                    valid.replace("\"code\":" + status + ",", ""),
+                    valid.replace("\"code\":" + status, "\"code\":200,\"code\":" + status),
+                    valid.replace("\"code\":" + status, "\"co\\u0064e\":200,\"code\":" + status),
+                    valid.replace("\"error\":", "\"error\":\"USERNAME_UNAVAILABLE\",\"error\":"),
+                    valid.replace("\"error\":", "\"er\\u0072or\":\"USERNAME_UNAVAILABLE\",\"error\":"),
+                    valid.replace("\"error\":\"" + code + "\",", ""),
+                    valid.replace("\"" + code + "\"", "true"),
+                    valid.replace("\"" + code + "\"", "null"),
+                    valid.replace("\"" + code + "\"", "[\"" + code + "\"]"),
+                    valid.replace(code, "UNKNOWN_ERROR"),
+                    valid.replace(code, code.toLowerCase(java.util.Locale.ROOT)),
+                    valid.replace(code, " " + code), valid.replace(code, code + " "),
+                    valid.replace(code, code + "_EXTRA"), valid.replace(code, "x".repeat(65)),
+                    valid.replace(",\"message\":\"" + PASSWORD + "\"", ""),
+                    valid.replace("\"" + PASSWORD + "\"", "true"),
+                    valid.replace(PASSWORD, "x".repeat(1025)),
+                    valid.replace(PASSWORD, "\\ud800"),
+                    valid.replace("\"message\":", "\"message\":\"ignored\",\"message\":"),
+                    valid.replace("\"message\":", "\"extra\":NaN,\"message\":"),
+                    valid.replace("\"message\":", "\"extra\":{\"x\":1,\"x\":2},\"message\":"),
+                    valid.replace("\"message\":", "\"extra\":[[[[[[[[[0]]]]]]]]],\"message\":")}) {
+                failResponse(status, invalid, fallback, status == 503);
+            }
+            // A known code at the wrong HTTP/body status is not an approved retry pair.
+            String wrongCode = status == 409 ? "REGISTRATION_TRIAL_RETRY_REQUIRED" : "REGISTRATION_IN_PROGRESS";
+            failResponse(status, errorJson(status, wrongCode), fallback, status == 503);
+        }
+        for (String code : new String[] {"REGISTRATION_PROOF_CONFLICT", "REGISTRATION_TRIALS_DISABLED",
+                "DURABLE_REGISTRATION_PROOF_REQUIRED", "INVALID_REGISTRATION_PROOF"}) {
+            int status = "REGISTRATION_PROOF_CONFLICT".equals(code) ? 409 : 503;
+            failResponse(status, errorJson(status, code),
+                    status == 409 ? FailureKind.USERNAME_TAKEN : FailureKind.SERVER_ERROR, status == 503);
+        }
+        failResponse(500, errorJson(500, "REGISTRATION_TRIAL_RETRY_REQUIRED"), FailureKind.SERVER_ERROR, true);
+        failResponse(200, errorJson(200, "REGISTRATION_TRIAL_RETRY_REQUIRED"), FailureKind.INVALID_RESPONSE, true);
+    }
+
+    private static void trialErrorBodyLimitsAndClosure() throws Exception {
+        for (int status : new int[] {409, 503}) {
+            FailureKind fallback = status == 409 ? FailureKind.USERNAME_TAKEN : FailureKind.SERVER_ERROR;
+            TrackingBody declared = new TrackingBody(new byte[1], MAX_RESPONSE_BYTES + 1);
+            TrackingBody chunked = new TrackingBody(new byte[MAX_RESPONSE_BYTES * 3], -1);
+            TrackingBody falseLength = new TrackingBody(new byte[MAX_RESPONSE_BYTES * 2], 2);
+            TrackingBody invalidUtf8 = new TrackingBody(new byte[] {(byte) 0xc3, (byte) 0x28}, -1);
+            for (TrackingBody body : new TrackingBody[] {declared, chunked, falseLength, invalidUtf8}) {
+                AtomicInteger calls = new AtomicInteger();
+                expectFailure(() -> new OfficialServiceRegistrationClient(request -> {
+                    calls.incrementAndGet();
+                    return response(request, status, body);
+                }).register(USER, PASSWORD), fallback, status == 503);
+                check(calls.get() == 1, "invalid trial body never triggers another request");
+                check(body.closed && body.bytesRead <= MAX_RESPONSE_BYTES + 8192,
+                        "invalid trial body bounded and closed before status fallback");
+            }
+            check(declared.bytesRead == 0, "oversized trial envelope rejected without reading");
+            String code = status == 409 ? "REGISTRATION_IN_PROGRESS" : "REGISTRATION_TRIAL_RETRY_REQUIRED";
+            byte[] exactLimit = new byte[MAX_RESPONSE_BYTES];
+            Arrays.fill(exactLimit, (byte) ' ');
+            byte[] json = errorJson(status, code).getBytes(StandardCharsets.UTF_8);
+            System.arraycopy(json, 0, exactLimit, 0, json.length);
+            TrackingBody body = new TrackingBody(exactLimit, -1);
+            expectFailure(() -> new OfficialServiceRegistrationClient(request -> response(request, status, body))
+                    .register(USER, PASSWORD), FailureKind.REGISTRATION_RETRY_REQUIRED, true);
+            check(body.closed, "valid trial envelope at exact limit accepted and closed");
+        }
     }
 
     private static void strictResponseTypes() throws Exception {
@@ -416,18 +535,23 @@ public final class OfficialServiceRegistrationChecks {
 
     private interface Attempt { void run() throws Exception; }
 
-    private static void expectFailure(Attempt attempt, FailureKind expected, boolean unknown) throws Exception {
+    private static RegistrationException expectFailure(Attempt attempt, FailureKind expected, boolean unknown) throws Exception {
         try {
             attempt.run();
             throw new AssertionError("Expected " + expected);
         } catch (RegistrationException actual) {
             check(actual.kind == expected, "failure category: " + expected);
             check(actual.accountMayHaveBeenCreated == unknown, "creation outcome uncertainty");
-            check(actual.userMessage().contains("相同账号和密码登录") == unknown, "uncertain registration directs same-credential login");
+            boolean trialRetry = expected == FailureKind.REGISTRATION_RETRY_REQUIRED;
+            check(actual.userMessage().contains("相同账号和密码登录") == (unknown && !trialRetry),
+                    "generic uncertain registration retains same-credential login guidance");
+            check(actual.userMessage().contains("稍后用相同账号和密码重试注册") == trialRetry,
+                    "recognized trial errors alone direct same-credential registration retry");
             check(actual.getCause() == null && actual.getSuppressed().length == 0, "no raw exception chain");
             check(!actual.toString().contains(PASSWORD) && !actual.toString().contains(USER), "redacted failure");
             check(actual.userMessage().equals(actual.getMessage()) && actual.userMessage().length() < 50,
                     "short safe user-facing message");
+            return actual;
         }
     }
 

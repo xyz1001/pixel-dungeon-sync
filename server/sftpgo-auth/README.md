@@ -61,3 +61,20 @@ not unrestricted: usernames remain ASCII `[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}`;
 passwords must be nonempty, at most 512 UTF-8 bytes and contain no control
 characters. Legacy random accounts fit these rules; arbitrary existing Unicode
 usernames may not. Upstream 2FA/access restrictions are not bypassed.
+
+
+## Optional registration-trial composition (sandbox only)
+
+A trusted sandbox host can inject `env['registration_trials']` with the disabled-
+by-default service from `../manual-orders/registration_trials.py`. Named register
+then uses that boundary instead of the legacy create callback; failure never
+falls back to unjournaled creation. Login and legacy empty-body registration
+remain unchanged. No deploy script enables it.
+
+The adapter must atomically create a read-only account with recoverable operation
+and original server creation-time proof, and validate supplied credentials on
+all retries. The service issues one fixed 72-hour grant after entitlement
+confirmation. A username match, existing-user response, or local success callback
+alone is insufficient. No production SFTPGo adapter is provided. Registration
+retry recovers the same proof and original deadline; login never grants or
+renews a trial. See the [ledger contract](../manual-orders/README.md#one-registration-trial-per-account-disabled-sandbox-seam).

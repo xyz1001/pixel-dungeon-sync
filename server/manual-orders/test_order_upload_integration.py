@@ -5,11 +5,13 @@ import sqlite3
 import tempfile
 import unittest
 
-from orders import Orders, Plan
+from orders import Orders, Plan, OrderError, extend_ms
+from registration_trials import RegistrationTrials, TRIAL_MS
 from write_gate import WriteGate, SqliteEntitlements
 from upload_policy import UploadPolicy, OrderUploadAdapter, READ
 from test_orders import TestAuth, ms
 from test_upload_policy import FencedFake
+from test_registration_trials import DurableRegistrationFake
 
 
 class OrderUploadIntegrationTests(unittest.TestCase):
@@ -68,6 +70,44 @@ class OrderUploadIntegrationTests(unittest.TestCase):
         self.assertEqual({'/': sorted(self.template)}, self.fake.account.permissions)
         self.assertEqual(0, self.fake.account.expiration_date)
         self.assertEqual(result['data']['target_ms'], self.orders.adapter.observed_expiry('alice'))
+
+    def registration(self):
+        upstream = DurableRegistrationFake(Path(self.temp.name) / 'registration.sqlite', lambda: self.now)
+        return RegistrationTrials(self.orders, registrations=upstream, mode='sandbox')
+
+    def test_registration_trial_activates_template_then_expiry_preserves_login_and_reads(self):
+        original_account = self.fake.account
+        trial = self.registration().register('alice', 'Synthetic-password-42')
+        self.assertEqual(self.now + TRIAL_MS, trial['expires_ms'])
+        self.assertEqual({'/': sorted(self.template)}, self.fake.account.permissions)
+        self.assertEqual(204, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+        self.now = trial['expires_ms']
+        self.policy.reconcile('alice')
+        self.assertEqual({'/': sorted(READ)}, self.fake.account.permissions)
+        self.assertEqual(original_account.status, self.fake.account.status)
+        self.assertEqual(original_account.expiration_date, self.fake.account.expiration_date)
+        self.assertEqual(403, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+        self.assertEqual(204, self.gate.decide('GET', {'test-identity': 'alice'}).status)
+        oid = self.submitted('trial-donation-0001')
+        paid = self.approve(oid, 'trial_receipt_0001')[1]['data']
+        self.assertEqual(extend_ms(self.now, 'calendar_year', 0), paid['target_ms'])
+        self.assertEqual({'/': sorted(self.template)}, self.fake.account.permissions)
+
+    def test_late_trial_application_rereads_paid_ledger_without_shortening_donation(self):
+        trials = self.registration()
+        trial_expiry = self.now + TRIAL_MS
+        self.fake.fail_after = True
+        with self.assertRaises(OrderError):
+            trials.register('alice', 'Synthetic-password-42')
+        self.assertEqual(403, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
+        self.now += 1000
+        oid = self.submitted('trial-donation-0001')
+        paid = self.approve(oid, 'trial_receipt_0001')[1]['data']
+        self.assertEqual(extend_ms(self.now, 'calendar_year', 0), paid['target_ms'])
+        self.assertEqual(trial_expiry, self.registration().register('alice', 'Synthetic-password-42')['expires_ms'])
+        self.assertEqual(paid['target_ms'], self.orders.adapter.observed_expiry('alice'))
+        self.assertEqual(paid['target_ms'], self.call('/api/order/entitlement', method='GET')[1]['data']['expires_ms'])
+        self.assertEqual(204, self.gate.decide('PUT', {'test-identity': 'alice'}).status)
 
     def test_remote_failure_restart_retry_keeps_one_term_and_not_active_until_confirmed(self):
         oid = self.submitted('new-donation-000001')

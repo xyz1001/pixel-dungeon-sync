@@ -61,5 +61,27 @@ class Tests(unittest.TestCase):
  def test_upstream_error_redacted(self):
   self.fake.side_effect=RuntimeError('PRIVATE_SECRET');status,r=self.request(self.body())
   self.assertEqual(status,502);self.assertNotIn('PRIVATE_SECRET',json.dumps(r))
+ def test_optional_trial_hook_replaces_only_named_registration(self):
+  calls=[]
+  class Trials:
+   def register(self,user,password):calls.append((user,password))
+  self.env['registration_trials']=Trials()
+  self.assertEqual(200,self.request(self.body('register','newuser'))[0])
+  self.assertEqual([('newuser','Example-test-42')],calls);self.assertEqual([],self.created)
+  self.assertEqual(200,self.request(self.body())[0]);self.assertEqual(1,len(calls))
+  self.assertEqual((200,{'legacy':True}),self.request({}));self.assertEqual(1,len(calls))
+ def test_trial_retry_errors_keep_exact_safe_envelope_without_fallback(self):
+  class Failure(Exception):
+   def __init__(self,code):self.code=code;super().__init__('PRIVATE_UPSTREAM_DETAIL')
+  class Trials:
+   code=None
+   def register(self,*args):raise Failure(self.code)
+  trials=Trials();self.env['registration_trials']=trials
+  for status,code in ((409,'REGISTRATION_IN_PROGRESS'),(409,'REGISTRATION_PROOF_CONFLICT'),
+                     (503,'REGISTRATION_TRIAL_RETRY_REQUIRED'),(503,'REGISTRATION_DATABASE_UNAVAILABLE'),
+                     (503,'REGISTRATION_UPSTREAM_UNAVAILABLE'),(503,'REGISTRATION_TRIALS_DISABLED')):
+   trials.code=code
+   self.assertEqual((status,{'code':status,'error':code,'message':code}),self.request(self.body('register','newuser')))
+  self.assertEqual([],self.created);self.assertEqual([],self.calls)
 
 if __name__=='__main__':unittest.main()

@@ -138,7 +138,9 @@ bypass review. No gate or network configuration is deployed by this module.
 
 OrderUploadAdapter exists solely to test the corrected sandbox ordering: Orders
 commits desired entitlements plus applying state first; ensure validates that
-reservation and invokes reconciliation using the latest ledger. observed_expiry
+reservation and invokes reconciliation using the latest ledger. It also accepts
+a proved, applying registration trial from the trusted journal; pending
+registration intents are not grants. The trial confirms only after readback. observed_expiry
 checks a confirmed job and read-back permissions, not account expiration_date.
 On failure the order remains applying; renewed rights are not delayed by waiting
 for the very ledger entry the worker needs. Completion never adds another year.

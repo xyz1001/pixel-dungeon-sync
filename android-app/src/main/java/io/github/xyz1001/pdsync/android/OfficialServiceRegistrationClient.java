@@ -38,8 +38,9 @@ import pdsync.AppendOnlyKt;
  * operation on a background thread only after the user requests it. This client neither
  * persists credentials nor connects to WebDAV. It never falls back to the v1 empty request.
  *
- * A failed registration may already have succeeded. Do not automatically retry registration;
- * let the user log in with the same submitted credentials to establish the account state.
+ * A failed registration may already have succeeded. Never automatically retry. Recognized
+ * trial-provisioning errors direct the user to retry registration with the same credentials;
+ * generic unknown outcomes retain login guidance, which cannot repair trial provisioning.
  */
 final class OfficialServiceRegistrationClient {
     static final String REGISTER_URL = "https://webdav.xyz1001.top:8443/api/register";
@@ -55,7 +56,7 @@ final class OfficialServiceRegistrationClient {
     }
 
     enum FailureKind {
-        INVALID_INPUT, INVALID_CREDENTIALS, USERNAME_TAKEN, REQUEST_TOO_LARGE,
+        INVALID_INPUT, INVALID_CREDENTIALS, USERNAME_TAKEN, REGISTRATION_RETRY_REQUIRED, REQUEST_TOO_LARGE,
         UNSUPPORTED_MEDIA_TYPE, RATE_LIMITED, UPSTREAM_ERROR, SERVER_ERROR, REQUEST_REJECTED,
         REDIRECT_REJECTED, INVALID_RESPONSE, RESPONSE_TOO_LARGE,
         TIMEOUT, NETWORK_ERROR, TLS_ERROR
@@ -63,7 +64,7 @@ final class OfficialServiceRegistrationClient {
 
     static final class RegistrationException extends IOException {
         final FailureKind kind;
-        /** True means registration may already have succeeded; use same-credential login. */
+        /** True means an account may exist; recovery guidance depends on the failure kind. */
         final boolean accountMayHaveBeenCreated;
 
         private RegistrationException(FailureKind kind, boolean accountMayHaveBeenCreated) {
@@ -188,7 +189,12 @@ final class OfficialServiceRegistrationClient {
                 throw failure(FailureKind.REDIRECT_REJECTED, true);
             }
             int status = response.code();
-            if (status != 200) throw httpFailure(status);
+            if (status != 200) {
+                if (registration && isRecoverableTrialFailure(status, response.body())) {
+                    throw failure(FailureKind.REGISTRATION_RETRY_REQUIRED, true);
+                }
+                throw httpFailure(status);
+            }
             ResponseBody body = response.body();
             if (body == null) throw failure(FailureKind.INVALID_RESPONSE, true);
             return parseAccount(readBoundedUtf8(body), username, password);
@@ -224,6 +230,29 @@ final class OfficialServiceRegistrationClient {
         if (status == 408) return failure(FailureKind.TIMEOUT, true);
         if (status >= 400 && status < 500) return failure(FailureKind.REQUEST_REJECTED, false);
         return failure(FailureKind.INVALID_RESPONSE, true);
+    }
+
+    /** Only the opt-in registration contract can change status-based recovery guidance. */
+    private static boolean isRecoverableTrialFailure(int status, ResponseBody body) {
+        if ((status != 409 && status != 503) || body == null) return false;
+        try {
+            String text = readBoundedUtf8(body);
+            checkNesting(text);
+            AppendOnlyKt.requireUniqueJsonKeys(text);
+            JsonObject root = object(Json.Default.parseToJsonElement(text));
+            validateJsonValues(root);
+            if (integer(root, "code") != status) return false;
+            string(root, "message", 1024, true); // Validate only; never display server text.
+            String error = string(root, "error", 64, false);
+            if (status == 409) return "REGISTRATION_IN_PROGRESS".equals(error);
+            return "REGISTRATION_TRIAL_RETRY_REQUIRED".equals(error)
+                    || "REGISTRATION_DATABASE_UNAVAILABLE".equals(error)
+                    || "REGISTRATION_UPSTREAM_UNAVAILABLE".equals(error);
+        } catch (IOException | RuntimeException invalid) {
+            // Missing, malformed, oversized, unreadable or unknown errors keep the old
+            // status-only fallback. Never surface raw response/transport diagnostics.
+            return false;
+        }
     }
 
     private static String readBoundedUtf8(ResponseBody body) throws IOException {
@@ -410,6 +439,8 @@ final class OfficialServiceRegistrationClient {
             case INVALID_INPUT: message = "账号或密码格式不符合服务要求。"; break;
             case INVALID_CREDENTIALS: message = "账号或密码不正确。"; break;
             case USERNAME_TAKEN: message = "账号已被使用，请登录或更换账号。"; break;
+            case REGISTRATION_RETRY_REQUIRED:
+                return "注册尚未完成，请稍后用相同账号和密码重试注册。";
             case REQUEST_TOO_LARGE: message = "提交的信息过大。"; break;
             case UNSUPPORTED_MEDIA_TYPE: message = "服务不支持这次请求的格式。"; break;
             case RATE_LIMITED: message = "操作过于频繁，服务暂时限制了请求。"; break;
