@@ -68,6 +68,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import pdsync.DiagnosticAction;
+import pdsync.DiagnosticLog;
+import pdsync.DiagnosticFailure;
+import pdsync.DiagnosticResult;
+import pdsync.DiagnosticStage;
+import pdsync.DiagnosticTrace;
 import pdsync.AppendCommit;
 import pdsync.DirectorySnapshotMetadata;
 import pdsync.EmptySetupCompletion;
@@ -90,6 +96,8 @@ public final class MainActivity extends Activity {
     private static final int INK = -14469589;
     private static final int MUTED = -10129303;
     private static final int PICK_APK = 8101;
+    private final AndroidDiagnosticExport diagnosticExport = AndroidDiagnosticExport.instance();
+    private boolean diagnosticPickerReturn;
     private LinearLayout body;
     private boolean busy;
     private boolean cloudVerified;
@@ -224,6 +232,12 @@ public final class MainActivity extends Activity {
     @Override // android.app.Activity
     public void onCreate(Bundle bundle) {
         super.onCreate(bundle);
+        AndroidDiagnosticLogging.configure(this);
+        diagnosticExport.attach(this);
+        if (bundle != null) {
+            diagnosticExport.restorePicker(bundle.getBoolean("diagnostics.picker", false));
+            diagnosticPickerReturn = bundle.getBoolean("diagnostics.return", false);
+        }
         getWindow().addFlags(8192);
         this.preparation = new GamePreparationService(this);
         this.installer = new InstallCoordinator(this);
@@ -276,6 +290,8 @@ public final class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onSaveInstanceState(Bundle bundle) {
         super.onSaveInstanceState(bundle);
+        bundle.putBoolean("diagnostics.picker", diagnosticExport.selecting());
+        bundle.putBoolean("diagnostics.return", diagnosticPickerReturn);
         bundle.putString("page", this.page.name());
         bundle.putString("selected", this.selected);
         bundle.putInt("historyPage", this.historyPage);
@@ -298,6 +314,11 @@ public final class MainActivity extends Activity {
             RuntimePlatformCompat.registerInternalReceiver(this, this.installChanged, changes);
             this.receiverRegistered = true;
         }
+        onDiagnosticExportChanged();
+        if (diagnosticPickerReturn || diagnosticExport.busy()) {
+            if (!diagnosticExport.selecting()) diagnosticPickerReturn = false;
+            return; // Returning from the local log picker must not inspect Root or the network.
+        }
         try {
             AutoSyncService.knownReturn(this);
         } catch (RuntimeException unused) {
@@ -313,12 +334,13 @@ public final class MainActivity extends Activity {
             this.managedAccountFlow.foreground(false);
             cancelManagedAccountRequest();
         }
-        AutoSyncService.recordDeparture(this);
+        if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this);
         super.onPause();
     }
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        diagnosticExport.detach(this);
         closeManagedAccount();
         closeSandboxPayment();
         if (this.receiverRegistered) {
@@ -362,10 +384,18 @@ public final class MainActivity extends Activity {
     }
 
     private <T> void work(String str, final Task<T> task, final Done<T> done) {
-        work(str, task, done, false);
+        work(DiagnosticAction.OTHER, str, task, done, false);
+    }
+
+    private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done) {
+        work(action, str, task, done, false);
     }
 
     private <T> void work(String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory) {
+        work(DiagnosticAction.INSPECT, str, task, done, preserveAutomaticHistory);
+    }
+
+    private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory) {
         if (this.busy || isDestroyed()) {
             return;
         }
@@ -379,28 +409,34 @@ public final class MainActivity extends Activity {
         this.status.setText(str);
         this.status.setVisibility(View.VISIBLE);
         disable(this.root);
+        final DiagnosticTrace trace = DiagnosticLog.begin(action, false);
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
             public final void run() {
-                MainActivity.this.m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(task, done);
+                MainActivity.this.m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(task, done, trace);
             }
         });
     }
 
     /* renamed from: lambda$work$2$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(Task task, final Done done) {
+    /* synthetic */ void m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(Task task, final Done done, final DiagnosticTrace trace) {
         final Object objRun;
-        try {
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
+            trace.record(AndroidDiagnosticLogging.stage(trace.getAction()), DiagnosticResult.STARTED);
             synchronized (SyncRuntime.OPERATION_LOCK) {
                 objRun = task.run();
             }
+            final DiagnosticResult result = diagnosticWorkResult(trace.getAction(), objRun);
+            trace.record(DiagnosticStage.WORK, result);
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda105
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun);
+                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result);
                 }
             });
         } catch (Exception e) {
+            AndroidDiagnosticLogging.failure(trace, AndroidDiagnosticLogging.stage(trace.getAction()), e);
+            AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda106
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -411,15 +447,19 @@ public final class MainActivity extends Activity {
     }
 
     /* renamed from: lambda$work$0$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj) {
+    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result) {
         if (isDestroyed()) {
+            trace.record(DiagnosticStage.FINISHED, result);
             return;
         }
         this.busy = false;
         try {
             done.accept(obj);
             rememberCurrentAutomaticHistory();
+            trace.record(DiagnosticStage.FINISHED, result);
         } catch (Exception e) {
+            trace.failure(DiagnosticStage.REFRESH, e);
+            trace.failure(DiagnosticStage.FINISHED, e);
             reportError(e);
         }
         render();
@@ -438,6 +478,29 @@ public final class MainActivity extends Activity {
         render();
         drainReadinessRefresh();
         drainAutomaticHistoryRefresh();
+    }
+
+    private DiagnosticResult diagnosticWorkResult(DiagnosticAction action, Object result) {
+        if (action == DiagnosticAction.ACCESS_CHECK && !this.readinessState.canContinue()) {
+            DiagnosticLog.record(DiagnosticStage.READINESS, DiagnosticResult.REJECTED,
+                    AndroidDiagnosticLogging.readinessFailure(this.readinessState));
+            return DiagnosticResult.REJECTED;
+        }
+        if (result instanceof OfficialAuthResult && !((OfficialAuthResult) result).davVerified) return DiagnosticResult.FAILED;
+        if (result instanceof OperationOutcome) {
+            OperationOutcome outcome = (OperationOutcome) result;
+            if (outcome.result.isConflict()) return DiagnosticResult.CONFLICT;
+            if (outcome.result.isPending()) return DiagnosticResult.PENDING;
+        }
+        if (action == DiagnosticAction.INSPECT && this.inspection != null) {
+            if ("BLOCKED".equals(this.inspection.getKind())) {
+                DiagnosticLog.record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED,
+                        this.inspection.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.VALIDATION);
+                return DiagnosticResult.REJECTED;
+            }
+            if ("BRANCHED".equals(this.inspection.getKind())) return DiagnosticResult.CONFLICT;
+        }
+        return DiagnosticResult.SUCCEEDED;
     }
 
     private void disable(View view) {
@@ -637,7 +700,7 @@ public final class MainActivity extends Activity {
     private void requestRootAuthorization() {
         if (this.rootGame == null || !this.resumed || this.busy) return;
         final SelectedRootGame chosen = this.rootGame;
-        work("正在通过 Root 检查所选游戏存档…", () -> {
+        work(DiagnosticAction.ACCESS_CHECK, "正在通过 Root 检查所选游戏存档…", () -> {
             if (!this.resumed || !chosen.matches(SyncRuntime.rootGame(this)))
                 throw new IOException("请在应用前台重新确认所选游戏。");
             checkRootAccess();
@@ -661,7 +724,7 @@ public final class MainActivity extends Activity {
             return;
         }
         final SelectedRootGame chosen = this.rootGame;
-        work("正在核对所选游戏启动入口…", () -> {
+        work(DiagnosticAction.LAUNCH, "正在核对所选游戏启动入口…", () -> {
             if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
                 throw new IOException("请先处理未完成恢复或系统安装请求。");
             if (!chosen.matches(SyncRuntime.rootGame(this))) throw new IOException("所选游戏已变化，请重新选择。");
@@ -684,7 +747,7 @@ public final class MainActivity extends Activity {
 
     private void chooseRootInstalled() {
         String selectedPackage = selectedGamePackage();
-        work("正在只读列出已安装应用…", () -> {
+        work(DiagnosticAction.INSPECT, "正在只读列出已安装应用…", () -> {
             if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
                 throw new IOException("请先处理未完成恢复或系统安装请求，再切换访问方式。");
             return InstalledAppCatalog.load(this, selectedPackage);
@@ -693,7 +756,7 @@ public final class MainActivity extends Activity {
     }
 
     private void selectRootGame(String packageName) {
-        work("正在核对已安装游戏身份，不更改游戏…", () -> {
+        work(DiagnosticAction.INSPECT, "正在核对已安装游戏身份，不更改游戏…", () -> {
             if (restoreNeedsAttention()) throw new IOException("请先核对当前游戏的未完成恢复，不能更换目标。");
             SelectedRootGame chosen = new RootTargetResolver(this).selectInstalled(packageName);
             SyncRuntime.setRootGame(this, chosen);
@@ -705,7 +768,7 @@ public final class MainActivity extends Activity {
     }
 
     private void switchToEmbedded() {
-        work("正在切换为内置存档桥…", () -> {
+        work(DiagnosticAction.CONFIGURE, "正在切换为内置存档桥…", () -> {
             if (restoreNeedsAttention()) throw new IOException("请先核对当前游戏的未完成恢复，不能切换访问方式。");
             SyncRuntime.useEmbeddedBackend(this);
             cancelControlledLaunch();
@@ -765,7 +828,7 @@ public final class MainActivity extends Activity {
         this.cloudVerified = false;
         this.inspection = null;
         this.history = null;
-        work("正在检查游戏与存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda0
+        work(DiagnosticAction.ACCESS_CHECK, "正在检查游戏与存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda0
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m68x764cc8a4(z);
@@ -1648,7 +1711,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderDiscovery$18$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m95xed7f5317() {
-        work("正在取消待处理安装…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda114
+        work(DiagnosticAction.INSTALL, "正在取消待处理安装…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda114
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m93x28b0695();
@@ -1664,7 +1727,7 @@ public final class MainActivity extends Activity {
     private void confirmObsoleteLegacyCleanup() {
         confirm("已在系统中取消旧版请求？",
                 "先在 Android 旧安装／卸载对话框点击取消并关闭。确认后只会核对原应用、取消保留的请求令牌并清理旧记录，不会重新打开或继续旧版安装／卸载。\n\n已经发生的卸载与存档删除不能撤销；若原应用身份发生变化，将停止清理并提示检查。",
-                "已取消并关闭，核对清理", () -> work("正在核对并清理旧版请求…",
+                "已取消并关闭，核对清理", () -> work(DiagnosticAction.INSTALL, "正在核对并清理旧版请求…",
                         () -> { this.installer.cancelObsoleteLegacyRequest(true); return null; },
                         ignored -> refreshReadiness()));
     }
@@ -1692,7 +1755,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderDiscovery$22$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m99x666d0f70() {
-        work("正在核对系统请求…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda17
+        work(DiagnosticAction.INSTALL, "正在核对系统请求…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda17
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m97x7b78c2ee();
@@ -1752,7 +1815,7 @@ public final class MainActivity extends Activity {
     public void chooseInstalled() {
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         String selectedPackage = selectedGamePackage();
-        work("正在读取可选择的已安装应用…", () -> {
+        work(DiagnosticAction.INSPECT, "正在读取可选择的已安装应用…", () -> {
             this.installer.assertCanPrepare();
             return InstalledAppCatalog.load(this, selectedPackage);
         }, games -> InstalledAppPickerDialog.show(this, "选择游戏", games, selectedPackage,
@@ -1761,7 +1824,7 @@ public final class MainActivity extends Activity {
 
     private void requestPrepare(final String str, final List<Uri> list) {
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
-        work("正在检查本机签名密钥…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda121
+        work(DiagnosticAction.PREPARE, "正在检查本机签名密钥…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda121
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m138x3dde23b5(list, str);
@@ -1808,7 +1871,7 @@ public final class MainActivity extends Activity {
         this.diagnosticReport = "";
         this.details = "";
         this.detailsExpanded = false;
-        work("正在验证并暂存安装包，原游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda99
+        work(DiagnosticAction.PREPARE, "正在验证并暂存安装包，原游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda99
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m58lambda$prepare$33$iogithubxyz1001pdsyncandroidMainActivity(list, str, z);
@@ -1897,7 +1960,7 @@ public final class MainActivity extends Activity {
         if (this.installer.hasConfirmation()) {
             openInstallConfirmation();
         } else {
-            work("正在重新验证暂存包与现有应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda112
+            work(DiagnosticAction.INSTALL, "正在重新验证暂存包与现有应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda112
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m32xc4841ad1();
@@ -1972,7 +2035,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$continueInstallation$38$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m35x24f28d94(final InstallNext installNext) {
-        work("正在最后核验安装包与当前应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda19
+        work(DiagnosticAction.INSTALL, "正在最后核验安装包与当前应用…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda19
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m33x39fe4112(installNext);
@@ -2002,7 +2065,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$continueInstallation$41$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m38x286623ac(final InstallNext installNext) {
-        work("正在向 Android 提交经过验证的安装包…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda123
+        work(DiagnosticAction.INSTALL, "正在向 Android 提交经过验证的安装包…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda123
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m36x9a6cb3d5(installNext);
@@ -2025,7 +2088,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void openInstallConfirmation() {
-        work("正在复核保留的安装包与系统确认…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda92
+        work(DiagnosticAction.INSTALL, "正在复核保留的安装包与系统确认…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda92
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m52xf9a573e3();
@@ -2180,7 +2243,7 @@ public final class MainActivity extends Activity {
         }
         this.previewAttempted = true;
         this.localPreview = null;
-        work("正在读取存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda44
+        work(DiagnosticAction.INSPECT, "正在读取存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda44
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m64x685e4018();
@@ -2679,8 +2742,10 @@ public final class MainActivity extends Activity {
                             .format(new java.util.Date(entitlement.expiresMs)) + "。";
                 return new OfficialAuthResult(candidate, true, message);
             } catch (ManagedAccountClient.ManagedAccountException failure) {
+                DiagnosticLog.failure(DiagnosticStage.CONNECTION, failure);
                 return new OfficialAuthResult(candidate, false, failure.userMessage());
             } catch (Exception failure) {
+                DiagnosticLog.failure(DiagnosticStage.CONNECTION, failure);
                 return new OfficialAuthResult(candidate, false, "已登录，连接测试未通过，请重试。");
             }
         });
@@ -2690,7 +2755,7 @@ public final class MainActivity extends Activity {
     private void resumeOfficialAttempt() {
         final ConnectionAuthAttempt<OfficialAuthResult> attempt = this.officialAttempt;
         if (attempt == null || this.busy) return;
-        work("正在连接…", attempt::await, result -> {
+        work(DiagnosticAction.CONNECT, "正在连接…", attempt::await, result -> {
             if (this.officialAttempt != attempt) return;
             this.officialAttempt = null;
             if (this.connectionEntry == null || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL
@@ -2730,7 +2795,7 @@ public final class MainActivity extends Activity {
                     ? this.verifiedOfficial : new SecureConnectionStore.Connection(this.draftEndpoint, this.draftUser, this.draftPassword, this.draftProfile);
             if (connection == null) return;
             this.testedDraft = null;
-            work(z ? "正在应用连接设置…" : "正在测试连接…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda116
+            work(DiagnosticAction.CONNECT, z ? "正在应用连接设置…" : "正在测试连接…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda116
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m17xc0060660(connection, z);
@@ -2806,7 +2871,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void reloadSavedConnection() {
-        work("正在读取已保存连接…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda110
+        work(DiagnosticAction.CONFIGURE, "正在读取已保存连接…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda110
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m70x54fe8022();
@@ -2960,7 +3025,7 @@ public final class MainActivity extends Activity {
         if (ticket == null) return;
         final AutomaticHistoryState state = this.automaticHistoryState;
         state.ticket = ticket; state.connection = captured; state.inFlight = true;
-        work("正在检查存档…", () -> {
+        work(DiagnosticAction.INSPECT, "正在检查存档…", () -> {
             // work() holds the global operation lock. A task paused before any read is deferred.
             // Rotation shares this holder, so the replacement Activity receives the same result.
             try {
@@ -2996,6 +3061,7 @@ public final class MainActivity extends Activity {
             AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
             this.inspection = inspectionInspect;
             if ("BLOCKED".equals(inspectionInspect.getKind())) {
+                DiagnosticLog.record(DiagnosticStage.VERIFY, DiagnosticResult.REJECTED);
                 return;
             }
             stage = SyncInspectionDiagnostics.Stage.HISTORY;
@@ -3042,7 +3108,7 @@ public final class MainActivity extends Activity {
             this.inspection = null;
             this.history = null;
         }
-        work("正在检查存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda141
+        work(DiagnosticAction.INSPECT, "正在检查存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda141
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m66x99ceaa21(z, syncPage);
@@ -3247,7 +3313,7 @@ public final class MainActivity extends Activity {
         if (owner == null || observed == null || !this.cloudVerified || !observed.getCanCompleteWithoutTransfer()) {
             return;
         }
-        work("正在确认同步基线…", () -> {
+        work(DiagnosticAction.RESOLVE, "正在确认同步基线…", () -> {
             if (owner != this.facade) {
                 throw new IOException("连接已变化，请重新比较后选择。");
             }
@@ -3269,7 +3335,7 @@ public final class MainActivity extends Activity {
         if (owner == null || observed == null || !this.cloudVerified || !observed.getCanKeepLocalProgress()) {
             return;
         }
-        work("正在重新核验本机进度与云端基线…", () -> {
+        work(DiagnosticAction.INSPECT, "正在重新核验本机进度与云端基线…", () -> {
             if (owner != this.facade) {
                 throw new IOException("连接已变化，请重新比较后选择。");
             }
@@ -3290,7 +3356,7 @@ public final class MainActivity extends Activity {
                 this.inspection != null && this.inspection.getNeedsRestoreRecovery(),
                 this.inspection != null && this.inspection.isRetryablePending(),
                 this.page == SyncPage.COMPARISON && this.onboardingActive, this.busy, this.connection != null)) return;
-        work("正在完成配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda33
+        work(DiagnosticAction.CONFIGURE, "正在完成配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda33
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m29xb53dc5d7();
@@ -3324,7 +3390,7 @@ public final class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: private */
     public void postpone() {
-        work("正在保留当前选择…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda108
+        work(DiagnosticAction.RESOLVE, "正在保留当前选择…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda108
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m56lambda$postpone$69$iogithubxyz1001pdsyncandroidMainActivity();
@@ -3375,7 +3441,7 @@ public final class MainActivity extends Activity {
         if (inspection == null) {
             refreshComparison(SyncPage.COMPARISON);
         } else {
-            operation("正在上传本机存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda160
+            operation(DiagnosticAction.PUSH, "正在上传本机存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda160
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m146lambda$upload$71$iogithubxyz1001pdsyncandroidMainActivity(inspection);
@@ -3396,7 +3462,7 @@ public final class MainActivity extends Activity {
             return;
         }
         final AndroidSyncFacade.Inspection inspection2 = this.inspection;
-        operation("正在关联相同存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda29
+        operation(DiagnosticAction.RESOLVE, "正在关联相同存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda29
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m15lambda$adopt$72$iogithubxyz1001pdsyncandroidMainActivity(inspection2);
@@ -3434,7 +3500,7 @@ public final class MainActivity extends Activity {
         final AndroidSyncFacade.Inspection inspection = this.inspection;
         SyncHistory syncHistory = this.history;
         if (syncHistory != null && syncHistory.getCurrentProtected()) {
-            operation("正在校验、备份并恢复所选存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda13
+            operation(DiagnosticAction.RESTORE, "正在校验、备份并恢复所选存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda13
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m141x92df934d(inspection, str);
@@ -3478,7 +3544,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$requestRestore$75$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m143x7dd3dfcf(final AndroidSyncFacade.Inspection inspection, final String str) {
-        operation("正在校验、备份并恢复所选存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda91
+        operation(DiagnosticAction.RESTORE, "正在校验、备份并恢复所选存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda91
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m142x859b98e(inspection, str);
@@ -3561,7 +3627,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderConflict$79$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m86xfa720d6a(final AndroidSyncFacade.Inspection inspection, final String str) {
-        operation("正在验证并发布分支选择…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda102
+        operation(DiagnosticAction.RESOLVE, "正在验证并发布分支选择…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda102
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m85x84f7e729(inspection, str);
@@ -3576,7 +3642,7 @@ public final class MainActivity extends Activity {
         if (inspection == null) {
             refreshComparison(SyncPage.COMPARISON);
         } else {
-            work("正在检查共同基线、单局身份与六槽容量…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda40
+            work(DiagnosticAction.MERGE, "正在检查共同基线、单局身份与六槽容量…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda40
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m60x842ac139(inspection);
@@ -3624,7 +3690,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$previewMerge$83$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m62x6f1f0dbb(final AndroidSyncFacade.Inspection inspection) {
-        operation("正在应用并核验安全合并…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda118
+        operation(DiagnosticAction.MERGE, "正在应用并核验安全合并…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda118
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m61xf9a4e77a(inspection);
@@ -3642,10 +3708,10 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void operation(String str, final Task<AndroidSyncFacade.OperationResult> task, final String str2) {
+    private void operation(DiagnosticAction action, String str, final Task<AndroidSyncFacade.OperationResult> task, final String str2) {
         this.confirmedAction = null;
         this.confirmationMerge = null;
-        work(str, new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda36
+        work(action, str, new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda36
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m54xc977a20(task);
@@ -3663,6 +3729,8 @@ public final class MainActivity extends Activity {
         SyncHistory syncHistory;
         OperationOutcome operationOutcome = new OperationOutcome();
         operationOutcome.result = (AndroidSyncFacade.OperationResult) task.run();
+        DiagnosticLog.record(DiagnosticStage.VERIFY, operationOutcome.result.isConflict() ? DiagnosticResult.CONFLICT
+                : operationOutcome.result.isPending() ? DiagnosticResult.PENDING : DiagnosticResult.SUCCEEDED);
         GamePreparationService.PreparedPair preparedPair = this.prepared;
         if (preparedPair != null && InstallProgressPolicy.requiresRebindAfterLegacyRecovery(preparedPair.legacyUnboundHelper, hasAnyRestoreJournal())) {
             operationOutcome.requiresBridgeUpgrade = true;
@@ -3818,6 +3886,7 @@ public final class MainActivity extends Activity {
     private void renderSettings() {
         String str;
         heading("设置");
+        button("导出日志", this::chooseDiagnosticDirectory).setEnabled(!diagnosticExport.busy());
         Switch r0 = new Switch(this);
         r0.setText("自动上传");
         r0.setChecked(automaticObservationSupported() && !SyncRuntime.isAutoUploadPaused(this));
@@ -3917,7 +3986,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$90$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m128x5965f8ae(CompoundButton compoundButton, final boolean z) {
-        work("正在保存自动上传设置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda38
+        work(DiagnosticAction.CONFIGURE, "正在保存自动上传设置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda38
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m126xcb6c88d7(z);
@@ -3984,7 +4053,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$97$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m135x8fbd0475() {
-        operation("正在核对未完成恢复…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda107
+        operation(DiagnosticAction.RESTORE, "正在核对未完成恢复…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda107
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m134x1a42de34();
@@ -4009,7 +4078,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$99$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m137x7ab150f7() {
-        operation("正在归档未完成恢复…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda2
+        operation(DiagnosticAction.RESTORE, "正在归档未完成恢复…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda2
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m136x5372ab6();
@@ -4033,7 +4102,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$103$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m115x29209d6f() {
-        work(this.rootGame != null ? "正在核对 Root 中断事务…" : "正在恢复存档桥中断前备份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda27
+        work(DiagnosticAction.RECOVERY, this.rootGame != null ? "正在核对 Root 中断事务…" : "正在恢复存档桥中断前备份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda27
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m113x3e2c50ed();
@@ -4093,7 +4162,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$107$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m119xff093673() {
-        work("正在归档待上传版本…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda148
+        work(DiagnosticAction.ARCHIVE, "正在归档待上传版本…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda148
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m117x1414e9f1();
@@ -4126,7 +4195,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$renderSettings$111$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m123x77f6f2cc() {
-        work("正在删除保存的连接信息…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda150
+        work(DiagnosticAction.CONFIGURE, "正在删除保存的连接信息…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda150
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m121xe9fd82f5();
@@ -4202,7 +4271,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$editNamespace$116$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m46xf5f10c8f(final String str, final String str2) {
-        work("正在保存云端关联…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda42
+        work(DiagnosticAction.CONFIGURE, "正在保存云端关联…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda42
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m44xafcc00d(str, str2);
@@ -4249,7 +4318,7 @@ public final class MainActivity extends Activity {
     }
 
     private void beginOnboarding(final SyncPage syncPage) {
-        work("正在重新检查配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda103
+        work(DiagnosticAction.INSPECT, "正在重新检查配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda103
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m19x95b322c4();
@@ -4318,7 +4387,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$rename$122$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m74lambda$rename$122$iogithubxyz1001pdsyncandroidMainActivity(final String str, final EditText editText, DialogInterface dialogInterface, int i) {
-        work("正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda11
+        work(DiagnosticAction.CONFIGURE, "正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda11
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m72lambda$rename$120$iogithubxyz1001pdsyncandroidMainActivity(str, editText);
@@ -4375,7 +4444,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$editCurrent$126$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m43x11deed4c(final AndroidSyncFacade.Inspection inspection, final EditText editText, DialogInterface dialogInterface, int i) {
-        work("正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda54
+        work(DiagnosticAction.CONFIGURE, "正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda54
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m41x26eaa0ca(inspection, editText);
@@ -4431,7 +4500,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$chooseRunIdentity$128$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m25x971d2691(final AndroidSyncFacade.Inspection inspection, final String str, DialogInterface dialogInterface, int i) {
-        operation("正在记录新局身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda31
+        operation(DiagnosticAction.RESOLVE, "正在记录新局身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda31
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m24x21a30050(inspection, str);
@@ -4446,7 +4515,7 @@ public final class MainActivity extends Activity {
 
     /* renamed from: lambda$chooseRunIdentity$130$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m27x25169668(final AndroidSyncFacade.Inspection inspection, final String str, DialogInterface dialogInterface, int i) {
-        operation("正在记录单局身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda161
+        operation(DiagnosticAction.RESOLVE, "正在记录单局身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda161
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m26xc974cd2(inspection, str);
@@ -4471,7 +4540,7 @@ public final class MainActivity extends Activity {
         if (this.prepared == null || !this.prepared.embeddedBridge() || !HelperActivationPolicy.canOffer(this.readinessState.withSystemRequest(this.installer.hasActiveRequest()), this.bridgeAccessCode, false)) {
             return;
         }
-        work("正在核对游戏内置存档桥激活入口，现有游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda21
+        work(DiagnosticAction.ACCESS_CHECK, "正在核对游戏内置存档桥激活入口，现有游戏保持不变…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda21
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m12xbb2f51f5();
@@ -4534,7 +4603,7 @@ public final class MainActivity extends Activity {
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
             this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
-            work("正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
+            work(DiagnosticAction.ACCESS_CHECK, "正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m50xa7c297e0();
@@ -4600,7 +4669,7 @@ public final class MainActivity extends Activity {
     /* JADX INFO: Access modifiers changed from: private */
     public void launchGame() {
         final boolean zAllowsAutomatic = OnboardingGate.allowsAutomatic(this.progress, this.onboardingActive, this.cloudVerified);
-        work("正在核对所选游戏…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda132
+        work(DiagnosticAction.LAUNCH, "正在核对所选游戏…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda132
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 return MainActivity.this.m48xf90bdc3d();
@@ -4698,9 +4767,28 @@ public final class MainActivity extends Activity {
         runnable.run();
     }
 
+    private void chooseDiagnosticDirectory() {
+        if (diagnosticExport.busy() || isDestroyed()) return;
+        diagnosticPickerReturn = true;
+        diagnosticExport.chooseDirectory(this);
+        if (!diagnosticExport.selecting()) diagnosticPickerReturn = false;
+        render();
+    }
+
+    void onDiagnosticExportChanged() {
+        if (!this.resumed || isDestroyed()) return;
+        String message = diagnosticExport.consumeOutcome();
+        if (message != null) Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+        if (!this.busy) render();
+    }
+
     @Override // android.app.Activity
     protected void onActivityResult(int i, int i2, Intent intent) {
         super.onActivityResult(i, i2, intent);
+        if (i == AndroidDiagnosticExport.REQUEST_DIRECTORY) {
+            diagnosticExport.onDirectoryResult(this, i2, intent);
+            return;
+        }
         if (i == 8103) {
             this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
             this.bridgeAccessCode = "NOT_CHECKED";

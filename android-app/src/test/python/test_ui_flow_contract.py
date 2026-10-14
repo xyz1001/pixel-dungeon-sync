@@ -262,7 +262,7 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertNotIn("this.", request)
         self.assertIn("final android.content.Context app = getApplicationContext()", authenticate)
         resume = body(MAIN, "private void resumeOfficialAttempt()")
-        self.assertIn("work(\"正在连接…\", attempt::await", resume)
+        self.assertIn("work(DiagnosticAction.CONNECT, \"正在连接…\", attempt::await", resume)
         for guard in ("this.officialAttempt != attempt", "connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL", "!attempt.proof.equals(draftFingerprint())"):
             self.assertLess(resume.index(guard), resume.index("this.verifiedOfficial = result.candidate"))
         self.assertLess(resume.index("this.verifiedOfficial = result.candidate"),

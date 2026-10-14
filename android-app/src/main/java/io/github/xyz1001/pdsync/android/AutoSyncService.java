@@ -17,6 +17,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import pdsync.android.app.AndroidSyncFacade;
+import pdsync.DiagnosticAction;
+import pdsync.DiagnosticLog;
+import pdsync.DiagnosticFailure;
+import pdsync.DiagnosticResult;
+import pdsync.DiagnosticStage;
+import pdsync.DiagnosticTrace;
 
 /* loaded from: classes.dex */
 public final class AutoSyncService extends Service {
@@ -27,6 +33,7 @@ public final class AutoSyncService extends Service {
     public static final String PREFS = "auto-sync-session-v1";
     private static final String RETURN = "pdsync.RETURN";
     private static final String STOP = "pdsync.STOP";
+    private DiagnosticTrace diagnosticTrace;
     private GameAccessBackend bridge;
     private SecureConnectionStore.Connection connection;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
@@ -48,6 +55,8 @@ public final class AutoSyncService extends Service {
     public static String arm(Context context) { return arm(context, null); }
 
     public static String arm(Context context, String controlledToken) {
+        AndroidDiagnosticLogging.configure(context);
+        DiagnosticTrace armTrace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true);
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         try {
             if (!SyncRuntime.automaticAllowed(context, SyncRuntime.connection(context))) {
@@ -64,6 +73,7 @@ public final class AutoSyncService extends Service {
                 if (controlledToken != null && !controlledToken.equals(string))
                     throw new IllegalStateException("上一轮退出监听尚未结束，本次身份连续性不作推断。");
                 startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string));
+                armTrace.record(DiagnosticStage.GUARD, DiagnosticResult.SUCCEEDED);
                 return string;
             }
             String string2 = controlledToken == null ? UUID.randomUUID().toString() : controlledToken;
@@ -71,8 +81,10 @@ public final class AutoSyncService extends Service {
                 throw new IllegalStateException("无法保存自动同步会话，本次不会后台上传。");
             }
             startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string2));
+            armTrace.record(DiagnosticStage.GUARD, DiagnosticResult.SUCCEEDED);
             return string2;
         } catch (Exception e) {
+            AndroidDiagnosticLogging.failure(armTrace, DiagnosticStage.GUARD, e);
             throw new IllegalStateException("自动上传尚未就绪，请先完成游戏与云端存档配置。", e);
         }
     }
@@ -196,6 +208,7 @@ public final class AutoSyncService extends Service {
     @Override // android.app.Service
     public void onCreate() {
         super.onCreate();
+        AndroidDiagnosticLogging.configure(this);
         this.prefs = getSharedPreferences("auto-sync-session-v1", 0);
         ((NotificationManager) getSystemService(NotificationManager.class)).createNotificationChannel(new NotificationChannel("game-exit-sync", "退出游戏后同步", 2));
     }
@@ -231,6 +244,7 @@ public final class AutoSyncService extends Service {
                 return 2;
             }
             this.token = stringExtra;
+            this.diagnosticTrace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true);
             this.policy = new AutoSyncPolicy(this.prefs.getLong("startedAt", System.currentTimeMillis()), this.prefs.getBoolean("foregroundSeen", false));
             this.executor.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.AutoSyncService$$ExternalSyntheticLambda0
                 @Override // java.lang.Runnable
@@ -240,6 +254,7 @@ public final class AutoSyncService extends Service {
             });
             return 2;
         } catch (RuntimeException unused) {
+            automaticTrace().failure(DiagnosticStage.RUNTIME, unused);
             finish("BLOCKED", "系统不允许本次后台同步。请返回首页手动检查；游戏仍可正常使用。");
             return 2;
         }
@@ -247,7 +262,7 @@ public final class AutoSyncService extends Service {
 
     /* renamed from: lambda$onStartCommand$0$io-github-xyz1001-pdsync-android-AutoSyncService, reason: not valid java name */
     /* synthetic */ void m1x57256bb9() {
-        try {
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(automaticTrace())) {
             this.connection = SyncRuntime.connection(this);
             this.selectedGameToken = SyncRuntime.currentSelectionToken(this);
             this.selectedNamespace = SyncRuntime.currentNamespace(this);
@@ -260,12 +275,14 @@ public final class AutoSyncService extends Service {
             this.facade = SyncRuntime.facade(this, this.connection);
             poll();
         } catch (Exception unused) {
+            automaticTrace().failure(DiagnosticStage.GUARD, unused);
             finish("BLOCKED", "本次自动同步未开始：WebDAV 连接或未完成恢复需要检查。请返回首页处理。");
         }
     }
 
     /* JADX INFO: Access modifiers changed from: private */
     public void poll() {
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(automaticTrace())) {
         if (AutoSyncPolicy.mayPublish(this.stopped, isActive(this.prefs), this.token, this.prefs.getString("token", ""))) {
             if (!currentGameAndPolicy()) {
                 finish("PAUSED", "游戏、云端档案或自动上传设置已变化，本次监听已停止。");
@@ -283,10 +300,12 @@ public final class AutoSyncService extends Service {
             boolean reliableForAutomatic = reliableForAutomaticObservation(this.bridge.mode(), observationObserveLifecycle);
             AutoSyncPolicy.Step stepObserve = this.policy.observe(reliableForAutomatic, observationObserveLifecycle.foreground, System.currentTimeMillis());
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
+                automaticTrace().record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED, DiagnosticFailure.NOT_READY);
                 finish("BLOCKED", AutoSyncStatusPolicy.IDLE_FAILURE);
                 return;
             }
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNOBSERVED) {
+                automaticTrace().record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED, DiagnosticFailure.NOT_READY);
                 finish("BLOCKED", "未观察到本次游戏前台活动，未猜测退出事件。请从本应用重新启动游戏或手动检查存档。");
                 return;
             }
@@ -295,9 +314,16 @@ public final class AutoSyncService extends Service {
                 return;
             }
             if (observationObserveLifecycle.reliable && observationObserveLifecycle.foreground) {
+                if (!"PLAYING".equals(this.prefs.getString("state", "")))
+                    automaticTrace().record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
                 this.prefs.edit().putBoolean("foregroundSeen", true).putString("state", "PLAYING").putString("result", "游戏进行中，退出后将检查无冲突上传。").commit();
             }
             schedule(1500L);
+        }
+
+        } catch (RuntimeException failure) {
+            automaticTrace().failure(DiagnosticStage.RUNTIME, failure);
+            throw failure;
         }
     }
 
@@ -322,6 +348,7 @@ public final class AutoSyncService extends Service {
         if (this.stopped) {
             return;
         }
+        automaticTrace().record(DiagnosticStage.WORK, DiagnosticResult.STARTED);
         this.prefs.edit().putString("state", "SYNCING").putString("result", "已观察到退出／后台，正在检查稳定存档与冲突。").commit();
         ((NotificationManager) getSystemService(NotificationManager.class)).notify(7301, notification("正在检查稳定存档；只有无冲突时才上传。"));
         try {
@@ -335,6 +362,8 @@ public final class AutoSyncService extends Service {
                     try {
                         AndroidSyncFacade.AutoUploadResult autoUploadResultAutoUpload = this.facade.autoUpload();
                         String status = autoUploadResultAutoUpload.getStatus();
+                        automaticTrace().record(DiagnosticStage.VERIFY, AndroidDiagnosticLogging.automaticResult(status),
+                                AndroidDiagnosticLogging.automaticFailure(autoUploadResultAutoUpload.getReasonCode()));
                         if (status.equals("UPLOADED")) {
                             finish("UPLOADED", autoUploadResultAutoUpload.getNeedsUserChoice() ? "本机版本已上传，但云端随后又有新版本。请检查后再恢复，未自动选择赢家。" : "退出后自动上传成功。");
                             return;
@@ -356,6 +385,7 @@ public final class AutoSyncService extends Service {
                 }
             }
         } catch (Exception unused) {
+            automaticTrace().failure(DiagnosticStage.WORK, unused);
             retryTransient("本次自动同步未完成。存档未被当作上传成功，请在首页检查后重试。");
         }
     }
@@ -377,6 +407,7 @@ public final class AutoSyncService extends Service {
     private void retryTransient(String str) {
         long jNextTransientRetryMillis = this.policy.nextTransientRetryMillis();
         if (jNextTransientRetryMillis >= 0) {
+            automaticTrace().record(DiagnosticStage.WORK, DiagnosticResult.PENDING);
             schedule(jNextTransientRetryMillis);
         } else {
             finish("RETRY_LATER", str);
@@ -388,6 +419,7 @@ public final class AutoSyncService extends Service {
             return;
         }
         this.stopped = true;
+        automaticTrace().record(DiagnosticStage.FINISHED, AndroidDiagnosticLogging.automaticResult(str));
         cancelEvidence(this, this.token);
         String str3 = this.token;
         boolean published = false;
@@ -413,8 +445,15 @@ public final class AutoSyncService extends Service {
         catch (Exception ignored) { /* No evidence is persisted; expiry and process death also invalidate it. */ }
     }
 
+    private synchronized DiagnosticTrace automaticTrace() {
+        if (this.diagnosticTrace == null) this.diagnosticTrace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true);
+        return this.diagnosticTrace;
+    }
+
     @Override // android.app.Service
     public void onDestroy() {
+        if (!this.stopped && this.diagnosticTrace != null)
+            this.diagnosticTrace.record(DiagnosticStage.FINISHED, DiagnosticResult.CANCELED);
         cancelEvidence(this, this.token);
         this.stopped = true;
         this.executor.shutdownNow();

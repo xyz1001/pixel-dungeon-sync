@@ -1,5 +1,11 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.DiagnosticLog;
+import pdsync.DiagnosticHttpMethod;
+import pdsync.DiagnosticFailure;
+import pdsync.DiagnosticResult;
+import pdsync.DiagnosticStage;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.InputStream;
@@ -194,10 +200,11 @@ final class OfficialServiceRegistrationClient {
                 }).build();
         try (Response response = transport.execute(request)) {
             if (response == null) throw failure(FailureKind.INVALID_RESPONSE, true);
+            int status = response.code();
+            DiagnosticLog.http(DiagnosticHttpMethod.POST, status);
             if (!REGISTER_URL.equals(response.request().url().toString())) {
                 throw failure(FailureKind.REDIRECT_REJECTED, true);
             }
-            int status = response.code();
             if (status != 200) {
                 if (status == 400) {
                     throw failure(inputFailure(response.body(), registration), false);
@@ -211,21 +218,37 @@ final class OfficialServiceRegistrationClient {
             if (body == null) throw failure(FailureKind.INVALID_RESPONSE, true);
             return parseAccount(readBoundedUtf8(body), username, password);
         } catch (RegistrationException failure) {
+            DiagnosticLog.record(DiagnosticStage.CONNECTION, DiagnosticResult.FAILED, diagnosticFailure(failure.kind));
             // Closing may add suppressed transport text. Rebuild a safe exception, and never
             // suggest that a login (which cannot create an account) created one.
             throw failure(failure.kind, registration && failure.accountMayHaveBeenCreated);
         } catch (CharacterCodingException invalidUtf8) {
             throw failure(FailureKind.INVALID_RESPONSE, registration);
         } catch (InterruptedIOException timeout) {
+            DiagnosticLog.networkFailure(timeout);
             throw failure(FailureKind.TIMEOUT, registration);
         } catch (SSLException tls) {
+            DiagnosticLog.networkFailure(tls);
             throw failure(FailureKind.TLS_ERROR, registration);
         } catch (IOException network) {
+            DiagnosticLog.networkFailure(network);
             throw failure(FailureKind.NETWORK_ERROR, registration);
         } catch (RuntimeException invalid) {
             throw failure(FailureKind.INVALID_RESPONSE, registration);
         } finally {
             Arrays.fill(payload, (byte) 0);
+        }
+    }
+
+    private static DiagnosticFailure diagnosticFailure(FailureKind kind) {
+        switch (kind) {
+            case INVALID_CREDENTIALS: return DiagnosticFailure.AUTHENTICATION;
+            case TIMEOUT: return DiagnosticFailure.TIMEOUT;
+            case TLS_ERROR: return DiagnosticFailure.TLS;
+            case NETWORK_ERROR: return DiagnosticFailure.NETWORK_IO;
+            case RATE_LIMITED: case UPSTREAM_ERROR: case SERVER_ERROR: case REQUEST_REJECTED:
+                return DiagnosticFailure.HTTP;
+            default: return DiagnosticFailure.VALIDATION;
         }
     }
 

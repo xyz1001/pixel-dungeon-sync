@@ -16,6 +16,7 @@ public final class InstallResultReceiver extends BroadcastReceiver {
         }
         if (("io.github.xyz1001.pdsync.android.INSTALL_CHANGED." + string).equals(intent.getAction()) && string.equals(intent.getStringExtra("requestNonce")) && InstallProgressPolicy.acceptsCallback("uninstall".equals(sharedPreferences.getString("operation", "")), sharedPreferences.getInt("session", -1), intent.getIntExtra("android.content.pm.extra.SESSION_ID", -2), string, intent.getStringExtra("requestNonce"))) {
             int intExtra = intent.getIntExtra("android.content.pm.extra.STATUS", 1);
+            AndroidDiagnosticLogging.installerResult(intExtra);
             SharedPreferences.Editor editorPutInt = sharedPreferences.edit().putInt("systemStatus", intExtra);
             if (intExtra == -1) {
                 Intent intentNestedIntent = AndroidCompat.nestedIntent(intent, "android.intent.extra.INTENT");
