@@ -1,6 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
 import pdsync.DiagnosticLog;
+import pdsync.DiagnosticDetails;
 import pdsync.DiagnosticHttpMethod;
 import pdsync.DiagnosticFailure;
 import pdsync.DiagnosticResult;
@@ -180,6 +181,11 @@ final class OfficialServiceRegistrationClient {
         }
     }
 
+    private static DiagnosticDetails networkContext(long started) {
+        return DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.OFFICIAL_AUTH)
+                .requestDurationMs(Math.max(0, (System.nanoTime() - started) / 1_000_000)).build();
+    }
+
     private Account request(String action, String username, String password) throws RegistrationException {
         final boolean registration = "register".equals(action);
         Map<String, JsonElement> fields = new LinkedHashMap<>();
@@ -198,10 +204,11 @@ final class OfficialServiceRegistrationClient {
                     @Override public boolean isOneShot() { return true; }
                     @Override public String toString() { return "Official service request [private fields hidden]"; }
                 }).build();
+        final long requestStarted = System.nanoTime();
         try (Response response = transport.execute(request)) {
             if (response == null) throw failure(FailureKind.INVALID_RESPONSE, true);
             int status = response.code();
-            DiagnosticLog.http(DiagnosticHttpMethod.POST, status);
+            DiagnosticLog.http(DiagnosticHttpMethod.POST, status, networkContext(requestStarted));
             if (!REGISTER_URL.equals(response.request().url().toString())) {
                 throw failure(FailureKind.REDIRECT_REJECTED, true);
             }
@@ -225,13 +232,13 @@ final class OfficialServiceRegistrationClient {
         } catch (CharacterCodingException invalidUtf8) {
             throw failure(FailureKind.INVALID_RESPONSE, registration);
         } catch (InterruptedIOException timeout) {
-            DiagnosticLog.networkFailure(timeout);
+            DiagnosticLog.networkFailure(timeout, networkContext(requestStarted));
             throw failure(FailureKind.TIMEOUT, registration);
         } catch (SSLException tls) {
-            DiagnosticLog.networkFailure(tls);
+            DiagnosticLog.networkFailure(tls, networkContext(requestStarted));
             throw failure(FailureKind.TLS_ERROR, registration);
         } catch (IOException network) {
-            DiagnosticLog.networkFailure(network);
+            DiagnosticLog.networkFailure(network, networkContext(requestStarted));
             throw failure(FailureKind.NETWORK_ERROR, registration);
         } catch (RuntimeException invalid) {
             throw failure(FailureKind.INVALID_RESPONSE, registration);

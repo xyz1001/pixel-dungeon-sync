@@ -23,13 +23,16 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
  private fun call(path: String, method: String = "GET", bytes: ByteArray? = null, headers: Map<String,String> = emptyMap()): Pair<ByteArray,String?> {
   val builder = Request.Builder().url(baseUrl+path).header("Authorization",auth).method(method,bytes?.toRequestBody())
   headers.forEach { (k,v) -> builder.header(k,v) }
+  val requestStarted = System.nanoTime()
+  fun context() = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
+   .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0)).build()
   try {
    client.newCall(builder.build()).execute().use { r ->
     DiagnosticLog.http(when(method) {
      "GET" -> DiagnosticHttpMethod.GET
      "PUT" -> DiagnosticHttpMethod.PUT
      else -> DiagnosticHttpMethod.OTHER
-    }, r.code)
+    }, r.code, context())
     if(r.code == 404 && method == "GET") throw java.nio.file.NoSuchFileException(path)
     if(!r.isSuccessful) throw WebDavException(r.code)
     val limit = if(path.endsWith(".zip")) MAX_SNAPSHOT_BYTES else MAX_MANIFEST_BYTES
@@ -41,7 +44,7 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
    }
   } catch(error: IOException) {
    if(error !is WebDavException && error !is java.nio.file.NoSuchFileException)
-    DiagnosticLog.networkFailure(error)
+    DiagnosticLog.networkFailure(error, context())
    throw error
   }
  }

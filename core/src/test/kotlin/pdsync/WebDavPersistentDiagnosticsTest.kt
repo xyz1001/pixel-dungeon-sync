@@ -45,6 +45,8 @@ class WebDavPersistentDiagnosticsTest {
   }
   val text=exported()
   for(value in listOf("PUT","GET","201","200","PUSH","SUCCEEDED")) assertTrue(value in text,value)
+  assertContains(text, "\"networkTarget\":\"DAV\"")
+  assertContains(text, "\"requestDurationMs\":")
   assertEquals(2,server.requestCount)
   assertPrivate(text,"private-base","private-save-content",server.url("/").toString())
  }
@@ -70,6 +72,8 @@ class WebDavPersistentDiagnosticsTest {
   assertEquals(IOException::class.java,error.javaClass)
   assertEquals(1,attempts)
   val text=exported();assertTrue("TIMEOUT" in text)
+  assertContains(text, "NETWORK_TARGET=DAV")
+  assertContains(text, "REQUEST_DURATION_MS=")
   assertPrivate(text,"private.invalid","secret","https://example.invalid")
  }
 

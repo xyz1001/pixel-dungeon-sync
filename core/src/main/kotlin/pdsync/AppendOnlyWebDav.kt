@@ -225,20 +225,25 @@ class AppendOnlyWebDav(
  }
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
- private fun <T> execute(request: Request, requestClient: OkHttpClient = client, block: (Response) -> T): T = try {
+ private fun <T> execute(request: Request, requestClient: OkHttpClient = client, block: (Response) -> T): T {
+  val requestStarted = System.nanoTime()
+  // Elapsed until response headers (or the observed transport failure), never request data.
+  fun context() = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
+   .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0)).build()
+  return try {
   requestClient.newCall(request).execute().use { response ->
    // The recorder accepts only a closed method enum and status, never URL, headers or payload.
-   DiagnosticLog.http(diagnosticMethod(request.method), response.code)
+   DiagnosticLog.http(diagnosticMethod(request.method), response.code, context())
    block(response)
   }
  } catch (e: NamespaceProvisioningException) {
   // The namespace interceptor rejects bad statuses before execute can expose its response.
-  e.statusCode?.let { DiagnosticLog.http(diagnosticMethod(request.method), it) }
+  e.statusCode?.let { DiagnosticLog.http(diagnosticMethod(request.method), it, context()) }
   throw e
  }
  catch (e: WebDavException) { throw e }
  catch (error: IOException) {
-  DiagnosticLog.networkFailure(error)
+  DiagnosticLog.networkFailure(error, context())
   // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
   // Never copy transport text, causes or suppressed exceptions, which can contain credentials/URLs.
   val category = when (error) {
@@ -253,6 +258,7 @@ class AppendOnlyWebDav(
    else -> "IO"
   }
   throw IOException("WebDAV network request failed [$category]")
+ }
  }
 
  private fun diagnosticMethod(method: String): DiagnosticHttpMethod = when (method) {
