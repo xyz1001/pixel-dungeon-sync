@@ -264,6 +264,10 @@ public final class BridgeClient implements GameAccessBackend {
                 throw new Failure(readiness.stage, readiness.code, readiness.getMessage(), readiness.getCause(),
                         readiness.transport, BridgeSaveLayout.fromReply(bundleCall));
             }
+            pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.READINESS, pdsync.DiagnosticResult.SUCCEEDED,
+                    pdsync.DiagnosticFailure.NONE, AndroidDiagnosticLogging.layoutDetails(
+                            this.selected.embeddedBridge() ? "EMBEDDED_BRIDGE" : "LEGACY_HELPER_BRIDGE",
+                            BridgeSaveLayout.fromReply(bundleCall)));
             return "游戏、存档桥和存档目录已验证；可开始稳定性检查。";
         } catch (Failure e) {
             throw e;

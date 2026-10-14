@@ -108,7 +108,12 @@ internal class OperationTrace internal constructor(
   OperationAction.MERGE, OperationAction.MERGE_CURRENT -> DiagnosticAction.MERGE
   OperationAction.ARCHIVE -> DiagnosticAction.ARCHIVE
  }, automatic)
+ private var diagnosticOutcome = DiagnosticResult.SUCCEEDED
  val id: String get() = uuid.toString()
+ fun outcome(result: DiagnosticResult) {
+  diagnosticOutcome = result
+  diagnostics.record(DiagnosticStage.VERIFY, result)
+ }
  fun <T> withDiagnostics(block: () -> T): T = DiagnosticLog.bind(diagnostics).use { block() }
  fun record(event: OperationEvent, guard: OperationGuard? = null, failure: OperationFailure? = null): Boolean {
   val (stage, result) = when (event) {
@@ -119,14 +124,14 @@ internal class OperationTrace internal constructor(
    OperationEvent.OPERATION_QUEUED -> DiagnosticStage.QUEUED to DiagnosticResult.PENDING
    OperationEvent.OPERATION_STARTED -> DiagnosticStage.STARTED to DiagnosticResult.STARTED
    OperationEvent.WORK_STARTED -> DiagnosticStage.WORK to DiagnosticResult.STARTED
-   OperationEvent.WORK_SUCCEEDED -> DiagnosticStage.WORK to DiagnosticResult.SUCCEEDED
+   OperationEvent.WORK_SUCCEEDED -> DiagnosticStage.WORK to diagnosticOutcome
    OperationEvent.WORK_FAILED -> DiagnosticStage.WORK to DiagnosticResult.FAILED
    OperationEvent.HISTORY_REFRESH_STARTED -> DiagnosticStage.REFRESH to DiagnosticResult.STARTED
    OperationEvent.HISTORY_REFRESH_SUCCEEDED -> DiagnosticStage.REFRESH to DiagnosticResult.SUCCEEDED
    OperationEvent.HISTORY_REFRESH_FAILED -> DiagnosticStage.REFRESH to DiagnosticResult.FAILED
    OperationEvent.OPERATION_CANCELED -> DiagnosticStage.FINISHED to DiagnosticResult.CANCELED
    OperationEvent.OPERATION_FINISHED -> DiagnosticStage.FINISHED to when (failure) {
-    null -> DiagnosticResult.SUCCEEDED
+    null -> diagnosticOutcome
     OperationFailure.CANCELED -> DiagnosticResult.CANCELED
     else -> DiagnosticResult.FAILED
    }

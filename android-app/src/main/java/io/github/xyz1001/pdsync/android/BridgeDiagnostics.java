@@ -183,6 +183,23 @@ public final class BridgeDiagnostics {
             super("ROOT_OPERATION_DETAIL");this.stage=stage;this.category=category;this.errno=errno;
         }
     }
+    /** Closed root evidence only, never the cause message, package, path or stack. */
+    static final class RootEvidence {
+        final RootStage stage; final RootCategory category; final int errno;
+        RootEvidence(RootStage stage, RootCategory category, int errno) {
+            this.stage = stage; this.category = category; this.errno = errno;
+        }
+    }
+    static RootEvidence rootEvidence(Throwable error) {
+        for (int depth = 0; error != null && depth < 16; depth++, error = error.getCause()) {
+            if (error instanceof RootDetail) {
+                RootDetail detail = (RootDetail) error;
+                return new RootEvidence(detail.stage, detail.category, detail.errno);
+            }
+        }
+        return null;
+    }
+
     static Throwable rootDetail(String stage,String category,int errno) {
         if(errno<0||errno>4095)return null;
         try {return new RootDetail(RootStage.valueOf(stage),RootCategory.valueOf(category),errno);}

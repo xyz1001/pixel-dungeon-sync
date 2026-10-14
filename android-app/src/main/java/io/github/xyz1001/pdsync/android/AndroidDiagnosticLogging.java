@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo;
 import pdsync.DiagnosticAction;
 import pdsync.DiagnosticLog;
 import pdsync.DiagnosticFailure;
+import pdsync.DiagnosticDetails;
 import pdsync.DiagnosticResult;
 import pdsync.DiagnosticStage;
 import pdsync.DiagnosticTrace;
@@ -35,40 +36,103 @@ final class AndroidDiagnosticLogging {
         }
     }
     static DiagnosticFailure readinessFailure(InstallationReadiness state) {
-        if (state.systemRequestActive) return DiagnosticFailure.BUSY;
+        return readinessFailure(state, null);
+    }
+    static DiagnosticFailure readinessFailure(InstallationReadiness state, String code) {
+        if (state.systemRequestActive) return DiagnosticFailure.SYSTEM_REQUEST_PENDING;
         if (state.restorePending) return DiagnosticFailure.RECOVERY_REQUIRED;
+        if (state.game == InstallationReadiness.PackageStatus.NOT_SELECTED) return DiagnosticFailure.GAME_NOT_SELECTED;
+        if (code != null && !"READY".equals(code) && !"NOT_CHECKED".equals(code)) return bridgeFailure(code);
         switch (state.access) {
             case READY: return state.identityVerified ? DiagnosticFailure.NONE : DiagnosticFailure.IDENTITY_MISMATCH;
             case GAME_BUSY: case SYNC_BUSY: return DiagnosticFailure.BUSY;
             case RECOVERY_NEEDED: return DiagnosticFailure.RECOVERY_REQUIRED;
             case SECURITY_ERROR: return DiagnosticFailure.AUTHORIZATION;
-            case IPC_ERROR: case CAPABILITY_UNAVAILABLE: return DiagnosticFailure.UNAVAILABLE;
-            case FIRST_LAUNCH_NEEDED: case NOT_CHECKED: return DiagnosticFailure.NOT_READY;
+            case IPC_ERROR: return DiagnosticFailure.UNAVAILABLE;
+            case CAPABILITY_UNAVAILABLE: return DiagnosticFailure.CAPABILITY_UNAVAILABLE;
+            case FIRST_LAUNCH_NEEDED: return DiagnosticFailure.FIRST_LAUNCH_NEEDED;
+            case NOT_CHECKED: return DiagnosticFailure.NOT_CHECKED;
+            case UNRECOGNIZED_LAYOUT: return DiagnosticFailure.UNRECOGNIZED_LAYOUT;
             default: return DiagnosticFailure.VALIDATION;
         }
     }
-    static void failure(DiagnosticTrace trace, DiagnosticStage stage, Throwable error) {
+    static DiagnosticFailure classify(Throwable error) {
         String code = BridgeDiagnostics.code(error);
-        if (code == null) { trace.failure(stage, error); return; }
-        DiagnosticFailure category;
+        if (code != null) return bridgeFailure(code);
+        SyncInspectionDiagnostics.Failure inspection = SyncInspectionDiagnostics.find(error);
+        return DiagnosticLog.classify(inspection != null && inspection.getCause() != null ? inspection.getCause() : error);
+    }
+    static void failure(DiagnosticTrace trace, DiagnosticStage stage, Throwable error) {
+        DiagnosticFailure category = classify(error);
+        trace.record(stage, category == DiagnosticFailure.CANCELED ? DiagnosticResult.CANCELED : DiagnosticResult.FAILED,
+                category, failureDetails(error));
+    }
+    static DiagnosticFailure bridgeFailure(String code) {
         switch (code) {
-            case "ROOT_BUSY": case "GAME_FOREGROUND": case "GAME_RUNNING": case "SAVE_NOT_QUIET":
-            case "GAME_SAVE_RACE": case "SYNC_BUSY": case "OPERATION_BUSY": category = DiagnosticFailure.BUSY; break;
-            case "ROOT_RECOVERY_REQUIRED": case "RECOVERY_REQUIRED": category = DiagnosticFailure.RECOVERY_REQUIRED; break;
-            case "ROOT_AUTH_REQUIRED": case "ROOT_DENIED_OR_EXITED": case "PROVIDER_ACQUIRE_SECURITY_REJECTED":
-            case "IPC_SECURITY_REJECTED": category = DiagnosticFailure.AUTHORIZATION; break;
+            case "ROOT_BUSY": case "ROOT_UNRELIABLE": case "ROOT_CHANGED": case "GAME_FOREGROUND":
+            case "GAME_RUNNING": case "SAVE_NOT_QUIET": case "PROCESS_STATE_UNKNOWN": case "SAVE_CHANGED":
+            case "GAME_SAVE_RACE": case "SYNC_BUSY": case "OPERATION_BUSY": return DiagnosticFailure.BUSY;
+            case "ROOT_RECOVERY_REQUIRED": case "RECOVERY_REQUIRED": case "ROOT_RESTORE_CONFLICT":
+            case "ROOT_RECOVERY_CONFLICT": case "ROOT_RESTORE_COMMITTED_CLEANUP_PENDING":
+            case "ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING": case "RESTORE_COMMITTED_CLEANUP_PENDING":
+            case "RESTORE_ROLLED_BACK": return DiagnosticFailure.RECOVERY_REQUIRED;
+            case "ROOT_AUTH_REQUIRED": case "ROOT_DENIED_OR_EXITED": case "ROOT_NOT_ROOT":
+            case "ROOT_UNSAFE_PATH": case "PROVIDER_ACQUIRE_SECURITY_REJECTED":
+            case "IPC_SECURITY_REJECTED": return DiagnosticFailure.AUTHORIZATION;
             case "ROOT_TARGET_CHANGED": case "ROOT_BINDING_MISMATCH": case "GAME_BINDING_MISMATCH":
             case "GAME_SIGNER_MISMATCH": case "PACKAGE_TRUST_FAILED": case "TARGET_IDENTITY_FAILED":
-            case "UID_MISMATCH": case "UNEXPECTED_SHARED_UID": category = DiagnosticFailure.IDENTITY_MISMATCH; break;
-            case "ROOT_TIMEOUT": case "ROOT_RUNNER_TIMEOUT": category = DiagnosticFailure.TIMEOUT; break;
-            case "ROOT_CANCELLED": case "INTERRUPTED": category = DiagnosticFailure.CANCELED; break;
+            case "INVALID_GAME_BINDING": case "REPLY_IDENTITY_MISMATCH":
+            case "UID_MISMATCH": case "UNEXPECTED_SHARED_UID": return DiagnosticFailure.IDENTITY_MISMATCH;
+            case "ROOT_TIMEOUT": case "ROOT_RUNNER_TIMEOUT": return DiagnosticFailure.TIMEOUT;
+            case "ROOT_CANCELLED": case "INTERRUPTED": return DiagnosticFailure.CANCELED;
             case "ROOT_UNAVAILABLE": case "PROVIDER_ACQUIRE_NULL": case "PROVIDER_ACQUIRE_FAILED":
-            case "IPC_CALL_FAILED": category = DiagnosticFailure.UNAVAILABLE; break;
-            case "ROOT_SAVE_NOT_READY": case "SAVE_NOT_READY": case "FIRST_LAUNCH_NEEDED": category = DiagnosticFailure.NOT_READY; break;
-            default: category = DiagnosticFailure.VALIDATION;
+            case "NO_PROVIDER_REPLY": case "IPC_CALL_FAILED": return DiagnosticFailure.UNAVAILABLE;
+            case "ROOT_ATTRIBUTES_UNSUPPORTED": case "ROOT_MUTATION_UNAVAILABLE":
+            case "ROOT_RESTORE_UNSUPPORTED": case "ROOT_RECOVERY_UNSUPPORTED": return DiagnosticFailure.CAPABILITY_UNAVAILABLE;
+            case "ROOT_MISSING_DIRECTORY": case "FIRST_LAUNCH_NEEDED": return DiagnosticFailure.FIRST_LAUNCH_NEEDED;
+            case "ROOT_UNRECOGNIZED_LAYOUT": case "UNRECOGNIZED_SAVE_LAYOUT": return DiagnosticFailure.UNRECOGNIZED_LAYOUT;
+            case "ROOT_SAVE_NOT_READY": case "SAVE_NOT_READY": return DiagnosticFailure.NOT_READY;
+            case "ROOT_IO_ERROR": case "SAVE_IO_ERROR": case "SAVE_UNREADABLE": return DiagnosticFailure.STORAGE;
+            default: return DiagnosticFailure.VALIDATION;
         }
-        trace.record(stage, category == DiagnosticFailure.CANCELED ? DiagnosticResult.CANCELED : DiagnosticResult.FAILED, category);
     }
+    static DiagnosticDetails.Builder readinessDetails(InstallationReadiness state, String code) {
+        return DiagnosticDetails.builder().mode(state.rootDirect ? "ROOT_DIRECT"
+                : state.embeddedBridge ? "EMBEDDED_BRIDGE" : "LEGACY_HELPER_BRIDGE")
+                .readinessCode(code).access(state.access.name()).gamePackageStatus(state.game.name())
+                .helperPackageStatus(state.helper.name()).identityVerified(state.identityVerified)
+                .systemRequestActive(state.systemRequestActive).restorePending(state.restorePending)
+                .failureSource("SAVE_READINESS");
+    }
+    static DiagnosticDetails layoutDetails(String mode, BridgeSaveLayout layout) {
+        DiagnosticDetails.Builder builder = DiagnosticDetails.builder().mode(mode).failureSource("SAVE_READINESS");
+        appendLayout(builder, layout);
+        return builder.build();
+    }
+    private static void appendLayout(DiagnosticDetails.Builder builder, BridgeSaveLayout layout) {
+        if (layout != null) builder.saveLayout(layout.state, layout.included, layout.excluded,
+                layout.unrecognized, layout.truncated, layout.valid);
+    }
+    static DiagnosticDetails failureDetails(Throwable error) {
+        return failureDetailsBuilder(error).build();
+    }
+    static DiagnosticDetails.Builder failureDetailsBuilder(Throwable error) {
+        DiagnosticDetails.Builder builder = DiagnosticDetails.builder();
+        BridgeDiagnostics.Failure bridge = BridgeDiagnostics.find(error);
+        if (bridge != null) {
+            builder.readinessCode(bridge.code).bridgeStage(bridge.stage.name()).failureSource(bridge.stage.name());
+            if (bridge.code.startsWith("ROOT_")) builder.mode("ROOT_DIRECT");
+            appendLayout(builder, bridge.saveLayout);
+        }
+        BridgeDiagnostics.RootEvidence root = BridgeDiagnostics.rootEvidence(error);
+        if (root != null) builder.mode("ROOT_DIRECT").failureSource("ROOT")
+                .rootStage(root.stage.name()).rootCategory(root.category.name()).errno(root.errno);
+        SyncInspectionDiagnostics.Failure inspection = SyncInspectionDiagnostics.find(error);
+        if (bridge == null && inspection != null) builder.failureSource(inspection.stage == SyncInspectionDiagnostics.Stage.HISTORY
+                ? "REMOTE_HISTORY" : "SYNC_COMPARE");
+        return builder;
+    }
+
     static DiagnosticFailure automaticFailure(String reason) {
         if (reason == null) return DiagnosticFailure.NONE;
         switch (reason) {
@@ -92,6 +156,12 @@ final class AndroidDiagnosticLogging {
             if (binding != null) try { binding.close(); }
             catch (Exception ignored) { /* Logging must not alter operation behavior. */ }
         }
+    }
+    static DiagnosticResult inspectionResult(String kind, boolean failed) {
+        if (failed) return DiagnosticResult.FAILED;
+        if ("BLOCKED".equals(kind)) return DiagnosticResult.REJECTED;
+        if ("BRANCHED".equals(kind)) return DiagnosticResult.CONFLICT;
+        return DiagnosticResult.SUCCEEDED;
     }
     static DiagnosticResult automaticResult(String state) {
         switch (state) {

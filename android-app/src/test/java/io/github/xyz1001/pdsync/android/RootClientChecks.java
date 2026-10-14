@@ -58,6 +58,7 @@ public final class RootClientChecks {
     }
     public static void main(String[] args)throws Exception {
         SelectedRootGame game=selection();Path dir=Files.createTempDirectory("root-client-host-");
+        diagnosticLoggingChecks(dir, game);
         String[] rootCodes={"ROOT_AUTH_REQUIRED","ROOT_UNAVAILABLE","ROOT_DENIED_OR_EXITED","ROOT_TIMEOUT",
                 "ROOT_RUNNER_TIMEOUT","ROOT_CANCELLED","ROOT_INVALID_REPLY","ROOT_PIPE_FAILED","ROOT_DIAGNOSTIC_LIMIT","ROOT_TARGET_CHANGED",
                 "ROOT_BINDING_MISMATCH","ROOT_ACCESS_FAILED","ROOT_SAVE_NOT_READY","ROOT_UNEXPECTED_ARCHIVE",
@@ -190,4 +191,67 @@ public final class RootClientChecks {
     }
     private static SelectedRootGame gamet(){try{return selection();}catch(Exception e){throw new AssertionError(e);}}
     private static RootProtocol.Response okayUnchecked(SelectedRootGame game){try{return okay(game);}catch(Exception e){throw new AssertionError(e);}}
+    private static String diagnosticEvents() throws Exception {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(pdsync.DiagnosticLog.snapshotExport()))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null)
+                if ("events.jsonl".equals(entry.getName())) return new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        throw new AssertionError("events missing");
+    }
+    private static void diagnosticLoggingChecks(Path directory, SelectedRootGame game) throws Exception {
+        pdsync.DiagnosticLog.configure(directory.resolve("diagnostics"), "0.5.15-root-test+37", "android");
+        RootProcessTransport.Exchange busyReply = (request, archive) -> new RootProtocol.Response(RootProtocol.Status.OK,
+                game.binding().fingerprint(), "ALLOWLISTED_FILES_PRESENT", 4, 1234, A, "FOREGROUND", true, null)
+                .withRequest(request, RootProtocol.Outcome.READ_ONLY);
+        RootGameBridge bridge = new RootGameBridge(game, null, selected -> {}, busyReply, () -> true, directory.toFile());
+        pdsync.DiagnosticTrace trace = pdsync.DiagnosticLog.begin(pdsync.DiagnosticAction.ACCESS_CHECK, false);
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
+            try { bridge.inspectReady(); throw new AssertionError("busy inspection accepted"); }
+            catch (BridgeDiagnostics.Failure failure) {
+                check("ROOT_BUSY".equals(failure.code), "existing busy decision preserved");
+                AndroidDiagnosticLogging.failure(trace, pdsync.DiagnosticStage.FINISHED, failure);
+            }
+        }
+        String events = diagnosticEvents();
+        check(events.contains("\"rootCommand\":\"INSPECT\""), "actual request command exported");
+        check(events.contains("\"readinessCode\":\"OK\""), "protocol response is only OK");
+        check(!events.contains("\"readinessCode\":\"READY\""), "busy response never marked ready");
+        check(events.contains("\"observationState\":\"FOREGROUND\""), "real UID observation preserved");
+        check(events.contains("\"fileCount\":\"4\""), "inventory retained before busy readiness rejection");
+        check(events.contains("\"contentBytes\":\"1234\""), "bounded inventory size retained");
+        check(events.contains("\"failure\":\"BUSY\""), "busy terminal error retained");
+        RootProcessTransport.Exchange permissionReply = (request, archive) -> RootProtocol.Response.failure(RootProtocol.Status.NOT_ROOT,
+                request).withDiagnostic(RootProtocol.DiagnosticStage.EUID, RootProtocol.DiagnosticCategory.PERMISSION, 13);
+        RootGameBridge denied = new RootGameBridge(game, null, selected -> {}, permissionReply, () -> true, directory.toFile());
+        pdsync.DiagnosticTrace rejected = pdsync.DiagnosticLog.begin(pdsync.DiagnosticAction.ACCESS_CHECK, false);
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(rejected)) {
+            try { denied.inspectReady(); throw new AssertionError("denied request accepted"); }
+            catch (BridgeDiagnostics.Failure failure) { AndroidDiagnosticLogging.failure(rejected, pdsync.DiagnosticStage.FINISHED, failure); }
+        }
+        for (String line : diagnosticEvents().split("\n")) if (line.contains(rejected.getId())) {
+            check(!line.contains("\"fileCount\""), "default zero failure inventory omitted");
+            check(!line.contains("\"contentBytes\""), "default zero failure size omitted");
+        }
+        AtomicReference<String> observation = new AtomicReference<>("FOREGROUND");
+        RootProcessTransport.Exchange observedReply = (request, archive) -> new RootProtocol.Response(RootProtocol.Status.OK,
+                game.binding().fingerprint(), "", 0, 0, "", observation.get(), true, null)
+                .withRequest(request, RootProtocol.Outcome.READ_ONLY);
+        RootGameBridge observed = new RootGameBridge(game, null, selected -> {}, observedReply, () -> true, directory.toFile());
+        pdsync.DiagnosticTrace monitored = pdsync.DiagnosticLog.begin(pdsync.DiagnosticAction.AUTOMATIC_SYNC, true);
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(monitored)) {
+            for (int i = 0; i < 10; i++) observed.observeLifecycle();
+            observation.set("CACHED");
+            for (int i = 0; i < 10; i++) observed.observeLifecycle();
+        }
+        int transitions = 0;
+        for (String line : diagnosticEvents().split("\n")) if (line.contains(monitored.getId()) && line.contains("\"stage\":\"BRIDGE\"")) {
+            transitions++;
+            check(line.contains("\"rootCommand\":\"OBSERVE\""), "actual observation command exported");
+            check(!line.contains("\"fileCount\""), "observation does not invent empty inventory");
+        }
+        check(transitions == 2, "only changed observation states are logged, not every poll");
+        check(!diagnosticEvents().contains(game.gamePackage), "package and binding identifiers omitted");
+    }
+
 }

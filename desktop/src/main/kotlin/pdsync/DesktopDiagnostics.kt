@@ -12,6 +12,7 @@ internal fun configureDesktopDiagnostics(directory: Path) {
  val platform = desktopDiagnosticPlatform(System.getProperty("os.name")) ?: return
  val version = DesktopDiagnosticExport::class.java.`package`?.implementationVersion ?: "development"
  runCatching {
+  configureDesktopDiagnosticEnvironment()
   DiagnosticLog.configure(directory, version, platform)
   DiagnosticLog.begin(DiagnosticAction.APP_START, false).record(DiagnosticStage.FINISHED, DiagnosticResult.SUCCEEDED)
  }
@@ -41,6 +42,26 @@ internal fun <T> diagnosticWork(action: DiagnosticAction, result: (T) -> Diagnos
    throw failure
   }
  }
+}
+
+/** Completed observation failures only; repeated identical polling failures are not log spam. */
+internal class DiagnosticObservationFailures {
+ private var last: DiagnosticFailure? = null
+ fun recovered() { last = null }
+ fun failed(error: Throwable) {
+  val category = DiagnosticLog.classify(error)
+  if (last == category) return
+  last = category
+  val trace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true)
+  trace.failure(DiagnosticStage.WORK, error)
+  trace.failure(DiagnosticStage.FINISHED, error)
+ }
+}
+
+internal fun diagnosticPublishedResult(value: Any?): DiagnosticResult = when (value) {
+ is AppendPushResult.Diverged -> DiagnosticResult.CONFLICT
+ is OnboardingRestoreResult.Published -> diagnosticPublishedResult(value.result)
+ else -> DiagnosticResult.SUCCEEDED
 }
 
 internal sealed interface DiagnosticExportResult {

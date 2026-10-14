@@ -24,6 +24,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     private final BooleanSupplier authorized;
     private final File stagingDirectory;
     private RootProcessTransport ownedTransport;
+    private final RootDiagnosticLogging diagnostics = new RootDiagnosticLogging();
 
     public RootGameBridge(Context context, SelectedRootGame selected, AndroidGameIdentity identity)throws Exception {
         this(context, selected, identity, new RootProcessTransport(context.getApplicationInfo().sourceDir));
@@ -195,6 +196,8 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
             RootProtocol.Response reply=exchange.exchange(request,upload,archive);
             try {RootProtocol.requireReplyMatches(request,reply);}
             catch(IOException mismatch){throw failure("ROOT_REPLY_MISMATCH",mismatch);}
+            // Protocol success is distinct from the readiness checks below; preserve this verified observation.
+            if(reply.status==RootProtocol.Status.OK)diagnostics.response(reply);
             if(!explicitProbe&&!authorized.getAsBoolean())throw failure("ROOT_CANCELLED",null);
             verifyTarget();
             if(reply.status!=RootProtocol.Status.OK)throw failure("ROOT_"+reply.status.name(),
@@ -211,9 +214,15 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
                 if(!("CACHED".equals(reply.observationState)||"ABSENT".equals(reply.observationState)))throw failure("ROOT_BUSY",null);
             }
             return reply;
-        }catch(BridgeDiagnostics.Failure failure){throw failure;}
-        catch(RootProcessTransport.Failure failure){throw failure(failure.code,failure);}
-        catch(Exception failure){throw failure("ROOT_ACCESS_FAILED",failure);}
+        }catch(BridgeDiagnostics.Failure failure){diagnostics.failure(command,failure);throw failure;}
+        catch(RootProcessTransport.Failure failure){
+            BridgeDiagnostics.Failure diagnostic = failure(failure.code,failure);
+            diagnostics.failure(command,diagnostic);throw diagnostic;
+        }
+        catch(Exception failure){
+            BridgeDiagnostics.Failure diagnostic = failure("ROOT_ACCESS_FAILED",failure);
+            diagnostics.failure(command,diagnostic);throw diagnostic;
+        }
     }
     private static BridgeDiagnostics.Failure atStage(BridgeDiagnostics.Stage stage, BridgeDiagnostics.Failure failure) {
         return new BridgeDiagnostics.Failure(stage,failure.code,failure.getMessage(),failure.getCause());

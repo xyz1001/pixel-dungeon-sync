@@ -97,7 +97,7 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('AndroidDiagnosticLogging.bind(trace)', worker)
         self.assertIn('AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e)', worker)
         self.assertIn('DiagnosticResult.CONFLICT', MAIN)
-        self.assertIn('AndroidDiagnosticLogging.readinessFailure(this.readinessState)', MAIN)
+        self.assertIn('AndroidDiagnosticLogging.readinessFailure(this.readinessState, this.bridgeAccessCode)', MAIN)
         self.assertIn('case "ROOT_BUSY"', LOGGING)
         self.assertIn('DiagnosticFailure.BUSY', LOGGING)
         self.assertIn('DiagnosticResult.PENDING', MAIN)
@@ -110,15 +110,31 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('case "SKIPPED_UNCERTAIN": case "PAUSED": return DiagnosticResult.SKIPPED', LOGGING)
         self.assertIn('case "SKIPPED_CONFLICT": return DiagnosticResult.CONFLICT', LOGGING)
 
+    def test_real_outcomes_and_readiness_reason_reach_terminal_event(self):
+        worker = body(MAIN, 'void m150lambda$work$2')
+        self.assertIn('diagnosticWorkFailure(trace.getAction(), objRun, result)', worker)
+        self.assertIn('trace.record(DiagnosticStage.WORK, result, failure, details)', worker)
+        completion = body(MAIN, 'void m148lambda$work$0')
+        self.assertEqual(completion.count('trace.record(DiagnosticStage.FINISHED, result, failure, details)'), 2)
+        refresh = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
+        self.assertIn('return DiagnosticResult.SKIPPED', refresh)
+        self.assertIn('DiagnosticLog.failure(DiagnosticStage.REFRESH, error)', refresh)
+        self.assertIn('return result;', refresh)
+        self.assertIn('result instanceof AutomaticHistoryOutcome', MAIN)
+        self.assertIn('work(DiagnosticAction.LAUNCH, "正在核对首次启动', MAIN)
+        self.assertIn('failDiagnostics(failure)', body(SERVICE, 'public void poll()'))
+        self.assertIn('DiagnosticStage.FINISHED', body(SERVICE, 'private synchronized void failDiagnostics('))
+
     def test_installer_and_auth_status_logging_has_no_payloads(self):
         receiver = (ROOT / 'InstallResultReceiver.java').read_text()
         self.assertIn('AndroidDiagnosticLogging.installerResult(intExtra)', receiver)
-        self.assertIn('DiagnosticLog.http(DiagnosticHttpMethod.POST, status)', AUTH)
+        self.assertIn('DiagnosticLog.http(DiagnosticHttpMethod.POST, status, networkContext(requestStarted))', AUTH)
         self.assertIn('AndroidDiagnosticLogging.configure(this)', (ROOT / 'DiagnosticApplication.java').read_text())
-        self.assertIn('DiagnosticLog.networkFailure(timeout)', AUTH)
-        self.assertIn('DiagnosticLog.networkFailure(tls)', AUTH)
-        self.assertIn('DiagnosticLog.networkFailure(network)', AUTH)
+        self.assertIn('DiagnosticLog.networkFailure(timeout, networkContext(requestStarted))', AUTH)
+        self.assertIn('DiagnosticLog.networkFailure(tls, networkContext(requestStarted))', AUTH)
+        self.assertIn('DiagnosticLog.networkFailure(network, networkContext(requestStarted))', AUTH)
         self.assertIn('context.getFilesDir().getCanonicalFile().toPath()', LOGGING)
         self.assertIn('info.versionName + "+"', LOGGING)
-        for forbidden in ('getMessage()', 'toString()', 'username', 'password', 'gamePackage', 'getStackTrace', 'logcat'):
+        for forbidden in ('getMessage()', 'toString()', 'username', 'password', 'getStackTrace', 'logcat'):
             self.assertNotIn(forbidden, LOGGING)
+        self.assertNotRegex(LOGGING, r'\.gamePackage\b')  # gamePackageStatus is an allowed closed enum.

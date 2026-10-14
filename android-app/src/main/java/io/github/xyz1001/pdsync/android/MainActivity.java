@@ -71,6 +71,7 @@ import java.util.concurrent.RejectedExecutionException;
 import pdsync.DiagnosticAction;
 import pdsync.DiagnosticLog;
 import pdsync.DiagnosticFailure;
+import pdsync.DiagnosticDetails;
 import pdsync.DiagnosticResult;
 import pdsync.DiagnosticStage;
 import pdsync.DiagnosticTrace;
@@ -427,11 +428,13 @@ public final class MainActivity extends Activity {
                 objRun = task.run();
             }
             final DiagnosticResult result = diagnosticWorkResult(trace.getAction(), objRun);
-            trace.record(DiagnosticStage.WORK, result);
+            final DiagnosticFailure failure = diagnosticWorkFailure(trace.getAction(), objRun, result);
+            final DiagnosticDetails details = diagnosticWorkDetails();
+            trace.record(DiagnosticStage.WORK, result, failure, details);
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda105
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result);
+                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result, failure, details);
                 }
             });
         } catch (Exception e) {
@@ -447,19 +450,22 @@ public final class MainActivity extends Activity {
     }
 
     /* renamed from: lambda$work$0$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result) {
+    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result, DiagnosticFailure failure, DiagnosticDetails details) {
         if (isDestroyed()) {
-            trace.record(DiagnosticStage.FINISHED, result);
+            trace.record(DiagnosticStage.FINISHED, result, failure, details);
             return;
         }
         this.busy = false;
-        try {
+        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
             done.accept(obj);
+            if (trace.getAction() == DiagnosticAction.LAUNCH)
+                trace.record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
             rememberCurrentAutomaticHistory();
-            trace.record(DiagnosticStage.FINISHED, result);
+            trace.record(DiagnosticStage.FINISHED, result, failure, details);
         } catch (Exception e) {
-            trace.failure(DiagnosticStage.REFRESH, e);
-            trace.failure(DiagnosticStage.FINISHED, e);
+            AndroidDiagnosticLogging.failure(trace, trace.getAction() == DiagnosticAction.LAUNCH
+                    ? DiagnosticStage.GAME_LAUNCH : DiagnosticStage.REFRESH, e);
+            AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
             reportError(e);
         }
         render();
@@ -481,14 +487,20 @@ public final class MainActivity extends Activity {
     }
 
     private DiagnosticResult diagnosticWorkResult(DiagnosticAction action, Object result) {
+        if (result instanceof DiagnosticResult) return (DiagnosticResult) result;
+        if (result instanceof AutomaticHistoryOutcome) {
+            AutomaticHistoryOutcome outcome = (AutomaticHistoryOutcome) result;
+            return AndroidDiagnosticLogging.inspectionResult(outcome.inspection == null ? null : outcome.inspection.getKind(), outcome.error != null);
+        }
         if (action == DiagnosticAction.ACCESS_CHECK && !this.readinessState.canContinue()) {
             DiagnosticLog.record(DiagnosticStage.READINESS, DiagnosticResult.REJECTED,
-                    AndroidDiagnosticLogging.readinessFailure(this.readinessState));
+                    AndroidDiagnosticLogging.readinessFailure(this.readinessState, this.bridgeAccessCode), diagnosticWorkDetails());
             return DiagnosticResult.REJECTED;
         }
         if (result instanceof OfficialAuthResult && !((OfficialAuthResult) result).davVerified) return DiagnosticResult.FAILED;
         if (result instanceof OperationOutcome) {
             OperationOutcome outcome = (OperationOutcome) result;
+            if (outcome.refreshFailure != null) return DiagnosticResult.FAILED;
             if (outcome.result.isConflict()) return DiagnosticResult.CONFLICT;
             if (outcome.result.isPending()) return DiagnosticResult.PENDING;
         }
@@ -501,6 +513,39 @@ public final class MainActivity extends Activity {
             if ("BRANCHED".equals(this.inspection.getKind())) return DiagnosticResult.CONFLICT;
         }
         return DiagnosticResult.SUCCEEDED;
+    }
+
+    private static DiagnosticDetails diagnosticInspectionDetails(AndroidSyncFacade.Inspection inspection) {
+        DiagnosticDetails.Builder details = DiagnosticDetails.builder().syncCompare(inspection.getKind())
+                .syncBlockReason(inspection.diagnosticBlockReason()).localFileCount(inspection.getLocalFileCount())
+                .failureSource("SYNC_COMPARE");
+        // Multiple remote branches have no single remote save file count.
+        if (inspection.getRemoteVersions().size() == 1)
+            details.remoteFileCount(inspection.getRemoteVersions().get(0).getFileCount());
+        return details.build();
+    }
+
+    private DiagnosticDetails diagnosticWorkDetails() {
+        DiagnosticDetails.Builder details = AndroidDiagnosticLogging.readinessDetails(this.readinessState, this.bridgeAccessCode);
+        if (this.rootGame != null) details.gameVersionCode(this.rootGame.gameVersionCode);
+        else if (this.prepared != null) details.gameVersionCode(this.prepared.gameVersionCode);
+        return details.build();
+    }
+
+    private DiagnosticFailure diagnosticWorkFailure(DiagnosticAction action, Object value, DiagnosticResult result) {
+        if (action == DiagnosticAction.ACCESS_CHECK && result == DiagnosticResult.REJECTED)
+            return AndroidDiagnosticLogging.readinessFailure(this.readinessState, this.bridgeAccessCode);
+        if (value instanceof AutomaticHistoryOutcome) {
+            AutomaticHistoryOutcome outcome = (AutomaticHistoryOutcome) value;
+            if (outcome.error != null) return AndroidDiagnosticLogging.classify(outcome.error);
+            if (outcome.inspection != null && outcome.inspection.getNeedsRestoreRecovery()) return DiagnosticFailure.RECOVERY_REQUIRED;
+        }
+        if (value instanceof OperationOutcome && ((OperationOutcome) value).refreshFailure != null)
+            return ((OperationOutcome) value).refreshDiagnosticFailure;
+        if (action == DiagnosticAction.INSPECT && result == DiagnosticResult.REJECTED && this.inspection != null)
+            return this.inspection.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.VALIDATION;
+        return result == DiagnosticResult.FAILED ? DiagnosticFailure.OTHER
+                : result == DiagnosticResult.REJECTED ? DiagnosticFailure.VALIDATION : DiagnosticFailure.NONE;
     }
 
     private void disable(View view) {
@@ -962,6 +1007,8 @@ public final class MainActivity extends Activity {
                                     "游戏与内置存档桥身份未通过核验，请查看诊断。", failure)
                             : failure;
                     accessCode = BridgeDiagnostics.code(diagnostic);
+                    DiagnosticLog.record(DiagnosticStage.READINESS, DiagnosticResult.FAILED,
+                            AndroidDiagnosticLogging.classify(diagnostic), AndroidDiagnosticLogging.failureDetails(diagnostic));
                     captureDiagnostic(diagnostic);
                 }
             }
@@ -3031,18 +3078,25 @@ public final class MainActivity extends Activity {
             try {
                 if (!this.resumed || !currentAutomaticHistory(ticket, captured)) {
                     state.refresh.deferBeforeRead(ticket);
-                    return null;
+                    return DiagnosticResult.SKIPPED;
                 }
-                if (!AutoSyncService.claimHistoryRefresh(this, ticket)) return null;
+                if (!AutoSyncService.claimHistoryRefresh(this, ticket)) return DiagnosticResult.SKIPPED;
                 AutomaticHistoryOutcome result = new AutomaticHistoryOutcome(ticket, captured);
                 try {
                     result.facade = SyncRuntime.facade(this, captured);
                     result.inspection = result.facade.inspect();
+                    DiagnosticLog.record(DiagnosticStage.VERIFY,
+                            AndroidDiagnosticLogging.inspectionResult(result.inspection.getKind(), false),
+                            result.inspection.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
+                            diagnosticInspectionDetails(result.inspection));
                     if (!"BLOCKED".equals(result.inspection.getKind()))
                         result.history = result.facade.historyPresentation(result.inspection);
-                } catch (Exception error) { result.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error); }
+                } catch (Exception error) {
+                    DiagnosticLog.failure(DiagnosticStage.REFRESH, error);
+                    result.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error);
+                }
                 state.outcome = result;
-                return null;
+                return result;
             } finally { state.inFlight = false; }
         }, ignored -> { /* Only drainAutomaticHistoryRefresh applies the scoped foreground result. */ }, true);
     }
@@ -3060,8 +3114,11 @@ public final class MainActivity extends Activity {
             stage = SyncInspectionDiagnostics.Stage.INSPECT;
             AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
             this.inspection = inspectionInspect;
+            DiagnosticLog.record(DiagnosticStage.VERIFY,
+                    AndroidDiagnosticLogging.inspectionResult(inspectionInspect.getKind(), false),
+                    inspectionInspect.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
+                    diagnosticInspectionDetails(inspectionInspect));
             if ("BLOCKED".equals(inspectionInspect.getKind())) {
-                DiagnosticLog.record(DiagnosticStage.VERIFY, DiagnosticResult.REJECTED);
                 return;
             }
             stage = SyncInspectionDiagnostics.Stage.HISTORY;
@@ -3701,6 +3758,7 @@ public final class MainActivity extends Activity {
     /* JADX INFO: Access modifiers changed from: private */
     static final class OperationOutcome {
         String refreshFailure;
+        DiagnosticFailure refreshDiagnosticFailure = DiagnosticFailure.NONE;
         boolean requiresBridgeUpgrade;
         AndroidSyncFacade.OperationResult result;
 
@@ -3743,13 +3801,18 @@ public final class MainActivity extends Activity {
                 if (this.rootGame != null && !hasAnyRestoreJournal()) checkRootAccess();
             }
         } catch (Exception e) {
+            DiagnosticLog.failure(DiagnosticStage.REFRESH, e);
             this.cloudVerified = false;
             reportError(e);
             operationOutcome.refreshFailure = safeText(e.getMessage());
+            operationOutcome.refreshDiagnosticFailure = AndroidDiagnosticLogging.classify(e);
         }
         if (!readyForSaves()) {
+            DiagnosticLog.record(DiagnosticStage.REFRESH, DiagnosticResult.REJECTED,
+                    AndroidDiagnosticLogging.readinessFailure(this.readinessState, this.bridgeAccessCode), diagnosticWorkDetails());
             this.cloudVerified = false;
             operationOutcome.refreshFailure = this.readinessState.statusDescription();
+            operationOutcome.refreshDiagnosticFailure = AndroidDiagnosticLogging.readinessFailure(this.readinessState, this.bridgeAccessCode);
             return operationOutcome;
         }
         readComparison();
@@ -4603,7 +4666,7 @@ public final class MainActivity extends Activity {
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
             this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
-            work(DiagnosticAction.ACCESS_CHECK, "正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
+            work(DiagnosticAction.LAUNCH, "正在核对首次启动所需的游戏与内置存档桥身份…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda97
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
                     return MainActivity.this.m50xa7c297e0();

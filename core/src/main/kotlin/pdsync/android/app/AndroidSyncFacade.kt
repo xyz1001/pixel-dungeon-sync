@@ -55,6 +55,8 @@ class AndroidSyncFacade internal constructor(
  }
  class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null) {
   val remoteVersions=immutable(remoteVersions)
+  /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
+  fun diagnosticBlockReason():String? = blockReason?.name
   val canAutoUpload get()=!needsRestoreRecovery && comparison?.let(::automaticEligible)==true
   val canCompleteWithoutTransfer get()=!needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.BOTH_EMPTY || it.kind==OnboardingKind.IDENTICAL && it.baselineLineage==OnboardingLineage.SAME_TIP }==true
   val canKeepLocalProgress get()=!needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.DIFFERENT && it.baselineLineage==OnboardingLineage.SAME_TIP && it.baselineId!=null && it.observedTips==setOf(it.baselineId) && !it.retryablePending }==true

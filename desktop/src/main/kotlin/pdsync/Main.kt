@@ -118,6 +118,7 @@ internal fun runSyncApplication(
   var launchNotice by remember { mutableStateOf<String?>(null) }
   var automaticStatus by remember { mutableStateOf("正在建立本地观察基线…") }
   var automatic by remember { mutableStateOf(AutomaticUpload()) }
+  val observationDiagnostics = remember { DiagnosticObservationFailures() }
   var remoteReadAt by remember { mutableStateOf(0L) }
   var device by remember { mutableStateOf<DeviceIdentity?>(null) }
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
@@ -147,17 +148,17 @@ internal fun runSyncApplication(
   }
   suspend fun refreshProfile(value: AppConfig?) {
    try {
-    val data = withContext(Dispatchers.IO) {
+    val data = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT) {
      if(value==null)location.requireDirectory() else location.selected(value)
      if (value == null) null else {
       val manager = location.open(value, workspace.resolve(".local/manager"))
       val target = runCatching { manager.targetInfo() }
       LoadedProfile(manager, manager.history(), manager.hasPending(), manager.currentVersions(), target.getOrNull(), target.exceptionOrNull()?.message, manager.deviceIdentity(), manager.baselineFiles())
      }
-    }
+    } }
     if (appClosed) return
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
-    graphHistory=withContext(Dispatchers.IO){data?.session?.syncHistory()}
+    graphHistory=withContext(Dispatchers.IO){diagnosticWork(DiagnosticAction.HISTORY) { data?.session?.syncHistory() }}
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
     // A newest history entry can be an empty pre-restore backup. Start unselected;
     // a sole verified remote tip (or the user's click) supplies the normal selection.
@@ -316,6 +317,7 @@ internal fun runSyncApplication(
        Action.MERGE_CURRENT -> pushed(manager.mergeCurrent(store(),stopped)).let {result->if(result.conflict==null)result.copy(appliedFiles=manager.observedFiles()) else result}
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
+      trace.outcome(if (completed.conflict != null) DiagnosticResult.CONFLICT else DiagnosticResult.SUCCEEDED)
       trace.record(OperationEvent.WORK_SUCCEEDED)
       completed
      } }
@@ -608,7 +610,7 @@ internal fun runSyncApplication(
       SetupAction.RESTORE -> DiagnosticAction.RESTORE
       SetupAction.ADOPT -> DiagnosticAction.CONFIGURE
       SetupAction.MERGE -> DiagnosticAction.MERGE
-     }) {
+     }, result = ::diagnosticPublishedResult) {
       val target = manager.targetInfo()
       val stopped = {
        val state = gameLauncher.status(target)
@@ -674,7 +676,7 @@ internal fun runSyncApplication(
    if(page==Page.PATH) {
     pathPreview=null;pathNotice="正在读取存档…";delay(350)
     try {
-     val result=withContext(Dispatchers.IO){SaveSummary.read(location.requireSelected(pathText,false))}
+     val result=withContext(Dispatchers.IO){diagnosticWork(DiagnosticAction.INSPECT) { SaveSummary.read(location.requireSelected(pathText,false)) }}
      pathPreview=result;pathNotice=if(result.files==0)"目录存在，尚无游戏存档或记录。" else null
     } catch(e:CancellationException){throw e}
     catch(e:Exception){pathNotice=e.message}
@@ -734,8 +736,12 @@ internal fun runSyncApplication(
       if (!retryable && files == baseline) automatic.succeeded(files)
       else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true)
      } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
+     observationDiagnostics.recovered()
     } catch (e: CancellationException) { throw e }
-    catch (_: Exception) { automaticStatus = "存档正在变化或暂不可读，自动上传等待中。" }
+    catch (failure: Exception) {
+     observationDiagnostics.failed(failure)
+     automaticStatus = "存档正在变化或暂不可读，自动上传等待中。"
+    }
    }
   }
   LaunchedEffect(session, selected, busy) {
