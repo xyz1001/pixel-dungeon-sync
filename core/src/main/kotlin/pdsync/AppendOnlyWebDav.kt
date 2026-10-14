@@ -12,6 +12,7 @@ import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.IOException
 import java.net.URI
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import javax.xml.XMLConstants
 
@@ -71,7 +72,9 @@ class AppendOnlyWebDav(
   baseCollection = url.newBuilder().apply { if (url.pathSegments.last().isNotEmpty()) addPathSegment("") }.build()
   gameCollection = baseCollection.newBuilder().addPathSegment(game).addPathSegment("").build()
   collection = gameCollection.newBuilder().addPathSegment(profile).addPathSegment("").build()
-  auth = Credentials.basic(username, password)
+  // Named-account registration and the DAV gate both use UTF-8 credentials.
+  // OkHttp's default ISO-8859-1 encoding silently replaces many valid passwords.
+  auth = Credentials.basic(username, password, StandardCharsets.UTF_8)
  }
 
  /**

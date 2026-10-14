@@ -22,6 +22,16 @@ class AppendOnlyWebDavTest {
  private fun xml(vararg entries: String) = """<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${entries.joinToString("")}</d:multistatus>"""
  private fun listing(vararg entries: String) = MockResponse().setResponseCode(207).setHeader("Content-Type", "application/xml").setBody(xml(*entries))
 
+ @Test fun unicodePasswordsUseTheSameUtf8BytesAsOfficialRegistration() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setResponseCode(404));server.start()
+  val password="合成密码-\u00e9-\ud83d\udd10"
+  val dav=AppendOnlyWebDav(server.url("/dav/").toString(),"shattered","hero","player",password)
+  assertNull(dav.readCommit(id))
+  val authorization=server.takeRequest().getHeader("Authorization")!!
+  assertEquals("player:$password",String(java.util.Base64.getDecoder().decode(authorization.removePrefix("Basic ")),Charsets.UTF_8))
+  assertEquals(Credentials.basic("player",password,Charsets.UTF_8),authorization)
+ }
+
  @Test fun flatReadsAndWritesWorkWithoutEtagsOrConditionalSupportAndNeverWriteHead() = MockWebServer().use { server ->
   // This deliberately ignores conditionals and returns no ETag, like a minimal append store.
   val objects = mutableMapOf<String, ByteArray>()
