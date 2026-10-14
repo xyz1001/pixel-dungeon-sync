@@ -378,9 +378,9 @@ class LedgerGateTests(unittest.TestCase):
 
     def test_entitlement_reports_managed_only_after_binding(self):
         account = self.accounts.lookup('alice')
-        self.assertEqual({'source': 'managed_ledger', 'username': 'alice', 'expires_ms': None, 'active': False, 'managed': False}, self.ledger.entitlement(account))
+        self.assertEqual({'source': 'managed_ledger', 'username': 'alice', 'expires_ms': None, 'active': False, 'managed': False, 'server_time_ms': self.now}, self.ledger.entitlement(account))
         result = self.renew()
-        self.assertEqual({'source': 'managed_ledger', 'username': 'alice', 'expires_ms': result['target_ms'], 'active': True, 'managed': True}, self.ledger.entitlement(account))
+        self.assertEqual({'source': 'managed_ledger', 'username': 'alice', 'expires_ms': result['target_ms'], 'active': True, 'managed': True, 'server_time_ms': self.now}, self.ledger.entitlement(account))
         self.now = result['target_ms']
         self.assertFalse(self.ledger.entitlement(account)['active'])
 

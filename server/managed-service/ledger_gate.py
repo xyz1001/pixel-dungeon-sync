@@ -1,9 +1,9 @@
-"""Durable local DAV authority, using the existing orders/trial/Feishu journal.
+"""Durable account grants using the existing orders/trial/Feishu journal.
 
-No SFTPGo permission PUT is performed or implied. This authority is effective
-only while every managed mutation passes the running gate, the upstream is
-inaccessible directly, and provider account deletion/username reuse is disabled.
-The SFTPGo adapter's configured instance namespace must remain immutable.
+The default local-gate mode is retained for compatibility. Explicit native
+expiry mode applies fixed targets to SFTPGo expiration_date, preserving status
+and all unrelated account fields. All cooperating processes must share this
+SQLite database; no external account writers or username reuse are permitted.
 """
 import base64
 import binascii
@@ -16,7 +16,7 @@ import time
 
 from feishu_renewals import AccountIdentity, FeishuRenewals
 from orders import OrderError, Orders, Principal
-from registration_trials import RegistrationProof, RegistrationTrials
+from registration_trials import RegistrationProof, RegistrationTrials, TRIAL_MS
 from sftpgo_client import SftpgoError
 from write_gate import Decision, READ_METHODS, WRITE_METHODS
 
@@ -41,6 +41,38 @@ CREATE TABLE IF NOT EXISTS managed_gate_applications (
  target_ms INTEGER NOT NULL CHECK(target_ms>=0), applied_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS managed_gate_account ON managed_gate_applications(owner,account_id);
+CREATE TABLE IF NOT EXISTS managed_native_registration_intents (
+ operation_id TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE,
+ requested_ms INTEGER NOT NULL CHECK(requested_ms>=0)
+);
+CREATE TABLE IF NOT EXISTS managed_native_applications (
+ operation_id TEXT PRIMARY KEY, owner TEXT NOT NULL, account_id TEXT NOT NULL,
+ source TEXT NOT NULL CHECK(source IN ('order','trial','feishu')),
+ mode TEXT NOT NULL CHECK(mode='native_expiry'),
+ target_ms INTEGER NOT NULL CHECK(target_ms>0),
+ observed_ms INTEGER NOT NULL CHECK(observed_ms>=target_ms), applied_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS managed_native_account ON managed_native_applications(owner,account_id);
+"""
+
+
+# Source confirmation and exact managed enrollment are both required. No
+# username-only historical grant can enter the native migration automatically.
+_CONFIRMED_SOURCES = """
+SELECT f.operation_id,b.owner,b.account_id,'feishu' AS source,f.target_ms
+FROM managed_account_bindings b JOIN feishu_renewals f
+ ON f.owner=b.owner AND f.account_id=b.account_id AND f.state='confirmed'
+UNION ALL
+SELECT r.operation_id,b.owner,b.account_id,'trial' AS source,r.expires_ms AS target_ms
+FROM managed_account_bindings b JOIN managed_registration_proofs p
+ ON p.owner=b.owner AND p.account_id=b.account_id
+JOIN registration_trials r ON r.operation_id=p.operation_id AND r.owner=p.owner
+ AND r.created_ms=p.created_ms AND r.state='confirmed'
+UNION ALL
+SELECT o.id AS operation_id,b.owner,b.account_id,'order' AS source,o.target_ms
+FROM managed_account_bindings b JOIN managed_legacy_paid p
+ ON p.owner=b.owner AND p.account_id=b.account_id AND p.source='order'
+JOIN orders o ON o.id=p.operation_id AND o.owner=p.owner AND o.state='approved'
 """
 
 
@@ -62,7 +94,7 @@ def _now(clock):
     return value
 
 
-def _confirmed_expiry(db, identity):
+def _confirmed_expiry(db, identity, *, native_expiry=False):
     """The same DB snapshot must confirm binding, operation, and application.
 
     A desired target, a durable application awaiting confirmation, and any old
@@ -74,7 +106,8 @@ def _confirmed_expiry(db, identity):
         return None
     if binding[0] != identity.account_id:
         raise OrderError(409, 'ACCOUNT_IDENTITY_CONFLICT')
-    return db.execute('''SELECT MAX(a.target_ms) FROM managed_gate_applications a
+    table = 'managed_native_applications' if native_expiry else 'managed_gate_applications'
+    return db.execute(f'''SELECT MAX(a.target_ms) FROM {table} a
         WHERE a.owner=? AND a.account_id=? AND (
           (a.source='feishu' AND EXISTS(SELECT 1 FROM feishu_renewals f
             WHERE f.operation_id=a.operation_id AND f.owner=a.owner
@@ -97,13 +130,56 @@ class _Accounts:
         self.ledger = ledger
 
     def lookup_exact(self, username):
-        account = self.ledger.accounts.lookup(username)
-        if account is None:
-            return None
-        identity = _identity(account, username)
+        # In native mode an existing provider username is not enrollment.
+        # Only an exact managed binding or our persisted registration proof
+        # permits a Feishu grant. In particular, never mutate ordinary users.
         with self.ledger.journal.transaction() as db:
+            account = self.ledger.accounts.lookup(username)
+            if account is None:
+                return None
+            identity = _identity(account, username)
+            if self.ledger.native_expiry:
+                binding = db.execute('SELECT account_id FROM managed_account_bindings WHERE owner=?',
+                                     (username,)).fetchone()
+                proof = db.execute('''SELECT 1 FROM managed_registration_proofs p
+                    JOIN registration_trials r ON r.operation_id=p.operation_id AND r.owner=p.owner
+                    WHERE p.owner=? AND p.account_id=? AND p.created_ms=?
+                    AND p.operation_id=?''', (username, identity.account_id,
+                        getattr(account, 'created_at_ms', None),
+                        getattr(account, 'registration_operation_id', None))).fetchone()
+                if binding is None and proof is None:
+                    # Native POST may have committed before its reply was lost.
+                    # After the provisional expiry, user/password recovery is
+                    # correctly rejected upstream. An already-authorized admin
+                    # renewal can recover ONLY our exact durable native intent
+                    # and server-retained operation marker, never a username.
+                    pending = db.execute('''SELECT p.operation_id FROM managed_registration_proofs p
+                        JOIN managed_native_registration_intents i
+                          ON i.operation_id=p.operation_id AND i.owner=p.owner
+                        JOIN registration_trials r
+                          ON r.operation_id=p.operation_id AND r.owner=p.owner
+                        WHERE p.owner=? AND p.operation_id=?
+                          AND p.account_id IS NULL AND p.created_ms IS NULL
+                          AND r.state='pending' ''',
+                        (username, getattr(account, 'registration_operation_id', None))).fetchone()
+                    if pending is None:
+                        return None
+                    created = getattr(account, 'created_at_ms', None)
+                    if type(created) is not int or not 0 <= created <= _now(self.ledger.clock):
+                        raise OrderError(503, 'INVALID_REGISTRATION_PROOF')
+                    if getattr(account, 'status', None) != 1:
+                        raise OrderError(409, 'SFTPGO_ACCOUNT_DISABLED')
+                    self.ledger._validate_native_trial_expiry(
+                        db, identity, created + TRIAL_MS, getattr(account, 'expiration_date_ms', None))
+                    db.execute('''UPDATE managed_registration_proofs SET account_id=?,created_ms=?
+                        WHERE owner=? AND operation_id=?''',
+                        (identity.account_id, created, username, pending['operation_id']))
+                    self.ledger.journal.audit(db, pending['operation_id'], 'system',
+                                              'native_registration_binding_recovered')
+                if getattr(account, 'status', None) != 1:
+                    raise OrderError(409, 'SFTPGO_ACCOUNT_DISABLED')
             self.ledger._bind(db, identity)
-        return identity
+            return identity
 
 
 class _ManagedRenewals(FeishuRenewals):
@@ -116,6 +192,17 @@ class _ManagedRenewals(FeishuRenewals):
             raise
         except Exception:
             raise OrderError(503, 'ACCOUNT_LOOKUP_UNAVAILABLE') from None
+
+    def _apply(self, scope, identity):
+        # Generic journals return confirmed rows immediately. A local-only
+        # historical confirmation must first acquire a native application.
+        if isinstance(self.adapter, _NativeApplications):
+            with self.ledger.connect() as db:
+                row = self._read(db, scope)
+            if row['state'] == 'confirmed':
+                self.adapter.ensure_account(identity, row['target_ms'], row['operation_id'])
+                return self.result(row)
+        return super()._apply(scope, identity)
 
 
 class _LocalApplications:
@@ -158,6 +245,68 @@ class _LocalApplications:
         return self.observed_account_expiry(_identity(account, username))
 
 
+class _NativeApplications(_LocalApplications):
+    """Serialize remote read/modify/readback and receipt under SQLite's lock.
+
+    BEGIN IMMEDIATE spans the complete remote sequence, across processes as
+    well as threads. Neither the provider's full-user PUT nor a Python mutex
+    alone supplies remote compare-and-swap. Every caller must use this ledger.
+    A remote success followed by a local rollback is repaired using the same
+    absolute target. No native receipt is fabricated from a local-only one.
+    """
+    def _ensure_locked(self, db, identity, expires_at_ms, operation_id):
+        current = self.ledger.accounts.lookup(identity.username)
+        if current is None or _identity(current, identity.username) != identity:
+            raise OrderError(409, 'ACCOUNT_IDENTITY_CONFLICT')
+        if getattr(current, 'status', None) != 1:
+            raise OrderError(409, 'SFTPGO_ACCOUNT_DISABLED')
+        self.ledger._bind(db, identity)
+        source, target = self.ledger._operation(db, identity, operation_id)
+        if type(expires_at_ms) is not int or expires_at_ms != target or target <= 0:
+            raise OrderError(409, 'ENTITLEMENT_TARGET_CONFLICT')
+        try:
+            applied = self.ledger.accounts.ensure_account_expiry(identity, target)
+            observed = self.ledger.accounts.observed_account_expiry(identity)
+        except SftpgoError as error:
+            raise OrderError(error.status, error.code) from None
+        if (type(applied) is not int or applied < target or
+                type(observed) is not int or observed < target):
+            raise OrderError(503, 'NATIVE_EXPIRY_NOT_CONFIRMED')
+        if source == 'trial':
+            self.ledger._validate_native_trial_expiry(db, identity, target, observed)
+        self.ledger._write_native_application(db, identity, operation_id, source, target, observed)
+
+    def ensure_account(self, identity, expires_at_ms, operation_id):
+        with self.ledger.journal.transaction() as db:
+            self._ensure_locked(db, identity, expires_at_ms, operation_id)
+
+    def ensure(self, username, expires_at_ms, operation_id):
+        with self.ledger.journal.transaction() as db:
+            account = self.ledger.accounts.lookup(username)
+            if account is None:
+                raise OrderError(409, 'ACCOUNT_IDENTITY_CONFLICT')
+            self._ensure_locked(db, _identity(account, username), expires_at_ms, operation_id)
+
+    def observed_account_expiry(self, identity):
+        with self.ledger.journal.transaction() as db:
+            binding = db.execute('SELECT account_id FROM managed_account_bindings WHERE owner=?',
+                                 (identity.username,)).fetchone()
+            if binding is None or binding[0] != identity.account_id:
+                raise OrderError(409, 'ACCOUNT_IDENTITY_CONFLICT')
+            receipt = db.execute('''SELECT MAX(target_ms) FROM managed_native_applications
+                WHERE owner=? AND account_id=? AND mode='native_expiry' ''',
+                (identity.username, identity.account_id)).fetchone()[0]
+            if receipt is None:
+                return None
+            try:
+                observed = self.ledger.accounts.observed_account_expiry(identity)
+            except SftpgoError as error:
+                raise OrderError(error.status, error.code) from None
+            if type(observed) is not int or observed <= 0:
+                raise OrderError(503, 'NATIVE_EXPIRY_NOT_CONFIRMED')
+            return min(receipt, observed)
+
+
 class _RegistrationAdapter:
     durable_registration_proof = True
 
@@ -182,6 +331,9 @@ class _RegistrationAdapter:
             if proof['account_id'] is not None and (proof['account_id'], proof['created_ms']) != (identity.account_id, created):
                 raise OrderError(409, 'REGISTRATION_PROOF_CONFLICT')
             self.ledger._bind(db, identity)
+            if self.ledger.native_expiry:
+                self.ledger._validate_native_trial_expiry(
+                    db, identity, created + TRIAL_MS, getattr(account, 'expiration_date_ms', None))
             db.execute('UPDATE managed_registration_proofs SET account_id=?,created_ms=? WHERE operation_id=?',
                        (identity.account_id, created, operation_id))
         return RegistrationProof(owner, operation_id, created)
@@ -196,6 +348,15 @@ class _ManagedTrials(RegistrationTrials):
         if self.managed.enabled is not True:
             raise OrderError(503, 'REGISTRATION_TRIALS_DISABLED')
 
+    def _apply(self, owner):
+        if self.managed.native_expiry:
+            with self.orders.connect() as db:
+                row = db.execute('SELECT * FROM registration_trials WHERE owner=?', (owner,)).fetchone()
+            if row['state'] == 'confirmed':
+                self.orders.adapter.ensure(owner, row['expires_ms'], row['operation_id'])
+                return self.public(row)
+        return super()._apply(owner)
+
     def _reserve(self, owner):
         # Intent and origin marker commit together, including before first
         # upstream I/O. A legacy username-only trial is never silently adopted.
@@ -206,6 +367,9 @@ class _ManagedTrials(RegistrationTrials):
                 db.execute("INSERT INTO registration_trials(owner,operation_id,requested_ms,state) VALUES(?,?,?,'pending')",
                            (owner, operation, _now(self.managed.clock)))
                 db.execute('INSERT INTO managed_registration_proofs(operation_id,owner) VALUES(?,?)', (operation, owner))
+                if self.managed.native_expiry:
+                    db.execute('INSERT INTO managed_native_registration_intents VALUES(?,?,?)',
+                               (operation, owner, _now(self.managed.clock)))
                 self.orders.audit(db, operation, 'system', 'registration_reserved')
                 row = db.execute('SELECT * FROM registration_trials WHERE owner=?', (owner,)).fetchone()
             if db.execute('SELECT 1 FROM managed_registration_proofs WHERE owner=? AND operation_id=?',
@@ -215,21 +379,27 @@ class _ManagedTrials(RegistrationTrials):
 
 
 class ManagedLedger:
-    """One local ledger shared by the bot, named registration, and DAV gate.
+    """One durable ledger shared by the bot, named registration, and DAV gate.
 
     accounts must implement lookup(username), authenticate_basic(username,
     password), and create_or_recover(username,password,operation_id). Creation
     must atomically retain an unforgeable-by-the-user operation marker and
     original server-created time; retries must authenticate without resetting
     passwords. Returned account_id is an immutable instance/id/incarnation key.
+    Native mode additionally needs ensure_account_expiry(identity,target_ms)
+    and observed_account_expiry(identity), both returning actual milliseconds.
+    Its creation adapter must set a finite provisional 72-hour native expiry.
     """
-    def __init__(self, path, *, accounts, enabled=False, clock=None):
+    def __init__(self, path, *, accounts, enabled=False, clock=None, native_expiry=False):
+        if type(native_expiry) is not bool:
+            raise ValueError('native_expiry must be a boolean')
+        self.native_expiry = native_expiry
         self.path, self.accounts, self.enabled = str(path), accounts, enabled
         self.clock = clock or (lambda: time.time_ns() // 1_000_000)
         self.journal = Orders(path, clock=self.clock)
         with self.journal.connect() as db:
             db.executescript(SCHEMA)
-        self.applications = _LocalApplications(self)
+        self.applications = _NativeApplications(self) if native_expiry else _LocalApplications(self)
         self.journal.adapter = self.applications
         self.renewals = _ManagedRenewals(path, enabled=enabled, accounts=_Accounts(self),
                                       entitlements=self.applications, clock=self.clock)
@@ -301,6 +471,135 @@ class ManagedLedger:
                    (operation_id, *expected, _now(self.clock)))
         self.journal.audit(db, operation_id, 'system', 'local_gate_application_committed')
 
+    def _validate_native_trial_expiry(self, db, identity, target, observed):
+        # A provisional create expiry must not silently stretch the original
+        # 72-hour proof under clock skew. A legitimate frozen paid reservation
+        # can explain a higher remote value on a later registration retry.
+        if type(observed) is not int or observed < 0:
+            raise OrderError(503, 'NATIVE_EXPIRY_NOT_CONFIRMED')
+        if observed <= target:
+            return
+        paid = db.execute('''SELECT MAX(target_ms) FROM (
+            SELECT target_ms FROM feishu_renewals
+              WHERE owner=? AND account_id=? AND state IN ('reserved','applying','confirmed')
+            UNION ALL
+            SELECT o.target_ms FROM orders o JOIN managed_legacy_paid p
+              ON p.operation_id=o.id AND p.owner=o.owner AND p.source='order'
+              WHERE o.owner=? AND p.account_id=? AND o.state IN ('applying','approved')
+            )''', (identity.username, identity.account_id,
+                    identity.username, identity.account_id)).fetchone()[0]
+        if type(paid) is not int or observed > paid:
+            raise OrderError(409, 'REGISTRATION_CLOCK_CONFLICT')
+
+    def _write_native_application(self, db, identity, operation_id, source, target, observed):
+        expected = identity.username, identity.account_id, source, 'native_expiry', target
+        old = db.execute('SELECT * FROM managed_native_applications WHERE operation_id=?',
+                         (operation_id,)).fetchone()
+        if old is not None:
+            if tuple(old[k] for k in ('owner', 'account_id', 'source', 'mode', 'target_ms')) != expected:
+                raise OrderError(409, 'ENTITLEMENT_APPLICATION_CONFLICT')
+            db.execute('''UPDATE managed_native_applications SET observed_ms=MAX(observed_ms,?),
+                applied_ms=? WHERE operation_id=?''', (observed, _now(self.clock), operation_id))
+            return
+        db.execute('INSERT INTO managed_native_applications VALUES(?,?,?,?,?,?,?,?)',
+                   (operation_id, *expected, observed, _now(self.clock)))
+        self.journal.audit(db, operation_id, 'system', 'native_expiry_application_confirmed')
+
+    def assert_native_migration_ready(self):
+        """Startup check only: inspect local receipts without remote writes.
+
+        A fresh empty database is ready. Existing exact bindings must have a
+        native application, and every source-confirmed original target needs
+        its own matching receipt. Local-only applications do not count. A new
+        native-origin registration may still be pending: its creation adapter
+        atomically set finite expiry, and the durable intent permits recovery
+        but never serves as an entitlement/application receipt.
+        This is not a proof against external provider edits; deployment must
+        prohibit those and preserve the shared SQLite writer boundary.
+        """
+        if not self.native_expiry:
+            raise OrderError(503, 'NATIVE_EXPIRY_DISABLED')
+        uri = Path(self.path).resolve().as_uri() + '?mode=ro'
+        with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
+            db.execute('BEGIN')
+            missing = db.execute('''SELECT 1 FROM managed_account_bindings b
+                WHERE NOT EXISTS(SELECT 1 FROM managed_native_applications a
+                  WHERE a.owner=b.owner AND a.account_id=b.account_id
+                  AND a.mode='native_expiry' AND a.observed_ms>=a.target_ms)
+                AND NOT EXISTS(SELECT 1 FROM managed_native_registration_intents i
+                  JOIN managed_registration_proofs p ON p.operation_id=i.operation_id
+                    AND p.owner=i.owner AND p.account_id=b.account_id
+                  JOIN registration_trials r ON r.operation_id=i.operation_id
+                    AND r.owner=i.owner AND r.state IN ('pending','applying')
+                  WHERE i.owner=b.owner)
+                LIMIT 1''').fetchone()
+            incomplete = db.execute(f'''WITH confirmed AS ({_CONFIRMED_SOURCES})
+                SELECT 1 FROM confirmed c WHERE c.target_ms IS NULL OR c.target_ms<=0
+                OR NOT EXISTS(SELECT 1 FROM managed_native_applications a
+                  WHERE a.operation_id=c.operation_id AND a.owner=c.owner
+                  AND a.account_id=c.account_id AND a.source=c.source
+                  AND a.mode='native_expiry' AND a.target_ms=c.target_ms
+                  AND a.observed_ms>=c.target_ms) LIMIT 1''').fetchone()
+            if missing or incomplete:
+                raise OrderError(503, 'NATIVE_EXPIRY_MIGRATION_REQUIRED')
+        return True
+
+    def reconcile_native_accounts(self, *, limit=100, after_owner=None):
+        """Explicit offline repair of a bounded page of exact managed bindings.
+
+        Reapply only already source-confirmed absolute targets, including old
+        expired ones; never calculate another term or adopt an unknown owner.
+        Reports contain counts and fixed error codes. The opaque pagination
+        cursor is an existing owner key and must not be printed publicly.
+        """
+        if self.enabled is not True or not self.native_expiry:
+            raise OrderError(503, 'NATIVE_EXPIRY_DISABLED')
+        if (type(limit) is not int or not 1 <= limit <= 1000 or
+                after_owner is not None and (not isinstance(after_owner, str) or len(after_owner) > 64)):
+            raise OrderError(400, 'INVALID_MIGRATION_PAGE')
+        with self.journal.connect() as db:
+            bindings = db.execute('''SELECT owner,account_id FROM managed_account_bindings
+                WHERE (? IS NULL OR owner>?) ORDER BY owner LIMIT ?''',
+                (after_owner, after_owner, limit + 1)).fetchall()
+        has_more = len(bindings) > limit
+        bindings = bindings[:limit]
+        report = {'processed': len(bindings), 'applied': 0,
+                  'operations_applied': 0, 'skipped': 0, 'failed': 0,
+                  'errors': {}, 'has_more': has_more,
+                  'next_owner': bindings[-1]['owner'] if has_more else None}
+        safe_codes = {'ACCOUNT_IDENTITY_CONFLICT', 'SFTPGO_ACCOUNT_DISABLED',
+                      'NATIVE_EXPIRY_NOT_CONFIRMED', 'REGISTRATION_CLOCK_CONFLICT', 'ENTITLEMENT_APPLICATION_CONFLICT',
+                      'ENTITLEMENT_TARGET_CONFLICT', 'LEGACY_ACCOUNT_MIGRATION_REQUIRED',
+                      'SFTPGO_NATIVE_EXPIRY_DISABLED', 'SFTPGO_ACCOUNT_WRITER_INVARIANT_REQUIRED'}
+        for binding in bindings:
+            identity = AccountIdentity(binding['owner'], binding['account_id'])
+            try:
+                with self.journal.transaction() as db:
+                    rows = db.execute(f'''WITH confirmed AS ({_CONFIRMED_SOURCES})
+                        SELECT * FROM confirmed WHERE owner=? AND account_id=?
+                        ORDER BY target_ms,operation_id''',
+                        (identity.username, identity.account_id)).fetchall()
+                    for row in rows:
+                        self.applications._ensure_locked(db, identity, row['target_ms'], row['operation_id'])
+                if rows:
+                    report['applied'] += 1
+                    report['operations_applied'] += len(rows)
+                else:
+                    report['skipped'] += 1
+            except Exception as error:
+                code = getattr(error, 'code', None)
+                if isinstance(error, sqlite3.Error):
+                    code = 'DATABASE_UNAVAILABLE'
+                elif code not in safe_codes:
+                    code = 'NATIVE_EXPIRY_UNAVAILABLE'
+                report['failed'] += 1
+                report['errors'][code] = report['errors'].get(code, 0) + 1
+        return report
+
+    def migrate_native_accounts(self, *, limit=100, after_owner=None):
+        """Alias for one explicit migration page; follow next_owner."""
+        return self.reconcile_native_accounts(limit=limit, after_owner=after_owner)
+
     def renew(self, **kwargs):
         return self.renewals.renew(**kwargs)
 
@@ -315,7 +614,7 @@ class ManagedLedger:
         uri = Path(self.path).resolve().as_uri() + '?mode=ro'
         with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
             db.execute('BEGIN')
-            return _confirmed_expiry(db, identity)
+            return _confirmed_expiry(db, identity, native_expiry=self.native_expiry)
 
     def entitlement(self, account):
         """Read-only status for an already authenticated provider account."""
@@ -323,11 +622,17 @@ class ManagedLedger:
         uri = Path(self.path).resolve().as_uri() + '?mode=ro'
         with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
             db.execute('BEGIN')
-            expiry = _confirmed_expiry(db, identity)
+            expiry = _confirmed_expiry(db, identity, native_expiry=self.native_expiry)
             managed = db.execute('SELECT 1 FROM managed_account_bindings WHERE owner=? AND account_id=?',
                                  (identity.username, identity.account_id)).fetchone() is not None
+        now = _now(self.clock)
+        active = expiry is not None and expiry > now
+        if self.native_expiry:
+            observed = getattr(account, 'expiration_date_ms', None)
+            active = (active and getattr(account, 'status', None) == 1 and
+                      type(observed) is int and observed >= expiry)
         return {'source': 'managed_ledger', 'username': identity.username, 'expires_ms': expiry,
-                'active': expiry is not None and expiry > _now(self.clock), 'managed': managed}
+                'active': bool(active), 'managed': managed, 'server_time_ms': now}
 
     def adopt_legacy_paid(self, username, expected_account_id, operation_ids):
         """OFFLINE operator-only migration; never expose as an HTTP endpoint.
@@ -383,6 +688,11 @@ class ManagedLedger:
         account = self.accounts.lookup(row['owner'])
         if account is None or _identity(account, row['owner']).account_id != row['account_id']:
             raise OrderError(409, 'ACCOUNT_IDENTITY_CONFLICT')
+        if self.native_expiry:
+            with self.journal.connect() as db:
+                order = db.execute('SELECT state,target_ms FROM orders WHERE id=?', (operation_id,)).fetchone()
+            if order is not None and order['state'] == 'approved':
+                self.applications.ensure_account(_identity(account, row['owner']), order['target_ms'], operation_id)
         return self.journal.retry(Principal('offline-operator', 'admin'), operation_id)
 
 
@@ -397,7 +707,7 @@ class SftpgoBasicAuthenticator:
     def __init__(self, accounts):
         self.accounts = accounts
 
-    def authenticate(self, headers):
+    def authenticate_account(self, headers):
         values = [v for k, v in headers.items() if isinstance(k, str) and k.lower() == 'authorization']
         if len(values) != 1 or not isinstance(values[0], str) or len(values[0]) > 8192:
             raise OrderError(401, 'AUTHENTICATION_REQUIRED')
@@ -411,7 +721,14 @@ class SftpgoBasicAuthenticator:
             raise OrderError(401, 'AUTHENTICATION_REQUIRED') from None
         if not username or not password or any(ord(c) < 32 or ord(c) == 127 for c in username + password):
             raise OrderError(401, 'AUTHENTICATION_REQUIRED')
-        return _identity(self.accounts.authenticate_basic(username, password), username)
+        account = self.accounts.authenticate_basic(username, password)
+        _identity(account, username)
+        return account
+
+    def authenticate(self, headers):
+        # DAV gates need only the immutable identity; private account status
+        # needs the same authenticated snapshot's native expiry/status fields.
+        return _identity(self.authenticate_account(headers))
 
 
 class AccountWriteGate:
@@ -430,6 +747,11 @@ class AccountWriteGate:
                 raise OrderError(401, 'AUTHENTICATION_REQUIRED')
         except Exception:
             return Decision(401, 'AUTHENTICATION_REQUIRED')
+        # Native mode delegates all read/write expiration enforcement to
+        # SFTPGo authentication. Startup must check migration readiness before
+        # serving this route; the old upload-only split no longer applies.
+        if getattr(self.ledger, 'native_expiry', False):
+            return Decision(204, 'PASS_TO_SFTPGO')
         # Reads retain upstream authentication/authorization and do not depend
         # on ledger availability or expired/absent upload rights.
         if method in READ_METHODS:
