@@ -22,6 +22,8 @@ object NoviceCopy {
   raw.contains("不兼容") || raw.contains("兼容范围") || raw.contains("降级") || raw.contains("存档写入版本") -> "暂不能恢复，请检查游戏与存档版本。"
   raw.contains("游戏正在运行") || raw.contains("无法确认游戏") -> "请退出游戏后重试。"
   raw.contains("存档发生变化") || raw.contains("存档仍在写入") -> "存档正在变化，请稍后重试。"
+  raw == "WebDAV network request failed [TIMEOUT]" -> "连接超时，请重试。"
+  raw.startsWith("WebDAV network request failed [") -> "网络连接失败，请重试。"
   raw.contains("timed out", true) || raw.contains("timeout", true) || raw.contains("超时") -> "连接超时，请检查网络后重试。"
   raw.length <= 48 && !raw.contains('\n') && !raw.contains(Regex("[A-Za-z]:[\\\\/]|https?://")) -> raw
   else -> fallback

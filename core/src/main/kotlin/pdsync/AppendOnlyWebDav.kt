@@ -229,7 +229,22 @@ class AppendOnlyWebDav(
   requestClient.newCall(request).execute().use(block)
  } catch (e: NamespaceProvisioningException) { throw e }
  catch (e: WebDavException) { throw e }
- catch (_: IOException) { throw IOException("WebDAV network request failed") }
+ catch (error: IOException) {
+  // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
+  // Never copy transport text, causes or suppressed exceptions, which can contain credentials/URLs.
+  val category = when (error) {
+   is java.net.SocketTimeoutException -> "TIMEOUT"
+   is java.net.UnknownHostException -> "DNS"
+   is java.net.ConnectException -> "CONNECT"
+   is javax.net.ssl.SSLException -> "TLS"
+   is java.io.EOFException -> "EOF"
+   is java.net.SocketException -> "CONNECTION"
+   // InterruptedIOException alone does not prove a timeout or a user cancellation.
+   is java.io.InterruptedIOException -> "INTERRUPTED"
+   else -> "IO"
+  }
+  throw IOException("WebDAV network request failed [$category]")
+ }
 
  private fun readBounded(response: Response, limit: Int): ByteArray {
   val body = response.body ?: throw IOException("WebDAV response body missing")

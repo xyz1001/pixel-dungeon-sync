@@ -83,6 +83,9 @@ class OperationEventsTest {
    UnsettledRemoteException("secret") to OperationFailure.VALIDATION,
    LegacyProtocolException() to OperationFailure.VALIDATION,
    IOException("HTTP 401 password=secret") to OperationFailure.OTHER,
+   // Sanitized DAV diagnostic labels must not opt into desktop automatic network retry.
+   IOException("WebDAV network request failed [TIMEOUT]") to OperationFailure.OTHER,
+   IOException("WebDAV network request failed [CONNECTION]") to OperationFailure.OTHER,
    RuntimeException("NETWORK cancellation authentication secret") to OperationFailure.OTHER,
    ExecutionException(WebDavException(401)) to OperationFailure.AUTHENTICATION,
    CompletionException(ExecutionException(AccessDeniedException("secret"))) to OperationFailure.STORAGE,
