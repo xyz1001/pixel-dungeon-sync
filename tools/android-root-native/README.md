@@ -56,15 +56,15 @@ compiler-runtime helpers, so the link deliberately uses `-nostdlib` plus the API
 libc stub and needs no CRT objects. Stack protection remains enabled.
 
 `toolchain-lock.json` contains exact official HTTPS URLs, downloaded byte counts and
-SHA-256 values for all inputs. Total binary/header downloads: **18,341,507 bytes**.
+SHA-256 values for all inputs. Total binary/header downloads: **18,341,492 bytes**.
 No full NDK, huge LLVM bundle or system package install is needed. An existing matching
 `libLLVM.so.19.1` is required; its observed size and SHA-256 are also pinned. The
 bootstrap checks that prerequisite and all downloaded inputs before extracting into
 a caller-selected directory outside the repository. It never disables TLS checks.
 
 The header transport archive was refreshed on 2026-10-14 after Google regenerated
-its tar metadata. The new 1,966,663-byte archive is SHA-256
-`a2052476816bd9031d7bb3a28181f45cad2f18e069c448507b86eb510f1c0d91`.
+its tar metadata. The new 1,966,648-byte archive is SHA-256
+`ad9ebf311c69a3888a777cc53f8801f5003053b58c4801d627b1f2945e9db616`.
 All 1,584 file blobs, file modes and 78 directories were checked by reconstructing the canonical
 Git tree, which exactly matches `cfad5dc3c662177cd7f758170c9b9746f6907758`
 at the original pinned commit. The tool still fails closed on an unrecognized
