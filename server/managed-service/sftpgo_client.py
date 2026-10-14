@@ -1,7 +1,9 @@
 """Bounded REST adapter for SFTPGo 2.7.6. Importing it performs no I/O.
 
-Only GET token, GET exact user and POST new user are implemented. There is no
-PUT permission writer: SFTPGo's username-addressed PUT is not compare-and-swap.
+GET token, GET exact user, POST new user and an opt-in native expiry writer are
+implemented. SFTPGo's username-addressed PUT is not compare-and-swap. Expiry
+writes require caller-side durable serialization and NO external account
+configuration writers, including administrators, for the whole GET/PUT/GET.
 
 SFTPGo user tokens contain username and updated_at, NOT immutable account ID.
 Authentication therefore requires an explicit deployment invariant: managed
@@ -27,6 +29,7 @@ import re
 import socket
 import ssl
 import stat
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +38,7 @@ import urllib.request
 MAX_JSON_BYTES = 1024 * 1024
 MAX_TOKEN_BYTES = 16 * 1024
 MAX_CREDENTIAL_FILE_BYTES = 4096
+TRIAL_DURATION_MS = 72 * 60 * 60 * 1000
 REGISTRATION_NAMESPACE = 'pixel-dungeon-sync.registration.v1'
 _USERNAME = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}')
 _NEW_USERNAME = re.compile(r'[a-z][a-z0-9_-]{2,31}')
@@ -184,7 +188,7 @@ class _RestTransport:
                             urllib.request.HTTPSHandler(context=ssl.create_default_context()))
 
     def request(self, method, path, *, authorization, payload=None):
-        if method not in ('GET', 'POST') or not path.startswith('/api/v2/'):
+        if method not in ('GET', 'POST', 'PUT') or not path.startswith('/api/v2/'):
             raise ValueError('unsupported SFTPGo operation')
         headers = {'Accept': 'application/json', 'Authorization': authorization,
                    'Cache-Control': 'no-store', 'Accept-Encoding': 'identity'}
@@ -231,7 +235,8 @@ class AdminTokenProvider:
     """Obtain a token from GET /api/v2/token using runtime existing credentials.
 
     Deliberately no disk/token cache and no retries with broader permissions.
-    The existing administrator needs view_users and add_users for registration.
+    The existing administrator needs view_users and add_users for registration,
+    and edit_users only when the native expiry writer is explicitly enabled.
     A 2FA-protected admin without an approved runtime token flow fails closed.
     """
 
@@ -262,6 +267,7 @@ class SftpgoAccount:
     upload_bandwidth_kb: int = 0
     download_bandwidth_kb: int = 0
     status: int = 1
+    expiration_date_ms: int = 0
 
     def public_info(self, webdav_url):
         return {'webdav_url': webdav_url, 'username': self.username,
@@ -311,14 +317,22 @@ class NewAccountTemplate:
 
 class SftpgoClient:
     def __init__(self, base_url, *, instance_id, admin_credentials, template=None,
-                 no_username_reuse=False, allow_loopback_http=False, timeout=5.0):
+                 no_username_reuse=False, no_external_account_writers=False,
+                 native_expiry_enabled=False, clock=None, allow_loopback_http=False, timeout=5.0):
         if not isinstance(instance_id, str) or not _INSTANCE.fullmatch(instance_id):
             raise ValueError('explicit stable SFTPGo instance_id required')
         if template is not None and not isinstance(template, NewAccountTemplate):
             raise ValueError('trusted NewAccountTemplate required')
         if type(no_username_reuse) is not bool:
             raise ValueError('explicit boolean no_username_reuse acknowledgement required')
+        if type(no_external_account_writers) is not bool or type(native_expiry_enabled) is not bool:
+            raise ValueError('explicit boolean native expiry and account-writer acknowledgements required')
+        if clock is not None and not callable(clock):
+            raise ValueError('callable server clock required')
         self.instance_id, self.template, self.no_username_reuse = instance_id, template, no_username_reuse
+        self.no_external_account_writers = no_external_account_writers
+        self.native_expiry_enabled = native_expiry_enabled
+        self.clock = clock if clock is not None else lambda: time.time_ns() // 1_000_000
         self._transport = _RestTransport(base_url, allow_loopback_http=allow_loopback_http, timeout=timeout)
         self.admin_tokens = AdminTokenProvider(self._transport, admin_credentials)
 
@@ -350,15 +364,18 @@ class SftpgoClient:
         # created_at, updated_at and quota_size are not omitempty in 2.7.6.
         numeric = ('id', 'created_at', 'updated_at', 'quota_size')
         upload, download = value.get('upload_bandwidth', 0), value.get('download_bandwidth', 0)
+        expiration = value.get('expiration_date', 0)
         if (value.get('username') != username or any(not _valid_integer(value.get(key), 1 if key in ('id', 'created_at') else 0)
                 for key in numeric) or not _valid_integer(upload) or not _valid_integer(download)
                 or type(value.get('status')) is not int or value['status'] not in (0, 1)):
             raise SftpgoError(503, 'SFTPGO_INVALID_ACCOUNT_IDENTITY')
+        if not _valid_integer(expiration):
+            raise SftpgoError(503, 'SFTPGO_INVALID_EXPIRATION')
         return SftpgoAccount(username, f'sftpgo:{self.instance_id}:{value["id"]}:{value["created_at"]}',
                 value['created_at'], self._operation(value.get('additional_info')), value['updated_at'],
-                value['quota_size'], upload, download, value['status'])
+                value['quota_size'], upload, download, value['status'], expiration)
 
-    def lookup(self, username):
+    def _lookup_snapshot(self, username):
         if not isinstance(username, str) or not _USERNAME.fullmatch(username):
             raise SftpgoError(400, 'INVALID_USERNAME')
         try:
@@ -367,7 +384,91 @@ class SftpgoClient:
             if error.status == 404:
                 return None
             raise SftpgoError(503, 'SFTPGO_ACCOUNT_LOOKUP_UNAVAILABLE') from None
-        return self._account(value, username)
+        return value, self._account(value, username)
+
+    def lookup(self, username):
+        snapshot = self._lookup_snapshot(username)
+        return snapshot[1] if snapshot is not None else None
+
+    def _expiry_snapshot(self, identity):
+        self._guard_identity()
+        username, account_id = getattr(identity, 'username', None), getattr(identity, 'account_id', None)
+        if (not isinstance(username, str) or not _USERNAME.fullmatch(username)
+                or not isinstance(account_id, str) or not account_id or len(account_id) > 256):
+            raise SftpgoError(400, 'INVALID_ACCOUNT_IDENTITY')
+        snapshot = self._lookup_snapshot(username)
+        if snapshot is None or snapshot[1].account_id != account_id:
+            raise SftpgoError(409, 'ACCOUNT_IDENTITY_CONFLICT')
+        value, account = snapshot
+        # The SDK may omit zero-valued expiration_date. Zero is unlimited, NOT
+        # an already-confirmed grant and NOT infinity for monotonic comparisons.
+        return value, account, account.expiration_date_ms
+
+    def observed_account_expiry(self, identity):
+        """Read the native Unix-millisecond expiry of this exact incarnation.
+
+        Zero means unlimited/uninitialized; callers must not confirm a positive
+        journal target from it. This read does not prove enforcement or perform
+        remote CAS. Disabled accounts cannot provide successful application proof.
+        """
+        _, account, expiration = self._expiry_snapshot(identity)
+        if account.status != 1:
+            raise SftpgoError(409, 'SFTPGO_ACCOUNT_DISABLED')
+        return expiration
+
+    def ensure_account_expiry(self, identity, target_ms):
+        """Apply one fixed positive target, then independently read it back.
+
+        The caller must durably reserve target_ms and serialize every write to
+        this account across retries/processes. Together with the explicit
+        no-reuse and no-external-writer deployment invariants this prevents
+        stale full-user replacements; it is NOT remote compare-and-swap.
+
+        SFTPGo v2.7.6 PUT replaces the user, so send the latest complete GET
+        object, changing only expiration_date and omitting password (the API
+        then preserves the current password). Status, permissions, quotas,
+        groups, filesystem, filters and every other returned field survive.
+        Contract: github.com/drakkan/sftpgo/blob/v2.7.6/internal/httpd/api_user.go
+        updateUser, and openapi/openapi.yaml update_user.
+        Never enable a manually disabled account. disconnect=1 invalidates
+        old settings on this node; multi-node propagation is deployment scope.
+        A lost PUT response is read back once, never replayed within this call.
+        """
+        self._guard_identity()
+        if not self.native_expiry_enabled:
+            raise SftpgoError(503, 'SFTPGO_NATIVE_EXPIRY_DISABLED')
+        if not self.no_external_account_writers:
+            raise SftpgoError(503, 'SFTPGO_ACCOUNT_WRITER_INVARIANT_REQUIRED')
+        if not _valid_integer(target_ms, 1):
+            raise SftpgoError(400, 'INVALID_EXPIRATION_TARGET')
+        value, account, current = self._expiry_snapshot(identity)
+        if account.status != 1:
+            raise SftpgoError(409, 'SFTPGO_ACCOUNT_DISABLED')
+        if current >= target_ms:
+            return current
+        payload = dict(value)
+        payload.pop('password', None)
+        payload['expiration_date'] = target_ms
+        uncertain = None
+        try:
+            self._admin('PUT', '/api/v2/users/' + urllib.parse.quote(account.username, safe='')
+                        + '?disconnect=1', payload)
+        except _UpstreamStatus as error:
+            if error.status == 404:
+                raise SftpgoError(409, 'ACCOUNT_IDENTITY_CONFLICT') from None
+            raise SftpgoError(503, 'SFTPGO_EXPIRY_UPDATE_UNAVAILABLE') from None
+        except SftpgoError as error:
+            # Connection loss/malformed success may follow a committed write.
+            # A bounded GET can establish the postcondition without adding time.
+            if error.code not in ('SFTPGO_UPSTREAM_UNAVAILABLE', 'SFTPGO_INVALID_RESPONSE'):
+                raise
+            uncertain = error
+        observed = self.observed_account_expiry(identity)
+        if observed < target_ms:
+            if uncertain is not None:
+                raise uncertain
+            raise SftpgoError(503, 'SFTPGO_EXPIRY_NOT_CONFIRMED')
+        return observed
 
     def authenticate_basic(self, username, password):
         self._guard_identity()
@@ -421,8 +522,17 @@ class SftpgoClient:
         if existing is None:
             marker = json.dumps({REGISTRATION_NAMESPACE: {'instance_id': self.instance_id,
                                 'operation_id': operation_id}}, separators=(',', ':'))
+            payload = self.template.payload(username, password, marker)
+            if self.native_expiry_enabled:
+                now = self.clock()
+                if not _valid_integer(now, 1) or now > 2**63 - 1 - TRIAL_DURATION_MS:
+                    raise SftpgoError(503, 'INVALID_SERVER_CLOCK')
+                # Provisional finite deadline, never reset on recovery. The
+                # durable trial still uses original SFTPGo created_at. Clocks
+                # must be synchronized; the ledger owns final reconciliation.
+                payload['expiration_date'] = now + TRIAL_DURATION_MS
             try:
-                created = self._admin('POST', '/api/v2/users', self.template.payload(username, password, marker))
+                created = self._admin('POST', '/api/v2/users', payload)
                 existing = self._account(created, username)
             except _UpstreamStatus as error:
                 if error.status not in (400, 409):
