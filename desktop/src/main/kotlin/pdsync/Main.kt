@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
 import java.nio.file.Path
+import pdsync.presentation.HistoryPresentation
 
 private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
@@ -815,7 +816,7 @@ internal fun runSyncApplication(
           TextButton(enabled=!busy&&pathResult.isSuccess,onClick={pathText=pathResult.getOrThrow().toString()}){Text("使用默认路径")}
          }
          pathPreview?.let { summary ->
-          Text("游戏槽位 ${summary.slots.size} 个 · 游玩 ${summary.plays?.toString() ?: "未知"} 次")
+          Text("游戏槽位 ${summary.slots.size} 个 · ${HistoryPresentation.plays(summary.plays)}")
           summary.slots.forEach { (slot,time) -> Text("$slot · ${time?.let(::localTime) ?: "时间未知"}",color=muted) }
          }
          pathNotice?.let { Text(it,color=muted) }

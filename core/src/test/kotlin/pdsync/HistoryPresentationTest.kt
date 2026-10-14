@@ -86,6 +86,23 @@ class HistoryPresentationTest {
   assertEquals("时间未知",view.nodes.single().time)
  }
 
+ @Test fun playCountCopyUsesActualCountsAndDisplayOnlyZeroFallback() {
+  assertEquals("已进行0场游戏",HistoryPresentation.plays(null))
+  assertEquals("已进行0场游戏",HistoryPresentation.plays(0))
+  assertEquals("已进行23场游戏",HistoryPresentation.plays(23))
+  val history=state(emptyList(),current=newFiles)
+  for(count in listOf(null,0,23)) {
+   val summary=history.summary!!.copy(plays=count)
+   val observed=history.copy(summary=summary)
+   val local=HistoryPresentation.from(observed,0).nodes.single()
+   assertEquals("1 个槽位 · 已进行${count ?: 0}场游戏",local.detail)
+   assertEquals(count,observed.summary!!.plays)
+  }
+  val unavailable=history.copy(summary=null)
+  assertEquals("? 个槽位 · 已进行0场游戏",HistoryPresentation.from(unavailable,0).nodes.single().detail)
+  assertNull(unavailable.summary)
+ }
+
  @Test fun repeatedRenderingPagingSelectionAndDismissalArePure() {
   val history=state((0..24).map {commit("commit-%03d".format(it))},"commit-000",newFiles,"upload")
   val before=history.copy(graph=history.graph.copy(commits=history.graph.commits.toMap()),currentFiles=history.currentFiles.toMap())

@@ -15,6 +15,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.sqrt
+import pdsync.presentation.HistoryPresentation
 
 internal fun historyTime(value:String?):String=value?.let { runCatching { DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull() } ?: "时间未知"
 
@@ -67,7 +68,7 @@ internal fun historyTime(value:String?):String=value?.let { runCatching { DateTi
        Box(Modifier.fillMaxWidth(.724f).padding(vertical=5.dp)) {
         if(row==0 && state.localNodeCount==0)Text("无存档",Modifier.padding(20.dp),color=Color.Gray)
         else if(row==0 && state.localNodeCount>0)HistoryNode(state.currentName.ifBlank{"本机当前"},historyTime(state.summary?.slots?.values?.filterNotNull()?.maxOrNull()),
-         "${state.summary?.slots?.size?.toString() ?: "?"} 个槽位 · 游玩 ${state.summary?.plays?.toString() ?: "未知"} 次",if(state.clean)"已同步云端" else "未同步云端",!state.clean,false,busy,{}, {onRename(null)})
+         "${state.summary?.slots?.size?.toString() ?: "?"} 个槽位 · ${HistoryPresentation.plays(state.summary?.plays)}",if(state.clean)"已同步云端" else "未同步云端",!state.clean,false,busy,{}, {onRename(null)})
         else if(row==1 && state.localNodeCount==2)state.baselineCommit?.snapshot?.let { m ->
          HistoryNode(m.directoryMetadata?.displayName?.ifBlank{"同步基线"} ?: "同步基线",historyTime(m.metadata?.latestFileModifiedAt),"${m.saveVersions?.runs?.size?.toString() ?: "?"} 个槽位","已同步云端",false,false,busy,{}, {onRename(m.id)})
         }

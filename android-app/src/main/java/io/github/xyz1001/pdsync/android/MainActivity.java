@@ -2078,9 +2078,8 @@ public final class MainActivity extends Activity {
         } else {
             StringBuilder sb = new StringBuilder("游戏槽位 ");
             sb.append(this.localPreview.getSlots().size());
-            sb.append(" 个 · 游玩 ");
-            sb.append(this.localPreview.getPlays() == null ? "未知" : this.localPreview.getPlays());
-            sb.append(" 次");
+            sb.append(" 个 · ");
+            sb.append(HistoryPresentation.plays(this.localPreview.getPlays()));
             text(sb.toString());
             if (this.localPreview.getSlots().isEmpty()) {
                 text(this.localPreview.getFiles() > 0 || (this.localPreview.getPlays() != null && this.localPreview.getPlays() > 0)

@@ -25,6 +25,9 @@ data class HistoryPresentation(
    runCatching { DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull()
   } ?: "时间未知"
 
+  /** Missing counts display as zero without changing the nullable save summary or game data. */
+  @JvmStatic fun plays(value: Int?): String = "已进行${value ?: 0}场游戏"
+
   /** The verified history supplied by the facade is the sole source of nodes and edges. */
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
    val allCloud = state.cloud
@@ -48,7 +51,7 @@ data class HistoryPresentation(
    if (state.localNodeCount > 0) nodes += HistoryNode(
     "local-current", null, state.currentName.ifBlank { "本机当前" },
     time(state.summary?.slots?.values?.filterNotNull()?.maxOrNull()),
-    "${state.summary?.slots?.size?.toString() ?: "?"} 个槽位 · 游玩 ${state.summary?.plays?.toString() ?: "未知"} 次",
+    "${state.summary?.slots?.size?.toString() ?: "?"} 个槽位 · ${plays(state.summary?.plays)}",
     if (state.clean) "已同步云端" else "未同步云端", 1, 0, dirty = !state.clean
    )
    val baseline = state.baselineCommit
