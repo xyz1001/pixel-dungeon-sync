@@ -103,7 +103,8 @@ class ManagedApplication:
     def appreciation(self, headers):
         if self.appreciation_asset is None:
             raise ApiError(404, 'NOT_FOUND')
-        self.authenticator.authenticate(headers)
+        # Public static metadata permits an expired user to view the donation
+        # image without authenticating, acquiring file access or exposing identity.
         # No username, credential, account identity or filesystem path belongs
         # in this static contract. The client gets its username from entitlement.
         return {'version': 1, 'payment_mode': 'donation',

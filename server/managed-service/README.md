@@ -140,11 +140,12 @@ All responses are noncacheable. The only supported public routes are:
 - `GET /api/account/entitlement`, existing Basic credentials. Returns the
   authenticated account's confirmed expiry, active/managed flags, and
   `source: "managed_ledger"`. It does not expose the sandbox order API.
-- `GET /api/account/appreciation`, existing valid Basic credentials, only when
+- `GET /api/account/appreciation`, public static metadata, only when
   appreciation is enabled. Exact success contract:
   `{"code":200,"data":{"version":1,"payment_mode":"donation","image_path":"/api/account/appreciation/image","image_sha256":"<verified lowercase SHA-256>","term":"calendar_year","remark":"username"}}`.
   `remark` is the literal instruction `username`, not a username value. The
-  client must take its account username from authenticated entitlement data.
+  client may show a local/input username as an unverified payment remark; it
+  must not treat that input or this public metadata as authenticated identity.
   Metadata contains no account data, credential or server filesystem path.
 - `GET /api/account/appreciation/image`, public raw `image/png`, only when enabled.
   Clients fetch this exact same-origin path without credentials and verify its
@@ -261,8 +262,8 @@ renewal message. Keep the fixed drop control separate. Exercise at least:
   Expired valid credentials still log in/download; unauthenticated downloads fail
   at SFTPGo even if the gate path is misused. Every allowed read remains subject
   to SFTPGo file permissions.
-- If appreciation is enabled, verify metadata is 401 without valid Basic auth,
-  authenticated JSON exactly matches the documented contract, and anonymous
+- If appreciation is enabled, verify anonymous metadata JSON exactly matches
+  the documented contract and contains no account information, and anonymous
   image GET returns the independently reviewed PNG with its matching SHA-256,
   `image/png`, `no-store` and no redirects. Confirm encoded/double-slash/query
   aliases and directory paths cannot retrieve it. With appreciation disabled,

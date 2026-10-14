@@ -182,7 +182,7 @@ class AppreciationHttpTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_exact_authenticated_metadata_contract_contains_no_account_data(self):
+    def test_exact_public_metadata_contract_contains_no_account_data(self):
         status, headers, raw = self.request(headers={'Authorization': basic(), 'X-User': 'other-user'})
         self.assertEqual(200, status)
         self.assertEqual('application/json; charset=utf-8', headers['Content-Type'])
@@ -193,14 +193,17 @@ class AppreciationHttpTests(unittest.TestCase):
         for private in (PASSWORD, 'alice', 'other-user', str(self.path), 'account_id'):
             self.assertNotIn(private.encode(), raw)
 
-    def test_metadata_requires_valid_basic_authentication(self):
-        for headers in ({}, {'Authorization': 'Bearer invalid'}, {'Authorization': basic(password='wrong-password')}):
-            with self.subTest(headers=headers):
-                status, response_headers, raw = self.request(headers=headers)
-                self.assertEqual(401, status)
-                self.assertIn('Basic', response_headers['WWW-Authenticate'])
-                self.assertEqual('no-store', response_headers['Cache-Control'])
-                self.assertNotIn(self.config.appreciation['expected_sha256'].encode(), raw)
+    def test_public_metadata_works_without_account_access_or_authentication(self):
+        with patch.object(self.accounts, 'authenticate_basic', side_effect=AssertionError('unexpected auth')):
+            for headers in ({}, {'Authorization': 'Bearer invalid'}, {'Authorization': basic(password='wrong-password')}):
+                with self.subTest(headers=headers):
+                    status, response_headers, raw = self.request(headers=headers)
+                    self.assertEqual(200, status)
+                    self.assertNotIn('WWW-Authenticate', response_headers)
+                    self.assertEqual('no-store', response_headers['Cache-Control'])
+                    self.assertEqual(self.config.appreciation['expected_sha256'], json.loads(raw)['data']['image_sha256'])
+                    for private in ('alice', PASSWORD, 'expires_ms', 'account_id', 'active'):
+                        self.assertNotIn(private, raw.decode())
 
     def test_public_png_is_raw_noncacheable_and_never_authenticates_or_reopens_file(self):
         self.path.unlink()
