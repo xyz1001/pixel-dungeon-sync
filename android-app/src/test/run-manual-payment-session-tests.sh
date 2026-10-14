@@ -13,6 +13,7 @@ OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-manual-session.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 CP="$CORE:$(find -L "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
 "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -Xlint:all,-serial,-options -Werror -encoding UTF-8 -cp "$CP" -d "$OUT" \
-  "$SRC/ManualOrderClient.java" "$SRC/ManualPaymentFlow.java" "$SRC/ManualPaymentSession.java" "$SRC/ManualPaymentCopy.java" \
+  "$SRC/OfficialServiceRegistrationClient.java" "$SRC/ManualOrderClient.java" \
+  "$SRC/ManualPaymentFlow.java" "$SRC/ManualPaymentSession.java" "$SRC/ManualPaymentCopy.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/ManualPaymentSessionChecks.java"
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.ManualPaymentSessionChecks

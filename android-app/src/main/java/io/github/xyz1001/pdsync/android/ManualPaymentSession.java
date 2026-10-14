@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 
 /** Explicitly injected sandbox session. No default endpoint, credentials or production authenticator. */
 public final class ManualPaymentSession implements AutoCloseable {
@@ -17,6 +18,22 @@ public final class ManualPaymentSession implements AutoCloseable {
     public interface DavVerifier { void verify() throws Exception; }
     public interface Listener { void changed(); }
 
+    /** Non-secret snapshot from a successful login/registration response, never editable form text. */
+    public static final class AuthenticatedIdentity {
+        private final String accountScope, username;
+
+        private AuthenticatedIdentity(OfficialServiceRegistrationClient.Account account) {
+            accountScope = account.endpoint + "\n" + account.username;
+            username = account.username;
+        }
+
+        static AuthenticatedIdentity fromOfficialAccount(OfficialServiceRegistrationClient.Account account) {
+            return new AuthenticatedIdentity(Objects.requireNonNull(account));
+        }
+
+        @Override public String toString() { return "Authenticated identity [private fields hidden]"; }
+    }
+
     private final ManualPaymentFlow flow;
     private final ManualOrderClient client;
     private final ExecutorService io;
@@ -28,6 +45,7 @@ public final class ManualPaymentSession implements AutoCloseable {
     private long attachment;
     private boolean visible, foreground, closed;
     private String accountScope;
+    private AuthenticatedIdentity identity;
     private long imageGeneration;
     private String imageKey;
     private byte[] image;
@@ -49,20 +67,47 @@ public final class ManualPaymentSession implements AutoCloseable {
     public String imageMessage() { return imageMessage; }
     public void listener(Listener listener) { this.listener = listener; }
 
-    public void enter(String accountScope) {
+    /** Explicit sandbox injection only. Replace on account changes; null revokes the current identity. */
+    public void enter(AuthenticatedIdentity identity) {
         if (closed) return;
         stopRequests();
-        if (!Objects.equals(this.accountScope, accountScope)) clearImage();
-        this.accountScope = Objects.requireNonNull(accountScope);
+        clearImage();
+        this.identity = null;
+        this.accountScope = null;
+        visible = foreground = false;
+        flow.leave();
+        if (identity == null || !view().sandbox) { changed(); return; }
+        this.identity = identity;
+        this.accountScope = identity.accountScope;
         visible = true;
         foreground = true;
         dispatch(flow.enter(accountScope, ui.nowMillis()));
         changed();
     }
 
+    public String authenticatedUsername() {
+        return available() && identity != null && Objects.equals(accountScope, identity.accountScope)
+                ? identity.username : null;
+    }
+
+    /** A retained or delayed button callback cannot copy after account, page or lifecycle changes. */
+    public Runnable usernameCopyAction(Consumer<String> clipboard) {
+        Objects.requireNonNull(clipboard);
+        final long epoch = attachment;
+        final AuthenticatedIdentity expected = identity;
+        final String username = authenticatedUsername();
+        return () -> {
+            if (username != null && epoch == attachment && expected == identity
+                    && username.equals(authenticatedUsername())) clipboard.accept(username);
+        };
+    }
+
     public void leave() {
         visible = false;
+        identity = null;
+        accountScope = null;
         stopRequests();
+        clearImage();
         flow.leave();
         changed();
     }
@@ -230,6 +275,8 @@ public final class ManualPaymentSession implements AutoCloseable {
         stopRequests();
         flow.leave();
         visible = foreground = false;
+        identity = null;
+        accountScope = null;
         listener = null;
         closed = true;
         io.shutdownNow();

@@ -2274,7 +2274,7 @@ public final class MainActivity extends Activity {
     }
 
     /** Development-only injection; normal login and saved connections never enable this feature. */
-    void showSandboxPaymentPreview(ManualPaymentSession session, String accountScope) {
+    void showSandboxPaymentPreview(ManualPaymentSession session, ManualPaymentSession.AuthenticatedIdentity identity) {
         if (this.busy || this.page != SyncPage.CONNECTION || this.connectionEntry == null
                 || this.connectionEntry.mode() != ConnectionEntryModel.Mode.OFFICIAL
                 || session == null || !session.view().sandbox)
@@ -2284,7 +2284,7 @@ public final class MainActivity extends Activity {
         this.testedDraft = null;
         this.sandboxPaymentSession = session;
         session.listener(() -> { if (!isDestroyed() && this.sandboxPaymentSession == session) render(); });
-        session.enter(accountScope);
+        session.enter(identity);
         if (!this.resumed) session.foreground(false);
         render();
     }

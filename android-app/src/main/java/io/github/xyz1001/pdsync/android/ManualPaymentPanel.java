@@ -2,6 +2,9 @@ package io.github.xyz1001.pdsync.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.widget.Button;
@@ -21,6 +24,15 @@ final class ManualPaymentPanel {
         label(activity, body, "沙箱", 14);
         label(activity, body, view.message, 16);
         label(activity, body, ManualPaymentCopy.validity(), 14);
+        String username = session.authenticatedUsername();
+        if (username != null) {
+            label(activity, body, "用户名 " + username, 16);
+            button(activity, body, "复制用户名", session.usernameCopyAction(currentUsername -> {
+                ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("用户名", currentUsername));
+            }));
+            label(activity, body, ManualPaymentCopy.usernameRemark(), 14);
+        }
         if (view.busy) body.addView(new ProgressBar(activity));
 
         ManualOrderClient.Order order = view.order;
@@ -39,8 +51,6 @@ final class ManualPaymentPanel {
         }
         if (order != null) {
             if (order.state == ManualOrderClient.State.CREATED) {
-                // Optional manual matching aid, shown only after a durable order exists. Never require a payment remark.
-                label(activity, body, "辅助编号 " + order.remarkCode, 16);
                 if (view.paymentDisplayMatches && view.selectedPlan != null) {
                     label(activity, body, view.selectedPlan.paymentInstructions, 16);
                     byte[] png = session.paymentImage();

@@ -20,12 +20,18 @@ import java.util.concurrent.TimeUnit;
 import kotlinx.serialization.json.Json;
 import kotlinx.serialization.json.JsonObject;
 import kotlinx.serialization.json.JsonPrimitive;
+import okhttp3.MediaType;
+import okhttp3.Protocol;
 import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import okio.Buffer;
 
 /** Deterministic host-only controller checks: no sockets, credentials, Android, or real payment. */
 public final class ManualPaymentSessionChecks {
-    private static final String A = "synthetic-session-a", B = "synthetic-session-b";
+    private static final String USER_A = "Synthetic.A_7", USER_B = "synthetic_b";
+    private static final String A = OfficialServiceRegistrationClient.DAV_URL + "\n" + USER_A;
+    private static final String B = OfficialServiceRegistrationClient.DAV_URL + "\n" + USER_B;
     private static final String ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private static final String ID2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     private static final String PLAN = "fixture_a";
@@ -47,18 +53,22 @@ public final class ManualPaymentSessionChecks {
         rejectedExecutorFailsClosed();
         cancellationConfirmationIsScopeBound();
         copyUsesDonationValidity();
+        authenticatedUsernameCopyIsExactAndExplicit();
+        missingIdentityFailsClosed();
+        usernameCallbacksAreIdentityAndGenerationBound();
+        lateResponsesCannotRestoreRevokedUsername();
         System.out.println("ManualPaymentSessionChecks: " + checks
                 + " checks passed (queued host fixtures; no sockets/device/account/payment)");
     }
 
     private static void disabledMakesNoRequests() throws Exception {
         try (Harness h = new Harness(false)) {
-            h.session.enter(A);
+            h.enter(A);
             h.session.create(); h.session.submit(); h.session.cancel(); h.session.refresh();
             h.session.testDav(); h.session.selectPlan(PLAN);
             h.session.foreground(false); h.session.foreground(true);
             h.ui.advance(1_000_000);
-            h.session.leave(); h.session.enter(B);
+            h.session.leave(); h.enter(B);
             eq(ManualPaymentFlow.Phase.DISABLED, h.session.view().phase, "default constructor stays disabled");
             check(!h.session.canContinue(), "disabled session cannot unlock Next");
             eq(0, h.io.pending(), "disabled session queues no IO");
@@ -72,7 +82,7 @@ public final class ManualPaymentSessionChecks {
     private static void bootstrapCreateReviewApproveAndDav() throws Exception {
         try (Harness h = new Harness(true)) {
             h.queueBootstrap("[]");
-            h.session.enter(A);
+            h.enter(A);
             eq(0, h.transport.requests.size(), "enter queues IO without inline network work");
             h.roundTrip();
             check(h.session.view().busy && !h.session.view().canCreate, "plans alone cannot create");
@@ -169,20 +179,23 @@ public final class ManualPaymentSessionChecks {
             h.session.leave();
             h.queueBootstrap("[]");
             h.transport.json("GET", "/api/order/status/" + ID, order(ID, "created"));
-            h.session.enter(A);
+            h.transport.png(2);
+            h.enter(A);
             h.roundTrip(); h.roundTrip(); h.roundTrip();
             check(!h.session.view().canCreate, "known ID absent from mine cannot create replacement");
             h.roundTrip();
             eq(ID, h.session.view().order.id, "Back and return resolves same known ID via status");
             eq("0007", h.session.view().order.remarkCode, "Back and return retain exact server remark");
             eq(key, h.store.load(A).requestKey, "Back and return preserves stable key");
+            h.roundTrip();
+            eq((byte) 2, h.session.paymentImage()[8], "Back and return reload payment image under current identity");
             h.assertSettled();
         }
     }
 
     private static void queuedWorkIsCancelled() throws Exception {
         try (Harness h = new Harness(true)) {
-            h.session.enter(A);
+            h.enter(A);
             h.session.foreground(false);
             eq(1, h.io.cancelled(), "background cancels queued bootstrap future");
             h.io.runAll(); h.ui.flush();
@@ -199,7 +212,7 @@ public final class ManualPaymentSessionChecks {
             eq(3, h.transport.requests.size(), "leave cancels queued create before transport");
             eq(key, h.store.load(A).requestKey, "cancelled create preserves durable retry identity");
             h.queueBootstrap("[" + order(ID, "review") + "]");
-            h.session.enter(A); h.roundTrip(); h.roundTrip(); h.roundTrip();
+            h.enter(A); h.roundTrip(); h.roundTrip(); h.roundTrip();
             eq(1, h.ui.delayed.size(), "review schedules one poll");
             h.ui.advance(2_000);
             eq(1, h.io.pending(), "due poll waits on injected IO executor");
@@ -211,11 +224,11 @@ public final class ManualPaymentSessionChecks {
             h.assertSettled();
         }
         Harness h = new Harness(true);
-        h.session.enter(A);
+        h.enter(A);
         int changes = h.changes;
         h.session.close(); h.session.close();
         h.io.runAll(); h.ui.flush();
-        h.session.enter(B); h.session.foreground(true); h.session.create(); h.session.refresh(); h.session.testDav();
+        h.enter(B); h.session.foreground(true); h.session.create(); h.session.refresh(); h.session.testDav();
         eq(0, h.transport.requests.size(), "closed session cannot start requests or revive queued work");
         eq(changes, h.changes, "close detaches listener");
         check(h.io.isShutdown(), "close shuts down owned IO executor");
@@ -225,7 +238,7 @@ public final class ManualPaymentSessionChecks {
     private static void staleBootstrapAndDavRepliesAreIgnored() throws Exception {
         try (Harness h = new Harness(true)) {
             h.transport.json("GET", "/api/order/plans", plans());
-            h.session.enter(A); h.io.runNext();
+            h.enter(A); h.io.runNext();
             eq(1, h.ui.posted.size(), "completed IO waits for UI callback");
             h.session.foreground(false); h.ui.flush();
             check(h.session.view().plans.isEmpty(), "background discards posted plans success");
@@ -240,8 +253,8 @@ public final class ManualPaymentSessionChecks {
         }
         try (Harness h = new Harness(true)) {
             h.transport.failure("GET", "/api/order/plans", new IOException("synthetic failure"));
-            h.session.enter(A); h.io.runNext();
-            h.queueBootstrap("[]"); h.session.enter(B);
+            h.enter(A); h.io.runNext();
+            h.queueBootstrap("[]"); h.enter(B);
             h.ui.flush();
             check(h.session.view().busy, "old failure cannot clear new account's busy state");
             h.roundTrip(); h.roundTrip(); h.roundTrip();
@@ -256,7 +269,7 @@ public final class ManualPaymentSessionChecks {
             h.transport.json("POST", "/api/order/create", order(ID, "approved"));
             h.session.create(); h.io.runNext();
             String aKey = h.store.load(A).requestKey;
-            h.queueBootstrap("[]"); h.session.enter(B); h.ui.flush();
+            h.queueBootstrap("[]"); h.enter(B); h.ui.flush();
             check(h.session.view().order == null && !h.session.canContinue(), "old account approved result is ignored");
             eq(null, h.store.load(A).orderId, "stale create cannot persist old response after account switch");
             h.roundTrip(); h.roundTrip(); h.roundTrip();
@@ -265,7 +278,7 @@ public final class ManualPaymentSessionChecks {
             h.session.create(); h.roundTrip(); h.io.runNext();
             check(!aKey.equals(h.store.load(B).requestKey), "separate account receives separate idempotency key");
             eq(ID2, h.store.load(B).orderId, "new account keeps only its returned ID");
-            h.queueBootstrap("[]"); h.session.enter(A); h.ui.flush();
+            h.queueBootstrap("[]"); h.enter(A); h.ui.flush();
             check(h.session.paymentImage() == null, "old account image completion cannot cross account scope");
             h.roundTrip(); h.roundTrip(); h.roundTrip();
             eq(aKey, h.store.load(A).requestKey, "switch back restores original unresolved create key");
@@ -401,7 +414,7 @@ public final class ManualPaymentSessionChecks {
     private static void rejectedExecutorFailsClosed() throws Exception {
         try (Harness h = new Harness(true)) {
             h.io.shutdown();
-            h.session.enter(A);
+            h.enter(A);
             check(!h.session.view().busy && !h.session.canContinue(), "rejected bootstrap fails closed without stuck busy");
             eq(ManualPaymentFlow.Phase.ERROR, h.session.view().phase, "rejected executor exposes error state");
             eq("暂时无法查询，请重试", h.session.view().message, "rejected executor has short safe error");
@@ -460,8 +473,130 @@ public final class ManualPaymentSessionChecks {
     private static void copyUsesDonationValidity() {
         String validity = ManualPaymentCopy.validity();
         eq("确认赞赏后一年有效，未到期顺延一年。", validity, "short donation validity copy");
+        eq("赞赏时请备注用户名", ManualPaymentCopy.usernameRemark(), "single short username remark reminder");
         check(!validity.contains("年费") && !validity.contains("价格") && !validity.contains("CNY")
                 && !validity.contains("¥") && !validity.contains("￥"), "validity copy has no fixed price or annual fee");
+    }
+
+    private static void authenticatedUsernameCopyIsExactAndExplicit() throws Exception {
+        try (Harness h = new Harness(true)) {
+            h.boot(A, "[]");
+            eq(USER_A, h.session.authenticatedUsername(), "username comes from authenticated account, preserving exact case");
+            List<String> copied = new ArrayList<>();
+            Runnable copy = h.session.usernameCopyAction(copied::add);
+            check(copied.isEmpty(), "rendering/capturing copy action never changes clipboard");
+            copy.run();
+            eq(List.of(USER_A), copied, "explicit click copies only the exact username, no scope/label/remark/secret");
+            eq(3, h.transport.requests.size(), "copy does not request payment or authentication");
+            h.assertSettled();
+        }
+    }
+
+    private static void missingIdentityFailsClosed() throws Exception {
+        try (Harness h = new Harness(true)) {
+            List<String> copied = new ArrayList<>();
+            eq(null, h.session.authenticatedUsername(), "no identity before explicit injection");
+            Runnable absent = h.session.usernameCopyAction(copied::add);
+            h.session.enter(null);
+            h.session.create(); h.session.submit(); h.session.refresh(); h.session.testDav();
+            absent.run(); h.session.usernameCopyAction(copied::add).run();
+            eq(null, h.session.authenticatedUsername(), "missing identity cannot display an account scope");
+            eq(0, h.io.pending(), "missing identity cannot queue sandbox actions");
+            check(copied.isEmpty(), "missing identity cannot copy anything");
+            h.boot(A, "[]");
+            absent.run();
+            check(copied.isEmpty(), "old missing-identity callback cannot copy a later account");
+            h.session.enter(null);
+            h.session.foreground(true); h.session.create();
+            eq(null, h.session.authenticatedUsername(), "revocation immediately hides prior username");
+            eq(0, h.io.pending(), "foreground cannot revive revoked identity");
+            h.assertSettled();
+        }
+        try (Harness h = new Harness(false)) {
+            h.enter(A);
+            List<String> copied = new ArrayList<>();
+            h.session.usernameCopyAction(copied::add).run();
+            eq(null, h.session.authenticatedUsername(), "disabled production flow does not expose injected username");
+            check(copied.isEmpty(), "disabled production flow cannot copy injected username");
+            h.assertSettled();
+        }
+    }
+
+    private static void usernameCallbacksAreIdentityAndGenerationBound() throws Exception {
+        try (Harness h = new Harness(true)) {
+            List<String> copied = new ArrayList<>();
+            h.boot(A, "[]");
+            Runnable oldAccount = h.session.usernameCopyAction(copied::add);
+            h.boot(B, "[]");
+            eq(USER_B, h.session.authenticatedUsername(), "account switch immediately replaces display username");
+            oldAccount.run();
+            check(copied.isEmpty(), "old callback cannot copy old or new account after switch");
+            h.session.usernameCopyAction(copied::add).run();
+            eq(List.of(USER_B), copied, "new callback copies only current account");
+            Runnable oldPage = h.session.usernameCopyAction(copied::add);
+            h.session.leave();
+            eq(null, h.session.authenticatedUsername(), "Back immediately hides username");
+            oldPage.run();
+            h.boot(B, "[]");
+            oldPage.run();
+            eq(1, copied.size(), "Back and same-account re-entry cannot revive old button");
+            Runnable oldForeground = h.session.usernameCopyAction(copied::add);
+            h.session.foreground(false);
+            eq(null, h.session.authenticatedUsername(), "background hides username");
+            oldForeground.run();
+            h.queueBootstrap("[]"); h.session.foreground(true);
+            h.roundTrip(); h.roundTrip(); h.roundTrip();
+            oldForeground.run();
+            eq(1, copied.size(), "foreground does not revive previous attachment callback");
+            Runnable oldLogin = h.session.usernameCopyAction(copied::add);
+            h.boot(B, "[]");
+            oldLogin.run();
+            eq(1, copied.size(), "same-account replacement authentication invalidates old callback");
+            Runnable beforeClose = h.session.usernameCopyAction(copied::add);
+            h.session.close(); beforeClose.run();
+            eq(null, h.session.authenticatedUsername(), "close clears identity display");
+            eq(1, copied.size(), "close invalidates clipboard callback");
+            h.assertSettled();
+        }
+    }
+
+    private static void lateResponsesCannotRestoreRevokedUsername() throws Exception {
+        for (boolean failure : new boolean[] {false, true}) {
+            try (Harness h = new Harness(true)) {
+                if (failure) h.transport.failure("GET", "/api/order/plans", new IOException("old fixture failure"));
+                else h.transport.json("GET", "/api/order/plans", plans());
+                h.enter(A); h.io.runNext();
+                List<String> copied = new ArrayList<>();
+                Runnable oldCopy = h.session.usernameCopyAction(copied::add);
+                h.queueBootstrap("[]"); h.enter(B); h.ui.flush(); oldCopy.run();
+                eq(USER_B, h.session.authenticatedUsername(), "late result cannot restore old account username");
+                check(copied.isEmpty(), "late result cannot revalidate old copy callback");
+                h.roundTrip(); h.roundTrip(); h.roundTrip();
+                h.transport.json("POST", "/api/order/create", order(ID2, "created"));
+                h.session.create(); h.io.runNext();
+                h.session.enter(null); h.ui.flush();
+                eq(null, h.session.authenticatedUsername(), "late create cannot restore revoked identity");
+                eq(null, h.session.paymentImage(), "revocation clears payment image");
+                h.session.usernameCopyAction(copied::add).run();
+                check(copied.isEmpty(), "late create cannot enable clipboard without identity");
+                h.assertSettled();
+            }
+        }
+    }
+
+    /** Authentication response fixture only; no socket, real account or registration is used. */
+    private static ManualPaymentSession.AuthenticatedIdentity authenticatedIdentity(String scope) throws Exception {
+        String username = A.equals(scope) ? USER_A : B.equals(scope) ? USER_B : null;
+        if (username == null) throw new AssertionError("Unknown fixture account scope");
+        OfficialServiceRegistrationClient client = new OfficialServiceRegistrationClient(request -> {
+            String json = "{\"code\":200,\"message\":\"success\",\"data\":{"
+                    + "\"webdav_url\":\"" + OfficialServiceRegistrationClient.DAV_URL + "\",\"username\":\"" + username
+                    + "\",\"quota_mb\":0,\"quota_bytes\":0,\"upload_bandwidth_kb\":0,\"download_bandwidth_kb\":0}}";
+            return new Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                    .body(ResponseBody.create(json, MediaType.get("application/json"))).build();
+        });
+        return ManualPaymentSession.AuthenticatedIdentity.fromOfficialAccount(
+                client.login(username, "synthetic-password-never-secret"));
     }
 
     private static final class MemoryStore implements ManualPaymentFlow.DraftStore {
@@ -608,6 +743,7 @@ public final class ManualPaymentSessionChecks {
             session = new ManualPaymentSession(flow, new ManualOrderClient("http://127.0.0.1:18080", transport), io, ui, dav);
             session.listener(() -> changes++);
         }
+        void enter(String scope) throws Exception { session.enter(authenticatedIdentity(scope)); }
         void queueBootstrap(String mine) { queueBootstrap(mine, false); }
         void queueBootstrap(String mine, boolean active) {
             transport.json("GET", "/api/order/plans", plans());
@@ -616,7 +752,7 @@ public final class ManualPaymentSessionChecks {
                     + (active ? "999999999" : "null") + ",\"active\":" + active + "}");
         }
         void boot(String scope, String mine) throws Exception {
-            queueBootstrap(mine); session.enter(scope); roundTrip(); roundTrip(); roundTrip();
+            queueBootstrap(mine); enter(scope); roundTrip(); roundTrip(); roundTrip();
         }
         void roundTrip() throws Exception { io.runNext(); ui.flush(); }
         void assertSettled() {

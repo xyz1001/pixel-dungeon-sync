@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2] / "main/java/io/github/xyz1001/pdsync
 MAIN = (ROOT / "MainActivity.java").read_text()
 PANEL = (ROOT / "ManualPaymentPanel.java").read_text()
 SESSION = (ROOT / "ManualPaymentSession.java").read_text()
+COPY = (ROOT / "ManualPaymentCopy.java").read_text()
 
 
 class ManualPaymentUiContract(unittest.TestCase):
@@ -17,9 +18,11 @@ class ManualPaymentUiContract(unittest.TestCase):
         hook = body(MAIN, "void showSandboxPaymentPreview(")
         for guard in ("this.page != SyncPage.CONNECTION", "ConnectionEntryModel.Mode.OFFICIAL", "!session.view().sandbox"):
             self.assertIn(guard, hook)
-        for forbidden in ("draftPassword", "officialPassword", "getIntent", "testedDraft = draftFingerprint", "authenticateOfficial"):
+        for forbidden in ("draftUser", "officialUser", "draftPassword", "officialPassword", "verifiedOfficial", "getIntent", "testedDraft = draftFingerprint", "authenticateOfficial"):
             self.assertNotIn(forbidden, hook)
         self.assertIn("captureDraft()", hook)
+        self.assertIn("ManualPaymentSession.AuthenticatedIdentity identity", MAIN)
+        self.assertIn("session.enter(identity)", hook)
 
     def test_only_official_child_changes(self):
         render = body(MAIN, "private void renderOfficialConnection()")
@@ -42,7 +45,8 @@ class ManualPaymentUiContract(unittest.TestCase):
 
     def test_server_values_order_first_and_explicit_sandbox(self):
         self.assertIn('"沙箱"', PANEL)
-        self.assertIn('"辅助编号 " + order.remarkCode', PANEL)
+        self.assertNotIn("remarkCode", PANEL)
+        self.assertNotIn("辅助编号", PANEL)
         self.assertNotIn("amountMinor", PANEL)
         self.assertNotIn("currency", PANEL)
         self.assertIn("ManualPaymentCopy.validity()", PANEL)
@@ -58,6 +62,33 @@ class ManualPaymentUiContract(unittest.TestCase):
         self.assertNotIn("WebView", PANEL)
         self.assertNotIn("https://", PANEL)
         self.assertNotIn("password", PANEL.lower())
+
+    def test_username_display_and_explicit_clipboard_use_typed_current_identity(self):
+        self.assertIn("String username = session.authenticatedUsername()", PANEL)
+        self.assertIn("if (username != null)", PANEL)
+        self.assertIn('"用户名 " + username', PANEL)
+        self.assertIn('"复制用户名", session.usernameCopyAction(', PANEL)
+        self.assertIn('clipboard.setPrimaryClip(ClipData.newPlainText("用户名", currentUsername))', PANEL)
+        self.assertIn("ManualPaymentCopy.usernameRemark()", PANEL)
+        self.assertEqual(COPY.count('"赞赏时请备注用户名"'), 1)
+        for forbidden in ("EditText", "getPrimaryClip", "setTextIsSelectable", "getIntent", "动态", "必须备注", "微信输入", "setPrimaryClip("):
+            if forbidden == "setPrimaryClip(":
+                self.assertEqual(PANEL.count(forbidden), 1)
+            else:
+                self.assertNotIn(forbidden, PANEL)
+        identity = body(SESSION, "public static final class AuthenticatedIdentity")
+        self.assertIn("private AuthenticatedIdentity(OfficialServiceRegistrationClient.Account account)", identity)
+        self.assertIn("username = account.username", identity)
+        for forbidden in ("password", "SecureConnectionStore", "String username)", "this.account ="):
+            self.assertNotIn(forbidden, identity)
+        entry = body(SESSION, "public void enter(")
+        self.assertIn("identity == null || !view().sandbox", entry)
+        self.assertNotIn("enter(String accountScope)", SESSION)
+        action = body(SESSION, "public Runnable usernameCopyAction(")
+        for check in ("epoch == attachment", "expected == identity", "username.equals(authenticatedUsername())"):
+            self.assertIn(check, action)
+        for signature in ("public void leave()", "@Override public void close()"):
+            self.assertIn("identity = null", body(SESSION, signature))
 
     def test_lifecycle_callbacks_reject_stale_ticket_and_image_generations(self):
         for signature in ("private void accepted(", "private void failed("):
