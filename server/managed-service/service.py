@@ -37,6 +37,7 @@ _PUBLIC_ERRORS = {
     'ACCOUNT_IDENTITY_CONFLICT': 409, 'LEGACY_ACCOUNT_MIGRATION_REQUIRED': 409,
     'LEGACY_TRIAL_MIGRATION_REQUIRED': 409, 'REGISTRATION_TRIALS_DISABLED': 503,
     'AUTHENTICATION_REQUIRED': 401,
+    'REGISTRATION_TRIAL_RETRY_REQUIRED': 503,
 }
 
 
@@ -73,7 +74,18 @@ class ManagedApplication:
                 raise ApiError(503, 'REGISTRATION_TRIALS_DISABLED')
             if not self.registration_limit.accept():
                 raise ApiError(429, 'REGISTRATION_RATE_LIMITED')
-            self.ledger.register(username, password)
+            try:
+                self.ledger.register(username, password)
+            except OrderError as error:
+                # Login authenticates but cannot repair an uncertain registration
+                # proof/application. Retry registration with its original operation.
+                if error.status == 503 and error.code in {
+                    'REGISTRATION_TRIAL_RETRY_REQUIRED', 'REGISTRATION_DATABASE_UNAVAILABLE',
+                    'REGISTRATION_UPSTREAM_UNAVAILABLE', 'SFTPGO_REGISTRATION_RETRY_REQUIRED',
+                    'SFTPGO_UPSTREAM_UNAVAILABLE', 'SFTPGO_ACCOUNT_LOOKUP_UNAVAILABLE',
+                }:
+                    raise ApiError(503, 'REGISTRATION_TRIAL_RETRY_REQUIRED') from None
+                raise
         elif not self.login_limit.accept():
             raise ApiError(429, 'LOGIN_RATE_LIMITED')
         # Reauthenticate after durable registration before returning any account

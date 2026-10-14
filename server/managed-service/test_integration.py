@@ -10,6 +10,7 @@ import tempfile
 import threading
 from types import SimpleNamespace as NS
 import unittest
+from unittest.mock import patch
 
 from service import ManagedApplication, create_server
 from runtime_config import PREREQUISITES, RuntimeConfig
@@ -110,7 +111,9 @@ class ManagedIntegrationTests(unittest.TestCase):
 
     def test_uncertain_create_response_restart_and_original_trial(self):
         self.upstream.drop_create_response_once = True
-        self.assertEqual(503, self.account()[0])
+        status, error = self.account()
+        self.assertEqual(503, status)
+        self.assertEqual('REGISTRATION_TRIAL_RETRY_REQUIRED', error['error'])
         self.assertEqual(1, len(self.upstream.creates))
         self.assertEqual(403, self.gate())  # Remote account exists, local grant not confirmed.
         self.now += 60000
@@ -124,6 +127,20 @@ class ManagedIntegrationTests(unittest.TestCase):
         self.assertEqual(200, self.account()[0])
         self.assertEqual(self.upstream.created_at_ms + TRIAL_MS, self.entitlement()['expires_ms'])
         self.assertEqual(1, len(self.upstream.creates))
+        self.assertEqual(204, self.gate())
+
+    def test_trial_application_failure_reports_registration_recovery_not_login(self):
+        with patch.object(self.ledger.applications, 'ensure', side_effect=OSError('private fixture detail')):
+            status, error = self.account()
+        self.assertEqual(503, status)
+        self.assertEqual('REGISTRATION_TRIAL_RETRY_REQUIRED', error['error'])
+        self.assertNotIn('private', json.dumps(error))
+        self.assertEqual(200, self.account('login')[0])
+        self.assertEqual(403, self.gate())  # Login never grants or repairs a pending trial.
+        self.now += 60000
+        self.assertEqual(200, self.account()[0])
+        self.assertEqual(1, len(self.upstream.creates))
+        self.assertEqual(self.upstream.created_at_ms + TRIAL_MS, self.entitlement()['expires_ms'])
         self.assertEqual(204, self.gate())
 
     def test_bot_queue_grant_reply_failure_restart_and_duplicate(self):
