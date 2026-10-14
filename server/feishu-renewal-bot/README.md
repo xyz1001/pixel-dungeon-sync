@@ -39,6 +39,77 @@
 [长连接接收事件](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscriptions/event-subscription-configure-/choose-a-subscription-mode/request-url-configuration-case)、
 [回复消息](https://open.feishu.cn/document/server-docs/im-v1/message/reply)。
 
+## 首次只读接通与 ID 发现（先于正式处理器）
+
+`setup_cli.py` 不需要完整 binding，也不导入机器人业务、SQLite 队列或续期 ledger。
+它只做官方 SDK 长连接握手、有限群列表 GET、机器人信息 GET 或选定群的 ID 观察。
+不会调用续期、查询账号、修改权益、发送群消息、自动选择管理员或写入/启用 binding。
+这些命令**会连接飞书**，仅供获授权的人在自己的受限服务端手动执行；仓库测试不会执行它们。
+
+**只允许在正式处理器启用前运行。** 同一应用的多个长连接会分摊事件，setup 会 ACK 后丢弃
+业务消息；与正式处理器并行可能使续期消息被吞掉。运行前停止同应用的其他监听实例，
+确认后才传 `--pre-production`；此参数只是人工确认，不能探测其他主机上的连接。
+setup 期间不要发送真实续期授权。
+
+最简顺序：
+
+1. 在飞书开发者后台准备企业自建应用并启用机器人能力。由管理员核实/批准权限及发布范围。
+   只读发现不需要发送消息权限；免 @ 的群消息需要 `im:message.group_msg`。
+   首次不知道 chat ID 才需要群列表读权限 `im:chat:read`，已有可用的
+   `im:chat:readonly` 等官方等价权限也可以。无需为此申请通讯录或群成员列表权限。
+2. 在受控 Python 3.10+ 环境中安装、审查固定的 `requirements.txt` 及传递依赖，先通过
+   已安装 SDK 的离线 smoke test。App Secret 由你已有的 secret 存储注入环境变量
+   `FEISHU_APP_SECRET`，或放在仓库外、当前用户独占读取的现有文件中（POSIX 权限 0600）。
+   CLI 不创建/保存 secret，不接受 secret 值参数；不要把它贴到聊天、群、Git 或 shell 命令里。
+3. 在本目录运行下面的 handshake。在它仍运行时，回到后台选择“使用长连接接收事件”并保存，
+   然后订阅 `im.message.receive_v1`。`STARTING_CHECK_CONSOLE` 只表示开始尝试；
+   **必须以控制台保存成功/显示已连接为准**，不能把进程存活当作接通。
+   保存完成后 Ctrl-C 停止 handshake，创建版本并经管理员批准发布，使机器人、权限和订阅生效。
+4. 将机器人加入专用群。运行 `bot-info` 获取机器人自己的 `bot_open_id`；该官方接口无需额外
+   scope，但须已启用并发布机器人能力。若还没有 chat ID，运行 `groups` 后由人核实并选择群。
+5. 把已选群 ID 显式传给 `discover`。让准备授权的管理员本人在这个群发一条普通诊断文字
+   （不需要 @）；CLI 仅打印 `app_id`、header 的 `tenant_key`、`chat_id`、`sender.open_id`。
+   不读/打印正文、完整事件、token，也不记录到文件。输出只是实际平台 ID，**不是管理员授权**；
+   由管理者另行核对本人身份、目标群及租户后，人工填入仓库外仍为 `enabled:false` 的 binding。
+   本实现沿用正式处理器的同租户限制，header tenant 与 sender tenant 不同的事件会被忽略。
+6. 停止 setup，运行离线配置校验。即使 ID 已齐全，正式账户/权益适配器、生产防护和获授权的
+   实际联调仍须完成；不要因为 setup 接通就启用正式处理器。
+
+以下 `cli_example` / `oc_selected` 必须替换为你核实的真实 ID。命令默认只读取已有的
+`FEISHU_APP_SECRET`，示例不包含任何 secret 值：
+
+```sh
+cd server/feishu-renewal-bot
+python setup_cli.py handshake --app-id cli_example --pre-production
+# 控制台保存长连接并订阅事件后，先 Ctrl-C，再发布应用/权限并加入专用群。
+python setup_cli.py bot-info --app-id cli_example --pre-production
+python setup_cli.py groups --app-id cli_example --pre-production
+python setup_cli.py discover --app-id cli_example --chat-id oc_selected --pre-production
+python check_config.py /path/outside/repository/binding.local.json
+```
+
+其他 secret 注入方式只能二选一：`--secret-env EXISTING_ENV_NAME` 或
+`--secret-file /path/outside/repository/app-secret`。使用文件时请移除当前进程环境中的
+`FEISHU_APP_SECRET`；两个来源同时存在会拒绝启动。文件允许一个末尾换行，不接受空值、
+空白、多行、过大值或样例占位符。未知 CLI 参数只返回固定错误码，不回显参数值。
+
+所有命令有 `--duration` 硬时限（默认 180 秒，范围 1–600）；Ctrl-C、SIGTERM 或终端关闭
+会停止并回收 SDK 子进程，不留后台续期 worker。日志与未处理的 SDK 输出被屏蔽；失败只打印
+固定错误码。`OBSERVATION_WINDOW_ENDED` 只表示观察时间已结束，并不证明接通或控制台已保存。
+`NO_MATCHING_EVENT` 表示未观察到符合上述限制的事件，请检查选定群、发布、权限和租户。
+不确定是否连通时查官方控制台，不要开启 SDK debug 日志或上传原始错误。
+
+`groups` 只请求第一批最多 20 个群，输出 chat ID/群名和 `has_more`；可用 `--limit 100`
+扩大这一批。`has_more:true` 表示未列全，目标不在结果内时通过[官方群列表 API 调试台](https://open.feishu.cn/document/server-docs/group/chat/list)
+继续人工定位并复制 chat ID；CLI 不输出分页 token，也不无限扫描或自动选择第一群。
+`discover --limit N` 最多输出 N 个不同发送者（默认 20，最多 100），只在显式指定的群观察。
+终端中的 ID/群名也是私有配置资料，不要提交到仓库或公开报告。
+
+官方依据：[机器人信息及权限](https://open.feishu.cn/document/client-docs/bot-v3/obtain-bot-info)、
+[机器人所在群列表及权限](https://open.feishu.cn/document/server-docs/group/chat/list)、
+[固定 SDK 群列表 request 源码](https://github.com/larksuite/oapi-sdk-python/blob/0b9e6e48b74bb4b34462fc67b7e738b27e73e697/lark_oapi/api/im/v1/model/list_chat_request.py)、
+[固定 SDK 通用 GET request 源码](https://github.com/larksuite/oapi-sdk-python/blob/0b9e6e48b74bb4b34462fc67b7e738b27e73e697/lark_oapi/core/model/base_request.py)。
+
 ## 持久状态与回复
 
 回调只做本地校验和 SQLite inbox 提交，再唤醒后台处理器。持久写入失败会继续抛给 SDK，
@@ -96,6 +167,8 @@ reserved/confirmed 分离、回复失败/发送后崩溃、UUID 超窗、启动�
 这些源码参考不代替实际安装版本验证。部署前必须完成依赖锁定和审查、已安装 SDK 的
 离线 smoke test，以及获授权的真实长连接、权限、消息接收与回复联调；fake builder 测试
 不能证明真实 SDK 或平台集成已经可用。
+`test_setup_cli.py` 另外验证只读初始化接线、secret 输入边界、元数据白名单、日志脱敏及
+有限时长/Ctrl-C 子进程回收；它的真实 SDK smoke test 同样在 SDK 未安装时明确 skip。
 
 ## 部署接线样例（尚不能直接上线）
 
