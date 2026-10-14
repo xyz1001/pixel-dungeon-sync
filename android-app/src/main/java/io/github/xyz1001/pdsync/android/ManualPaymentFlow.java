@@ -5,13 +5,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
- * Sandbox-only, single-flight presentation state. No HTTP, Android, credentials or prices.
- * The controller executes returned tickets, cancels its transport on leave/background, and
- * returns results on this model. Account scope must identify the authenticated service/account,
- * never be a password or token. All times supplied by the controller are monotonic milliseconds.
+ * Read-only appreciation display for an explicitly injected sandbox. Server entitlement is
+ * authoritative for both trial and renewal; only a separate successful DAV test enables Next.
+ * Requests are single-flight and bound to the visible authenticated account generation.
  */
 public final class ManualPaymentFlow {
     public static final long NO_POLL = -1L;
@@ -19,28 +17,25 @@ public final class ManualPaymentFlow {
     public static final int MAX_POLL_REQUESTS = 8;
     private static final long[] BACKOFF = {2_000L, 4_000L, 8_000L, 16_000L, 30_000L};
 
-    public enum Action { LOAD_PLANS, LOAD_MINE, LOAD_ENTITLEMENT, CREATE, SUBMIT, CANCEL, STATUS, DAV_TEST }
-    public enum Phase { DISABLED, LOADING, SELECT_PLAN, CREATED, REVIEW, APPLYING, APPROVED,
-        CANCELLED, REJECTED, ERROR, DAV_TESTING, READY }
+    public enum Action { LOAD_PLANS, LOAD_IMAGE, LOAD_ENTITLEMENT, DAV_TEST }
+    public enum Phase { DISABLED, LOADING, SHOWING, ACTIVE, ERROR, DAV_TESTING, READY }
 
-    /** Immutable request identity; possession does not authenticate any service operation. */
+    /** Request identity is not authentication and contains no secret or order identity. */
     public static final class Ticket {
         public final Action action;
-        public final String accountScope, planId, requestKey, orderId;
+        public final String accountScope;
         public final long generation;
-        private Ticket(Action action, String scope, long generation, String planId,
-                       String requestKey, String orderId) {
+        public final ManualOrderClient.Plan plan;
+        private Ticket(Action action, String scope, long generation, ManualOrderClient.Plan plan) {
             this.action = action;
             this.accountScope = scope;
             this.generation = generation;
-            this.planId = planId;
-            this.requestKey = requestKey;
-            this.orderId = orderId;
+            this.plan = plan;
         }
         @Override public String toString() { return "Sandbox ticket " + action + " #" + generation; }
     }
 
-    /** Non-secret idempotency metadata only; never store login credentials here. */
+    /** Legacy local-file shape only. The read-only flow never loads, saves or replays a draft. */
     public static final class Draft {
         public final String accountScope, planId, requestKey, orderId;
         public Draft(String accountScope, String planId, String requestKey, String orderId) {
@@ -53,419 +48,199 @@ public final class ManualPaymentFlow {
             this.requestKey = requestKey;
             this.orderId = orderId;
         }
-        @Override public String toString() { return "Sandbox order draft [private fields hidden]"; }
+        @Override public String toString() { return "Legacy sandbox draft [private fields hidden]"; }
     }
-
     public interface DraftStore {
         Draft load(String accountScope) throws IOException;
-        /** Must complete a durable, atomic replacement before returning. */
         void save(Draft draft) throws IOException;
     }
 
     public static final class View {
         public final List<ManualOrderClient.Plan> plans;
-        public final String selectedPlanId, message;
         public final ManualOrderClient.Plan selectedPlan;
-        public final ManualOrderClient.Order order;
         public final ManualOrderClient.Entitlement entitlement;
+        public final String message;
         public final Phase phase;
-        public final boolean sandbox, busy, canContinue, canCreate, canSubmit, canCancel, canTestDav,
-                paymentDisplayMatches, outcomeUnknown;
+        public final boolean sandbox, busy, canContinue, canTestDav;
         private View(ManualPaymentFlow f) {
             plans = f.plans;
-            selectedPlanId = f.selectedPlanId;
             selectedPlan = f.selectedPlan();
-            order = f.order;
             entitlement = f.entitlement;
             sandbox = f.enabled;
             busy = f.current != null;
             phase = f.phase();
             message = f.message();
-            boolean usable = f.usable();
-            canContinue = usable && f.davPassed && f.davEligible();
-            canCreate = f.canCreate();
-            canSubmit = usable && f.created();
-            canCancel = usable && (f.created() || f.state(ManualOrderClient.State.REVIEW));
-            canTestDav = usable && f.davEligible();
-            paymentDisplayMatches = order != null && matches(selectedPlan, order);
-            outcomeUnknown = f.outcomeUnknown;
+            canTestDav = f.usable() && f.davEligible();
+            canContinue = canTestDav && f.davPassed;
         }
     }
 
     private final boolean enabled;
-    private final DraftStore store;
-    private String scope, selectedPlanId, notice;
+    private String scope, notice;
     private long generation, pollDeadline, nextPollAt;
     private int pollRequests;
-    private boolean active, foreground, plansLoaded, mineLoaded, entitlementLoaded, storageReady,
-            davPassed, outcomeUnknown, pollNeedsWindow, unsupportedContract;
+    private boolean active, foreground, plansLoaded, entitlementLoaded, davPassed, unsupportedContract;
     private Ticket current;
-    private Draft draft;
     private List<ManualOrderClient.Plan> plans = Collections.emptyList();
-    private ManualOrderClient.Order order;
     private ManualOrderClient.Entitlement entitlement;
 
-    public ManualPaymentFlow(DraftStore store) { this(false, store); }
-    public ManualPaymentFlow(boolean sandboxEnabled, DraftStore store) {
-        this.enabled = sandboxEnabled;
-        this.store = Objects.requireNonNull(store, "store");
-    }
+    public ManualPaymentFlow() { this(false); }
+    public ManualPaymentFlow(boolean sandboxEnabled) { enabled = sandboxEnabled; }
+    /** Compatibility for old injection code; existing drafts are deliberately left untouched. */
+    public ManualPaymentFlow(DraftStore ignored) { this(false); }
+    public ManualPaymentFlow(boolean sandboxEnabled, DraftStore ignored) { this(sandboxEnabled); }
 
-    /** Explicit page entry. Re-entering preserves the account's draft but always rechecks server state. */
     public synchronized Ticket enter(String accountScope, long now) {
         nonEmpty(accountScope, "account scope", 1024);
         invalidate();
-        active = true;
-        foreground = true;
-        davPassed = false;
+        scope = accountScope;
+        active = foreground = true;
+        plans = Collections.emptyList();
+        entitlement = null;
+        plansLoaded = entitlementLoaded = davPassed = unsupportedContract = false;
         notice = null;
-        if (!Objects.equals(scope, accountScope)) {
-            scope = accountScope;
-            selectedPlanId = null;
-            draft = null;
-            order = null;
-            entitlement = null;
-            plans = Collections.emptyList();
-            outcomeUnknown = false;
-        }
-        plansLoaded = mineLoaded = entitlementLoaded = false;
-        unsupportedContract = false;
         resetPollWindow(now);
-        if (!enabled) return null;
-        try {
-            Draft loaded = store.load(scope);
-            if (loaded != null && !scope.equals(loaded.accountScope)) throw new IOException("Draft scope mismatch");
-            draft = loaded;
-            storageReady = true;
-            if (draft != null) {
-                if (selectedPlanId == null || order == null || pending()
-                        || !Objects.equals(order.id, draft.orderId)) selectedPlanId = draft.planId;
-                outcomeUnknown = draft.orderId == null;
-            }
-        } catch (IOException | RuntimeException ignored) {
-            storageReady = false;
-            notice = "订单草稿无法读取";
-            return null;
-        }
         return issue(Action.LOAD_PLANS);
     }
 
-    /** Refresh visibility state without extending an already-running order's poll budget. */
+    /** Resume rechecks server state without extending the finite foreground polling window. */
     public synchronized Ticket resume(long now) {
         if (!enabled || !active || !foreground || current != null || scope == null) return null;
-        boolean preserve = waiting();
-        long deadline = pollDeadline, next = nextPollAt;
-        int requests = pollRequests;
-        boolean needsWindow = pollNeedsWindow;
-        Ticket ticket = enter(scope, now);
-        if (preserve) {
-            pollDeadline = deadline;
-            nextPollAt = next;
-            pollRequests = requests;
-            pollNeedsWindow = needsWindow;
-        }
-        return ticket;
+        davPassed = entitlementLoaded = false;
+        notice = null;
+        return issue(plansLoaded && !unsupportedContract
+                ? selectedPlan() == null ? Action.LOAD_ENTITLEMENT : Action.LOAD_IMAGE : Action.LOAD_PLANS);
     }
-
-    /** Also cancel the controller's current Call/Future and delayed poll runnable. */
     public synchronized void leave() {
-        active = false;
-        davPassed = false;
+        active = foreground = davPassed = entitlementLoaded = false;
+        scope = null;
+        entitlement = null;
+        plans = Collections.emptyList();
+        plansLoaded = false;
         invalidate();
     }
-
-    /** Becoming visible does not start a request or extend the finite polling budget. */
+    /** The controller also cancels transport and its delayed runnable. */
     public synchronized void setForeground(boolean value, long now) {
         foreground = value;
-        if (!value) {
-            davPassed = false;
-            if (current != null && current.action == Action.CREATE) outcomeUnknown = true;
-            invalidate();
-        }
+        if (!value) { davPassed = entitlementLoaded = false; invalidate(); }
     }
-
-    public synchronized boolean selectPlan(String planId) {
-        if (!usable() || pending() || unresolvedDraft() || findPlan(planId) == null) return false;
-        if (!Objects.equals(selectedPlanId, planId)) davPassed = false;
-        selectedPlanId = planId;
-        notice = null;
-        return true;
-    }
-
-    /** Persist owner+plan+stable key BEFORE allowing the first create HTTP request. */
-    public synchronized Ticket create() {
-        if (!canCreate()) return null;
-        String key = draft != null && draft.orderId == null && Objects.equals(draft.planId, selectedPlanId)
-                ? draft.requestKey : UUID.randomUUID().toString();
-        Draft next = new Draft(scope, selectedPlanId, key, null);
-        if (!saveDraft(next)) return null;
-        order = null;
-        davPassed = false;
-        outcomeUnknown = true; // Only a matching server response establishes the outcome.
-        notice = null;
-        return issue(Action.CREATE);
-    }
-
-    public synchronized Ticket submit() {
-        if (!usable() || !created()) return null;
-        notice = null;
-        return issue(Action.SUBMIT);
-    }
-
-    /** Clock-taking overload for controllers that timestamp every user action. */
-    public synchronized Ticket submit(long now) {
-        Ticket ticket = submit();
-        if (ticket != null) resetPollWindow(now);
-        return ticket;
-    }
-
-    public synchronized Ticket cancel() {
-        if (!usable() || !(created() || state(ManualOrderClient.State.REVIEW))) return null;
-        notice = null;
-        return issue(Action.CANCEL);
-    }
-
-    /** An explicit refresh resets the bounded foreground poll window. */
+    /** Explicit refresh reloads the code and server state; repeated refresh cannot overlap. */
     public synchronized Ticket refresh(long now) {
         if (!enabled || !active || !foreground || current != null) return null;
         notice = null;
+        davPassed = plansLoaded = entitlementLoaded = unsupportedContract = false;
         resetPollWindow(now);
-        if (!storageReady) return enter(scope, now);
-        if (unsupportedContract) {
-            unsupportedContract = false;
-            plansLoaded = mineLoaded = entitlementLoaded = false;
-            return issue(Action.LOAD_PLANS);
-        }
-        if (!plansLoaded) return issue(Action.LOAD_PLANS);
-        if (!mineLoaded || !entitlementLoaded || order == null) return issue(Action.LOAD_MINE);
-        return issue(Action.STATUS);
+        return issue(Action.LOAD_PLANS);
     }
-
     public synchronized long nextDelayMillis(long now) {
-        if (!enabled || !active || !foreground || unsupportedContract || current != null || !waiting()) return NO_POLL;
-        if (pollNeedsWindow) resetPollWindow(now);
-        if (pollRequests >= MAX_POLL_REQUESTS || now >= pollDeadline || nextPollAt >= pollDeadline)
-            return NO_POLL;
+        if (!enabled || !active || !foreground || unsupportedContract || current != null
+                || !plansLoaded || !entitlementLoaded || davPassed) return NO_POLL;
+        if (pollRequests >= MAX_POLL_REQUESTS || now >= pollDeadline || nextPollAt >= pollDeadline) return NO_POLL;
         return Math.max(0L, nextPollAt - now);
     }
-
     public synchronized Ticket poll(long now) {
         if (nextDelayMillis(now) != 0L) return null;
         pollRequests++;
         nextPollAt = safeAdd(now, BACKOFF[Math.min(pollRequests, BACKOFF.length - 1)]);
-        return issue(Action.STATUS);
+        return issue(Action.LOAD_ENTITLEMENT);
     }
-
     public synchronized Ticket beginDavTest() {
         if (!usable() || !davEligible()) return null;
         davPassed = false;
         notice = null;
         return issue(Action.DAV_TEST);
     }
-
-    /** The controller must call this whenever DAV endpoint/user/password inputs are edited. */
     public synchronized void invalidateDav() {
         davPassed = false;
         if (current != null && current.action == Action.DAV_TEST) invalidate();
     }
-
     public synchronized boolean acceptDavSuccess(Ticket ticket) {
-        if (!accepts(ticket, Action.DAV_TEST) || !davEligible()
-                || !Objects.equals(ticket.orderId, order == null ? null : order.id)) return false;
+        if (!accepts(ticket, Action.DAV_TEST) || !davEligible()) return false;
         current = null;
         davPassed = true;
         notice = null;
         return true;
     }
-
     public synchronized Ticket acceptPlans(Ticket ticket, List<ManualOrderClient.Plan> result) {
         if (!accepts(ticket, Action.LOAD_PLANS)) return null;
-        if (result == null || hasNull(result)) { fail(ticket, "INVALID_RESPONSE"); return null; }
+        if (result == null) { fail(ticket, "INVALID_RESPONSE"); return null; }
+        for (ManualOrderClient.Plan plan : result)
+            if (plan == null) { fail(ticket, "INVALID_RESPONSE"); return null; }
         List<ManualOrderClient.Plan> copy = new ArrayList<>(result);
         for (int i = 0; i < copy.size(); i++) for (int j = i + 1; j < copy.size(); j++)
             if (copy.get(i).id.equals(copy.get(j).id)) { fail(ticket, "INVALID_RESPONSE"); return null; }
         plans = Collections.unmodifiableList(copy);
         plansLoaded = true;
+        unsupportedContract = false;
         current = null;
-        if (selectedPlanId == null && !plans.isEmpty()) selectedPlanId = plans.get(0).id;
-        return issue(Action.LOAD_MINE);
+        return issue(selectedPlan() == null ? Action.LOAD_ENTITLEMENT : Action.LOAD_IMAGE);
     }
-
-    public synchronized Ticket acceptMine(Ticket ticket, List<ManualOrderClient.Order> result) {
-        if (!accepts(ticket, Action.LOAD_MINE)) return null;
-        if (result == null || hasNull(result)) { fail(ticket, "INVALID_RESPONSE"); return null; }
-        ManualOrderClient.Order recovered = null, known = null;
-        for (ManualOrderClient.Order candidate : result) {
-            if (draft != null && Objects.equals(draft.orderId, candidate.id)) known = candidate;
-            if (isPending(candidate)) {
-                if (recovered != null) { fail(ticket, "INVALID_RESPONSE"); return null; }
-                recovered = candidate;
-            }
-        }
-        if (recovered == null) recovered = known;
+    /** A missing image must not prevent querying an existing trial or renewed entitlement. */
+    public synchronized Ticket imageFinished(Ticket ticket) {
+        if (!accepts(ticket, Action.LOAD_IMAGE)) return null;
         current = null;
-        mineLoaded = true;
-        if (recovered != null) {
-            String key = draft != null && Objects.equals(draft.planId, recovered.planId)
-                    && (draft.orderId == null || draft.orderId.equals(recovered.id)) ? draft.requestKey : null;
-            if (!saveDraft(new Draft(scope, recovered.planId, key, recovered.id))) return null;
-            if (!waiting() || order == null || !order.id.equals(recovered.id)) pollNeedsWindow = true;
-            order = recovered;
-            if (isPending(recovered) || selectedPlanId == null) selectedPlanId = recovered.planId;
-            outcomeUnknown = false;
-            davPassed = false;
-        } else {
-            order = null;
-            davPassed = false;
-        }
         return issue(Action.LOAD_ENTITLEMENT);
     }
-
     public synchronized Ticket acceptEntitlement(Ticket ticket, ManualOrderClient.Entitlement result) {
         if (!accepts(ticket, Action.LOAD_ENTITLEMENT)) return null;
         if (result == null) { fail(ticket, "INVALID_RESPONSE"); return null; }
         current = null;
         entitlement = result;
         entitlementLoaded = true;
-        notice = null;
-        if (order == null && draft != null && draft.orderId != null) return issue(Action.STATUS);
-        return null;
-    }
-
-    public synchronized boolean acceptOrder(Ticket ticket, ManualOrderClient.Order result) {
-        if (!acceptsOrder(ticket)) return false;
-        if (result == null || (ticket.action == Action.CREATE && !Objects.equals(ticket.planId, result.planId))
-                || (ticket.action != Action.CREATE && !Objects.equals(ticket.orderId, result.id))) {
-            fail(ticket, "INVALID_RESPONSE");
-            return false;
-        }
-        String key = draft != null && draft.planId.equals(result.planId) ? draft.requestKey : null;
-        if (!saveDraft(new Draft(scope, result.planId, key, result.id))) {
-            current = null;
-            return false;
-        }
-        current = null;
-        if (!waiting()) pollNeedsWindow = true;
-        order = result;
-        selectedPlanId = result.planId;
-        outcomeUnknown = false;
+        // Even a newly active or extended entitlement cannot stand in for DAV verification.
         davPassed = false;
         notice = null;
-        return true;
+        return null;
     }
-
-    /** Supply a fixed error code, never raw exception/response text or credentials. */
+    /** Only safe fixed codes are mapped to visible copy. */
     public synchronized boolean fail(Ticket ticket, String code) {
         if (!isCurrent(ticket)) return false;
         current = null;
         davPassed = false;
-        if (ticket.action == Action.CREATE) outcomeUnknown = true;
+        if (ticket.action == Action.LOAD_ENTITLEMENT) entitlementLoaded = false;
         if ("UNSUPPORTED_CONTRACT".equals(code)) unsupportedContract = true;
         if (ticket.action == Action.DAV_TEST) notice = "连接测试未通过";
         else if ("PAYMENTS_DISABLED".equals(code)) notice = "沙箱赞赏未开启";
         else if ("AUTHENTICATION_REQUIRED".equals(code) || "FORBIDDEN".equals(code)) notice = "请重新验证账号";
-        else if ("PENDING_ORDER_EXISTS".equals(code)) notice = "已有待处理订单，请刷新";
         else if ("UNSUPPORTED_CONTRACT".equals(code)) notice = "赞赏服务版本不支持";
-        else if ("INVALID_RESPONSE".equals(code)) notice = "订单响应无法确认";
-        else if (outcomeUnknown) notice = "结果待确认，请刷新或重试";
-        else notice = "暂时无法查询，请重试";
+        else if ("INVALID_RESPONSE".equals(code)) notice = "服务响应无法确认";
+        else notice = "暂时无法查询，请刷新";
         return true;
     }
-
     public synchronized boolean isCurrent(Ticket ticket) {
         return enabled && active && foreground && ticket != null && ticket == current
                 && ticket.generation == generation && Objects.equals(ticket.accountScope, scope);
     }
     public synchronized Ticket currentTicket() { return current; }
     public synchronized View snapshot() { return new View(this); }
-
     private Ticket issue(Action action) {
-        if (!enabled || !active || !foreground || current != null || !storageReady) return null;
-        current = new Ticket(action, scope, ++generation, selectedPlanId,
-                draft == null ? null : draft.requestKey,
-                order != null ? order.id : draft == null ? null : draft.orderId);
+        if (!enabled || !active || !foreground || current != null || scope == null) return null;
+        current = new Ticket(action, scope, ++generation, selectedPlan());
         return current;
     }
     private void invalidate() { generation++; current = null; }
     private boolean accepts(Ticket ticket, Action action) { return isCurrent(ticket) && ticket.action == action; }
-    private boolean acceptsOrder(Ticket t) {
-        return isCurrent(t) && (t.action == Action.CREATE || t.action == Action.SUBMIT
-                || t.action == Action.CANCEL || t.action == Action.STATUS);
-    }
-    private boolean saveDraft(Draft next) {
-        try { store.save(next); draft = next; return true; }
-        catch (IOException | RuntimeException ignored) {
-            storageReady = false;
-            notice = "订单草稿无法保存";
-            return false;
-        }
-    }
-    private boolean usable() { return enabled && active && foreground && !unsupportedContract && current == null && storageReady
-            && plansLoaded && mineLoaded && entitlementLoaded; }
-    private boolean canCreate() { return usable() && selectedPlan() != null && !pending()
-            && !(draft != null && draft.orderId != null && order == null)
-            && !(draft != null && draft.orderId == null && !Objects.equals(draft.planId, selectedPlanId)); }
-    private boolean unresolvedDraft() { return draft != null && draft.orderId == null; }
-    private boolean state(ManualOrderClient.State value) { return order != null && order.state == value; }
-    private boolean created() { return state(ManualOrderClient.State.CREATED); }
-    private boolean approved() { return state(ManualOrderClient.State.APPROVED); }
-    private boolean davEligible() {
-        return approved() || (entitlementLoaded && entitlement != null && entitlement.active
-                && !pending() && !unresolvedDraft() && !(order == null && draft != null && draft.orderId != null));
-    }
-    private boolean waiting() { return state(ManualOrderClient.State.REVIEW) || state(ManualOrderClient.State.APPLYING); }
-    private boolean pending() { return order != null && isPending(order); }
-    private static boolean isPending(ManualOrderClient.Order value) {
-        return value.state == ManualOrderClient.State.CREATED || value.state == ManualOrderClient.State.REVIEW
-                || value.state == ManualOrderClient.State.APPLYING;
-    }
-    private ManualOrderClient.Plan selectedPlan() { return findPlan(selectedPlanId); }
-    private ManualOrderClient.Plan findPlan(String id) {
-        for (ManualOrderClient.Plan value : plans) if (value.id.equals(id)) return value;
-        return null;
-    }
-    /** Equal price/limits cannot prove a versioned payment image: the v1 API has no image binding. */
-    public static boolean matches(ManualOrderClient.Plan p, ManualOrderClient.Order o) {
-        return p != null && o != null && p.id.equals(o.planId) && "donation".equals(p.paymentMode)
-                && "sandbox_upload_only".equals(p.expiryPolicy)
-                && Objects.equals(p.currency, o.currency)
-                && Objects.equals(p.amountMinor, o.amountMinor) && p.days == o.days && p.quotaBytes == o.quotaBytes
-                && p.uploadKbps == o.uploadKbps && p.downloadKbps == o.downloadKbps && p.term.equals(o.term);
-    }
+    private boolean usable() { return enabled && active && foreground && !unsupportedContract && current == null
+            && plansLoaded && entitlementLoaded; }
+    private boolean davEligible() { return entitlementLoaded && entitlement != null && entitlement.active; }
+    private ManualOrderClient.Plan selectedPlan() { return plans.isEmpty() ? null : plans.get(0); }
     private Phase phase() {
         if (!enabled) return Phase.DISABLED;
-        if (unsupportedContract) return Phase.ERROR;
         if (current != null) return current.action == Action.DAV_TEST ? Phase.DAV_TESTING : Phase.LOADING;
+        if (notice != null || unsupportedContract) return Phase.ERROR;
         if (davPassed && davEligible()) return Phase.READY;
-        if (order != null) return Phase.valueOf(order.state.name());
-        return notice == null ? Phase.SELECT_PLAN : Phase.ERROR;
+        return davEligible() ? Phase.ACTIVE : Phase.SHOWING;
     }
     private String message() {
         if (!enabled) return "沙箱赞赏未开启";
         if (current != null) return current.action == Action.DAV_TEST ? "正在测试连接" : "正在查询";
         if (notice != null) return notice;
-        if (davPassed && davEligible()) return "连接已通过";
-        if (order == null && davEligible()) return "沙箱额度有效，请测试连接";
-        if (order == null) return outcomeUnknown ? "结果待确认，请刷新或重试" : "请选择赞赏服务";
-        switch (order.state) {
-            case CREATED: return "待赞赏（沙箱）";
-            case REVIEW: return "等待人工确认";
-            case APPLYING: return "正在开通，请稍候";
-            case APPROVED: return "沙箱已确认，请测试连接";
-            case CANCELLED: return "订单已取消";
-            case REJECTED: return "订单未通过";
-            default: return "订单响应无法确认";
-        }
+        return davPassed && davEligible() ? "连接已通过" : "";
     }
     private void resetPollWindow(long now) {
-        pollNeedsWindow = false;
         pollRequests = 0;
         pollDeadline = safeAdd(now, POLL_BUDGET_MILLIS);
         nextPollAt = safeAdd(now, BACKOFF[0]);
-    }
-    private static boolean hasNull(List<?> values) {
-        for (Object value : values) if (value == null) return true;
-        return false;
     }
     private static long safeAdd(long a, long b) { return a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b; }
     private static String nonEmpty(String value, String name, int max) {

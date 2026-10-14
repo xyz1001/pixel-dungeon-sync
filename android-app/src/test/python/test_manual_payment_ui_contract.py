@@ -1,5 +1,6 @@
 """Source wiring checks only; session execution is covered by Java host tests, not device UI."""
 import unittest
+import re
 from pathlib import Path
 from test_embedded_install_contract import body
 
@@ -8,6 +9,8 @@ MAIN = (ROOT / "MainActivity.java").read_text()
 PANEL = (ROOT / "ManualPaymentPanel.java").read_text()
 SESSION = (ROOT / "ManualPaymentSession.java").read_text()
 COPY = (ROOT / "ManualPaymentCopy.java").read_text()
+FLOW = (ROOT / "ManualPaymentFlow.java").read_text()
+CLIENT = (ROOT / "ManualOrderClient.java").read_text()
 
 
 class ManualPaymentUiContract(unittest.TestCase):
@@ -43,25 +46,40 @@ class ManualPaymentUiContract(unittest.TestCase):
         for forbidden in ("save(", "applyConnection", "refreshComparison", "authenticateOfficial", "verifiedOfficial ="):
             self.assertNotIn(forbidden, ret)
 
-    def test_server_values_order_first_and_explicit_sandbox(self):
+    def test_minimal_read_only_appreciation_page(self):
         self.assertIn('"沙箱"', PANEL)
-        self.assertNotIn("remarkCode", PANEL)
-        self.assertNotIn("辅助编号", PANEL)
-        self.assertNotIn("amountMinor", PANEL)
-        self.assertNotIn("currency", PANEL)
-        self.assertIn("ManualPaymentCopy.validity()", PANEL)
-        self.assertNotIn('"备注 ' , PANEL)
-        self.assertNotIn('"购买"', PANEL)
-        self.assertNotIn('"我已付款"', PANEL)
-        self.assertIn("view.selectedPlan.paymentInstructions", PANEL)
-        self.assertIn("paymentDisplayMatches", PANEL)
-        self.assertIn("session.cancellationConfirmation()", PANEL)
-        self.assertIn('"我已赞赏"', PANEL)
-        self.assertIn('"测试连接"', PANEL)
-        self.assertIn("session.canContinue()", PANEL)
-        self.assertNotIn("WebView", PANEL)
-        self.assertNotIn("https://", PANEL)
+        self.assertIn("session.paymentImage()", PANEL)
+        self.assertIn("ManualPaymentCopy.expiry(view.entitlement)", PANEL)
+        self.assertIn("ManualPaymentCopy.usernameRemark()", PANEL)
+        for forbidden in ("remarkCode", "辅助编号", "amountMinor", "currency", "validity()",
+                          "paymentInstructions", "paymentDisplayMatches", "cancellationConfirmation",
+                          "我已赞赏", "待审核", "申报", "订单", "AlertDialog", "selectPlan",
+                          "session.create", "session.submit", "session.cancel", "WebView", "https://"):
+            self.assertNotIn(forbidden, PANEL)
+        for source in (PANEL, COPY, FLOW, SESSION):
+            for forbidden in ("我已赞赏", "待审核", "申报", "等待人工确认", "已续期"):
+                self.assertNotIn(forbidden, source)
+        for control in ('"测试连接"', '"刷新"', '"下一步"', "backLabel, back", "session.canContinue()"):
+            self.assertIn(control, PANEL)
         self.assertNotIn("password", PANEL.lower())
+        self.assertIn("new Date(entitlement.expiresMs)", COPY)
+        for invented_time in ("currentTimeMillis", "plusYears", "plusDays", "calendar_year", "365", "259200"):
+            self.assertNotIn(invented_time, COPY)
+
+    def test_new_flow_has_only_get_service_calls_and_ignores_legacy_drafts(self):
+        self.assertEqual(set(re.findall(r"client\.(\w+)\(", SESSION)),
+                         {"plans", "paymentImage", "entitlement", "cancelPending"})
+        actions = body(FLOW, "public enum Action")
+        self.assertEqual({value.strip() for value in actions.strip("{} ").split(",")},
+                         {"LOAD_PLANS", "LOAD_IMAGE", "LOAD_ENTITLEMENT", "DAV_TEST"})
+        for forbidden in ("store.load(", "store.save(", "Action.CREATE", "Action.SUBMIT",
+                          "Action.LOAD_MINE", "Action.STATUS", "Action.CANCEL", "ManualOrderClient.Order"):
+            self.assertNotIn(forbidden, FLOW)
+        self.assertIn('jsonRequest("/api/order/entitlement", null', body(CLIENT, "public Entitlement entitlement()"))
+        self.assertIn('jsonRequest("/api/order/plans", null', body(CLIENT, "public List<Plan> plans()"))
+        self.assertIn(".get().build()", body(CLIENT, "public byte[] paymentImage("))
+        self.assertIn("Action.LOAD_IMAGE", body(FLOW, "public synchronized Ticket acceptPlans("))
+        self.assertIn("entitlement.active", body(FLOW, "private boolean davEligible()"))
 
     def test_username_display_and_explicit_clipboard_use_typed_current_identity(self):
         self.assertIn("String username = session.authenticatedUsername()", PANEL)
@@ -92,9 +110,12 @@ class ManualPaymentUiContract(unittest.TestCase):
 
     def test_lifecycle_callbacks_reject_stale_ticket_and_image_generations(self):
         for signature in ("private void accepted(", "private void failed("):
-            self.assertIn("!flow.isCurrent(ticket)", body(SESSION, signature))
+            callback = body(SESSION, signature)
+            self.assertIn("!flow.isCurrent(ticket)", callback)
+            self.assertIn("epoch != attachment", callback)
         self.assertIn("dispatch(flow.resume(ui.nowMillis()))", SESSION)
-        self.assertEqual(SESSION.count("imageEpoch == imageGeneration"), 2)
-        settle = body(SESSION, "private void settle()")
-        self.assertLess(settle.index("loadImageIfNeeded()"), settle.index("changed()"))
+        self.assertIn("case LOAD_IMAGE:", body(SESSION, "private void accepted("))
+        refresh = body(SESSION, "public void refresh()")
+        self.assertLess(refresh.index("if (ticket == null) return"), refresh.index("clearImage()"))
+        self.assertNotIn("imageTask", SESSION)
         self.assertIn("RejectedExecutionException", SESSION)

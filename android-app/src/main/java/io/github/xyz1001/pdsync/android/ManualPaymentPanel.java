@@ -1,7 +1,6 @@
 package io.github.xyz1001.pdsync.android;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -22,8 +21,10 @@ final class ManualPaymentPanel {
         ManualPaymentFlow.View view = session.view();
         if (!view.sandbox) throw new IllegalArgumentException("Sandbox session required");
         label(activity, body, "沙箱", 14);
-        label(activity, body, view.message, 16);
-        label(activity, body, ManualPaymentCopy.validity(), 14);
+        if (!view.message.isEmpty()) label(activity, body, view.message, 16);
+        byte[] png = session.paymentImage();
+        if (png != null) showImage(activity, body, png);
+        else if (!session.imageMessage().isEmpty()) label(activity, body, session.imageMessage(), 14);
         String username = session.authenticatedUsername();
         if (username != null) {
             label(activity, body, "用户名 " + username, 16);
@@ -35,37 +36,7 @@ final class ManualPaymentPanel {
         }
         if (view.busy) body.addView(new ProgressBar(activity));
 
-        ManualOrderClient.Order order = view.order;
-        if (order == null || order.state == ManualOrderClient.State.CANCELLED
-                || order.state == ManualOrderClient.State.REJECTED || order.state == ManualOrderClient.State.APPROVED) {
-            if (!view.canContinue) {
-                for (ManualOrderClient.Plan plan : view.plans) {
-                    Button choice = button(activity, body,
-                            (plan.id.equals(view.selectedPlanId) ? "✓ " : "") + plan.displayName,
-                            () -> session.selectPlan(plan.id));
-                    choice.setEnabled(!view.busy && !view.outcomeUnknown);
-                }
-                button(activity, body, view.outcomeUnknown ? "重试创建" : renewal(view) ? "赞赏续期" : "赞赏",
-                        session::create).setEnabled(view.canCreate);
-            }
-        }
-        if (order != null) {
-            if (order.state == ManualOrderClient.State.CREATED) {
-                if (view.paymentDisplayMatches && view.selectedPlan != null) {
-                    label(activity, body, view.selectedPlan.paymentInstructions, 16);
-                    byte[] png = session.paymentImage();
-                    if (png != null) showImage(activity, body, png);
-                    else if (!session.imageMessage().isEmpty()) label(activity, body, session.imageMessage(), 14);
-                } else label(activity, body, "赞赏信息需要更新，请刷新。", 16);
-                button(activity, body, "我已赞赏", session::submit).setEnabled(view.canSubmit && view.paymentDisplayMatches);
-            }
-        }
-        if (view.canCancel && order != null) button(activity, body, "取消订单", () -> {
-            Runnable confirmation = session.cancellationConfirmation();
-            new AlertDialog.Builder(activity).setMessage("取消该订单？")
-                    .setNegativeButton("返回", null)
-                    .setPositiveButton("取消订单", (dialog, which) -> confirmation.run()).show();
-        });
+        label(activity, body, ManualPaymentCopy.expiry(view.entitlement), 14);
         if (view.canTestDav && !view.canContinue)
             button(activity, body, "测试连接", session::testDav).setEnabled(!view.busy);
 
@@ -77,9 +48,6 @@ final class ManualPaymentPanel {
         button(activity, row, "下一步", () -> { if (session.canContinue()) next.run(); }).setEnabled(session.canContinue());
     }
 
-    private static boolean renewal(ManualPaymentFlow.View view) {
-        return view.entitlement != null && view.entitlement.expiresMs != null;
-    }
     private static void showImage(Activity activity, LinearLayout body, byte[] bytes) {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;

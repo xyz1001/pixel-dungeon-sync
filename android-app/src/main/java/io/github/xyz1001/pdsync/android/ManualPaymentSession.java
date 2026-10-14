@@ -41,12 +41,10 @@ public final class ManualPaymentSession implements AutoCloseable {
     private final DavVerifier dav;
     private Listener listener;
     private Future<?> task;
-    private Future<?> imageTask;
     private long attachment;
     private boolean visible, foreground, closed;
     private String accountScope;
     private AuthenticatedIdentity identity;
-    private long imageGeneration;
     private String imageKey;
     private byte[] image;
     private String imageMessage = "";
@@ -63,7 +61,7 @@ public final class ManualPaymentSession implements AutoCloseable {
     }
 
     public ManualPaymentFlow.View view() { return flow.snapshot(); }
-    public byte[] paymentImage() { return image == null || !Objects.equals(imageKey, currentImageKey()) ? null : image.clone(); }
+    public byte[] paymentImage() { return !available() || image == null || !Objects.equals(imageKey, currentImageKey()) ? null : image.clone(); }
     public String imageMessage() { return imageMessage; }
     public void listener(Listener listener) { this.listener = listener; }
 
@@ -113,41 +111,27 @@ public final class ManualPaymentSession implements AutoCloseable {
     }
 
     public void foreground(boolean foreground) {
-        if (closed) return;
+        if (closed || this.foreground == foreground) return;
         this.foreground = foreground;
         if (!foreground) {
             stopRequests();
             flow.setForeground(false, ui.nowMillis());
             changed();
         } else if (visible && accountScope != null) {
-            // Reload mine/entitlement rather than assuming a paused order stayed unchanged.
+            // Reload the code and entitlement without assuming paused server state stayed unchanged.
+            clearImage();
             flow.setForeground(true, ui.nowMillis());
             dispatch(flow.resume(ui.nowMillis()));
             changed();
         }
     }
 
-    public void selectPlan(String planId) {
-        if (available() && flow.selectPlan(planId)) { clearImage(); changed(); }
-    }
-    public void create() { if (available()) dispatch(flow.create()); }
-    public void submit() { if (available()) dispatch(flow.submit(ui.nowMillis())); }
-    public void cancel() { if (available()) dispatch(flow.cancel()); }
-    /** Bind a visible confirmation to this account/order/page, never a later replacement. */
-    public Runnable cancellationConfirmation() {
-        final long epoch = attachment;
-        final String scope = accountScope;
-        final ManualOrderClient.Order order = view().order;
-        return () -> {
-            ManualOrderClient.Order current = view().order;
-            if (available() && epoch == attachment && Objects.equals(scope, accountScope)
-                    && order != null && current != null && order.id.equals(current.id)) cancel();
-        };
-    }
     public void refresh() {
         if (!available()) return;
+        ManualPaymentFlow.Ticket ticket = flow.refresh(ui.nowMillis());
+        if (ticket == null) return;
         clearImage();
-        dispatch(flow.refresh(ui.nowMillis()));
+        dispatch(ticket);
     }
     public void testDav() { if (available()) dispatch(flow.beginDavTest()); }
     public boolean canContinue() { return available() && view().canContinue; }
@@ -166,12 +150,8 @@ public final class ManualPaymentSession implements AutoCloseable {
                 Object value;
                 switch (ticket.action) {
                     case LOAD_PLANS: value = client.plans(); break;
-                    case LOAD_MINE: value = client.mine(); break;
+                    case LOAD_IMAGE: value = client.paymentImage(ticket.plan); break;
                     case LOAD_ENTITLEMENT: value = client.entitlement(); break;
-                    case CREATE: value = client.create(ticket.planId, ticket.requestKey); break;
-                    case SUBMIT: value = client.submit(ticket.orderId); break;
-                    case CANCEL: value = client.cancel(ticket.orderId); break;
-                    case STATUS: value = client.status(ticket.orderId); break;
                     case DAV_TEST: dav.verify(); value = Boolean.TRUE; break;
                     default: throw new IllegalStateException("Unsupported sandbox action");
                 }
@@ -199,11 +179,19 @@ public final class ManualPaymentSession implements AutoCloseable {
         task = null;
         ManualPaymentFlow.Ticket next = null;
         switch (ticket.action) {
-            case LOAD_PLANS: next = flow.acceptPlans(ticket, (List<ManualOrderClient.Plan>) value); break;
-            case LOAD_MINE: next = flow.acceptMine(ticket, (List<ManualOrderClient.Order>) value); break;
+            case LOAD_PLANS:
+                next = flow.acceptPlans(ticket, (List<ManualOrderClient.Plan>) value);
+                if (view().selectedPlan == null) imageMessage = "赞赏码暂不可用，请刷新。";
+                break;
+            case LOAD_IMAGE:
+                image = ((byte[]) value).clone();
+                imageKey = currentImageKey();
+                imageMessage = "";
+                next = flow.imageFinished(ticket);
+                break;
             case LOAD_ENTITLEMENT: next = flow.acceptEntitlement(ticket, (ManualOrderClient.Entitlement) value); break;
             case DAV_TEST: flow.acceptDavSuccess(ticket); break;
-            default: flow.acceptOrder(ticket, (ManualOrderClient.Order) value); break;
+            default: throw new IllegalStateException("Unsupported sandbox result");
         }
         if (next != null) dispatch(next);
         else settle();
@@ -211,63 +199,31 @@ public final class ManualPaymentSession implements AutoCloseable {
     private void failed(long epoch, ManualPaymentFlow.Ticket ticket, String message) {
         if (!available() || epoch != attachment || !flow.isCurrent(ticket)) return;
         task = null;
-        flow.fail(ticket, message);
-        settle();
+        if (ticket.action == ManualPaymentFlow.Action.LOAD_IMAGE) {
+            imageMessage = "赞赏码暂不可用，请刷新。";
+            dispatch(flow.imageFinished(ticket));
+        } else {
+            flow.fail(ticket, message);
+            settle();
+        }
     }
     private void settle() {
-        loadImageIfNeeded();
         changed();
         ui.remove(poll);
         long delay = flow.nextDelayMillis(ui.nowMillis());
         if (available() && delay != ManualPaymentFlow.NO_POLL) ui.after(delay, poll);
     }
-    private void loadImageIfNeeded() {
-        ManualPaymentFlow.View view = view();
-        if (!available() || view.busy || view.order == null || !view.paymentDisplayMatches
-                || view.order.state != ManualOrderClient.State.CREATED || view.selectedPlan == null) return;
-        ManualOrderClient.Plan plan = view.selectedPlan;
-        String key = accountScope + "\n" + view.order.id + "\n" + plan.paymentImagePath;
-        if (key.equals(imageKey)) return;
-        clearImage();
-        imageKey = key;
-        final long imageEpoch = imageGeneration;
-        final long epoch = attachment;
-        try { imageTask = io.submit(() -> {
-            try {
-                byte[] bytes = client.paymentImage(plan);
-                ui.post(() -> {
-                    if (available() && epoch == attachment && imageEpoch == imageGeneration && key.equals(imageKey)) {
-                        imageTask = null; image = bytes.clone(); changed();
-                    }
-                });
-            } catch (Exception ignored) {
-                ui.post(() -> {
-                    if (available() && epoch == attachment && imageEpoch == imageGeneration && key.equals(imageKey)) {
-                        imageTask = null; imageMessage = "赞赏码暂不可用，请刷新。"; changed();
-                    }
-                });
-            }
-        }); } catch (RejectedExecutionException rejected) {
-            imageMessage = "赞赏码暂不可用，请刷新。";
-        }
-    }
     private String currentImageKey() {
         ManualPaymentFlow.View v = view();
-        return v.order == null || v.selectedPlan == null || !v.paymentDisplayMatches
-                || v.order.state != ManualOrderClient.State.CREATED ? null
-                : accountScope + "\n" + v.order.id + "\n" + v.selectedPlan.paymentImagePath;
+        return accountScope == null || v.selectedPlan == null ? null
+                : accountScope + "\n" + v.selectedPlan.paymentImagePath;
     }
-    private void clearImage() {
-        imageGeneration++;
-        if (imageTask != null) { imageTask.cancel(true); imageTask = null; }
-        imageKey = null; image = null; imageMessage = "";
-    }
+    private void clearImage() { imageKey = null; image = null; imageMessage = ""; }
     private void changed() { if (!closed && listener != null) listener.changed(); }
     private void stopRequests() {
         attachment++;
         ui.remove(poll);
         if (task != null) { task.cancel(true); task = null; }
-        if (imageTask != null) { imageTask.cancel(true); imageTask = null; clearImage(); }
         client.cancelPending();
     }
     @Override public void close() {
