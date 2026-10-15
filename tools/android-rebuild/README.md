@@ -1,6 +1,6 @@
 # Android reconstruction build
 
-Builds Java Android modules with API 36 and Android Build-Tools 36.0.0, without an emulator, Android Gradle plugin, or device installation. Python 3, Java with `jdk.compiler`, AAPT2, D8, zipalign and apksigner are required.
+The SDK-only script builds the independent Java game bridge with API 36 and Android Build-Tools 36.0.0. The main app now compiles the same shared Kotlin/Compose sources as desktop through Android Gradle Plugin 8.11.1. It no longer supports the SDK-only javac/D8 main-app entrypoint, which fails early with the migration command. Neither flow needs an emulator or device installation. See [shared UI build instructions](../../shared-ui/README.md) for the pinned Gradle toolchain and dependency locks.
 
 This is a source reconstruction from published test APKs, not a claim that the lost original source was recovered byte-for-byte. The main app retains package `io.github.xyz1001.pdsync.android`; its new development certificate cannot update the old installed app. Device installation and destructive clean-install steps are deliberately outside this script.
 
@@ -19,7 +19,7 @@ The local reconstruction layout is detected automatically. Reuse the same retain
 
 ## Commands
 
-Run from the source checkout. These commands show the supported build-host signing alternative. For recommended user-device final signing, run the same host tests, helper compilation and DEX extraction, then replace the final main-app build command with the unsigned command in the next section.
+Run from the source checkout. Build the standalone bridge exactly as before, then use the unsigned Gradle main-app build. Final signing remains a separate, explicitly authorized operation using the retained key; Gradle does not generate or use a debug key.
 
 ```sh
 set -eu
@@ -33,7 +33,11 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
         raise SystemExit("Expected exactly one standalone bridge classes.dex")
     Path(sys.argv[2]).write_bytes(apk.read("classes.dex"))
 PYTHON
-tools/android-rebuild/build-apk.sh --module android-app --core core/build/libs/core.jar --asset "bridge-runtime.dex=$PDSYNC_BUILD_HOME/bridge-runtime.dex" --out "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-test.apk"
+export PDSYNC_BRIDGE_RUNTIME_DEX="$PDSYNC_BUILD_HOME/bridge-runtime.dex"
+export PDSYNC_ROOT_NATIVE_DIR="/absolute/path/to/root-native/output"
+export PDSYNC_APKSIG_JAR="$PDSYNC_BUILD_HOME/generated-deps/apksigner-api26.jar"
+# Generate the patched apksig JAR below and build the four native libraries first.
+./gradlew :android-app:assembleRelease --offline
 ```
 
 The current flow embeds a Provider runtime in the prepared game. The `android-helper` module is reused only to compile the standalone runtime; its unsigned APK is an intermediate container from which `classes.dex` is extracted. Only `bridge-runtime.dex` is bundled as a main-app asset. The helper APK and its legacy manifest are neither bundled nor installed in this flow, and no separately installed helper is required. `--standalone` excludes core, Kotlin, OkHttp and apksig dependencies from the runtime DEX.
@@ -42,7 +46,7 @@ During game preparation, the main app appends that standalone DEX as the next un
 
 The main app has `minSdkVersion=26` (Android 8.0) and `targetSdkVersion=36`; D8 also uses minimum API 26 for the standalone runtime. Prepared games have their minimum SDK raised to at least 26 while retaining the game's original target SDK, including its effective target when the source manifest omitted an explicit value. The build script reads these SDK settings from the module manifests; its SDK command-line defaults do not override existing manifest values.
 
-Build output includes `.build.json`, `.badging.txt` and, for signed APKs, `.verify.txt`. Inputs, hashes, SDK versions, new signer identity, and device-test status are recorded. ZIP payload timestamps are fixed. A host smoke test confirms deterministic signed output when inputs and the retained key are unchanged.
+SDK-only bridge build output includes `.build.json`, `.badging.txt` and, for signed APKs, `.verify.txt`. The Gradle main build writes `android-app/build/outputs/apk/release/android-app-release-unsigned.apk` and AGP metadata. Inputs, hashes, SDK versions, new signer identity, and device-test status are recorded. ZIP payload timestamps are fixed. A host smoke test confirms deterministic signed output when inputs and the retained key are unchanged.
 
 The installed cloud Java runtime exposes javac but lacks `ct.sym`, so application compilation uses `-source 17 -target 17` rather than `--release 17`. This proves JVM17 bytecode compatibility, not a Java17 API fence. D8 uses the selected module manifest's minimum SDK. Android device/runtime testing remains required.
 
@@ -66,7 +70,9 @@ Run the offline source-selection regression with:
 python3 tools/android-rebuild/tests/test_java_sources.py
 ```
 
-## Main-only native library inputs
+## Main-only native library inputs (legacy SDK packager tests)
+
+Current main-app packaging uses `PDSYNC_ROOT_NATIVE_DIR` in Gradle, validates all four ELF inputs and preserves their bytes. It uses compressed/extracted libraries and `extractNativeLibs=true`, so the root process can still use `ApplicationInfo.nativeLibraryDir`. The following describes retained SDK-packager utilities and their tests; the legacy main-app command itself is no longer supported.
 
 `--native-library ABI/libNAME.so=FILE` may be repeated to package explicitly built
 main-app native libraries. Supported ABIs are `arm64-v8a`, `armeabi-v7a`, `x86` and
@@ -101,10 +107,15 @@ These are public certificate data, not a private key. Keep the same signer for f
 After extracting `bridge-runtime.dex` as above, use this main-app command on the build host:
 
 ```sh
-tools/android-rebuild/build-apk.sh --module android-app --core core/build/libs/core.jar --asset "bridge-runtime.dex=$PDSYNC_BUILD_HOME/bridge-runtime.dex" --unsigned --out "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-unsigned.apk"
+export PDSYNC_BRIDGE_RUNTIME_DEX="$PDSYNC_BUILD_HOME/bridge-runtime.dex"
+export PDSYNC_ROOT_NATIVE_DIR="/absolute/path/to/root-native/output"
+export PDSYNC_APKSIG_JAR="$PDSYNC_BUILD_HOME/generated-deps/apksigner-api26.jar"
+./gradlew :android-app:assembleRelease --offline
+cp android-app/build/outputs/apk/release/android-app-release-unsigned.apk \
+  "$PDSYNC_BUILD_HOME/pixel-dungeon-sync-android-unsigned.apk"
 ```
 
-The script already runs zipalign before producing this unsigned APK and checks the resulting alignment. The main build still includes its runtime APK-signing dependencies for game preparation; `--unsigned` skips only the final main-app signature. Transfer the unsigned APK to the user's Windows device and compare its SHA-256 before signing. No signing secrets need to cross to the cloud.
+AGP produces the aligned unsigned APK. The main build still includes its API-26-patched runtime APK-signing dependencies for game preparation; only final main-app signing is absent. The debug variant is disabled and release has no signing configuration. Transfer the unsigned APK to the user's Windows device and compare its SHA-256 before signing. No signing secrets need to cross to the cloud.
 
 ### Sign and verify on Windows
 

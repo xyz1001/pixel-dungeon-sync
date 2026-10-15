@@ -120,6 +120,11 @@ def main():
     p.add_argument('--work-dir',type=Path,help='Dedicated disposable working directory')
     a=p.parse_args(); module=a.module.resolve(); out=a.out.resolve()
     if not module.is_dir(): p.error('Module directory does not exist')
+    if module == (REPO / 'android-app').resolve():
+        p.error('The main app now compiles shared Kotlin/Compose with Gradle. Run '
+                './gradlew :android-app:assembleRelease (unsigned); set PDSYNC_BRIDGE_RUNTIME_DEX, '
+                'PDSYNC_ROOT_NATIVE_DIR and PDSYNC_APKSIG_JAR. See shared-ui/README.md. '
+                'This SDK-only script remains the standalone bridge builder.')
     if KEY == module or PASSWORD == module or module in KEY.parents or module in PASSWORD.parents: p.error('Signing secrets must remain outside the selected module')
     if ROOT/'test-signing' in module.parents or module==ROOT/'test-signing': p.error('Signing directory cannot be a module')
     if ROOT/'test-signing' in out.parents or out in (KEY,PASSWORD): p.error('APK cannot overwrite signing material')

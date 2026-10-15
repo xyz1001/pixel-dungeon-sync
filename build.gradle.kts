@@ -1,4 +1,12 @@
+buildscript {
+    configurations.named("classpath") {
+        resolutionStrategy.activateDependencyLocking()
+    }
+}
+
 plugins {
+    id("com.android.application") version "8.11.1" apply false
+    kotlin("android") version "2.2.20" apply false
     kotlin("jvm") version "2.2.20" apply false
     kotlin("plugin.serialization") version "2.2.20" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.2.20" apply false
@@ -14,6 +22,8 @@ subprojects {
         // Native Compose dependencies differ by host. Only resolved hosts get a lockfile.
         val host = System.getProperty("os.name").substringBefore(' ').lowercase()
         val arch = System.getProperty("os.arch")
-        lockFile.set(layout.projectDirectory.file("gradle-$host-$arch.lockfile"))
+        lockFile.set(layout.projectDirectory.file(
+            if (name == "android-app") "gradle.lockfile" else "gradle-$host-$arch.lockfile"
+        ))
     }
 }

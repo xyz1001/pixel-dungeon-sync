@@ -2,6 +2,12 @@
 
 Kotlin/JVM 独立核心 + Compose Desktop。默认使用游戏的系统存档目录，也支持显式选择专用目录，提供四步首次引导、文件设置持久化、存档变化/游戏退出后的自动上传、整个档案的历史快照、备份后恢复、显式冲突选择，以及 WebDAV 追加式分支同步。仅在隔离测试目录中验证；不是可直接托管唯一存档的正式产品。
 
+## Android / 桌面共享 Compose 构建
+
+连接、验证码、注册与账号界面共用 `shared-ui/src/main/kotlin` 的同一份源码，由桌面 Kotlin 和 Android Gradle Plugin 分别编译。Android 主应用入口为 `./gradlew :android-app:assembleRelease`，产物为 `android-app/build/outputs/apk/release/android-app-release-unsigned.apk`；不生成调试签名密钥。
+
+先安装 SDK 36 / Build Tools 36.0.0，并设置 `ANDROID_HOME`、`PDSYNC_BRIDGE_RUNTIME_DEX`、`PDSYNC_ROOT_NATIVE_DIR`、`PDSYNC_APKSIG_JAR`。已有依赖缓存时运行 `./gradlew :core:test :desktop:test :android-app:assembleRelease --offline`。具体输入、首次受控依赖解析和锁文件见 [共享 UI 构建说明](shared-ui/README.md)。独立 bridge 与 root-native 构建保持原流程；旧 SDK-only 脚本不再构建含 Kotlin/Compose 的主应用。Android 真机、旋转、输入法及 Root 加载仍需独立验证。
+
 ## 最新协议：追加式 v2
 
 桌面和隔离演示使用独立随机 ID 的 ZIP 与提交文件，以父提交 DAG 保留并发分支，不再依赖 Cloudreve 的条件覆盖或共享 head。只有完整对象和全部祖先验证后，提交才可用；重试复用已冻结的相同键与相同字节。单一观测分支不代表全局最新。历史恢复与显式冲突选择创建新提交，不删除旧分支或合并二进制存档。

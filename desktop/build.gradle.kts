@@ -3,10 +3,17 @@
 import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
 
 plugins { kotlin("jvm"); id("org.jetbrains.kotlin.plugin.compose"); id("org.jetbrains.compose") }
-kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
+kotlin {
+ compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+ sourceSets {
+  main { kotlin.srcDir(rootProject.file("shared-ui/src/main/kotlin")) }
+  test { kotlin.srcDir(rootProject.file("shared-ui/src/test/kotlin")) }
+ }
+}
 dependencies {
  implementation(project(":core")); implementation(compose.desktop.currentOs)
  testImplementation(kotlin("test"))
+ testImplementation("com.squareup.okhttp3:okhttp:4.12.0")
  testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
 }
 tasks.test { useJUnitPlatform() }
