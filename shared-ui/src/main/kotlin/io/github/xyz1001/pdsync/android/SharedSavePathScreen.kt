@@ -55,8 +55,10 @@ private fun SharedSavePathContent(
         },
     ) {
         SharedForm {
-            SharedTextField("存档路径", state.path, interactions::editPath,
-                enabled = !state.busy, readOnly = !state.editable, singleLine = false)
+            Text("存档路径", color = SharedUiColors.label, style = MaterialTheme.typography.body2)
+            Spacer(Modifier.height(8.dp))
+            Text(state.path, Modifier.fillMaxWidth(), softWrap = true,
+                style = MaterialTheme.typography.body2)
             Spacer(Modifier.height(12.dp))
             val summary = savePathSummary(state.summary)
             if (summary != null) {

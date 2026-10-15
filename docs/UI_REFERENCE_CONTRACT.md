@@ -48,11 +48,13 @@ game metadata enters the product. Reference: `app.mjs:78–79`.
 
 ### 2. Save path
 
-Path, folder selection where supported, concise preview and slot times. Editing
-invalidates the old preview. Reading, queued continuation, failure/retry and Back
+Display the resolved path as labelled, wrapping text on both platforms, never as
+an editable or read-only text field. No alternative/default path controls or extra
+explanation. Keep the concise preview, slot times and existing Back/Next footer.
+Reading, queued continuation, failure/retry and Back
 must have explicit state; a stale result cannot advance a changed page or draft.
 The primary footer action expresses Next/Waiting/Retry rather than stacking
-several independent controls. Android's trusted private path can remain read-only.
+several independent controls. Keep platform path resolution and preview adapters.
 Reference: `app.mjs:80–92`, `model.mjs:316–324,338–352`.
 
 ### 3. Cloud connection
@@ -118,8 +120,9 @@ technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
 
 ## Later requirements that override mock content
 
-- Step 2 omits the alternative/default path buttons; keep the path, save summary
-  and existing Back/Next navigation (2026-10-15 clarification).
+- Step 2 displays the path as labelled, wrapping text, with no editable/read-only
+  input, alternative/default path buttons or extra explanation; keep save status,
+  summary and existing Back/Next navigation (2026-10-15 clarification).
 - Step 1 uses the selected game's real icon when available. The shared page has no
   details toggle; Desktop keeps the initial automatic scan, omits manual rescan,
   and labels the selected-game file chooser `重新选择` (2026-10-15 clarification).

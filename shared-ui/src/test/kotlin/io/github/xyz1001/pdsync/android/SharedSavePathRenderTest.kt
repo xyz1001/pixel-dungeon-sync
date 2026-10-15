@@ -1,4 +1,6 @@
 @file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+// Test-only access to pinned Compose 1.9.3's AWT key conversion, used by real scene dispatch.
+@file:Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
 
 package io.github.xyz1001.pdsync.android
 
@@ -6,8 +8,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.key.toComposeEvent
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsOwner
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
+import java.awt.Component
+import java.awt.event.KeyEvent
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
@@ -20,13 +30,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** Real production page rendering and pointer dispatch, rather than a duplicate test layout. */
+/** Real production page rendering and pointer/keyboard dispatch, not a duplicate test layout. */
 class SharedSavePathRenderTest {
-    private class Actions : SharedSavePathActions {
+    private class Actions(private val onEditPath: (String) -> Unit = {}) : SharedSavePathActions {
         var next = 0
         var back = 0
         var choose = 0
-        override fun editPath(path: String) = Unit
+        var edits = 0
+        override fun editPath(path: String) { edits++; onEditPath(path) }
         override fun chooseDirectory() { choose++ }
         override fun useDefault() = Unit
         override fun retry() = Unit
@@ -45,10 +56,66 @@ class SharedSavePathRenderTest {
         assertFalse(source.contains("使用默认路径"))
         assertFalse(source.contains("interactions.perform(SharedSavePathControl.CHOOSE_DIRECTORY)"))
         assertFalse(source.contains("interactions.perform(SharedSavePathControl.USE_DEFAULT)"))
-        assertTrue(source.contains("SharedTextField(\"存档路径\""))
+        assertTrue(source.contains("Text(\"存档路径\""))
+        assertTrue(source.contains("Text(state.path, Modifier.fillMaxWidth(), softWrap = true"))
+        assertFalse(source.contains("SharedTextField"))
+        assertFalse(source.contains("interactions::editPath"))
         assertTrue(source.contains("savePathSummary(state.summary)"))
         assertTrue(source.contains("SharedSavePathControl.BACK"))
         assertTrue(source.contains("SharedSavePathControl.NEXT"))
+    }
+
+    @Test fun actualSavePathIsPlainTextAndKeyboardCannotEditEvenWhenAdapterAllowsEditing() {
+        val path = "/home/player/game/files"
+        for (width in listOf(1165, 500, 320)) for (editable in listOf(true, false)) {
+            val state = mutableStateOf(SharedSavePathState(path, editable, summary,
+                readStatus = SharedSavePathReadStatus.READY, canContinue = true))
+            val actions = Actions { edited -> state.value = state.value.copy(path = edited) }
+            val scene = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+                SharedSavePathScreen(state.value, actions, game)
+            }
+            try {
+                val name = "path-display-only-$width-$editable"
+                render(scene, name)
+                val nodes = semanticsNodes(scene)
+                val pathNode = nodes.single { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == path } == true
+                }
+                assertTrue(nodes.any { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "存档路径" } == true
+                })
+                for (node in nodes) {
+                    assertFalse(node.config.contains(SemanticsProperties.EditableText), "no text input semantics")
+                    assertFalse(node.config.contains(SemanticsActions.SetText), "no accessibility editing action")
+                    assertFalse(node.config.contains(SemanticsActions.InsertTextAtCursor), "no insertion action")
+                }
+                click(scene, pathNode.boundsInRoot.center)
+                render(scene, "$name-clicked")
+                typeX(scene)
+                render(scene, "$name-after-keyboard")
+                assertEquals(0, actions.edits, "clicking and typing must never call the path adapter")
+                assertEquals(path, state.value.path, "keyboard must not change the resolved path")
+                assertTrue(semanticsNodes(scene).any { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == path } == true
+                }, "the original path remains rendered")
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun keyboardInjectionReallyEditsAnEditableField() {
+        val value = mutableStateOf("")
+        val scene = ImageComposeScene(width = 320, height = 150, density = Density(1f)) {
+            SharedConnectionTheme { SharedTextField("输入测试", value.value, { value.value = it }) }
+        }
+        try {
+            render(scene, "path-keyboard-positive-control")
+            val field = semanticsNodes(scene).single { it.config.contains(SemanticsProperties.EditableText) }
+            click(scene, field.boundsInRoot.center)
+            render(scene, "path-keyboard-positive-control-focused")
+            typeX(scene)
+            render(scene, "path-keyboard-positive-control-typed")
+            assertEquals("x", value.value, "the regression's keyboard injection must reach a real editable field")
+        } finally { scene.close() }
     }
 
     @Test fun actualSavePathPageWrapsLongPathsKeepsSlotTimesAndFooterAtAllReferenceWidths() {
@@ -115,6 +182,28 @@ class SharedSavePathRenderTest {
     private fun click(scene: ImageComposeScene, point: Offset) {
         scene.sendPointerEvent(PointerEventType.Press, point)
         scene.sendPointerEvent(PointerEventType.Release, point)
+    }
+
+    private fun typeX(scene: ImageComposeScene) {
+        val source = object : Component() {}
+        for ((id, code) in listOf(KeyEvent.KEY_PRESSED to KeyEvent.VK_X,
+                KeyEvent.KEY_TYPED to KeyEvent.VK_UNDEFINED, KeyEvent.KEY_RELEASED to KeyEvent.VK_X)) {
+            scene.sendKeyEvent(KeyEvent(source, id, 1L, 0, code, 'x').toComposeEvent())
+        }
+    }
+
+    /** ImageComposeScene has no public semantics accessor in pinned Compose 1.9.3. */
+    private fun semanticsNodes(scene: ImageComposeScene): List<SemanticsNode> {
+        val backing = ImageComposeScene::class.java.getDeclaredField("scene").run {
+            isAccessible = true; get(scene)
+        }
+        val root = backing.javaClass.getDeclaredField("mainOwner").run {
+            isAccessible = true; get(backing)
+        }
+        val owner = root.javaClass.getMethod("getSemanticsOwner").invoke(root) as SemanticsOwner
+        fun descendants(node: SemanticsNode): List<SemanticsNode> =
+            listOf(node) + node.children.flatMap(::descendants)
+        return descendants(owner.unmergedRootSemanticsNode)
     }
 
     private fun assertCardWithinViewport(image: BufferedImage) {
