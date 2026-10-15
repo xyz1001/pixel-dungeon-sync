@@ -59,8 +59,8 @@ private fun SharedConnectionContent(
         }
     }
     val setup = state.origin == ConnectionEntryModel.Origin.SETUP
-    LaunchedEffect(controller, state.officialExpired) {
-        if (setup && state.officialExpired) controller.openInlineAppreciation()
+    LaunchedEffect(controller, state.showInlineAppreciation, state.appreciation == null) {
+        if (state.showInlineAppreciation && state.appreciation == null) controller.openInlineAppreciation()
     }
     val appreciation = state.appreciation.takeUnless { state.appreciationInline }
     SharedAppShell(
@@ -109,7 +109,7 @@ private fun SharedConnectionContent(
                             Text("用户名 ${state.username}")
                             Text(state.officialExpiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
                             if (state.officialAccessStatus.isNotEmpty()) SharedConnectionNotice(state.officialAccessStatus)
-                            if (setup && state.officialExpired) {
+                            if (state.showInlineAppreciation) {
                                 SharedInlineAppreciationContent(state.appreciation, state.busy || state.appreciation == null,
                                     controller::copyUsername, onSaveImage = onSaveImage,
                                     imageSaveBusy = imageSaveBusy, imageSaveMessage = imageSaveMessage)

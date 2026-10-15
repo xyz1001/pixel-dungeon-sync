@@ -84,6 +84,8 @@ data class SharedConnectionState(
     val officialExpired: Boolean,
     val officialExpiry: String,
     val officialAccessStatus: String,
+    /** Setup-only QR for authenticated accounts or confirmed expiry; never gated by window focus. */
+    val showInlineAppreciation: Boolean,
     /** Built-in account access or permission to verify custom DAV; never a synchronization baseline. */
     val canContinue: Boolean,
     val notice: String,
@@ -495,10 +497,10 @@ class SharedConnectionController internal constructor(
         }
     }
 
-    /** Step 3 renewals stay inside the connection form and never add a navigation level. */
+    /** Step 3 appreciation stays inside the authenticated connection form without another page. */
     fun openInlineAppreciation() {
         if (!alive.get() || origin != ConnectionEntryModel.Origin.SETUP ||
-            !state.officialExpired || officialAccountForDraft() == null) return
+            !state.showInlineAppreciation || officialAccountForDraft() == null) return
         // A saved expired account can already be visible while its one entry-time read is pending.
         // Remember this presentation request so completion can open it without a focus listener.
         pendingInlineAppreciation = true
@@ -528,7 +530,7 @@ class SharedConnectionController internal constructor(
         refreshAppreciation()
     }
 
-    /** One load per page or expired-inline entry; focus never refreshes it. Missing images retry once. */
+    /** One load per page or authenticated inline entry; focus never refreshes it. Missing images retry once. */
     fun refreshAppreciation() {
         val flow = appreciationFlow ?: return
         val source = appreciationSource ?: return
@@ -849,6 +851,8 @@ class SharedConnectionController internal constructor(
                 record?.expiresMs != null && record.serverTimeMs == null -> "使用期限待确认"
                 else -> ""
             },
+            origin == ConnectionEntryModel.Origin.SETUP && visibleAccount != null &&
+                (expired || account != null),
             if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
                 canStart() && (appreciation == null || appreciationInline) && account?.let(::hasOfficialAccess) == true
             else hasProof() || savedDraftForRevalidation() != null, notice, error,

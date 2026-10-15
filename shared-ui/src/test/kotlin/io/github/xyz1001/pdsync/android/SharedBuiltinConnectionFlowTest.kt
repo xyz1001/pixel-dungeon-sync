@@ -138,14 +138,14 @@ class SharedBuiltinConnectionFlowTest {
         }
     }
 
-    @Test fun builtinAuthenticatedAndExpiredScreensRenderInlineRenewalOnlyWhenExpiredAtEveryWidth() {
-        for (expired in listOf(false, true)) {
-            val clients = Clients().apply { this.expired = expired; active = !expired }
+    @Test fun builtinAuthenticatedActiveInactiveAndExpiredScreensRenderInlineAppreciationAtEveryWidth() {
+        for ((expired, active) in listOf(false to true, true to false, false to false)) {
+            val clients = Clients().apply { this.expired = expired; this.active = active }
             Page(newConnectionConfig(), clients).use { page ->
                 page.login()
                 assertTrue(page.controller.state.showOfficialAccount)
                 assertTrue(page.controller.state.canAppreciate)
-                assertEquals(!expired, page.controller.state.canContinue)
+                assertEquals(active && !expired, page.controller.state.canContinue)
                 for (width in listOf(1165, 500, 320)) for (androidSave in listOf(false, true)) {
                     val scene = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
                         SharedConnectionScreen(page.controller, SharedGameIdentity("破碎的像素地牢", "3.3.8"),
@@ -161,29 +161,30 @@ class SharedBuiltinConnectionFlowTest {
                         assertEquals(1, labels.count { it == page.controller.state.officialExpiry })
                         assertFalse(labels.any { it == "赞赏" || it == "赞赏续期" || it == "复制用户名" || it.contains("刷新") },
                             "Step 3 adds no appreciation navigation, duplicate account block, or refresh action")
-                        assertEquals(expired, "赞赏可续期一年" in labels)
-                        assertEquals(expired && androidSave, "保存图片" in labels)
+                        assertTrue("赞赏可续期一年" in labels)
+                        assertEquals(androidSave, "保存图片" in labels)
                         val nodes = semanticsNodes(scene)
-                        assertEquals(expired, nodes.any { "赞赏码" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() })
-                        assertEquals(expired, button(nodes, "下一步").config.contains(SemanticsProperties.Disabled))
+                        assertTrue(nodes.any { "赞赏码" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() })
+                        assertEquals(expired || !active, button(nodes, "下一步").config.contains(SemanticsProperties.Disabled))
                         assertFalse(button(nodes, "上一步").config.contains(SemanticsProperties.Disabled))
-                        assertEquals(expired, page.controller.state.appreciationInline)
+                        assertTrue(page.controller.state.appreciationInline)
+                        assertTrue(page.controller.state.showInlineAppreciation)
                         val pixels = scene.render().encodeToData(EncodedImageFormat.PNG)!!.bytes
                         val output = Path.of("build/ui-reference-builtin")
                         Files.createDirectories(output)
-                        Files.write(output.resolve("builtin-${if (expired) "expired" else "active"}-${if (androidSave) "android" else "desktop"}-$width.png"), pixels)
+                        Files.write(output.resolve("builtin-${if (expired) "expired" else if (active) "active" else "inactive"}-${if (androidSave) "android" else "desktop"}-$width.png"), pixels)
                     } finally { scene.close() }
                 }
                 assertEquals(0, page.probes)
                 assertEquals(0, page.commits)
-                assertEquals(if (expired) 2 else 1, clients.entitlementCalls)
-                assertEquals(if (expired) 1 else 0, clients.metadataCalls)
-                assertEquals(if (expired) 1 else 0, clients.imageCalls)
+                assertEquals(2, clients.entitlementCalls)
+                assertEquals(1, clients.metadataCalls)
+                assertEquals(1, clients.imageCalls)
             }
         }
     }
 
-    @Test fun renewedEntitlementHidesStepThreeInlineCodeAndEnablesNextWhileImageFailureLeavesExpiredAccountVisible() {
+    @Test fun renewedEntitlementKeepsStepThreeInlineAppreciationWhileImageFailureLeavesAccountVisible() {
         for (renewed in listOf(false, true)) for (width in listOf(1165, 500, 320)) {
             val clients = Clients().apply {
                 expired = true; active = false; imageFailure = true; renewOnAppreciation = renewed
@@ -200,8 +201,8 @@ class SharedBuiltinConnectionFlowTest {
                     assertTrue("连接云端" in labels)
                     assertTrue("用户名 alice" in labels)
                     assertTrue(page.controller.state.officialExpiry in labels)
-                    assertEquals(!renewed, "赞赏可续期一年" in labels)
-                    assertEquals(!renewed, "赞赏码暂时无法加载。" in labels)
+                    assertTrue("赞赏可续期一年" in labels)
+                    assertTrue("赞赏码暂时无法加载。" in labels)
                     assertEquals(!renewed, "服务已到期" in labels)
                     assertEquals(!renewed, button(semanticsNodes(scene), "下一步").config.contains(SemanticsProperties.Disabled))
                     assertEquals(renewed, page.controller.state.canContinue)
@@ -215,22 +216,69 @@ class SharedBuiltinConnectionFlowTest {
         }
     }
 
-    @Test fun customConnectionHasNoInlineAppreciationContentOrRequests() {
-        Page(null).use { page ->
-            page.controller.choose(ConnectionEntryModel.Mode.CUSTOM)
-            val scene = ImageComposeScene(width = 320, height = 757, density = Density(1f)) {
+    @Test fun inlinePanelReloadsForExplicitReloginButNotRecompositionOrForeground() {
+        Page(newConnectionConfig()).use { page ->
+            page.login()
+            val scene = ImageComposeScene(width = 500, height = 757, density = Density(1f)) {
                 SharedConnectionScreen(page.controller)
             }
             try {
                 repeat(3) { scene.render().close() }
-                val labels = visibleTexts(scene)
-                assertTrue("WebDAV 地址" in labels)
-                assertTrue("测试连接" in labels)
-                assertFalse(labels.any { it.contains("赞赏") || it == "保存图片" })
-                assertEquals(0, page.clients.entitlementCalls)
-                assertEquals(0, page.clients.metadataCalls)
-                assertEquals(0, page.clients.imageCalls)
+                val firstScope = assertNotNull(page.controller.currentAppreciationScope())
+                repeat(3) {
+                    page.controller.foreground(false)
+                    scene.render().close()
+                    assertTrue(page.controller.state.showInlineAppreciation)
+                    assertTrue("赞赏可续期一年" in visibleTexts(scene))
+                    page.controller.foreground(true)
+                    scene.render().close()
+                }
+                assertSame(firstScope, page.controller.currentAppreciationScope())
+                assertEquals(1, page.clients.metadataCalls)
+                assertEquals(1, page.clients.imageCalls)
+                assertEquals(2, page.clients.entitlementCalls)
+                // A synchronous re-login may coalesce account-cleared and account-ready UI states.
+                // The cleared appreciation scope must still cause exactly one new inline load.
+                page.controller.login()
+                repeat(3) { scene.render().close() }
+                assertNotSame(firstScope, page.controller.currentAppreciationScope())
+                assertTrue(page.controller.state.appreciationInline)
+                assertTrue(page.controller.state.canContinue)
+                assertEquals(2, page.clients.authCalls)
+                assertEquals(2, page.clients.metadataCalls)
+                assertEquals(2, page.clients.imageCalls)
+                assertEquals(4, page.clients.entitlementCalls)
+                assertEquals(0, page.probes)
+                assertEquals(0, page.commits)
             } finally { scene.close() }
+        }
+    }
+
+    @Test fun customAndUnloggedInBuiltinConnectionsHaveNoInlineAppreciationContentOrRequests() {
+        for (mode in listOf(ConnectionEntryModel.Mode.CUSTOM, ConnectionEntryModel.Mode.OFFICIAL)) {
+            Page(null).use { page ->
+                page.controller.choose(mode)
+                val scene = ImageComposeScene(width = 320, height = 757, density = Density(1f)) {
+                    SharedConnectionScreen(page.controller, onSaveImage = {})
+                }
+                try {
+                    repeat(3) { scene.render().close() }
+                    val labels = visibleTexts(scene)
+                    if (mode == ConnectionEntryModel.Mode.CUSTOM) {
+                        assertTrue("WebDAV 地址" in labels)
+                        assertTrue("测试连接" in labels)
+                    } else {
+                        assertTrue("登录" in labels)
+                        assertTrue("注册" in labels)
+                    }
+                    assertFalse(labels.any { it.contains("赞赏") || it == "保存图片" })
+                    assertFalse(page.controller.state.showInlineAppreciation)
+                    assertEquals(0, page.clients.authCalls)
+                    assertEquals(0, page.clients.entitlementCalls)
+                    assertEquals(0, page.clients.metadataCalls)
+                    assertEquals(0, page.clients.imageCalls)
+                } finally { scene.close() }
+            }
         }
     }
 
@@ -266,7 +314,8 @@ class SharedBuiltinConnectionFlowTest {
         val authenticated = source.substringAfter("if (state.showOfficialAccount) {").substringBefore("} else {")
         assertTrue(authenticated.contains("state.officialExpiry"))
         assertTrue(authenticated.contains("if (!setup) Row"), "Only settings retain the separate appreciation navigation")
-        assertTrue(authenticated.contains("if (setup && state.officialExpired)"))
+        assertTrue(authenticated.contains("if (state.showInlineAppreciation)"))
+        assertTrue(source.contains("LaunchedEffect(controller, state.showInlineAppreciation, state.appreciation == null)"))
         assertTrue(authenticated.contains("SharedInlineAppreciationContent"))
         assertTrue(authenticated.contains("state.appreciationLabel"))
         assertTrue(authenticated.contains("赞赏可续期一年"))

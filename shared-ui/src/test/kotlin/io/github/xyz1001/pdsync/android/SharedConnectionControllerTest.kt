@@ -1220,6 +1220,101 @@ class SharedConnectionControllerTest {
         f.controller.close()
     }
 
+    @Test fun activeSetupInlineAppreciationRetainsAccountAndImageAcrossBackgroundAndReattachment() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        assertTrue(f.controller.state.showInlineAppreciation)
+        val expiry = f.controller.state.officialExpiry
+        f.controller.openInlineAppreciation()
+        assertTrue(f.controller.state.canContinue, "Public image loading cannot block authenticated Next")
+        f.finish()
+        assertTrue(f.controller.state.appreciationInline)
+        assertTrue(f.controller.state.canContinue)
+        val image = assertNotNull(f.controller.state.appreciation?.image)
+        val scope = assertNotNull(f.controller.currentAppreciationScope())
+        val requests = f.clients.requests.size
+        repeat(4) {
+            f.controller.detach()
+            assertTrue(f.controller.state.showInlineAppreciation, "Background cannot hide the inline panel")
+            assertTrue(f.controller.state.officialAuthenticated)
+            assertEquals(expiry, f.controller.state.officialExpiry)
+            assertSame(image, f.controller.state.appreciation?.image)
+            f.controller.attach(f.host); f.controller.foreground(true)
+            f.controller.openInlineAppreciation(); f.controller.refreshAccountStatus(); f.finish()
+            assertTrue(f.controller.state.canContinue)
+            assertSame(scope, f.controller.currentAppreciationScope())
+            assertSame(image, f.controller.state.appreciation?.image)
+        }
+        assertEquals(requests, f.clients.requests.size)
+        assertEquals(2, f.clients.entitlementCalls)
+        assertEquals(1, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.ports.officialSaves)
+        assertEquals(1, f.host.commits.size)
+        assertEquals(0, f.ports.probes)
+        f.controller.close()
+    }
+
+    @Test fun inlineAccountEditsServiceExitAndLogoutRejectLateImagesAndEntitlement() {
+        val resets: List<(SharedConnectionController) -> Unit> = listOf(
+            { it.editUsername("bob") },
+            { it.editPassword("changed-password") },
+            { it.showChooser() },
+            { it.back() },
+            { it.close() },
+        )
+        for (expired in listOf(false, true)) for (finishRead in listOf(false, true)) for (reset in resets) {
+            val f = Fixture(); f.official()
+            f.clients.active = !expired; f.clients.serverTime = if (expired) 10001 else 1000
+            f.controller.login(); f.finish(); f.enableImage()
+            f.controller.openInlineAppreciation(); f.io.drain()
+            if (finishRead) f.ui.drain()
+            reset(f.controller)
+            f.finish()
+            assertNull(f.controller.state.appreciation)
+            assertNull(f.controller.currentAppreciationPng())
+            assertNull(f.controller.currentAppreciationScope())
+            assertFalse(f.controller.state.appreciationInline)
+            assertFalse(f.controller.state.showInlineAppreciation)
+            assertFalse(f.controller.state.showOfficialAccount)
+            assertFalse(f.controller.state.officialAuthenticated)
+            assertFalse(f.controller.state.canContinue)
+            val requests = f.clients.requests.size
+            f.controller.openInlineAppreciation(); f.controller.foreground(true); f.finish()
+            assertEquals(requests, f.clients.requests.size)
+            assertEquals(0, f.ports.saves)
+            assertEquals(0, f.ports.probes)
+            f.controller.close()
+        }
+    }
+
+    @Test fun activeInlineImageFailureCannotRevokeLoginOrBlockNextAndNeverRetriesOnFocus() {
+        for (status in listOf(401, 403, 429, 503)) {
+            val f = Fixture(); f.official(); f.controller.login(); f.finish()
+            f.clients.publicStatus = status
+            val expiry = f.controller.state.officialExpiry
+            f.controller.openInlineAppreciation(); f.finish()
+            assertTrue(f.controller.state.officialAuthenticated)
+            assertTrue(f.controller.state.canContinue)
+            assertTrue(f.controller.state.showInlineAppreciation)
+            assertEquals(expiry, f.controller.state.officialExpiry)
+            assertNull(f.controller.state.appreciation?.image)
+            assertFalse(f.controller.state.appreciation!!.busy)
+            assertEquals(if (status == 503) 2 else 1, f.clients.metadataCalls)
+            val requests = f.clients.requests.size
+            repeat(4) {
+                f.controller.foreground(false); f.controller.foreground(true)
+                f.controller.refreshAccountStatus(); f.controller.openInlineAppreciation(); f.finish()
+            }
+            assertEquals(requests, f.clients.requests.size)
+            assertEquals(2, f.clients.entitlementCalls)
+            assertEquals(1, f.clients.authCalls)
+            assertEquals(0, f.ports.saves)
+            assertEquals(0, f.ports.probes)
+            f.controller.close()
+        }
+    }
+
     @Test fun savedExpiredInlineBackReturnsToPathInOneClickAndRejectsLateImageAndRenewal() {
         for (finishRead in listOf(false, true)) {
             val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
@@ -1247,6 +1342,7 @@ class SharedConnectionControllerTest {
         f.clients.active = true; f.clients.expires = 20000
         f.finish()
         assertTrue(f.controller.state.appreciationInline)
+        assertTrue(f.controller.state.showInlineAppreciation)
         assertFalse(f.controller.state.officialExpired)
         assertTrue(f.controller.state.officialAuthenticated)
         assertTrue(f.controller.state.canContinue)
@@ -1314,16 +1410,19 @@ class SharedConnectionControllerTest {
         f.controller.close()
     }
 
-    @Test fun savedHistoryRenewedByEntryReadDoesNotStartDeferredInlineAppreciation() {
+    @Test fun savedHistoryRenewedByEntryReadStillOpensDeferredInlineAppreciation() {
         val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
         val cached = TrustedEntitlementCache.Record(saved.endpoint, saved.username, 1000, false, 1001, 0, 1)
         val f = Fixture(saved, persisted = saved, cached = cached)
-        f.controller.openInlineAppreciation(); f.finish(); f.finish()
+        f.enableImage(); f.controller.openInlineAppreciation(); f.finish(); f.finish()
         assertFalse(f.controller.state.officialExpired)
         assertTrue(f.controller.state.canContinue)
-        assertNull(f.controller.state.appreciation)
-        assertEquals(1, f.clients.entitlementCalls)
-        assertEquals(0, f.clients.publicCalls)
+        assertTrue(f.controller.state.showInlineAppreciation)
+        assertTrue(f.controller.state.appreciationInline)
+        assertNotNull(f.controller.state.appreciation?.image)
+        assertEquals(2, f.clients.entitlementCalls)
+        assertEquals(1, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
         f.controller.close()
     }
 
@@ -1400,16 +1499,31 @@ class SharedConnectionControllerTest {
         restored.controller.close()
     }
 
-    @Test fun inlineEntryIgnoresActiveInactiveUnknownCustomAndSettingsAccounts() {
-        for (active in listOf(false, true)) {
-            val f = Fixture(); f.official(); f.clients.active = active
-            f.controller.login(); f.finish(); f.controller.openInlineAppreciation(); f.finish()
-            assertFalse(f.controller.state.officialExpired)
-            assertNull(f.controller.state.appreciation)
-            assertEquals(1, f.clients.entitlementCalls)
-            assertEquals(0, f.clients.publicCalls)
-            f.controller.close()
-        }
+    @Test fun authenticatedInactiveAccountShowsInlineAppreciationWithoutGrantingNext() {
+        val inactive = Fixture(); inactive.official(); inactive.clients.active = false; inactive.enableImage()
+        inactive.controller.login(); inactive.finish(); inactive.controller.openInlineAppreciation(); inactive.finish()
+        assertFalse(inactive.controller.state.officialExpired)
+        assertTrue(inactive.controller.state.officialAuthenticated)
+        assertTrue(inactive.controller.state.showInlineAppreciation)
+        assertTrue(inactive.controller.state.appreciationInline)
+        assertNotNull(inactive.controller.state.appreciation?.image)
+        assertEquals("服务未启用", inactive.controller.state.officialAccessStatus)
+        assertFalse(inactive.controller.state.canContinue)
+        inactive.controller.continueConnection(); inactive.finish()
+        assertEquals(0, inactive.ports.saves)
+        assertEquals(0, inactive.ports.probes)
+        assertEquals(2, inactive.clients.entitlementCalls)
+        assertEquals(1, inactive.clients.metadataCalls)
+        assertEquals(1, inactive.clients.imageCalls)
+        inactive.controller.foreground(false)
+        assertTrue(inactive.controller.state.showInlineAppreciation)
+        inactive.controller.foreground(true); inactive.finish()
+        assertEquals(2, inactive.clients.entitlementCalls)
+        assertEquals(1, inactive.clients.metadataCalls)
+        inactive.controller.close()
+    }
+
+    @Test fun inlineEntryIgnoresUnknownCustomAndSettingsAccounts() {
         val unknown = Fixture(); unknown.official(); unknown.clients.entitlementFailure = true
         unknown.controller.login(); unknown.finish(); unknown.controller.openInlineAppreciation(); unknown.finish()
         assertFalse(unknown.controller.state.officialExpired)
