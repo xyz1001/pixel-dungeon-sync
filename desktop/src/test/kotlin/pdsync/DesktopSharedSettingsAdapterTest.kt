@@ -8,6 +8,20 @@ import org.junit.jupiter.api.Test
 import kotlin.test.*
 
 class DesktopSharedSettingsAdapterTest {
+ @Test fun builtInServiceLabelsStayConsistentAcrossPlatformAndAccountErrors() {
+  val root = generateSequence(java.nio.file.Path.of("").toAbsolutePath()) { it.parent }
+   .first { java.nio.file.Files.isDirectory(it.resolve("shared-ui/src/main/kotlin")) }
+  for (path in listOf(
+   "desktop/src/main/kotlin/pdsync/DesktopSharedSettingsAdapter.kt",
+   "desktop/src/main/kotlin/pdsync/DesktopConnectionAdapter.kt",
+   "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java",
+   "core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountClient.java",
+  )) {
+   val source = java.nio.file.Files.readString(root.resolve(path))
+   assertFalse(source.contains("官方服务"), path)
+   assertFalse(source.contains("官方账号"), path)
+  }
+ }
  private fun ready() = DesktopSettingsContext(
   config = AppConfig(username = "实际账号", targetGame = "/actual/game.jar", profile = "real-profile",
    endpoint = "https://actual.invalid/dav", password = "never-display-this",
@@ -68,7 +82,7 @@ class DesktopSharedSettingsAdapterTest {
   val original = ready()
   val current = original.copy(config = original.config!!.copy(connectionProvider = "official"), connected = false)
   val result = state(current)
-  assertEquals("官方服务 · 实际账号 · 未连接", result.rows.single { it.key == SharedSettingsKey.CLOUD_CONNECTION }.currentValue)
+  assertEquals("内置服务 · 实际账号 · 未连接", result.rows.single { it.key == SharedSettingsKey.CLOUD_CONNECTION }.currentValue)
   assertFalse(result.rows.any { it.key == SharedSettingsKey.ACCOUNT_APPRECIATION })
   assertTrue(result.actionEnabled(SharedSettingsKey.CLOUD_CONNECTION))
  }

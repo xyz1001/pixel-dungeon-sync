@@ -117,7 +117,7 @@ internal class DesktopConnectionAdapter(
 
  private fun configurationFor(config: SharedConnectionConfig): AppConfig {
   require(config.profile == original.profile) { "同步档案不能在连接设置中改变。" }
-  require(!config.official || isDesktopOfficialRoot(config.endpoint)) { "官方服务地址无效。" }
+  require(!config.official || isDesktopOfficialRoot(config.endpoint)) { "内置服务地址无效。" }
   val endpoint = if (config.official) DESKTOP_OFFICIAL_ROOT else config.endpoint
   val provider = if (config.official) "official" else "custom"
   val identityChanged = endpoint.trimEnd('/') != original.endpoint.trimEnd('/') ||

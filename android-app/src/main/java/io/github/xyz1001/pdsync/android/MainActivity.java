@@ -3756,7 +3756,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         rows.add(new SharedSettingsRow(SharedSettingsKey.CLOUD_CONNECTION, "云端连接", settingsConnectionValue(),
                 "修改", !this.installer.hasActiveRequest()));
         if (isOfficialAccount(this.connection)) {
-            rows.add(new SharedSettingsRow(SharedSettingsKey.ACCOUNT_APPRECIATION, "官方账号", this.connection.username,
+            rows.add(new SharedSettingsRow(SharedSettingsKey.ACCOUNT_APPRECIATION, "内置账号", this.connection.username,
                     officialAppreciationLabel(this.connection.username), !this.installer.hasActiveRequest()));
         }
         if (selectedGame) rows.add(new SharedSettingsRow(SharedSettingsKey.SAVE_PATH, "存档位置", savePathLabel(), null, false));
@@ -3865,7 +3865,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private String settingsConnectionValue() {
         if (this.connection == null) return this.connectionLoadError.isEmpty() ? "尚未连接" : "连接信息待检查";
-        return (isOfficialAccount(this.connection) ? "官方账号" : "WebDAV")
+        return (isOfficialAccount(this.connection) ? "内置账号" : "WebDAV")
                 + (this.connection.username.isEmpty() ? "" : " · " + this.connection.username);
     }
 

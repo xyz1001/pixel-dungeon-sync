@@ -48,7 +48,7 @@ internal object DesktopSharedSettingsAdapter {
    add(SharedSettingsRow(SharedSettingsKey.SAVE_PATH, "存档位置", current.savePath.ifBlank { "尚未选择" },
     "修改", true))
    add(SharedSettingsRow(SharedSettingsKey.CLOUD_CONNECTION, "云端连接", if (config == null) "尚未配置" else
-    listOf(if (config.connectionProvider == "official") "官方服务" else "自定义服务",
+    listOf(if (config.connectionProvider == "official") "内置服务" else "自定义服务",
      config.username, if (current.connected) "已连接" else "未连接").filter(String::isNotBlank).joinToString(" · "),
     "修改", true))
    add(SharedSettingsRow(SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传", when {

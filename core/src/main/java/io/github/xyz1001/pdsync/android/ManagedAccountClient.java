@@ -519,14 +519,14 @@ final class ManagedAccountClient {
     private static ManagedAccountException failure(FailureKind kind) { return new ManagedAccountException(kind); }
     private static String messageFor(FailureKind kind) {
         switch (kind) {
-            case INVALID_INPUT: return "官方账号配置无效。";
+            case INVALID_INPUT: return "内置账号配置无效。";
             case AUTHENTICATION_REQUIRED: return "无法登录，请检查账号或续期状态。";
             case ACCOUNT_EXPIRED: return "服务已到期";
             case ACCOUNT_INACTIVE: return "暂时无法同步，请检查账号或续期状态。";
             case FORBIDDEN: return "服务未允许读取这项信息。";
             case NOT_AVAILABLE: return "此项服务暂不可用。";
             case RATE_LIMITED: return "操作过于频繁，请稍后刷新。";
-            case SERVER_ERROR: return "官方服务暂时异常。";
+            case SERVER_ERROR: return "内置服务暂时异常。";
             case REQUEST_REJECTED: return "服务未接受这次查询。";
             case REDIRECT_REJECTED: return "已拒绝服务地址跳转。";
             case RESPONSE_TOO_LARGE: return "服务返回的信息过大。";
