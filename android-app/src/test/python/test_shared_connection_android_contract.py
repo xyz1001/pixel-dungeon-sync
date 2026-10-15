@@ -111,7 +111,10 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("host = null", body(COMMON, "fun detach()"))
         foreground = body(COMMON, "fun foreground(")
         self.assertIn("proof = null", foreground)
-        self.assertIn("cancelAppreciationRequest()", foreground)
+        self.assertNotIn("cancelAppreciationRequest()", foreground)
+        self.assertNotIn("refreshAppreciation()", foreground)
+        self.assertNotIn("officialSession = null", foreground)
+        self.assertIn("if (!entered)", foreground)
 
     def test_saved_instance_state_contains_no_credentials_or_controller(self):
         saved = body(MAIN, "protected void onSaveInstanceState(")

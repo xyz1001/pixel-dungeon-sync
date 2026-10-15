@@ -471,20 +471,20 @@ class SharedConnectionControllerTest {
         assertEquals(0, f.ports.saves)
     }
 
-    @Test fun backgroundCancelsAppreciationAndLateReplyCannotRevealIdentity() {
-        val f = Fixture(); f.official()
-        f.controller.login(); f.finish()
+    @Test fun backgroundDoesNotCancelAnAlreadyRequestedReadOrRefetchOnReturn() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
         f.controller.openAppreciation()
         f.controller.foreground(false); f.finish()
-        assertNull(f.controller.state.appreciation!!.username)
-        assertEquals(0, f.clients.publicCalls)
-        f.controller.copyUsername()
-        assertNull(f.ports.copied)
-        f.controller.foreground(true)
-        assertTrue(f.controller.state.appreciation!!.busy)
-        f.finish()
+        assertEquals("alice", f.controller.state.appreciation!!.username)
+        assertTrue(f.controller.state.appreciation!!.authenticated)
+        assertNotNull(f.controller.state.appreciation!!.image)
         assertFalse(f.controller.state.appreciation!!.busy)
-        assertEquals(2, f.clients.metadataCalls)
+        val requests = f.clients.requests.size
+        f.controller.copyUsername()
+        assertNull(f.ports.copied, "inactive Android page cannot initiate a clipboard action")
+        f.controller.foreground(true); f.finish()
+        assertEquals(requests, f.clients.requests.size)
+        assertEquals(1, f.clients.metadataCalls)
     }
 
     @Test fun saveAccessorReturnsOnlyCurrentDisplayedOriginalAndSurvivesChooserBackground() {
@@ -512,29 +512,24 @@ class SharedConnectionControllerTest {
         assertNull(f.controller.currentAppreciationScope())
     }
 
-    @Test fun appreciationLoadsAutomaticallyAndRetainsImageAcrossRotationAndTransientFailure() {
+    @Test fun appreciationRetainsIdentityExpiryAndImageAcrossRotationWithoutAnyNetwork() {
         val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
         f.controller.openAppreciation(); f.finish()
-        val image = assertNotNull(f.controller.state.appreciation!!.image)
-        assertEquals(1, f.clients.imageCalls)
-        val authCalls = f.clients.authCalls
-        f.controller.detach()
-        assertSame(image, f.controller.state.appreciation!!.image)
-        assertNull(f.controller.state.appreciation!!.username)
-        assertFalse(f.controller.state.appreciation!!.authenticated)
+        val before = f.controller.state.appreciation!!
+        val requests = f.clients.requests.size
         f.clients.publicStatus = 503; f.clients.entitlementFailure = true
-        f.controller.attach(Host()); f.controller.foreground(true)
-        assertSame(image, f.controller.state.appreciation!!.image)
-        f.finish()
-        assertSame(image, f.controller.state.appreciation!!.image)
-        assertFalse(f.controller.state.appreciation!!.authenticated)
-        assertEquals(2, f.clients.metadataCalls, "A cached image needs no retry on resume failure")
-        assertEquals(1, f.clients.imageCalls)
-        assertEquals(authCalls, f.clients.authCalls)
-        assertFalse(f.controller.state.canContinue)
-        assertFalse(f.controller.state.appreciation!!.message.contains("刷新"))
+        repeat(4) {
+            f.controller.detach()
+            assertEquals(before.copy(canRefresh = false), f.controller.state.appreciation)
+            f.controller.attach(Host()); f.controller.foreground(true); f.finish()
+            assertEquals(before, f.controller.state.appreciation)
+        }
+        assertEquals(requests, f.clients.requests.size)
         f.controller.back()
-        assertFalse(f.controller.state.canContinue, "Public image never restores revoked account access")
+        assertTrue(f.controller.state.canContinue)
+        // A later explicit page entry is a natural read, and actual denial revokes access.
+        f.controller.openAppreciation(); f.finish(); f.controller.back()
+        assertFalse(f.controller.state.canContinue)
     }
 
     @Test fun sameHashReusesImageAndRepeatedForegroundOrOpenDoesNotRefetch() {
@@ -543,7 +538,7 @@ class SharedConnectionControllerTest {
         val image = f.controller.state.appreciation!!.image
         f.controller.foreground(false); f.controller.foreground(true); f.finish()
         assertSame(image, f.controller.state.appreciation!!.image)
-        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.metadataCalls)
         assertEquals(1, f.clients.imageCalls)
         assertEquals(1, f.ports.decodeCalls)
         repeat(4) {
@@ -551,8 +546,11 @@ class SharedConnectionControllerTest {
             f.controller.openAppreciation(); f.controller.refreshAccountStatus()
         }
         f.finish()
-        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.metadataCalls)
         assertEquals(1, f.clients.imageCalls)
+        f.controller.refreshAppreciation(); f.finish()
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls, "An explicit same-hash read reuses the validated PNG")
     }
 
     @Test fun changedServerHashInvalidatesOldImageEvenWhenReplacementFails() {
@@ -560,13 +558,13 @@ class SharedConnectionControllerTest {
         f.controller.openAppreciation(); f.finish()
         assertNotNull(f.controller.state.appreciation!!.image)
         f.enableImage(width = 2); f.clients.imageStatus = 503
-        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        f.controller.refreshAppreciation(); f.finish()
         assertNull(f.controller.state.appreciation!!.image)
         assertEquals(3, f.clients.imageCalls, "Only the missing replacement gets one retry")
         assertFalse(f.controller.state.appreciation!!.busy)
         assertFalse(f.controller.state.appreciation!!.message.contains("刷新"))
         f.clients.imageStatus = 200
-        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        f.controller.refreshAppreciation(); f.finish()
         assertSame(f.ports.decodedImage, f.controller.state.appreciation!!.image)
     }
 
@@ -720,18 +718,46 @@ class SharedConnectionControllerTest {
         assertEquals("", f.ports.last!!.username)
     }
 
-    @Test fun backgroundOfficialAccountReauthenticatesReadOnlyWithoutReplayingRegistration() {
-        val f = Fixture(); f.official()
+    @Test fun confirmedAccountSurvivesBackgroundWithoutReauthenticationUntilItsRealExpiry() {
+        val f = Fixture(); f.official(); f.ports.boot = -1
         f.controller.register(); f.finish()
-        f.controller.foreground(false)
+        val expiry = f.controller.state.officialExpiry
+        val requests = f.clients.requests.size
+        repeat(4) {
+            f.controller.foreground(false)
+            assertTrue(f.controller.state.officialAuthenticated)
+            assertEquals(expiry, f.controller.state.officialExpiry)
+            assertFalse(f.controller.state.canContinue, "background still cannot commit configuration")
+            f.controller.foreground(true); f.finish()
+            assertTrue(f.controller.state.canContinue)
+        }
+        assertEquals(requests, f.clients.requests.size)
+        f.ports.elapsed = 9001L
+        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        assertEquals("服务已到期", f.controller.state.officialAccessStatus)
+        assertEquals(expiry, f.controller.state.officialExpiry)
         assertFalse(f.controller.state.canContinue)
-        f.controller.foreground(true)
+        assertEquals(requests, f.clients.requests.size)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.saves)
+    }
+
+    @Test fun appreciationExpiryStillAdvancesLocallyWithoutFocusRequestsOrPolling() {
+        val f = Fixture(); f.official(); f.ports.boot = -1
+        f.controller.login(); f.finish(); f.enableImage()
+        f.controller.openAppreciation(); f.finish()
+        val before = f.controller.state.appreciation!!
+        val requests = f.clients.requests.size
+        f.controller.foreground(false); f.ports.elapsed = 9001L
+        f.controller.refreshAccountStatus(); f.finish()
+        assertEquals("服务已到期", f.controller.state.appreciation!!.accessStatus)
+        assertEquals(before.expiry, f.controller.state.appreciation!!.expiry)
+        assertEquals(before.username, f.controller.state.appreciation!!.username)
+        assertSame(before.image, f.controller.state.appreciation!!.image)
+        f.controller.foreground(true); f.finish()
+        assertEquals(requests, f.clients.requests.size)
+        f.controller.back()
         assertFalse(f.controller.state.canContinue)
-        f.finish()
-        assertEquals(1, f.clients.authCalls)
-        assertEquals(2, f.clients.entitlementCalls)
-        assertEquals(0, f.ports.probes)
-        assertTrue(f.controller.state.canContinue)
     }
 
     @Test fun cancelAtFinalSaveCannotClaimAlreadyAdmittedCommitWasCancelled() {

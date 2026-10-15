@@ -1190,7 +1190,7 @@ internal fun runSyncApplication(
        Page.CONNECTION -> key(pageGeneration) {
         val generation = pageGeneration
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
-        DesktopSharedConnectionPage(window, configFile, if (onboardingActive) setupDraft else config, password,
+        DesktopSharedConnectionPage(configFile, if (onboardingActive) setupDraft else config, password,
          if (connectionReturnPage == Page.PATH) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
           gameIdentity(it)
@@ -1267,7 +1267,6 @@ private fun CompactFeedback(raw: String, fallback: String) {
 /** The same controller and composable are used by Android; this host only supplies desktop I/O. */
 @Composable
 private fun DesktopSharedConnectionPage(
- window: java.awt.Window,
  configFile: ConfigFile,
  initial: AppConfig?,
  currentPassword: String,
@@ -1284,7 +1283,7 @@ private fun DesktopSharedConnectionPage(
  val latestDismiss by rememberUpdatedState(onDismiss)
  val latestApplied by rememberUpdatedState(onApplied)
  val latestBusy by rememberUpdatedState(onBusy)
- DisposableEffect(controller, window) {
+ DisposableEffect(controller) {
   controller.attach(object : SharedConnectionHost {
    override fun onBusyChanged(busy: Boolean) { latestBusy(busy) }
    override fun onBack(destination: ConnectionEntryModel.Back) { latestBusy(false); latestDismiss() }
@@ -1293,9 +1292,9 @@ private fun DesktopSharedConnectionPage(
     adapter.appliedConnection?.let { latestApplied(it, null) }
    }
   })
-  val visibility = observeDesktopConnectionWindow(window, controller::foreground)
+  // Account/appreciation state belongs to this page, independent of native window focus.
+  controller.foreground(true)
   onDispose {
-   visibility.close()
    controller.foreground(false)
    controller.detach()
    controller.close()

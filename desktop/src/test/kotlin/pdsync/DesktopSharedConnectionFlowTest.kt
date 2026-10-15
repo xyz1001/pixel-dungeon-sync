@@ -31,7 +31,7 @@ class DesktopSharedConnectionFlowTest {
  private data class Page(val controller: SharedConnectionController, val adapter: DesktopConnectionAdapter,
                          val io: Queue, val ui: Queue, val host: Host) {
   fun finish() { io.runAll(); ui.runAll() }
-  fun close() { controller.detach(); controller.close(); adapter.close() }
+  fun close() { controller.foreground(false); controller.detach(); controller.close(); adapter.close() }
  }
  private fun page(origin: ConnectionEntryModel.Origin, initial: AppConfig, password: String,
                   configFile: ConfigFile, probe: (ConnectionDraft) -> RemoteHead? = { null }): Page {
@@ -172,29 +172,43 @@ class DesktopSharedConnectionFlowTest {
   }
  }
 
- @Test fun minimizeRestoreKeepsDraftButNeverReplaysNetworkOrRestoresProof() {
-  val path = temp.resolve("visibility.json"); val file = ConfigFile(path)
+ @Test fun repeatedPageActivationPreservesProofAndDoesNotReplayNetwork() {
+  val path = temp.resolve("page-active.json"); val file = ConfigFile(path)
   file.save(existing())
   val before = path.readBytes()
   var probes = 0
   val page = page(ConnectionEntryModel.Origin.SETTINGS, existing(), "fixture-secret", file) { probes++; null }
-  val visibility = DesktopConnectionVisibility(page.controller::foreground)
-  visibility.update(showing = true, focused = true, iconified = false)
   page.controller.testConnection(); page.finish()
   assertTrue(page.controller.state.canContinue)
-  visibility.update(showing = true, focused = true, iconified = true)
-  assertFalse(page.controller.state.canContinue)
-  visibility.update(showing = true, focused = true, iconified = false)
+  repeat(3) { page.controller.foreground(true) }
   assertEquals("alice", page.controller.state.username)
   assertEquals("fixture-secret", page.controller.state.password)
-  assertFalse(page.controller.state.canContinue)
-  assertTrue(page.io.tasks.isEmpty())
-  page.controller.continueConnection()
+  assertTrue(page.controller.state.canContinue)
   assertTrue(page.io.tasks.isEmpty())
   assertEquals(1, probes)
   assertContentEquals(before, path.readBytes())
-  visibility.close()
-  page.close()
+  page.close(); page.close()
+  assertFalse(page.controller.state.canContinue)
+  assertEquals("", page.controller.state.password)
+  assertTrue(page.io.tasks.isEmpty())
+  assertEquals(1, probes)
+ }
+
+ @Test fun pageDisposalCancelsQueuedVerificationAndIgnoresLateActivation() {
+  val path = temp.resolve("page-disposal.json"); val file = ConfigFile(path)
+  file.save(existing())
+  val before = path.readBytes()
+  var probes = 0
+  val page = page(ConnectionEntryModel.Origin.SETTINGS, existing(), "fixture-secret", file) { probes++; null }
+  page.controller.testConnection()
+  page.close(); page.close()
+  page.controller.foreground(true)
+  page.finish()
+  assertEquals(0, probes)
+  assertFalse(page.controller.state.canContinue)
+  assertEquals("", page.controller.state.password)
+  assertTrue(page.host.committed.isEmpty())
+  assertContentEquals(before, path.readBytes())
  }
 
  @Test fun changingServiceAndReturningKeepsOriginalFormButDiscardsProof() {

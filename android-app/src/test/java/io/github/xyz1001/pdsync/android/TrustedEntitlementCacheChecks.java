@@ -132,7 +132,7 @@ public final class TrustedEntitlementCacheChecks {
         flow.entitlement(request, "account-a", 1000L, true, true, 201L); flow.complete(request);
         check(!flow.view().expired && !flow.view().cachedExpiry && flow.view().entitlementLoaded, "Live authenticated renewal removes stale display");
         flow.foreground(false);
-        check(flow.view().expiresMs == null && flow.view().localUsername == null, "Background hides live and cached account details");
+        check(flow.view().expiresMs == 1000L && "account-a".equals(flow.view().localUsername) && flow.view().entitlementLoaded, "Background preserves confirmed account and expiry display");
         flow.close(); flow.foreground(true);
         check(flow.view().expiresMs == null && flow.refresh() == null, "Closed page cannot resurrect cache or callbacks");
     }

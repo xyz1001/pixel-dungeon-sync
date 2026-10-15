@@ -47,36 +47,91 @@ public final class ManagedAccountFlowChecks {
         check(!flow.entitlement(invalid, "account-a", -1L, true, true), "Negative expiry fails closed");
     }
 
-    private static void backgroundNavigationAndAccountSwitchDiscardOldResponses() {
+    private static void backgroundPreservesDisplayAndNavigationDiscardsOldResponses() {
         ManagedAccountFlow flow = visible("account-a");
         ManagedAccountFlow.Ticket first = flow.refresh();
         flow.entitlement(first, "account-a", 42L, true, true);
         flow.image(first, new byte[] {7});
         long firstGeneration = flow.view().generation;
         flow.foreground(false);
-        check(flow.view().username == null && flow.view().expiresMs == null && Arrays.equals(flow.view().image, new byte[] {7}),
-                "Background clears private account presentation while retaining the public image");
-        check(!flow.entitlement(first, "account-a", 99L, true, true)
-                && !flow.image(first, new byte[] {9}) && !flow.fail(first, "stale"), "Background callbacks are discarded");
-        check(!flow.copyUsername(firstGeneration, ignored -> { throw new AssertionError(); }), "Old button cannot copy in background");
+        check(flow.view().username.equals("account-a") && flow.view().localUsername.equals("account-a")
+                && flow.view().expiresMs == 42L && Arrays.equals(flow.view().image, new byte[] {7}),
+                "Background preserves identity, trusted expiry and the public image");
+        check(flow.view().entitlementLoaded && flow.view().generation == firstGeneration
+                && flow.view().busy && !flow.view().canRefresh && flow.refresh() == null,
+                "Focus changes preserve the pending generation and cannot start a read");
+        check(flow.entitlement(first, "account-a", 99L, true, true)
+                && flow.image(first, new byte[] {9}) && flow.complete(first),
+                "An existing read can finish in background without leaving a stuck spinner");
+        check(!flow.copyUsername(firstGeneration, ignored -> { throw new AssertionError(); }), "Copy remains foreground-only");
         flow.foreground(true);
-        check(!flow.view().busy && flow.view().canRefresh, "The flow itself never polls or registers; the controller owns bounded read-only reloads");
+        check(!flow.view().busy && flow.view().canRefresh && flow.view().generation == firstGeneration
+                && flow.view().username.equals("account-a") && flow.view().expiresMs == 99L
+                && Arrays.equals(flow.view().image, new byte[] {9}),
+                "Resume keeps the finished display and never starts or invalidates a read");
         ManagedAccountFlow.Ticket second = flow.refresh();
-        check(second.generation != first.generation, "Fresh foreground request owns a new generation");
-        check(!flow.entitlement(first, "account-a", 99L, true, true), "Old request remains rejected after resume");
+        check(second.generation != first.generation, "An explicit fresh request owns a new generation");
+        check(!flow.entitlement(first, "account-a", 99L, true, true), "Completed request remains rejected");
         flow.entitlement(second, "account-a", 101L, true, true);
         check(!flow.copyUsername(firstGeneration, ignored -> { throw new AssertionError(); }), "Captured button from old generation remains invalid");
         ManagedAccountFlow replacement = visible("account-b");
         ManagedAccountFlow.Ticket other = replacement.refresh();
         check(!replacement.entitlement(second, "account-b", 33L, true, true), "A ticket cannot cross account-flow owners");
         check(!flow.entitlement(other, "account-a", 33L, true, true), "Another account cannot alter original flow");
+        flow.foreground(false);
         flow.close();
-        check(!flow.image(second, new byte[] {3}) && !flow.fail(second, "stale"), "Leaving cancels all old updates");
+        check(!flow.image(second, new byte[] {3}) && !flow.fail(second, "stale")
+                && !flow.entitlement(second, "account-a", 103L, true, true) && !flow.complete(second),
+                "Leaving cancels every paused callback");
         check(flow.view().username == null && flow.view().expiresMs == null && flow.view().image == null,
                 "Leaving removes old account data");
         flow.foreground(true);
         check(flow.refresh() == null, "A closed account flow cannot resume");
         check(replacement.entitlement(other, "account-b", null, true, false), "Replacement authenticates independently");
+
+        ManagedAccountFlow failed = visible("account-c");
+        ManagedAccountFlow.Ticket pending = failed.refresh();
+        failed.foreground(false);
+        check(failed.metadata(pending, "a".repeat(64)) && failed.image(pending, new byte[] {5})
+                && failed.fail(pending, "temporarily unavailable"), "Pending public image and failure can arrive while paused");
+        failed.foreground(true);
+        check(!failed.view().busy && failed.view().image[0] == 5
+                && failed.view().message.equals("temporarily unavailable"), "Resume retains the completed result or error");
+    }
+
+    private static void liveExpiryUsesElapsedTimeWithoutDesktopBootIdentity() {
+        final long[] elapsed = {500L};
+        ManagedAccountFlow.Clock clock = new ManagedAccountFlow.Clock() {
+            public long elapsedMs() { return elapsed[0]; }
+            public int bootCount() { return -1; }
+        };
+        TrustedEntitlementCache.Record cached = new TrustedEntitlementCache.Record(
+                TrustedEntitlementCache.OFFICIAL_ENDPOINT, "account-a", 1_100L, true, 1_000L, 500L, -1);
+        ManagedAccountFlow flow = new ManagedAccountFlow("account-a", cached, clock);
+        flow.foreground(true);
+        elapsed[0] = 600L;
+        check(!flow.view().expired && flow.view().cachedExpiry,
+                "Persisted unknown-boot metadata cannot prove elapsed time from another process");
+        ManagedAccountFlow.Ticket ticket = flow.refresh();
+        flow.entitlement(ticket, "account-a", 1_100L, true, true, 1_000L);
+        flow.complete(ticket);
+        flow.foreground(false);
+        elapsed[0] = 699L;
+        check(!flow.view().expired, "Live account stays unexpired before its server-derived deadline");
+        elapsed[0] = 700L;
+        check(flow.view().expired && ManagedAccountFlow.accessStatus(flow.view()).equals("服务已到期"),
+                "Live metadata expires on monotonic elapsed time even with desktop bootCount -1");
+        flow.foreground(true);
+        check(flow.view().expired && flow.view().username.equals("account-a") && flow.view().expiresMs == 1_100L,
+                "Resume preserves identity and expiry while reflecting genuine elapsed expiry");
+        ticket = flow.refresh();
+        check(flow.view().expired && flow.view().cachedExpiry,
+                "Explicit refresh retains the same-process trusted clock until a new response arrives");
+        flow.entitlement(ticket, "account-a", 1_300L, true, true, 1_100L);
+        flow.complete(ticket);
+        check(!flow.view().expired, "Authenticated renewal replaces the live clock anchor");
+        elapsed[0] = 600L;
+        check(!flow.view().expired, "A regressed elapsed clock cannot manufacture expiry");
     }
 
     private static void failuresAndImageCopiesAreIsolated() {
@@ -174,8 +229,9 @@ public final class ManagedAccountFlowChecks {
         check(reads.indexOf("client.paymentImage(metadata)") < reads.indexOf("client.entitlement()")
                 && reads.contains("client.canReadEntitlement()"), "Public QR loads before optional private metadata");
         check(reads.contains("appreciationFlow !== flow") && reads.contains("appreciationClient !== client")
-                && reads.contains("flow.accepts(ticket)") && reads.contains("foreground.get()"),
-                "Delayed account callbacks require current visible source generation");
+                && reads.contains("flow.accepts(ticket)") && reads.contains("alive.get()")
+                && !reads.contains("foreground.get()"),
+                "Delayed account callbacks require a live page and current source generation, not focus");
         String selection = controller.substring(controller.indexOf("private fun officialAccountForDraft()"),
                 controller.indexOf("private fun hasOfficialAccess("));
         check(selection.contains("officialSession?.config") && selection.contains("savedOfficialHistory?.first")
@@ -184,9 +240,13 @@ public final class ManagedAccountFlowChecks {
         String publicChoice = method(controller, "fun openAppreciation()");
         check(publicChoice.contains("officialAccountForDraft() ?: return") && publicChoice.contains("refreshAppreciation()"),
                 "Appreciation automatically loads only for an eligible account");
-        check(method(controller, "fun foreground(").contains("cancelAppreciationRequest()")
+        String foreground = method(controller, "fun foreground(");
+        check(!foreground.contains("cancelAppreciationRequest()") && !foreground.contains("refreshAppreciation()")
+                && foreground.contains("appreciationFlow?.foreground(value)"),
+                "Focus changes preserve the account flow and do not cancel or reload its transport");
+        check(method(controller, "private fun closeAppreciation()").contains("cancelAppreciationRequest()")
                 && method(controller, "private fun cancelAppreciationRequest()").contains("cancelPending()"),
-                "Background invalidates and cancels account transport");
+                "Leaving the account page still cancels its transport");
         check(main.contains("session = activity.sharedConnectionSession") && main.contains("this.sharedConnectionSession = retained.session"),
                 "Rotation retains the same controller and in-flight authentication");
         String saved = method(main, "protected void onSaveInstanceState(");
@@ -222,7 +282,8 @@ public final class ManagedAccountFlowChecks {
     public static void main(String[] args) throws Exception {
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
         identityAndEntitlementAreServerBound();
-        backgroundNavigationAndAccountSwitchDiscardOldResponses();
+        backgroundPreservesDisplayAndNavigationDiscardsOldResponses();
+        liveExpiryUsesElapsedTimeWithoutDesktopBootIdentity();
         failuresAndImageCopiesAreIsolated();
         publicQrSurvivesUnknownAuthentication();
         if (args.length > 0) activityIntegrationGuards(Path.of(args[0]));

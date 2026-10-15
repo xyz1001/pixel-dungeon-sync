@@ -113,8 +113,8 @@ private object ProductionOfficialClients : SharedOfficialClients {
 /**
  * The same state machine runs on both platforms. UI methods and [ui] callbacks must run on
  * the platform UI thread. [io] performs blocking I/O. Attachment changes never replay an
- * authentication attempt. A background transition invalidates every DAV proof; a returned
- * login can retain its account, but cannot restore permission to save or start further I/O.
+ * authentication attempt. Android backgrounding invalidates in-flight mutation/DAV permission,
+ * but retains confirmed account display and its server-time expiry. Window focus is not observed.
  */
 class SharedConnectionController internal constructor(
     private val origin: ConnectionEntryModel.Origin,
@@ -158,6 +158,7 @@ class SharedConnectionController internal constructor(
     private var host: SharedConnectionHost? = null
     private val alive = AtomicBoolean(true)
     private val foreground = AtomicBoolean(false)
+    private var entered = false
     private val generation = AtomicLong(0)
     private val lifetime = AtomicLong(0)
     private var operation: Operation? = null
@@ -192,7 +193,7 @@ class SharedConnectionController internal constructor(
     }
     private data class Proof(val generation: Long, val lifetime: Long, val config: SharedConnectionConfig)
     private data class OfficialSession(val config: SharedConnectionConfig, val record: TrustedEntitlementCache.Record,
-                                       val generation: Long, val lifetime: Long)
+                                       val generation: Long)
     private data class Authentication(val config: SharedConnectionConfig, val record: TrustedEntitlementCache.Record?)
 
     fun attach(host: SharedConnectionHost) {
@@ -218,16 +219,17 @@ class SharedConnectionController internal constructor(
                 proof = null
             }
         }
-        val wasForeground = foreground.get()
         val pending = operation
         if (pending == null) transition() else synchronized(pending) { transition() }
-        if (!value) cancelAppreciationRequest()
         appreciationFlow?.foreground(value)
         publish()
         if (value) {
             deliverCommit()
-            if (!wasForeground && appreciationFlow != null) refreshAppreciation()
-            else restoreOfficialAccount()
+            // Restore saved credentials once on actual page entry, never on focus/resume.
+            if (!entered) {
+                entered = true
+                restoreOfficialAccount()
+            }
         }
     }
 
@@ -372,7 +374,6 @@ class SharedConnectionController internal constructor(
     private fun restoreOfficialAccount() {
         if (!canStart() || appreciationFlow != null || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
         val candidate = savedReentry?.takeIf { it.official && it == draft() }
-            ?: officialSession?.takeIf { it.config == draft() && it.lifetime != lifetime.get() }?.config
             ?: return
         savedReentry = null
         val pending = Operation(generation.get(), lifetime.get(), candidate, accountRefresh = true)
@@ -395,7 +396,7 @@ class SharedConnectionController internal constructor(
 
     private fun acceptOfficialAccount(candidate: SharedConnectionConfig, record: TrustedEntitlementCache.Record?, pending: Operation) {
         officialSession = record?.takeIf { canWork(pending) && candidate == draft() }?.let {
-            OfficialSession(candidate, it, pending.generation, pending.lifetime)
+            OfficialSession(candidate, it, pending.generation)
         }
         notice = if (officialSession != null) "" else "请重新登录。"
         error = officialSession == null
@@ -497,7 +498,7 @@ class SharedConnectionController internal constructor(
         refreshAppreciation()
     }
 
-    /** One load per open/resume; at most one retry while no usable public image exists. */
+    /** One load per explicit page open; focus/resume never requests data. Missing images retry once. */
     fun refreshAppreciation() {
         val flow = appreciationFlow ?: return
         val source = appreciationSource ?: return
@@ -513,7 +514,7 @@ class SharedConnectionController internal constructor(
         }
         appreciationClient = client
         publish()
-        fun current() = alive.get() && foreground.get() && flow.accepts(ticket)
+        fun current() = alive.get() && flow.accepts(ticket)
         try {
             io.execute {
                 var message = initialMessage
@@ -566,7 +567,7 @@ class SharedConnectionController internal constructor(
                             if (flow.entitlement(ticket, entitlement.username, entitlement.expiresMs,
                                     entitlement.active, entitlement.managed, entitlement.serverTimeMs)) {
                                 val record = remember(source, entitlement)
-                                officialSession = OfficialSession(source, record, generation.get(), lifetime.get())
+                                officialSession = OfficialSession(source, record, generation.get())
                                 publish()
                             }
                         }
@@ -746,7 +747,7 @@ class SharedConnectionController internal constructor(
     private fun hasOfficialAccess(session: OfficialSession): Boolean {
         val record = session.record
         return alive.get() && foreground.get() && session.generation == generation.get() &&
-            session.lifetime == lifetime.get() && session.config == draft() && record.active &&
+            session.config == draft() && record.active &&
             ports.elapsedRealtimeMs() >= record.elapsedMs &&
             (record.expiresMs == null || record.serverTimeMs != null) && !officialExpired(record)
     }
