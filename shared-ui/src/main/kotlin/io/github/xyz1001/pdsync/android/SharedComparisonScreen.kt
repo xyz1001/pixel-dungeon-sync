@@ -31,14 +31,22 @@ import androidx.compose.ui.unit.sp
 import pdsync.NoviceCopy
 import pdsync.OnboardingKind
 
-/** One physical Step 4 screen. Rendering does not inspect files or contact the cloud. */
+/** One physical Step 4 screen. The optional appreciation slot never changes comparison actions. */
 @Composable
-fun SharedComparisonScreen(state: SharedComparisonState, actions: SharedComparisonActions) {
-    SharedConnectionTheme { SharedComparisonContent(state, actions) }
+fun SharedComparisonScreen(
+    state: SharedComparisonState,
+    actions: SharedComparisonActions,
+    appreciation: (@Composable () -> Unit)? = null,
+) {
+    SharedConnectionTheme { SharedComparisonContent(state, actions, appreciation) }
 }
 
 @Composable
-private fun SharedComparisonContent(state: SharedComparisonState, actions: SharedComparisonActions) {
+private fun SharedComparisonContent(
+    state: SharedComparisonState,
+    actions: SharedComparisonActions,
+    appreciation: (@Composable () -> Unit)?,
+) {
     val currentState by rememberUpdatedState(state)
     val currentActions by rememberUpdatedState(actions)
     val interactions = remember { SharedComparisonInteractions({ currentState }, { currentActions }) }
@@ -50,7 +58,7 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
             SharedActionButton(state.primaryLabel, { interactions.performPrimary(state.primary) }, enabled = state.primaryEnabled)
         }) {
         if (state.isSimpleCompletion) {
-            Column(Modifier.fillMaxWidth().heightIn(min = 285.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            Column(Modifier.fillMaxWidth().heightIn(min = if (appreciation == null) 285.dp else 64.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 Text(state.headline, fontSize = 29.sp, lineHeight = 36.sp, fontWeight = FontWeight(650))
                 if (state.kind != OnboardingKind.IDENTICAL || state.feedbackError) ComparisonNotice(state)
@@ -84,6 +92,9 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
                     SharedComparisonPrimary.OPEN_RECOVERY)) ComparisonDetails(state, interactions)
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
+        appreciation?.let { content ->
+            Column(Modifier.fillMaxWidth().padding(top = 20.dp)) { content() }
+        }
     }
     state.confirmationPresentation?.let { presentation ->
         SharedConfirmationDialog(presentation, interactions::confirm, interactions::previewMerge, interactions::cancel) {

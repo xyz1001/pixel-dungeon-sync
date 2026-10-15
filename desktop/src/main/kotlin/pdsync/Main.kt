@@ -1081,6 +1081,11 @@ internal fun runSyncApplication(
           performOnboarding(SetupAction.MERGE, finishAfterOperation = true, confirmedProof = proof)
         }
         override fun cancelConflict(token: Long) { comparisonAdapter.cancel(comparisonContext(), token) }
+       }, appreciation = config?.takeIf {
+        it.connectionProvider == "official" && isDesktopOfficialRoot(it.endpoint)
+       }?.let { account ->
+        { DesktopComparisonAppreciation(account, password, configFile,
+           workspace.resolve(".local/official-account-cache")) }
        })
        Page.HOME -> SharedHomeScreen(homeState(), object : SharedHomeActions {
         override fun settings() { if (homeState().canInteract) navigate(Page.SETTINGS) }

@@ -3,6 +3,10 @@
 package io.github.xyz1001.pdsync.android
 
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsOwner
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
 import java.nio.file.Files
 import java.nio.file.Path
@@ -118,7 +122,12 @@ class SharedBuiltinConnectionFlowTest {
                         SharedConnectionScreen(page.controller, SharedGameIdentity("破碎的像素地牢", "3.3.8"))
                     }
                     try {
-                        repeat(3) { scene.render() }
+                        repeat(3) { scene.render().close() }
+                        val labels = visibleTexts(scene)
+                        assertTrue("用户名 alice" in labels)
+                        assertTrue(page.controller.state.officialExpiry in labels)
+                        assertFalse(labels.any { it == "赞赏" || it == "赞赏续期" || it == "赞赏可续期一年" || it == "复制用户名" },
+                            "Step 3 retains login and expiry without separate appreciation navigation")
                         val pixels = scene.render().encodeToData(EncodedImageFormat.PNG)!!.bytes
                         val output = Path.of("build/ui-reference-builtin")
                         Files.createDirectories(output)
@@ -131,6 +140,16 @@ class SharedBuiltinConnectionFlowTest {
         }
     }
 
+    private fun visibleTexts(scene: ImageComposeScene): List<String> {
+        val backing = ImageComposeScene::class.java.getDeclaredField("scene").run { isAccessible = true; get(scene) }
+        val root = backing.javaClass.getDeclaredField("mainOwner").run { isAccessible = true; get(backing) }
+        val owner = root.javaClass.getMethod("getSemanticsOwner").invoke(root) as SemanticsOwner
+        fun nodes(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::nodes)
+        return nodes(owner.unmergedRootSemanticsNode).flatMap {
+            it.config.getOrNull(SemanticsProperties.Text).orEmpty().map { text -> text.text }
+        }
+    }
+
     @Test fun sharedSourceOnlyRendersCustomTestAndAuthenticatedAppreciation() {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.isDirectory(it.resolve("shared-ui/src/main/kotlin")) }
@@ -140,6 +159,7 @@ class SharedBuiltinConnectionFlowTest {
         assertEquals(1, Regex("SharedActionButton\\(\\\"测试连接\\\"").findAll(source).count())
         val authenticated = source.substringAfter("if (state.showOfficialAccount) {").substringBefore("} else {")
         assertTrue(authenticated.contains("state.officialExpiry"))
+        assertTrue(authenticated.contains("if (!setup) Row"), "Only settings retain the separate appreciation navigation")
         assertTrue(authenticated.contains("state.appreciationLabel"))
         assertTrue(authenticated.contains("赞赏可续期一年"))
         assertEquals(1, Regex("赞赏可续期一年").findAll(source).count())

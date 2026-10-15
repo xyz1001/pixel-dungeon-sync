@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -33,6 +34,13 @@ import pdsync.DiagnosticStage
 
 /** Android owns platform services only. The same screen and controller compile on desktop. */
 object AndroidConnectionComposition {
+    /** No navigation, account activation, or comparison-busy callback leaves the inline panel. */
+    private object ReadOnlyHost : SharedConnectionHost {
+        override fun onBack(destination: ConnectionEntryModel.Back) = Unit
+        override fun onCommitted(config: SharedConnectionConfig) = Unit
+        override fun onBusyChanged(busy: Boolean) = Unit
+    }
+
     /** No Activity is retained here. Only the controller's detachable host points at the current UI. */
     class Session internal constructor(
         val controller: SharedConnectionController,
@@ -40,6 +48,8 @@ object AndroidConnectionComposition {
         private val app: Context,
         private val io: ExecutorService,
     ) : AutoCloseable {
+        fun attachReadOnlyHost() = controller.attach(ReadOnlyHost)
+
         fun requestImageSave(): Boolean = imageExport.request(
             controller.currentAppreciationPng(), controller.currentAppreciationScope())
 
@@ -66,29 +76,60 @@ object AndroidConnectionComposition {
             AppreciationImageExport(io, ui), context.applicationContext, io)
     }
 
+    /** Read-only Step 4 session: even an accidental controller action cannot activate an account. */
+    @JvmStatic
+    fun createReadOnlyAppreciation(context: Context, existing: SecureConnectionStore.Connection): Session {
+        val io = Executors.newSingleThreadExecutor()
+        val handler = Handler(Looper.getMainLooper())
+        val ui = Executor { task -> handler.post(task) }
+        return Session(SharedConnectionController(ConnectionEntryModel.Origin.SETTINGS,
+            fromStored(existing), existing.profile,
+            AndroidConnectionPorts(context.applicationContext, readOnly = true), io, ui),
+            AppreciationImageExport(io, ui), context.applicationContext, io)
+    }
+
+    internal data class ImageSaveUi(
+        val onSaveImage: (() -> Unit)?,
+        val busy: Boolean,
+        val message: String,
+    )
+
+    /** Both hosts keep this launcher at a stable, unconditional composition position. */
+    @Composable
+    internal fun rememberImageSave(session: Session?): ImageSaveUi {
+        // A retained session owns the exact requested PNG through the picker and rotation.
+        // Process death loses those pending bytes and safely ignores a returned destination.
+        val saveImage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {
+            session?.selectedImageDestination(it)
+        }
+        val export = session?.imageExport?.state
+        val image = session?.controller?.state?.appreciation?.image
+        val source = session?.controller?.currentAppreciationScope()
+        val png = remember(session, image, source) { session?.controller?.currentAppreciationPng() }
+        return ImageSaveUi(
+            onSaveImage = session?.let { owner ->
+                {
+                    if (owner.requestImageSave()) {
+                        try { saveImage.launch("appreciation.png") }
+                        catch (_: RuntimeException) { owner.imageExport.launchFailed() }
+                    }
+                }
+            },
+            busy = export?.busy == true,
+            message = session?.imageExport?.messageFor(source, png).orEmpty(),
+        )
+    }
+
     @JvmStatic
     fun show(activity: ComponentActivity, session: Session, game: SharedGameIdentity?) {
         activity.setContent {
-            // Register unconditionally at a stable composition position so a picker result can
-            // return after rotation. Process death loses the pending bytes and safely ignores it.
-            val saveImage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {
-                session.selectedImageDestination(it)
-            }
-            val export = session.imageExport.state
-            val image = session.controller.state.appreciation?.image
-            val source = session.controller.currentAppreciationScope()
-            val png = remember(image, source) { session.controller.currentAppreciationPng() }
+            val imageSave = rememberImageSave(session)
             // Android target 36 is edge-to-edge. Keep system bars/IME handling out of desktop UI.
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 SharedConnectionScreen(session.controller, game,
-                    onSaveImage = {
-                        if (session.requestImageSave()) {
-                            try { saveImage.launch("appreciation.png") }
-                            catch (_: RuntimeException) { session.imageExport.launchFailed() }
-                        }
-                    },
-                    imageSaveBusy = export.busy,
-                    imageSaveMessage = session.imageExport.messageFor(source, png),
+                    onSaveImage = imageSave.onSaveImage,
+                    imageSaveBusy = imageSave.busy,
+                    imageSaveMessage = imageSave.message,
                 )
             }
         }
@@ -108,7 +149,7 @@ object AndroidConnectionComposition {
 }
 
 /** Application-context-only, typed adapter. It never chooses a game, source, namespace, or baseline. */
-internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts {
+internal class AndroidConnectionPorts(context: Context, private val readOnly: Boolean = false) : SharedConnectionPorts {
     private val app = context.applicationContext
 
     /** Durable credential equality is only permission to start fresh verification on Next. */
@@ -124,6 +165,7 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
     }.getOrDefault(false)
 
     override fun testConnection(config: SharedConnectionConfig): Boolean = diagnostic(DiagnosticStage.CONNECTION) {
+        check(!readOnly) { "Read-only appreciation cannot probe a connection" }
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()
@@ -143,6 +185,7 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
     }
 
     private fun persistAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
+        check(!readOnly) { "Read-only appreciation cannot activate a connection" }
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()

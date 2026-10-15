@@ -20,11 +20,12 @@ MANIFEST = (REPO / "android-app/AndroidManifest.xml").read_text()
 class AppreciationImageExportContract(unittest.TestCase):
     def test_png_system_create_picker_is_registered_unconditionally(self):
         show = body(ADAPTER, "fun show(")
-        self.assertIn('rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png"))', show)
-        self.assertLess(show.index("rememberLauncherForActivityResult"), show.index("Box("))
-        self.assertLess(show.index("session.requestImageSave()"), show.index('saveImage.launch("appreciation.png")'))
-        self.assertIn("session.selectedImageDestination(it)", show)
-        self.assertIn("session.imageExport.launchFailed()", show)
+        picker = body(ADAPTER, "internal fun rememberImageSave(")
+        self.assertIn('rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png"))', picker)
+        self.assertLess(show.index("rememberImageSave(session)"), show.index("Box("))
+        self.assertLess(picker.index("owner.requestImageSave()"), picker.index('saveImage.launch("appreciation.png")'))
+        self.assertIn("session?.selectedImageDestination(it)", picker)
+        self.assertIn("owner.imageExport.launchFailed()", picker)
         for forbidden in ("MediaStore", "ACTION_GET_CONTENT", "ACTION_OPEN_DOCUMENT", "takePersistableUriPermission"):
             self.assertNotIn(forbidden, ADAPTER + DESTINATION)
 
@@ -49,8 +50,9 @@ class AppreciationImageExportContract(unittest.TestCase):
     def test_success_is_bound_to_original_page_and_png_content_not_bitmap_instance(self):
         self.assertIn("source !== this.source", EXPORT)
         self.assertIn("imageDigest?.contentEquals(digest(png))", EXPORT)
-        self.assertIn("session.controller.currentAppreciationScope()", ADAPTER)
-        self.assertIn("imageSaveMessage = session.imageExport.messageFor(source, png)", ADAPTER)
+        self.assertIn("session?.controller?.currentAppreciationScope()", ADAPTER)
+        self.assertIn("message = session?.imageExport?.messageFor(source, png).orEmpty()", ADAPTER)
+        self.assertIn("imageSaveMessage = imageSave.message", ADAPTER)
 
     def test_background_writer_closes_flushes_and_does_not_reencode(self):
         self.assertIn('resolver.openOutputStream(uri, "w")', DESTINATION)

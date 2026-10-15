@@ -27,6 +27,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import pdsync.OnboardingKind
 
 /** Actual shared appreciation content, semantic state, and pointer dispatch. All image data is synthetic. */
 class SharedAppreciationRenderTest {
@@ -43,6 +44,7 @@ class SharedAppreciationRenderTest {
         var saves = 0
         var copies = 0
         var backs = 0
+        val finishes = mutableListOf<SharedComparisonCompletion>()
         val save: () -> Unit = { saves++ }
     }
 
@@ -158,6 +160,104 @@ class SharedAppreciationRenderTest {
                 assertEquals(1, host.backs)
                 assertNoRefresh(restored)
             } finally { scene.close() }
+        }
+    }
+
+    @Test fun sameAndEmptyStepFourEmbedImageAndKeepCompletionWithoutAccountOrExtraNavigation() {
+        for (width in widths) for (kind in listOf(OnboardingKind.IDENTICAL, OnboardingKind.BOTH_EMPTY)) {
+            for (androidSave in listOf(false, true)) {
+                val host = Host(syntheticImage())
+                host.appreciation = host.appreciation.copy(accessStatus = "private account status",
+                    message = "private account refresh error")
+                val scene = comparisonScene(width, host, kind, androidSave)
+                try {
+                    render(scene, "inline-${kind.name.lowercase()}-${if (androidSave) "android" else "desktop"}-$width")
+                    val nodes = semanticsNodes(scene)
+                    val labels = texts(nodes)
+                    assertTrue(hasImage(nodes))
+                    assertTrue("赞赏可续期一年" in labels)
+                    assertTrue((if (kind == OnboardingKind.IDENTICAL) "进度已同步" else "配置完成") in labels)
+                    assertFalse(labels.any { it.contains("layout-user") || it.contains("用户名") || it.contains("有效期") ||
+                        it.contains("private account") || it == "详细信息" || it == "返回" || it == "赞赏" })
+                    assertFalse(labels.any { it == "上一步" } && kind == OnboardingKind.IDENTICAL)
+                    assertNoRefresh(nodes)
+                    val finish = button(nodes, "完成")
+                    assertEnabled(finish, true)
+                    assertWithinViewport(finish.boundsInRoot, width)
+                    if (androidSave) {
+                        val save = button(nodes, "保存图片")
+                        assertEnabled(save, true)
+                        assertWithinViewport(save.boundsInRoot, width)
+                        click(scene, save.boundsInRoot.center)
+                        assertEquals(1, host.saves)
+                    } else {
+                        assertFalse("保存图片" in labels)
+                    }
+                    click(scene, finish.boundsInRoot.center)
+                    assertEquals(listOf(if (kind == OnboardingKind.IDENTICAL) SharedComparisonCompletion.CONFIRM
+                        else SharedComparisonCompletion.EMPTY), host.finishes)
+                    assertEquals(0, host.copies)
+                    assertEquals(0, host.backs)
+
+                    host.appreciation = host.appreciation.copy(image = null, message = "private account refresh error")
+                    render(scene, "inline-missing-${kind.name.lowercase()}-$androidSave-$width")
+                    val failed = semanticsNodes(scene)
+                    assertTrue("赞赏码暂时无法加载。" in texts(failed))
+                    assertFalse(texts(failed).any { it.contains("private account") || it.contains("用户名") })
+                    assertEnabled(button(failed, "完成"), true)
+                    if (androidSave) assertEnabled(button(failed, "保存图片"), false)
+                } finally { scene.close() }
+            }
+        }
+    }
+
+    @Test fun customDavStepFourHasNoAppreciationAndInlineFailureCannotEnableBlockedComparison() {
+        val host = Host(syntheticImage())
+        val noSlot = comparisonScene(500, host, OnboardingKind.BOTH_EMPTY, androidSave = false, showAppreciation = false)
+        try {
+            render(noSlot, "custom-comparison-no-appreciation")
+            val nodes = semanticsNodes(noSlot)
+            assertFalse(hasImage(nodes))
+            assertFalse(texts(nodes).any { it.contains("赞赏") || it.contains("用户名") || it == "保存图片" })
+            assertEnabled(button(nodes, "完成"), true)
+        } finally { noSlot.close() }
+
+        host.appreciation = host.appreciation.copy(image = null, busy = true)
+        val blocked = comparisonScene(320, host, null, androidSave = true, comparisonBusy = true)
+        try {
+            render(blocked, "inline-loading-comparison-blocked")
+            assertEnabled(button(semanticsNodes(blocked), "重新检查"), false)
+            host.appreciation = host.appreciation.copy(busy = false, message = "image failure")
+            render(blocked, "inline-failed-comparison-still-blocked")
+            val nodes = semanticsNodes(blocked)
+            assertTrue("赞赏码暂时无法加载。" in texts(nodes))
+            assertEnabled(button(nodes, "重新检查"), false)
+            assertTrue(host.finishes.isEmpty())
+        } finally { blocked.close() }
+    }
+
+    private fun comparisonScene(width: Int, host: Host, kind: OnboardingKind?, androidSave: Boolean,
+        showAppreciation: Boolean = true, comparisonBusy: Boolean = false): ImageComposeScene {
+        val actions = object : SharedComparisonActions {
+            override fun back() { host.backs++ }
+            override fun refresh() = Unit
+            override fun selectProgress(choice: SharedProgressChoice) = Unit
+            override fun selectRemote(snapshotId: String) = Unit
+            override fun finish(mode: SharedComparisonCompletion) { host.finishes += mode }
+            override fun handleConflict() = Unit
+            override fun upload() = Unit
+            override fun openRecovery() = Unit
+        }
+        return ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+            SharedComparisonScreen(SharedComparisonState(kind, cloudVerified = kind != null,
+                canCompleteWithoutTransfer = kind == OnboardingKind.IDENTICAL, pageActive = true,
+                configured = true, busy = comparisonBusy, game = SharedGameIdentity("private game title", "3.3.8"),
+                localDetails = "hidden comparison detail", details = "hidden comparison detail"), actions,
+                appreciation = if (showAppreciation) ({
+                    SharedInlineAppreciationContent(host.appreciation, false, { host.copies++ },
+                        onSaveImage = if (androidSave) host.save else null,
+                        imageSaveBusy = host.imageSaveBusy, imageSaveMessage = host.imageSaveMessage)
+                }) else null)
         }
     }
 

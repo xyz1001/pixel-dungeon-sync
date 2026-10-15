@@ -21,7 +21,7 @@ class SharedComparisonAndroidContract(unittest.TestCase):
         self.assertLess(render.index(route), render.index('ScrollView scrollView'))
         self.assertNotIn('private void renderComparison()', MAIN)
         adapter = body(ADAPTER, 'fun showComparison(')
-        self.assertIn('SharedComparisonScreen(state, actions)', adapter)
+        self.assertIn('SharedComparisonScreen(state, actions, appreciation = appreciation)', adapter)
         self.assertIn('safeDrawingPadding().imePadding()', adapter)
         for native in ('LinearLayout', 'RadioButton', 'foot(', 'heading(', 'showConfirmation('):
             self.assertNotIn(native, body(MAIN, 'private void renderSharedComparison()'))

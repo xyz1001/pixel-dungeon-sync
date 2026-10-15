@@ -647,6 +647,117 @@ class SharedConnectionControllerTest {
         assertEquals(0, f.ports.saves)
     }
 
+    @Test fun inlineAppreciationWaitsForSavedAuthenticationAndRepeatedEntryDoesNotRepeatReads() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, ConnectionEntryModel.Origin.SETTINGS, persisted = saved)
+        f.enableImage()
+        repeat(4) { f.controller.openAppreciationOnly() }
+        assertNull(f.controller.state.appreciation)
+        assertEquals(0, f.clients.entitlementCalls, "Saved authentication is still queued")
+        f.finish(); f.finish()
+        assertNotNull(f.controller.state.appreciation?.image)
+        assertEquals(0, f.clients.authCalls, "Saved credentials need no repeated login request")
+        assertEquals(2, f.clients.entitlementCalls, "One saved-account check and one appreciation read")
+        assertEquals(1, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        val scope = f.controller.currentAppreciationScope()
+        repeat(5) {
+            f.controller.openAppreciationOnly()
+            f.controller.foreground(false)
+            f.controller.foreground(true)
+            f.controller.refreshAccountStatus()
+            f.finish()
+        }
+        assertSame(scope, f.controller.currentAppreciationScope())
+        assertEquals(2, f.clients.entitlementCalls)
+        assertEquals(1, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertTrue(f.host.commits.isEmpty())
+        f.controller.close()
+    }
+
+    @Test fun inlineAppreciationFailedSavedAuthenticationDoesNotFetchImageOrRetryOnResume() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, ConnectionEntryModel.Origin.SETTINGS, persisted = saved)
+        f.enableImage(); f.clients.entitlementFailure = true
+        f.controller.openAppreciationOnly(); f.finish(); f.finish()
+        assertNull(f.controller.state.appreciation)
+        assertTrue(f.controller.state.error)
+        assertFalse(f.controller.state.busy)
+        repeat(3) {
+            f.controller.openAppreciationOnly()
+            f.controller.foreground(false); f.controller.foreground(true)
+            f.finish()
+        }
+        assertEquals(1, f.clients.entitlementCalls)
+        assertEquals(0, f.clients.publicCalls)
+        assertEquals(0, f.clients.authCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertTrue(f.host.commits.isEmpty())
+        f.controller.close()
+    }
+
+    @Test fun inlineAppreciationMissingImageUsesBoundedExistingRetryWithoutBlockingOtherWork() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, ConnectionEntryModel.Origin.SETTINGS, persisted = saved)
+        f.controller.openAppreciationOnly(); f.finish(); f.finish()
+        val appreciation = assertNotNull(f.controller.state.appreciation)
+        assertNull(appreciation.image)
+        assertFalse(appreciation.busy)
+        assertTrue(appreciation.message.isNotBlank())
+        assertEquals(2, f.clients.metadataCalls, "Only the existing bounded public-image retry runs")
+        repeat(3) { f.controller.openAppreciationOnly(); f.finish() }
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(2, f.clients.entitlementCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        f.controller.close()
+    }
+
+    @Test fun inlineAppreciationDoesNothingForCustomDavOrAfterPageClose() {
+        val custom = SharedConnectionConfig("https://dav.example.test/", "custom-user", "", "slot", false)
+        val f = Fixture(custom, ConnectionEntryModel.Origin.SETTINGS, persisted = custom)
+        f.controller.openAppreciationOnly(); f.finish()
+        assertNull(f.controller.state.appreciation)
+        assertEquals(0, f.clients.entitlementCalls)
+        assertEquals(0, f.clients.publicCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        f.controller.close()
+        f.controller.openAppreciationOnly(); f.finish()
+        assertNull(f.controller.state.appreciation)
+        assertEquals(0, f.clients.publicCalls)
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Test fun realInlineComposableRecomposesWithoutStartingAnotherAppreciationLoad() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, ConnectionEntryModel.Origin.SETTINGS, persisted = saved)
+        f.enableImage()
+        val scene = androidx.compose.ui.ImageComposeScene(width = 500, height = 600) {
+            SharedConnectionTheme { SharedInlineAppreciation(f.controller) }
+        }
+        try {
+            repeat(4) { scene.render().close(); f.finish() }
+            assertNotNull(f.controller.state.appreciation?.image)
+            assertEquals(1, f.clients.metadataCalls)
+            assertEquals(1, f.clients.imageCalls)
+            repeat(5) {
+                f.controller.refreshAccountStatus()
+                scene.render().close()
+                f.finish()
+            }
+            assertEquals(1, f.clients.metadataCalls)
+            assertEquals(1, f.clients.imageCalls)
+            assertEquals(2, f.clients.entitlementCalls)
+            assertEquals(0, f.ports.probes)
+            assertEquals(0, f.ports.saves)
+        } finally { scene.close(); f.controller.close() }
+    }
+
     @Test fun elapsedExpiryInvalidatesOfficialProofBeforeSave() {
         val f = Fixture(); f.official()
         f.controller.login(); f.finish()

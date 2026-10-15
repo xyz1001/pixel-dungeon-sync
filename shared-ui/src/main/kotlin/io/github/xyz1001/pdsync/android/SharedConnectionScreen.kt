@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** One physical UI source, compiled by both desktop JVM and Android. */
@@ -105,7 +106,7 @@ private fun SharedConnectionContent(
                             Text("用户名 ${state.username}")
                             Text(state.officialExpiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
                             if (state.officialAccessStatus.isNotEmpty()) SharedConnectionNotice(state.officialAccessStatus)
-                            Row(verticalAlignment = Alignment.CenterVertically,
+                            if (!setup) Row(verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SharedActionButton(state.appreciationLabel, controller::openAppreciation,
                                     enabled = !state.busy && state.canAppreciate, style = SharedButtonStyle.TEXT)
@@ -155,10 +156,12 @@ internal fun SharedAppreciationContent(
     onSaveImage: (() -> Unit)? = null,
     imageSaveBusy: Boolean = false,
     imageSaveMessage: String = "",
+    showAccount: Boolean = true,
+    imageHeight: Dp = 240.dp,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         appreciation.image?.let {
-            Image(it, "赞赏码", Modifier.fillMaxWidth().height(240.dp), contentScale = ContentScale.Fit)
+            Image(it, "赞赏码", Modifier.fillMaxWidth().height(imageHeight), contentScale = ContentScale.Fit)
         }
         if (onSaveImage != null) {
             SharedActionButton(if (imageSaveBusy) "保存中…" else "保存图片", onSaveImage,
@@ -166,14 +169,19 @@ internal fun SharedAppreciationContent(
                 style = SharedButtonStyle.SECONDARY)
             if (imageSaveMessage.isNotEmpty()) SharedConnectionNotice(imageSaveMessage)
         }
-        appreciation.username?.let { username ->
+        if (showAccount) appreciation.username?.let { username ->
             Text(if (appreciation.authenticated) "用户名 $username" else "用户名（未验证） $username")
             SharedActionButton("复制用户名", copyUsername, style = SharedButtonStyle.SECONDARY)
             Text("赞赏时请备注用户名", color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
         }
-        Text(appreciation.expiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
-        if (appreciation.accessStatus.isNotEmpty()) Text(appreciation.accessStatus, style = MaterialTheme.typography.body2)
-        if (appreciation.message.isNotEmpty()) SharedConnectionNotice(appreciation.message)
+        if (showAccount) {
+            Text(appreciation.expiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
+            if (appreciation.accessStatus.isNotEmpty()) Text(appreciation.accessStatus, style = MaterialTheme.typography.body2)
+            if (appreciation.message.isNotEmpty()) SharedConnectionNotice(appreciation.message)
+        } else if (appreciation.image == null && !appreciation.busy) {
+            // The inline panel does not disclose account metadata or account-refresh errors.
+            SharedConnectionNotice("赞赏码暂时无法加载。")
+        }
         if (appreciation.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
     }
 }

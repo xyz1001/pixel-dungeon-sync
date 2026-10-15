@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import pdsync.SaveSummary
 import pdsync.OnboardingKind
@@ -112,6 +113,7 @@ object AndroidOnboardingComposition {
         canCopyDiagnostics: Boolean,
         confirmation: SharedComparisonConfirmation?,
         feedbackError: Boolean,
+        appreciationSession: AndroidConnectionComposition.Session?,
         actions: SharedComparisonActions,
     ) {
         val kind = observed?.kind?.let { runCatching { OnboardingKind.valueOf(it) }.getOrDefault(OnboardingKind.BLOCKED) }
@@ -146,8 +148,19 @@ object AndroidOnboardingComposition {
             feedbackError = feedbackError,
         )
         activity.setContent {
+            // Register even for custom DAV; a previous, disposed session cannot export a new image.
+            val imageSave = AndroidConnectionComposition.rememberImageSave(appreciationSession)
+            val appreciation: (@Composable () -> Unit)? = appreciationSession?.let { session ->
+                {
+                    SharedInlineAppreciation(session.controller,
+                        onSaveImage = imageSave.onSaveImage,
+                        imageSaveBusy = imageSave.busy,
+                        imageSaveMessage = imageSave.message,
+                    )
+                }
+            }
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedComparisonScreen(state, actions)
+                SharedComparisonScreen(state, actions, appreciation = appreciation)
             }
         }
     }

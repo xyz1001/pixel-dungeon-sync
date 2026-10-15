@@ -144,6 +144,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private String selected;
     private TextView status;
     private AndroidConnectionComposition.Session sharedConnectionSession;
+    private AndroidConnectionComposition.Session sharedComparisonAppreciationSession;
+    private SecureConnectionStore.Connection sharedComparisonAppreciationAccount;
     private SharedConnectionConfig pendingSharedCommit;
     private int sharedCommitSerial;
     private boolean sharedReloadPending;
@@ -156,7 +158,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final boolean onboarding, draftLoaded, appreciationOnly;
         final SyncPage page;
         final String profile;
-        final AndroidConnectionComposition.Session session;
+        final AndroidConnectionComposition.Session session, comparisonAppreciationSession;
+        final SecureConnectionStore.Connection comparisonAppreciationAccount;
         final SharedConnectionConfig pendingCommit;
         final AutomaticHistoryState automaticHistory;
         RetainedConnectionUi(MainActivity activity) {
@@ -166,6 +169,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             page = activity.page;
             profile = activity.draftProfile;
             session = activity.sharedConnectionSession;
+            comparisonAppreciationSession = activity.sharedComparisonAppreciationSession;
+            comparisonAppreciationAccount = activity.sharedComparisonAppreciationAccount;
             pendingCommit = activity.pendingSharedCommit;
             appreciationOnly = activity.sharedAppreciationOnly;
         }
@@ -245,9 +250,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     @Override public Object onRetainCustomNonConfigurationInstance() {
-        if (this.sharedConnectionSession == null && this.automaticHistoryState.outcome == null
-                && !this.automaticHistoryState.inFlight) return null;
+        if (this.sharedConnectionSession == null && this.sharedComparisonAppreciationSession == null
+                && this.automaticHistoryState.outcome == null && !this.automaticHistoryState.inFlight) return null;
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().detach();
+        if (this.sharedComparisonAppreciationSession != null) this.sharedComparisonAppreciationSession.getController().detach();
         return new RetainedConnectionUi(this);
     }
 
@@ -258,6 +264,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.draftLoaded = retained.draftLoaded;
         this.page = retained.page == SyncPage.CONFIRM ? SyncPage.HOME : retained.page;
         this.sharedConnectionSession = retained.session;
+        this.sharedComparisonAppreciationSession = retained.comparisonAppreciationSession;
+        this.sharedComparisonAppreciationAccount = retained.comparisonAppreciationAccount;
+        if (this.sharedComparisonAppreciationSession != null)
+            this.sharedComparisonAppreciationSession.attachReadOnlyHost();
         this.pendingSharedCommit = retained.pendingCommit;
         this.sharedAppreciationOnly = retained.appreciationOnly;
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().attach(this);
@@ -282,6 +292,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final int commitBeforeResume = this.sharedCommitSerial;
         this.resumed = true;
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(true);
+        if (this.sharedComparisonAppreciationSession != null)
+            this.sharedComparisonAppreciationSession.getController().foreground(true);
         if (!this.receiverRegistered) {
             IntentFilter changes = new IntentFilter("io.github.xyz1001.pdsync.android.INSTALL_CHANGED");
             changes.addAction(AutoSyncService.HISTORY_CHANGED);
@@ -312,6 +324,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.comparisonProofState.reset();
         invalidatePathPreview();
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(false);
+        if (this.sharedComparisonAppreciationSession != null)
+            this.sharedComparisonAppreciationSession.getController().foreground(false);
         if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this);
         super.onPause();
     }
@@ -327,6 +341,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.sharedConnectionSession != null) {
             this.sharedConnectionSession.getController().detach();
             if (!isChangingConfigurations()) closeSharedConnection();
+        }
+        if (this.sharedComparisonAppreciationSession != null) {
+            this.sharedComparisonAppreciationSession.getController().detach();
+            if (!isChangingConfigurations()) closeComparisonAppreciation();
         }
         if (this.receiverRegistered) {
             unregisterReceiver(this.installChanged);
@@ -1083,6 +1101,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             invalidatePathPreview();
         }
         if (syncPage != SyncPage.CONNECTION) closeSharedConnection();
+        if (syncPage != SyncPage.COMPARISON) closeComparisonAppreciation();
         if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
         this.detailsExpanded = false;
         this.page = syncPage;
@@ -1101,6 +1120,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.activeSharedComparisonClaim = null;
         }
         if (this.page != SyncPage.COMPARISON) this.comparisonProofState.reset();
+        if (this.page != SyncPage.COMPARISON || this.sharedAppreciationOnly) closeComparisonAppreciation();
         if (this.page != SyncPage.PATH || this.sharedAppreciationOnly) invalidatePathPreview();
         if (drainSharedCommit()) return;
         if (this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly) {
@@ -2381,7 +2401,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void closeSharedConnection() {
         AndroidConnectionComposition.Session session = this.sharedConnectionSession;
         this.sharedConnectionSession = null;
-        this.retainedConnectionUi = null;
+        // A Step 4 rotation snapshot remains live while the unrelated Step 3 host is absent.
+        if (this.sharedComparisonAppreciationSession == null) this.retainedConnectionUi = null;
         this.sharedAppreciationOnly = false;
         if (session != null) session.close();
     }
@@ -2815,7 +2836,44 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return NoviceCopy.comparison(this.cloudVerified || kind() == OnboardingKind.BLOCKED ? kind() : null, this.busy);
     }
 
+    /** Retain only while this comparison displays the same durable built-in account. */
+    private AndroidConnectionComposition.Session comparisonAppreciationSession() {
+        // onCreate precedes the initial durable connection read. Keep a rotation's live session
+        // until that read finishes, rather than replacing its image or in-flight SAF request.
+        if (this.initialLoad) return this.sharedComparisonAppreciationSession;
+        SecureConnectionStore.Connection source = this.connection;
+        if (!isOfficialAccount(source) || source.isTemporary()) {
+            closeComparisonAppreciation();
+            return null;
+        }
+        SecureConnectionStore.Connection previous = this.sharedComparisonAppreciationAccount;
+        if (previous == null || !source.endpoint.equals(previous.endpoint)
+                || !source.username.equals(previous.username) || !source.password.equals(previous.password)
+                || !source.profile.equals(previous.profile) || !source.provider.equals(previous.provider)) {
+            closeComparisonAppreciation();
+            this.sharedComparisonAppreciationAccount = source;
+            this.sharedComparisonAppreciationSession = AndroidConnectionComposition.createReadOnlyAppreciation(
+                    getApplicationContext(), source);
+            this.sharedComparisonAppreciationSession.attachReadOnlyHost();
+        }
+        if (this.sharedComparisonAppreciationSession != null)
+            this.sharedComparisonAppreciationSession.getController().foreground(this.resumed);
+        return this.sharedComparisonAppreciationSession;
+    }
+
+    private void closeComparisonAppreciation() {
+        AndroidConnectionComposition.Session session = this.sharedComparisonAppreciationSession;
+        this.sharedComparisonAppreciationSession = null;
+        this.sharedComparisonAppreciationAccount = null;
+        if (session != null) {
+            if (this.retainedConnectionUi != null && this.retainedConnectionUi.comparisonAppreciationSession == session)
+                this.retainedConnectionUi = null;
+            session.close();
+        }
+    }
+
     private void renderSharedComparison() {
+        final AndroidConnectionComposition.Session appreciationSession = comparisonAppreciationSession();
         if (this.comparisonProofState.bind(currentComparisonContext())) {
             this.comparisonDialogMessage = "";
             this.comparisonDialogDetails = "";
@@ -2841,7 +2899,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 isForegroundComparison(), this.busy,
                 choice == null ? null : SharedProgressChoice.valueOf(choice.name()), this.comparisonProofState.selectedId(),
                 visibleNotice(), this.details, !this.diagnosticReport.isEmpty(), confirmation, this.feedbackError,
-                new SharedComparisonActions() {
+                appreciationSession, new SharedComparisonActions() {
                     @Override public void back() { if (isCurrentComparisonAction(renderToken)) navigate(SyncPage.CONNECTION); }
                     @Override public void refresh() { if (isCurrentComparisonAction(renderToken)) refreshComparison(SyncPage.COMPARISON); }
                     @Override public void selectProgress(SharedProgressChoice value) {
