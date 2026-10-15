@@ -194,6 +194,86 @@ class SharedConnectionControllerTest {
         assertEquals(0, f.ports.saves)
     }
 
+    @Test fun customTestAllowsFieldEditAndRejectsItsQueuedLateResult() {
+        val edits: List<(SharedConnectionController) -> Unit> = listOf(
+            { it.editEndpoint("https://changed.example.test/") },
+            { it.editUsername("changed-user") },
+            { it.editPassword("changed-password") },
+        )
+        edits.forEach { edit ->
+            val f = Fixture(); f.custom()
+            f.controller.testConnection(); f.io.drain()
+            assertTrue(f.controller.state.busy)
+            assertTrue(f.controller.state.canEdit)
+            assertTrue(f.controller.state.canGoBack)
+            edit(f.controller)
+            assertFalse(f.controller.state.busy)
+            f.ui.drain()
+            assertFalse(f.controller.state.canContinue)
+            assertEquals("", f.controller.state.notice)
+            f.controller.continueConnection(); f.finish()
+            assertEquals(0, f.ports.saves)
+        }
+    }
+
+    @Test fun backDuringCustomTestPreservesDraftAndRejectsLateProof() {
+        val f = Fixture(); f.custom(); f.controller.editPassword("kept-password")
+        f.controller.testConnection(); f.io.drain(); f.controller.back(); f.ui.drain()
+        assertEquals(ConnectionEntryModel.Mode.CHOICE, f.controller.state.mode)
+        assertFalse(f.controller.state.busy)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.choose(ConnectionEntryModel.Mode.CUSTOM)
+        assertEquals("https://dav.example.test/", f.controller.state.endpoint)
+        assertEquals("custom-user", f.controller.state.username)
+        assertEquals("kept-password", f.controller.state.password)
+        assertFalse(f.controller.state.canContinue)
+        assertEquals(0, f.ports.saves)
+    }
+
+    @Test fun backBeforeCustomProbeDispatchPreventsProbeAndLeavesSavedSettingsDirectly() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "", "slot", false)
+        val f = Fixture(saved, ConnectionEntryModel.Origin.SETTINGS)
+        f.controller.testConnection(); f.controller.back(); f.finish()
+        assertEquals(listOf(ConnectionEntryModel.Back.SETTINGS), f.host.backs)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertFalse(f.controller.state.canContinue)
+    }
+
+    @Test fun authenticationAndRegistrationDoNotBecomeEditableOrNavigable() {
+        listOf(false, true).forEach { register ->
+            val f = Fixture(); f.official()
+            if (register) f.controller.register() else f.controller.login()
+            assertFalse(f.controller.state.canEdit)
+            assertFalse(f.controller.state.canGoBack)
+            f.controller.back()
+            assertEquals("alice", f.controller.state.username)
+            assertEquals("secret-password", f.controller.state.password)
+            assertTrue(f.controller.state.busy)
+            assertTrue(f.host.backs.isEmpty())
+            f.finish()
+            assertEquals(1, f.clients.authCalls)
+        }
+    }
+
+    @Test fun applyingConfigurationRemainsLockedBeforeAndDuringDurableWrite() {
+        val f = Fixture(); f.custom(); f.controller.testConnection(); f.finish()
+        f.controller.continueConnection()
+        fun assertLocked() {
+            assertFalse(f.controller.state.canEdit)
+            assertFalse(f.controller.state.canGoBack)
+            f.controller.editUsername("ignored")
+            f.controller.back()
+            assertEquals("custom-user", f.controller.state.username)
+            assertTrue(f.host.backs.isEmpty())
+        }
+        assertLocked()
+        f.ports.onSave = { assertLocked() }
+        f.finish()
+        assertEquals(1, f.ports.saves)
+        assertEquals(1, f.host.commits.size)
+    }
+
     @Test fun officialLoginRequiresAuthenticatedEntitlementAndDavThenRechecksOnSave() {
         val f = Fixture(); f.official()
         f.controller.login(); f.finish()

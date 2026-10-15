@@ -68,6 +68,8 @@ data class SharedConnectionState(
     val password: String,
     val busy: Boolean,
     val canCancel: Boolean,
+    val canEdit: Boolean,
+    val canGoBack: Boolean,
     val canRetestOfficial: Boolean,
     val canContinue: Boolean,
     val notice: String,
@@ -160,7 +162,8 @@ class SharedConnectionController internal constructor(
         private set
 
     private data class Operation(val generation: Long, val lifetime: Long, val config: SharedConnectionConfig,
-                                 val register: Boolean = false, val commit: Boolean = false) {
+                                 val register: Boolean = false, val commit: Boolean = false,
+                                 val editableDavTest: Boolean = false) {
         @Volatile var commitStarted: Boolean = false
         val trace = DiagnosticLog.begin(if (commit) DiagnosticAction.CONFIGURE else DiagnosticAction.CONNECT, false)
     }
@@ -280,6 +283,9 @@ class SharedConnectionController internal constructor(
             if (standalone) host?.onBack(ConnectionEntryModel.Back.SETTINGS)
             return
         }
+        // A DAV-only test has no durable effect; Back invalidates its late callback before navigating.
+        // Authentication/registration and the persistence boundary keep their existing explicit cancellation.
+        if (operation?.editableDavTest == true) invalidateSource()
         // Editing a saved connection inside the wizard historically returns directly to Path.
         // New setup alone visits its chooser first; this distinction is shared by both hosts.
         val destination = if (origin == ConnectionEntryModel.Origin.SETUP && existingOnEntry && operation == null)
@@ -356,7 +362,7 @@ class SharedConnectionController internal constructor(
             return
         }
         proof = null
-        val pending = Operation(generation.get(), lifetime.get(), candidate)
+        val pending = Operation(generation.get(), lifetime.get(), candidate, editableDavTest = !candidate.official)
         operation = pending
         notice = "正在测试连接…"
         error = false
@@ -615,6 +621,8 @@ class SharedConnectionController internal constructor(
     private fun accepts(pending: Operation) = alive.get() && generation.get() == pending.generation
     private fun canWork(pending: Operation) = accepts(pending) && foreground.get() && lifetime.get() == pending.lifetime
     private fun checkWork(pending: Operation) { if (!canWork(pending)) throw StaleOperation() }
+    private fun canEditDraft() = alive.get() && pendingCommit == null &&
+        (operation == null || operation?.editableDavTest == true)
     private fun canStart() = alive.get() && foreground.get() && host != null && operation == null && pendingCommit == null
     private fun hasProof(): Boolean {
         val current = proof ?: return false
@@ -661,6 +669,7 @@ class SharedConnectionController internal constructor(
         }
         return SharedConnectionState(origin, entry.mode(), current.endpoint, current.username, current.password,
             operation != null, operation != null && operation?.commitStarted != true,
+            canEditDraft(), appreciation != null || canEditDraft(),
             entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && officialAccountForDraft() != null,
             hasProof(), notice, error,
             saved != null || origin == ConnectionEntryModel.Origin.SETTINGS,
