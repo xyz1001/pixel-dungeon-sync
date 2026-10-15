@@ -135,6 +135,11 @@ internal fun runSyncApplication(
   val scope = rememberCoroutineScope()
   val selection = history.firstOrNull { it.manifest.id == selected } ?: graphHistory?.graph?.commits?.values?.firstOrNull { it.snapshot.id==selected }?.let { HistoryEntry(it.snapshot,"","云端历史") }
 
+  val iconTarget = (if (onboardingActive) discoveredTarget ?: targetInfo else targetInfo)?.takeIf { it.trusted }
+  val selectedGameIcon = rememberDesktopGameIcon(iconTarget)
+  fun gameIdentity(target: TargetGame) = SharedGameIdentity("Shattered Pixel Dungeon", target.displayVersion,
+   selectedGameIcon.takeIf { target == iconTarget })
+
   fun homeState() = DesktopSharedHomeAdapter.state(DesktopHomeContext(
    config = config, hasSession = session != null,
    pageActive = page == Page.HOME && directoryEditor == null && renameSnapshot == null,
@@ -143,7 +148,7 @@ internal fun runSyncApplication(
    pendingUpload = pending, hasConflict = conflict != null, remoteTips = remoteTips,
    selectedId = selected, selectedByUser = selectedByUser, restoreIssue = restoreIssue,
    history = graphHistory, historyPage = homeHistoryPage,
-   game = targetInfo?.takeIf { it.trusted }?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+   game = targetInfo?.takeIf { it.trusted }?.let { gameIdentity(it) },
    operation = homeOperation, automaticStatus = automaticStatus, operationStatus = status,
    connectionNotice = connectionNotice, locationIssue = locationIssue,
    launchNotice = launchNotice, deviceLabel = device?.label,
@@ -158,7 +163,7 @@ internal fun runSyncApplication(
   fun comparisonContext() = DesktopComparisonContext(pageGeneration, session, comparison, config,
    page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup, connected)
   fun comparisonState() = comparisonAdapter.state(comparisonContext(),
-   game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+   game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let { gameIdentity(it) },
    localLabel = "本机 · ${device?.label ?: "设备未知"}", notice = comparisonNotice.orEmpty(),
    restoreSupported = targetInfo?.trusted == true)
   fun navigate(next: Page) {
@@ -960,7 +965,7 @@ internal fun runSyncApplication(
         val gamePageGeneration = pageGeneration
         val selectedGame = discoveredTarget?.takeIf { it.trusted }
         val discoveryState = SharedGameSelectionState(
-         game = selectedGame?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+         game = selectedGame?.let { gameIdentity(it) },
          selectionId = selectedGame?.path,
          selectionStatus = if (selectedGame != null) "已找到" else "",
          location = selectedGame?.path.orEmpty(),
@@ -969,7 +974,7 @@ internal fun runSyncApplication(
           SharedGameSelectionRow(SharedGameSelectionControl.RESCAN, "重新扫描"),
          ),
          candidates = discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true }.orEmpty().map {
-          SharedGameCandidate(it.path, SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion), it.path)
+          SharedGameCandidate(it.path, gameIdentity(it), it.path)
          },
          pageActive = !appClosed && page == Page.DISCOVERY,
          busy = busy || connectingAtStartup,
@@ -1027,7 +1032,7 @@ internal fun runSyncApplication(
         },
         continuePath = { continuePath() }
        ), game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
-        SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+        gameIdentity(it)
        })
        }
        Page.COMPARISON -> SharedComparisonScreen(comparisonState(), object : SharedComparisonActions {
@@ -1114,7 +1119,7 @@ internal fun runSyncApplication(
         fun current() = !appClosed && page == Page.SETTINGS && pageGeneration == generation
         fun settingsContext() = DesktopSettingsContext(
          config = config,
-         game = targetInfo?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+         game = targetInfo?.let { gameIdentity(it) },
          savePath = pathAdapter.state.path, hasSession = session != null, connected = connected,
          pendingUpload = pending, currentName = graphHistory?.currentName.orEmpty(),
          pageActive = current(), busy = busy, connectingAtStartup = connectingAtStartup, appClosed = appClosed,
@@ -1183,7 +1188,7 @@ internal fun runSyncApplication(
         DesktopSharedConnectionPage(window, configFile, if (onboardingActive) setupDraft else config, password,
          if (connectionReturnPage == Page.PATH) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
-          SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+          gameIdentity(it)
          },
          onBusy = { if (current()) busy = it },
          onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(connectionReturnPage) },
@@ -1199,7 +1204,7 @@ internal fun runSyncApplication(
        Page.CONFLICT -> conflict?.let { value ->
         ConflictPage(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
-          SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+          gameIdentity(it)
          }, pending = pending,
          onSelect = { if (!busy && !connectingAtStartup) conflictSelection = it },
          onBack = { if (!busy && !connectingAtStartup) navigate(Page.HOME) },
