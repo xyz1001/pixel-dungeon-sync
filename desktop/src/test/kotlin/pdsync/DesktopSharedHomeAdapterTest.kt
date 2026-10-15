@@ -12,23 +12,26 @@ import kotlin.test.*
 
 class DesktopSharedHomeAdapterTest {
  private val files = mapOf("game1/game.dat" to "a".repeat(64))
- private fun commit(id: String, parents: List<String> = emptyList(), savedAt: String? = "2026-10-12T01:00:00Z") =
+ private val config = AppConfig(username = "real-account", profile = "home", onboardingProgress = OnboardingProgress.COMPLETE)
+ private fun commit(id: String, parents: List<String> = emptyList(), savedAt: String? = "2026-10-12T01:00:00Z",
+  content: Map<String, String> = files) =
   AppendCommit(id = id, parents = parents, objectBytes = 1,
    snapshot = Manifest(game = "shattered", profile = "home", version = "922", id = "snapshot-$id",
-    parent = null, sha256 = "b".repeat(64), files = files,
+    parent = null, sha256 = "b".repeat(64), files = content,
     metadata = SnapshotMetadata(device = DeviceIdentity("device", "真实设备"), capturedAt = "2026-10-15T01:00:00Z",
      fileModifiedAt = savedAt?.let { mapOf("game1/game.dat" to it) }.orEmpty())))
  private fun history(commits: List<AppendCommit> = listOf(commit("tip"))) =
   SyncHistory(CommitGraph(commits.associateBy { it.id }, emptyMap()), null, files, "本机名称",
    SaveSummary(mapOf("game1" to "2026-10-13T01:00:00Z"), null, 1), emptyMap())
  private fun ready(history: SyncHistory = history()) = DesktopHomeContext(
-  config = AppConfig(username = "real-account", profile = "home", onboardingProgress = OnboardingProgress.COMPLETE),
+  config = config,
   hasSession = true, pageActive = true, busy = false, connectingAtStartup = false, appClosed = false,
   connected = true, gameStatus = GameProcessStatus.Stopped, launchingGame = false,
   pendingUpload = false, hasConflict = false, remoteTips = setOf("snapshot-tip"),
   selectedId = history.defaultSnapshot, selectedByUser = false, restoreIssue = null,
   history = history, historyPage = 0, game = SharedGameIdentity("Shattered Pixel Dungeon", "3.3.8"),
   automaticStatus = "自动上传已开启。",
+  historyOwner = config, historyVerified = true,
  )
 
  @Test fun uniqueDefaultTargetIsRealButDoesNotPretendTheUserSelectedIt() {
@@ -87,8 +90,8 @@ class DesktopSharedHomeAdapterTest {
   assertFalse(sameDesktopHomeProfile(null, config))
  }
 
- @Test fun uploadRestoreAndLaunchRetainThePreviousHostCapabilityMatrix() {
-  val base = ready()
+ @Test fun unverifiedUploadRestoreAndLaunchRetainThePreviousHostCapabilityMatrix() {
+  val base = ready().copy(historyVerified = false)
   for (connected in listOf(false, true)) for (session in listOf(false, true))
    for (pending in listOf(false, true)) for (complete in listOf(false, true))
     for (conflict in listOf(false, true)) for (tips in listOf(emptySet(), setOf("a"), setOf("a", "b")))
@@ -102,6 +105,59 @@ class DesktopSharedHomeAdapterTest {
        (conflict || tips.size > 1 || selected != null && issue == null)), state.canRestore)
       assertTrue(state.canLaunch)
      }
+ }
+
+ @Test fun verifiedFullContentEqualityDisablesOnlyTheUnnecessaryTransfers() {
+  val same = DesktopSharedHomeAdapter.state(ready())
+  assertFalse(same.canUpload); assertFalse(same.canRestore); assertTrue(same.canLaunch)
+  assertEquals("已同步", same.status)
+  assertEquals("本机已是此进度，无需恢复。", same.restoreTarget?.notice)
+
+  // A changed global record is still a different save even when slot/play counts and names match.
+  val different = history().copy(currentFiles = files + ("badges.dat" to "c".repeat(64)))
+  val changed = DesktopSharedHomeAdapter.state(ready(different))
+  assertTrue(changed.canUpload); assertTrue(changed.canRestore)
+  assertNotEquals("已同步", changed.status)
+  assertEquals("", changed.restoreTarget?.notice)
+ }
+
+ @Test fun selectedIdenticalHistoryDoesNotMistakeTheDifferentLatestTipForSynced() {
+  val history = history(listOf(commit("old"), commit("tip", listOf("old"),
+   content = mapOf("game1/game.dat" to "c".repeat(64)))))
+  val selected = DesktopSharedHomeAdapter.state(ready(history).copy(selectedId = "snapshot-old", selectedByUser = true))
+  assertTrue(selected.canUpload); assertFalse(selected.canRestore)
+  assertEquals("snapshot-old", selected.restoreTarget?.snapshotId)
+  assertNotEquals("已同步", selected.status)
+  val latest = DesktopSharedHomeAdapter.state(ready(history))
+  assertTrue(latest.canUpload); assertTrue(latest.canRestore)
+ }
+
+ @Test fun equalityNeverHidesPendingBranchRecoveryOrUnfinishedSetup() {
+  val pending = DesktopSharedHomeAdapter.state(ready().copy(pendingUpload = true))
+  assertTrue(pending.canUpload); assertFalse(pending.canRestore)
+  assertContains(pending.status, "重试上传")
+  val conflict = DesktopSharedHomeAdapter.state(ready().copy(hasConflict = true))
+  assertTrue(conflict.canUpload); assertTrue(conflict.canRestore)
+  val branched = history(listOf(commit("left"), commit("right")))
+  val branch = DesktopSharedHomeAdapter.state(ready(branched).copy(
+   remoteTips = setOf("snapshot-left", "snapshot-right"), selectedId = "snapshot-left"))
+  assertTrue(branch.canUpload); assertTrue(branch.canRestore)
+  val setup = DesktopSharedHomeAdapter.state(ready().copy(config = config.copy(onboardingProgress = OnboardingProgress.PENDING)))
+  assertTrue(setup.canUpload); assertTrue(setup.canRestore)
+ }
+
+ @Test fun unknownFailedOrOtherAccountHistoryCannotClaimIdenticalContent() {
+  val base = ready()
+  for (unverified in listOf(base.copy(historyVerified = false), base.copy(historyOwner = null),
+   base.copy(historyOwner = config.copy(username = "previous-account")),
+   base.copy(historyOwner = config.copy(profile = "previous-profile")),
+   base.copy(locationIssue = "Unable to read save"), base.copy(remoteTips = emptySet()),
+   base.copy(history = base.history!!.copy(graph = base.history.graph.copy(pending = mapOf("missing" to "unverified")))))) {
+   val state = DesktopSharedHomeAdapter.state(unverified)
+   assertTrue(state.canUpload); assertTrue(state.canRestore)
+   assertNotEquals("已同步", state.status)
+   assertEquals("", state.restoreTarget?.notice)
+  }
  }
 
  @Test fun startupBusyClosedAndInactivePagesCannotAct() {

@@ -1,6 +1,7 @@
 package pdsync
 
 import io.github.xyz1001.pdsync.android.SharedGameIdentity
+import io.github.xyz1001.pdsync.android.SharedHomeContent
 import io.github.xyz1001.pdsync.android.SharedHomeOperation
 import io.github.xyz1001.pdsync.android.SharedHomeRestoreTarget
 import io.github.xyz1001.pdsync.android.SharedHomeState
@@ -33,6 +34,8 @@ internal data class DesktopHomeContext(
  val locationIssue: String? = null,
  val launchNotice: String? = null,
  val deviceLabel: String? = null,
+ val historyOwner: AppConfig? = null,
+ val historyVerified: Boolean = false,
 )
 
 internal data class DesktopHomeSelection(val snapshotId: String?, val explicit: Boolean)
@@ -58,6 +61,11 @@ internal object DesktopSharedHomeAdapter {
   val target = history?.graph?.commits?.values?.firstOrNull { it.snapshot.id == current.selectedId }
   val complete = current.config?.onboardingProgress == OnboardingProgress.COMPLETE
   val locked = current.busy || current.connectingAtStartup || current.appClosed
+  val content = SharedHomeContent.from(history, current.selectedId,
+   complete && current.connected && current.hasSession && current.historyVerified &&
+    current.locationIssue == null && sameDesktopHomeProfile(current.historyOwner, current.config) &&
+    history?.graph?.tips?.map { history.graph.commits.getValue(it).snapshot.id }?.toSet() == current.remoteTips,
+   current.pendingUpload, current.hasConflict)
   val restoreProblem = current.restoreIssue?.takeIf {
    current.selectedId != null && current.remoteTips.size <= 1 && !current.hasConflict
   }
@@ -83,6 +91,7 @@ internal object DesktopSharedHomeAdapter {
     !complete -> "自动上传暂停，请先选择上传或恢复。"
     current.pendingUpload -> "上次上传尚未完成，请先重试上传。"
     current.hasConflict || current.remoteTips.size > 1 -> "云端有多份进度，请点击恢复后选择。"
+    content.uploadUnnecessary -> "已同步"
     current.automaticStatus.isNotBlank() -> desktopHomeFeedback(current.automaticStatus, "请查看同步状态。")
     else -> "云端已连接"
    },
@@ -90,9 +99,9 @@ internal object DesktopSharedHomeAdapter {
    busy = locked,
    // A disconnected Upload intentionally opens the existing login flow. Do not invent an
    // entitlement result here: real authentication and expiry failures remain owned by the host.
-   canUpload = !locked && (!current.connected || current.hasSession &&
+   canUpload = !locked && !content.uploadUnnecessary && (!current.connected || current.hasSession &&
     (current.pendingUpload || history?.currentFiles?.isNotEmpty() == true)),
-   canRestore = current.hasSession && !locked && current.connected &&
+   canRestore = current.hasSession && !locked && current.connected && !content.restoreUnnecessary &&
     (!complete || !current.pendingUpload && (current.hasConflict || current.remoteTips.size > 1 ||
      current.selectedId != null && current.restoreIssue == null)),
    canLaunch = current.config != null && !locked && current.gameStatus !is GameProcessStatus.Running,
@@ -105,7 +114,8 @@ internal object DesktopSharedHomeAdapter {
       ?: "存档 ${commit.id.take(6)}",
      snapshot.metadata?.device?.label ?: "来源未知",
      HistoryPresentation.time(snapshot.metadata?.latestFileModifiedAt),
-     notice = restoreProblem?.let { desktopHomeFeedback(it, "暂不能恢复，请重新检查所选存档。") }.orEmpty(),
+     notice = restoreProblem?.let { desktopHomeFeedback(it, "暂不能恢复，请重新检查所选存档。") }
+      ?: if (content.restoreUnnecessary) "本机已是此进度，无需恢复。" else "",
      noticeError = restoreProblem != null)
    },
    // The actual restore target can be the unique default without becoming a user selection.

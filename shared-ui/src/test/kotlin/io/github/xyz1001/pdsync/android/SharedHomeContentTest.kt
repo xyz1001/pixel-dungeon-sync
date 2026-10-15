@@ -1,0 +1,104 @@
+package io.github.xyz1001.pdsync.android
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import pdsync.AppendCommit
+import pdsync.CommitGraph
+import pdsync.Manifest
+import pdsync.SaveSummary
+import pdsync.SyncHistory
+
+class SharedHomeContentTest {
+    private val files = mapOf("game1/game.dat" to "a".repeat(64), "game1/level1.dat" to "b".repeat(64),
+        "badges.dat" to "c".repeat(64))
+    private fun commit(id: String, content: Map<String, String> = files, parents: List<String> = emptyList()) =
+        AppendCommit(id = id, parents = parents, objectBytes = 1,
+            snapshot = Manifest(game = "shattered", profile = "real-profile", version = "922",
+                id = "snapshot-$id", parent = null, sha256 = "d".repeat(64), files = content))
+    private fun history(commits: List<AppendCommit> = listOf(commit("tip")), current: Map<String, String> = files,
+        baseline: String? = null) = SyncHistory(CommitGraph(commits.associateBy { it.id }, emptyMap()),
+        baseline, current, "同名存档", SaveSummary(mapOf("game1" to "2026-10-15T01:00:00Z"), 10, current.size), emptyMap())
+    private fun content(history: SyncHistory?, selected: String? = null, verified: Boolean = true,
+        pending: Boolean = false, conflict: Boolean = false) = SharedHomeContent.from(history, selected, verified, pending, conflict)
+
+    @Test fun completeFileMapsMatchIndependentlyOfOrderingBaselineAndLabels() {
+        val history = history(current = files.entries.reversed().associate { it.toPair() })
+        assertEquals(SharedHomeContent(true, true), content(history))
+        assertEquals(SharedHomeContent(true, true), content(history.copy(baseline = "absent-baseline",
+            currentName = "改名", aliases = mapOf("snapshot-tip" to "另一名称"), summary = null)))
+        assertEquals(SharedHomeContent(true, true), content(history.copy(baseline = "tip")))
+    }
+
+    @Test fun everyPathAndEveryFileHashMattersEvenWithTheSameCounts() {
+        for (changed in listOf(files + ("game1/level1.dat" to "e".repeat(64)),
+            files + ("badges.dat" to "f".repeat(64)),
+            files - "badges.dat" + ("journal.dat" to files.getValue("badges.dat")),
+            files - "game1/level1.dat", files + ("game1/level2.dat" to "e".repeat(64)))) {
+            assertEquals(SharedHomeContent(), content(history(current = changed)))
+        }
+    }
+
+    @Test fun uploadUsesSoleTipButRestoreUsesTheActualSelectedHistoryTarget() {
+        val older = commit("old")
+        val newer = commit("tip", files + ("badges.dat" to "e".repeat(64)), listOf("old"))
+        val history = history(listOf(older, newer), baseline = "old")
+        assertTrue(history.clean, "A baseline match is not a cloud-tip match")
+        assertEquals(SharedHomeContent(false, true), content(history, "snapshot-old"))
+        assertEquals(SharedHomeContent(), content(history))
+        assertEquals(SharedHomeContent(), content(history, "missing-target"))
+        val atTip = history.copy(currentFiles = newer.snapshot.files)
+        assertEquals(SharedHomeContent(true, false), content(atTip, "snapshot-old"))
+        assertEquals(SharedHomeContent(true, false), content(atTip, "missing-target"))
+    }
+
+    @Test fun unknownFailedEmptyOrUnsettledHistoryDoesNotSuppressHostRecovery() {
+        assertEquals(SharedHomeContent(), content(null))
+        assertEquals(SharedHomeContent(), content(history(), verified = false))
+        assertEquals(SharedHomeContent(), content(history(current = emptyMap())))
+        assertEquals(SharedHomeContent(), content(history(emptyList())))
+        assertEquals(SharedHomeContent(), content(history(emptyList(), emptyMap())))
+        val history = history()
+        assertEquals(SharedHomeContent(), content(history.copy(graph = history.graph.copy(pending = mapOf("missing" to "unverified")))))
+    }
+
+    @Test fun pendingRetriesAndBranchSelectionAreNeverRemovedForMatchingBytes() {
+        assertEquals(SharedHomeContent(), content(history(), pending = true))
+        assertEquals(SharedHomeContent(), content(history(), conflict = true))
+        val branched = history(listOf(commit("left"), commit("right")))
+        assertEquals(SharedHomeContent(), content(branched))
+        assertEquals(SharedHomeContent(), content(branched, "snapshot-left"))
+    }
+
+    @Test fun repeatedRenderingIsPureAndRetainedCallbacksRecheckChangedCapabilities() {
+        val history = history()
+        val original = history.copy(currentFiles = history.currentFiles.toMap())
+        repeat(20) { assertEquals(SharedHomeContent(true, true), content(history)) }
+        assertEquals(original, history)
+
+        var state = SharedHomeState(null, "云端已连接", pageActive = true, canUpload = true, canRestore = true)
+        val calls = mutableListOf<String>()
+        val actions = object : SharedHomeActions {
+            override fun upload() { calls += "upload" }
+            override fun restore() { calls += "restore" }
+            override fun settings() = Unit
+            override fun launch() = Unit
+            override fun selectSnapshot(snapshotId: String) = Unit
+            override fun rename(snapshotId: String?) = Unit
+            override fun changeHistoryPage(page: Int) = Unit
+        }
+        val interactions = SharedHomeInteractions({ state }, { actions })
+        val retainedUpload = interactions::upload
+        val retainedRestore = interactions::restore
+        val same = content(history)
+        state = state.copy(canUpload = !same.uploadUnnecessary, canRestore = !same.restoreUnnecessary)
+        retainedUpload(); retainedRestore()
+        assertTrue(calls.isEmpty())
+        val different = content(history.copy(currentFiles = files + ("badges.dat" to "f".repeat(64))))
+        state = state.copy(canUpload = !different.uploadUnnecessary, canRestore = !different.restoreUnnecessary)
+        retainedUpload(); retainedRestore()
+        assertEquals(listOf("upload", "restore"), calls)
+        assertFalse(content(history, verified = false).uploadUnnecessary)
+    }
+}

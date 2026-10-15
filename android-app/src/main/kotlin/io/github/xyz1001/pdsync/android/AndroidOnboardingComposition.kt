@@ -159,6 +159,7 @@ object AndroidOnboardingComposition {
         pending: SharedHomeOperation,
         selectedId: String?,
         explicitSelection: String?,
+        content: SharedHomeContent,
         notice: String,
         noticeError: Boolean,
         details: String,
@@ -184,7 +185,7 @@ object AndroidOnboardingComposition {
                         ?: "存档 ${commit.id.take(6)}",
                     source = snapshot.metadata?.device?.label ?: "来源未知",
                     time = HistoryPresentation.time(snapshot.metadata?.latestFileModifiedAt),
-                    notice = if (history.currentFiles.isNotEmpty() && history.currentFiles == snapshot.files)
+                    notice = if (content.restoreUnnecessary)
                         "本机已是此进度，无需恢复。" else "",
                 )
             },

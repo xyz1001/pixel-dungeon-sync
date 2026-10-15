@@ -1358,8 +1358,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void renderHome() {
         final int renderToken = ++this.sharedHomeRenderToken;
         final HomeActionContext owner = currentHomeContext(renderToken);
+        final SharedHomeContent content = homeContent();
         String homeStatus = this.cloudVerified
-                ? this.history != null && this.history.getClean() ? "已同步" : "云端已连接"
+                ? content.getUploadUnnecessary() ? "已同步" : "云端已连接"
                 : this.connection == null ? "等待连接" : "存档待检查";
         if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE)
             homeStatus += " · 自动上传已暂停";
@@ -1375,9 +1376,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (!capabilityNotice.isEmpty() && !homeNotice.contains(capabilityNotice))
             homeNotice = homeNotice.isEmpty() ? capabilityNotice : homeNotice + "\n" + capabilityNotice;
         // These are platform capabilities, not permission inferred from a label, PID or timestamp.
-        final boolean canUpload = canRequestSaveAccess() && !restoreNeedsAttention();
+        final boolean canUpload = canRequestSaveAccess() && !restoreNeedsAttention() && !content.getUploadUnnecessary();
         final boolean canRestore = restoreSupported() && canRequestSaveAccess()
-                && this.connection != null && !restoreNeedsAttention();
+                && this.connection != null && !restoreNeedsAttention() && !content.getRestoreUnnecessary();
         final boolean canLaunch = canRequestSaveAccess() && !restoreNeedsAttention();
         this.root = null;
         this.status = null;
@@ -1387,17 +1388,19 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.renderedPage = this.page;
         AndroidOnboardingComposition.showHome(this, this.history, this.historyPage, selectedGameIdentity(),
                 homeStatus, isForegroundHome(), this.busy, canUpload, canRestore, canLaunch, homeOperation(),
-                this.selected, this.explicitHomeSelection, homeNotice, this.feedbackError, this.details,
+                this.selected, this.explicitHomeSelection, content, homeNotice, this.feedbackError, this.details,
                 new SharedHomeActions() {
                     @Override public void settings() {
                         if (isCurrentHomeAction(owner)) navigate(SyncPage.SETTINGS);
                     }
                     @Override public void upload() {
-                        if (isCurrentHomeAction(owner) && canRequestSaveAccess() && !restoreNeedsAttention()) requestUpload();
+                        if (isCurrentHomeAction(owner) && canRequestSaveAccess() && !restoreNeedsAttention()
+                                && !homeContent().getUploadUnnecessary()) requestUpload();
                     }
                     @Override public void restore() {
                         if (isCurrentHomeAction(owner) && restoreSupported() && canRequestSaveAccess()
-                                && connection != null && !restoreNeedsAttention()) requestRestore();
+                                && connection != null && !restoreNeedsAttention()
+                                && !homeContent().getRestoreUnnecessary()) requestRestore();
                     }
                     @Override public void launch() {
                         if (isCurrentHomeAction(owner) && canRequestSaveAccess() && !restoreNeedsAttention()) launchGame();
@@ -1421,6 +1424,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         render();
                     }
                 });
+    }
+
+    /** Uses only the paired in-memory inspection/history; failure is never equality evidence. */
+    private SharedHomeContent homeContent() {
+        return SharedHomeContent.from(this.history, this.selected,
+                this.cloudVerified && this.connection != null && this.facade != null && this.inspection != null
+                        && this.progress == OnboardingProgress.COMPLETE && this.readinessState.canContinue()
+                        && !restoreNeedsAttention() && kind() != OnboardingKind.BLOCKED,
+                this.inspection != null && this.inspection.isRetryablePending(), kind() == OnboardingKind.BRANCHED);
     }
 
     private boolean isForegroundHome() {

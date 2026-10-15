@@ -146,6 +146,7 @@ internal fun runSyncApplication(
    operation = homeOperation, automaticStatus = automaticStatus, operationStatus = status,
    connectionNotice = connectionNotice, locationIssue = locationIssue,
    launchNotice = launchNotice, deviceLabel = device?.label,
+   historyOwner = homeProfile, historyVerified = remoteInspectionReady,
   ))
   fun reconcileHomeSelection(retainExplicit: Boolean = true) {
    val next = desktopHomeSelection(graphHistory, selected, selectedByUser && retainExplicit)

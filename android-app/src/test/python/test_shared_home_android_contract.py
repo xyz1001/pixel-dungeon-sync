@@ -36,7 +36,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         for real in ('selectedId ?: history?.defaultSnapshot', 'history?.cloud?.firstOrNull { it.snapshot.id == targetId }',
                      'history.aliases[snapshot.id]', 'snapshot.directoryMetadata?.displayName',
                      'snapshot.metadata?.device?.label', 'HistoryPresentation.time(snapshot.metadata?.latestFileModifiedAt)',
-                     'history.currentFiles == snapshot.files', 'HistoryPresentation.from(it, historyPage)'):
+                     'content.restoreUnnecessary', 'HistoryPresentation.from(it, historyPage)'):
             self.assertIn(real, adapter)
         self.assertIn('history.graph.tips.size > 1', adapter)
         self.assertNotIn('capturedAt', adapter)
@@ -116,6 +116,24 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('requestRootAuthorization()', MAIN)
         self.assertIn('refreshComparison(SyncPage.HOME)', body(MAIN, 'void m130x445a4530()'))
         self.assertIn('检查未完成恢复', body(MAIN, 'private void showSettingsMaintenance('))
+
+    def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
+        home = body(MAIN, 'private void renderHome()')
+        evidence = body(MAIN, 'private SharedHomeContent homeContent()')
+        for required in ('SharedHomeContent.from(this.history, this.selected', 'this.cloudVerified',
+                         'this.connection != null', 'this.facade != null', 'this.inspection != null',
+                         'this.progress == OnboardingProgress.COMPLETE', '!restoreNeedsAttention()',
+                         'kind() != OnboardingKind.BLOCKED', 'this.inspection.isRetryablePending()',
+                         'kind() == OnboardingKind.BRANCHED'):
+            self.assertIn(required, evidence)
+        self.assertIn('!content.getUploadUnnecessary()', home)
+        self.assertIn('!content.getRestoreUnnecessary()', home)
+        self.assertIn('!homeContent().getUploadUnnecessary()', body(home, 'public void upload()'))
+        self.assertIn('!homeContent().getRestoreUnnecessary()', body(home, 'public void restore()'))
+        self.assertNotIn('getClean()', home)
+        for forbidden in ('.inspect(', 'SyncRuntime.', 'freshExport(', 'getLocalFileCount()',
+                          'getClean()', 'getBaselineCommit()', 'getSummary()', '.historyPresentation('):
+            self.assertNotIn(forbidden, evidence)
 
     def test_native_confirmation_and_real_rename_identity_remain_explicit_boundaries(self):
         self.assertIn('showConfirmation(', body(MAIN, 'public void requestRestore()'))
