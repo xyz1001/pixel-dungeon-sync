@@ -9,11 +9,14 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -33,9 +36,19 @@ object AndroidConnectionComposition {
     /** No Activity is retained here. Only the controller's detachable host points at the current UI. */
     class Session internal constructor(
         val controller: SharedConnectionController,
+        val imageExport: AppreciationImageExport,
+        private val app: Context,
         private val io: ExecutorService,
     ) : AutoCloseable {
+        fun requestImageSave(): Boolean = imageExport.request(
+            controller.currentAppreciationPng(), controller.currentAppreciationScope())
+
+        fun selectedImageDestination(uri: android.net.Uri?) {
+            imageExport.selected(uri?.let { AndroidAppreciationImageDestination(app, it) })
+        }
+
         override fun close() {
+            imageExport.close()
             controller.detach()
             controller.close()
             io.shutdownNow()
@@ -49,15 +62,34 @@ object AndroidConnectionComposition {
         val handler = Handler(Looper.getMainLooper())
         val ui = Executor { task -> handler.post(task) }
         return Session(SharedConnectionController(origin, fromStored(existing), profile,
-            AndroidConnectionPorts(context.applicationContext), io, ui), io)
+            AndroidConnectionPorts(context.applicationContext), io, ui),
+            AppreciationImageExport(io, ui), context.applicationContext, io)
     }
 
     @JvmStatic
     fun show(activity: ComponentActivity, session: Session, game: SharedGameIdentity?) {
         activity.setContent {
+            // Register unconditionally at a stable composition position so a picker result can
+            // return after rotation. Process death loses the pending bytes and safely ignores it.
+            val saveImage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {
+                session.selectedImageDestination(it)
+            }
+            val export = session.imageExport.state
+            val image = session.controller.state.appreciation?.image
+            val source = session.controller.currentAppreciationScope()
+            val png = remember(image, source) { session.controller.currentAppreciationPng() }
             // Android target 36 is edge-to-edge. Keep system bars/IME handling out of desktop UI.
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedConnectionScreen(session.controller, game)
+                SharedConnectionScreen(session.controller, game,
+                    onSaveImage = {
+                        if (session.requestImageSave()) {
+                            try { saveImage.launch("appreciation.png") }
+                            catch (_: RuntimeException) { session.imageExport.launchFailed() }
+                        }
+                    },
+                    imageSaveBusy = export.busy,
+                    imageSaveMessage = session.imageExport.messageFor(source, png),
+                )
             }
         }
     }

@@ -35,7 +35,7 @@ class SharedConnectionThemeTest {
         val entry = screen.substringAfter("fun SharedConnectionScreen(")
             .substringBefore("private fun SharedConnectionContent(")
         assertTrue(entry.contains("SharedConnectionTheme {"))
-        assertTrue(entry.contains("SharedConnectionContent(controller, game)"))
+        assertTrue(entry.contains("SharedConnectionContent(controller, game, onSaveImage, imageSaveBusy, imageSaveMessage)"))
         val android = Files.readString(root.resolve(
             "android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidConnectionComposition.kt"))
         assertTrue(android.contains("SharedConnectionScreen(session.controller,"))

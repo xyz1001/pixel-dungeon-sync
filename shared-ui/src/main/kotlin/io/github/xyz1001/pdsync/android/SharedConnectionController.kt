@@ -603,6 +603,18 @@ class SharedConnectionController internal constructor(
         }
     }
 
+    /** Opaque page identity survives configuration changes but never crosses account/page exit. */
+    fun currentAppreciationScope(): Any? = appreciationFlow?.takeIf {
+        alive.get() && appreciationSource == draft()
+    }
+
+    /** Defensive copy of the validated original backing the currently displayed bitmap. No I/O. */
+    fun currentAppreciationPng(): ByteArray? {
+        val flow = appreciationFlow ?: return null
+        if (currentAppreciationScope() !== flow || appreciationImage == null) return null
+        return flow.view().image
+    }
+
     fun copyUsername() {
         val flow = appreciationFlow ?: return
         try {

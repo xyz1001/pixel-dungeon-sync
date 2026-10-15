@@ -487,6 +487,31 @@ class SharedConnectionControllerTest {
         assertEquals(2, f.clients.metadataCalls)
     }
 
+    @Test fun saveAccessorReturnsOnlyCurrentDisplayedOriginalAndSurvivesChooserBackground() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish()
+        assertNull(f.controller.currentAppreciationPng())
+        assertNull(f.controller.currentAppreciationScope())
+        f.enableImage(); f.controller.openAppreciation(); f.finish()
+        val source = assertNotNull(f.controller.currentAppreciationScope())
+        val original = assertNotNull(f.controller.currentAppreciationPng())
+        kotlin.test.assertContentEquals(f.clients.imageBytes, original)
+        original.fill(0)
+        kotlin.test.assertContentEquals(f.clients.imageBytes, f.controller.currentAppreciationPng())
+        val calls = f.clients.requests.size
+        f.controller.foreground(false)
+        assertSame(source, f.controller.currentAppreciationScope())
+        kotlin.test.assertContentEquals(f.clients.imageBytes, f.controller.currentAppreciationPng())
+        assertEquals(calls, f.clients.requests.size, "a save accessor never requests another image")
+        f.controller.foreground(true); f.finish()
+        assertSame(source, f.controller.currentAppreciationScope())
+        f.enableImage(width = 2); f.clients.imageStatus = 503
+        f.controller.refreshAppreciation(); f.finish()
+        assertNull(f.controller.currentAppreciationPng(), "known changed but unavailable image cannot be saved")
+        f.controller.back()
+        assertNull(f.controller.currentAppreciationPng())
+        assertNull(f.controller.currentAppreciationScope())
+    }
+
     @Test fun appreciationLoadsAutomaticallyAndRetainsImageAcrossRotationAndTransientFailure() {
         val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
         f.controller.openAppreciation(); f.finish()

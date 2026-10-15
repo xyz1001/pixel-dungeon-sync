@@ -30,14 +30,26 @@ import androidx.compose.ui.unit.dp
 
 /** One physical UI source, compiled by both desktop JVM and Android. */
 @Composable
-fun SharedConnectionScreen(controller: SharedConnectionController, game: SharedGameIdentity? = null) {
+fun SharedConnectionScreen(
+    controller: SharedConnectionController,
+    game: SharedGameIdentity? = null,
+    onSaveImage: (() -> Unit)? = null,
+    imageSaveBusy: Boolean = false,
+    imageSaveMessage: String = "",
+) {
     SharedConnectionTheme {
-        SharedConnectionContent(controller, game)
+        SharedConnectionContent(controller, game, onSaveImage, imageSaveBusy, imageSaveMessage)
     }
 }
 
 @Composable
-private fun SharedConnectionContent(controller: SharedConnectionController, game: SharedGameIdentity?) {
+private fun SharedConnectionContent(
+    controller: SharedConnectionController,
+    game: SharedGameIdentity?,
+    onSaveImage: (() -> Unit)?,
+    imageSaveBusy: Boolean,
+    imageSaveMessage: String,
+) {
     val state = controller.state
     LaunchedEffect(controller, state.showOfficialAccount) {
         while (state.showOfficialAccount) {
@@ -67,7 +79,7 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
     ) {
         SharedForm {
             if (appreciation != null) {
-                SharedAppreciationContent(appreciation, controller::copyUsername)
+                SharedAppreciationContent(appreciation, controller::copyUsername, onSaveImage, imageSaveBusy, imageSaveMessage)
             } else {
                 if (state.mode == ConnectionEntryModel.Mode.CHOICE) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -136,10 +148,22 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
 }
 
 @Composable
-private fun SharedAppreciationContent(appreciation: SharedAppreciationState, copyUsername: () -> Unit) {
+internal fun SharedAppreciationContent(
+    appreciation: SharedAppreciationState,
+    copyUsername: () -> Unit,
+    onSaveImage: (() -> Unit)? = null,
+    imageSaveBusy: Boolean = false,
+    imageSaveMessage: String = "",
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         appreciation.image?.let {
             Image(it, "赞赏码", Modifier.fillMaxWidth().height(240.dp), contentScale = ContentScale.Fit)
+        }
+        if (onSaveImage != null) {
+            SharedActionButton(if (imageSaveBusy) "保存中…" else "保存图片", onSaveImage,
+                enabled = appreciation.image != null && !appreciation.busy && !imageSaveBusy,
+                style = SharedButtonStyle.SECONDARY)
+            if (imageSaveMessage.isNotEmpty()) SharedConnectionNotice(imageSaveMessage)
         }
         appreciation.username?.let { username ->
             Text(if (appreciation.authenticated) "用户名 $username" else "用户名（未验证） $username")

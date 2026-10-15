@@ -18,7 +18,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_component_activity_mounts_the_actual_shared_composable(self):
         self.assertIn("extends ComponentActivity implements SharedConnectionHost", MAIN)
         self.assertIn("activity.setContent", ADAPTER)
-        self.assertIn("SharedConnectionScreen(session.controller, game)", ADAPTER)
+        self.assertIn("SharedConnectionScreen(session.controller, game,", ADAPTER)
         route = body(MAIN, "public void render()")
         self.assertLess(route.index("renderSharedConnection()"), route.index("ScrollView scrollView"))
         self.assertIn("this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly", route)
