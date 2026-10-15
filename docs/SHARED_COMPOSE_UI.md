@@ -83,9 +83,18 @@ Observed merge preview/apply checks remain inside the physical-root lock, and a
 new branch arriving during publication requires a new preview rather than being
 silently included. Android retains its separate game-file restoration journal.
 
+The shared home/history slice uses `SharedHomeScreen` and `SharedHistorySection`
+on both platforms. Upload, restore, launch and settings retain their existing host
+capabilities and operations. Selection uses actual snapshot IDs, survives paging
+and same-profile refreshes, and is invalidated when its account/profile changes.
+The default restore target is distinct from an explicit selection. Drawing or
+paging does not export saves or mutate the mirror. History is ordered globally by
+save-content time before pagination; same-column straight arrows use measured
+card geometry. Platform adapters retain their operation and stale-callback guards.
+
 This is not completion of the full shared UI. Discovery/game selection,
-home/history, home conflict/confirmation and settings still need to move to common
-Compose pages and shared presentation state. Android package
+home conflict/confirmation, naming dialogs and settings still need to move to
+common Compose pages and shared presentation state. Android package
 installation, Root/embedded bridge access, SAF and foreground observation remain
 platform capabilities. Desktop JAR selection, native directory chooser and process
 launch/observation remain desktop capabilities.

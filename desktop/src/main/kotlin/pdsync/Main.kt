@@ -2,9 +2,6 @@ package pdsync
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.*
@@ -104,6 +101,9 @@ internal fun runSyncApplication(
   var historyName by remember { mutableStateOf("") }
   var selected by remember { mutableStateOf<String?>(null) }
   var selectedByUser by remember { mutableStateOf(false) }
+  var homeHistoryPage by remember { mutableStateOf(0) }
+  var homeProfile by remember { mutableStateOf<AppConfig?>(null) }
+  var homeOperation by remember { mutableStateOf(SharedHomeOperation.NONE) }
   var remoteTips by remember { mutableStateOf(emptySet<String>()) }
   var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
@@ -133,8 +133,25 @@ internal fun runSyncApplication(
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
   val selection = history.firstOrNull { it.manifest.id == selected } ?: graphHistory?.graph?.commits?.values?.firstOrNull { it.snapshot.id==selected }?.let { HistoryEntry(it.snapshot,"","云端历史") }
-  val homeScroll = rememberScrollState()
-  val historyScroll = rememberLazyListState()
+
+  fun homeState() = DesktopSharedHomeAdapter.state(DesktopHomeContext(
+   config = config, hasSession = session != null,
+   pageActive = page == Page.HOME && directoryEditor == null && renameSnapshot == null,
+   busy = busy, connectingAtStartup = connectingAtStartup, appClosed = appClosed,
+   connected = connected, gameStatus = gameStatus, launchingGame = launchingGame,
+   pendingUpload = pending, hasConflict = conflict != null, remoteTips = remoteTips,
+   selectedId = selected, selectedByUser = selectedByUser, restoreIssue = restoreIssue,
+   history = graphHistory, historyPage = homeHistoryPage,
+   game = targetInfo?.takeIf { it.trusted }?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+   operation = homeOperation, automaticStatus = automaticStatus, operationStatus = status,
+   connectionNotice = connectionNotice, locationIssue = locationIssue,
+   launchNotice = launchNotice, deviceLabel = device?.label,
+  ))
+  fun reconcileHomeSelection(retainExplicit: Boolean = true) {
+   val next = desktopHomeSelection(graphHistory, selected, selectedByUser && retainExplicit)
+   if (next.snapshotId != selected) restoreIssue = "正在校验实际版本…"
+   selected = next.snapshotId; selectedByUser = next.explicit
+  }
 
   fun comparisonContext() = DesktopComparisonContext(pageGeneration, session, comparison, config,
    page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup, connected)
@@ -167,6 +184,7 @@ internal fun runSyncApplication(
    confirm = operationEvents.begin(action); confirmationNotice = null; navigate(Page.CONFIRM)
   }
   suspend fun refreshProfile(value: AppConfig?) {
+   val sameProfile = sameDesktopHomeProfile(homeProfile, value)
    try {
     val data = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT) {
      if(value==null)location.requireDirectory() else location.selected(value)
@@ -180,15 +198,18 @@ internal fun runSyncApplication(
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
     graphHistory=withContext(Dispatchers.IO){diagnosticWork(DiagnosticAction.HISTORY) { data?.session?.syncHistory() }}
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
-    // A newest history entry can be an empty pre-restore backup. Start unselected;
-    // a sole verified remote tip (or the user's click) supplies the normal selection.
-    selected = graphHistory?.defaultSnapshot;selectedByUser=false; remoteTips = emptySet(); conflictSelection = null; conflict = null
+    // Preserve an explicit still-valid target on ordinary refresh. A different account/profile
+    // starts from its sole verified tip; publication order never chooses a branch.
+    reconcileHomeSelection(retainExplicit = sameProfile)
+    if (!sameProfile) homeHistoryPage = 0
+    homeProfile = value; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
     status = if (value == null) "存档内容待检查。" else "正在检查存档变化。"
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
     if (appClosed) return
-    session = null; history = emptyList(); saveInfo = null; targetInfo = null; pending = false
+    session = null; history = emptyList(); graphHistory = null; saveInfo = null; targetInfo = null; pending = false
+    if (!sameProfile) { selected = null; selectedByUser = false; homeHistoryPage = 0; homeProfile = null }
     locationIssue = e.message; status = e.message ?: "无法读取默认存档目录"
    }
   }
@@ -293,7 +314,7 @@ internal fun runSyncApplication(
    val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
    val allowUniqueReplacement=confirm===trace
    val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
-   busy = true; confirm = null; confirmationNotice = null; navigate(Page.HOME)
+   busy = true; homeOperation = desktopHomeOperation(action); confirm = null; confirmationNotice = null; navigate(Page.HOME)
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
@@ -377,7 +398,7 @@ internal fun runSyncApplication(
       val data = withContext(Dispatchers.IO) { trace.withDiagnostics { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) } }
       history = data.first; pending = data.second; saveInfo = data.third
       graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
-      if (selected == null) selected = graphHistory?.defaultSnapshot
+      reconcileHomeSelection()
       trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
      } catch (e: CancellationException) {
       if (terminalFailure == null) terminalFailure = OperationFailure.CANCELED
@@ -388,7 +409,7 @@ internal fun runSyncApplication(
       trace.record(OperationEvent.HISTORY_REFRESH_FAILED, failure = refreshFailure)
       status += " 历史刷新失败：${e.message}"
      }
-     busy = false
+     homeOperation = SharedHomeOperation.NONE; busy = false
     }
    }.invokeOnCompletion { cause ->
     trace.record(OperationEvent.OPERATION_FINISHED, failure = terminalFailure ?: cause?.let(::operationFailure))
@@ -421,10 +442,9 @@ internal fun runSyncApplication(
      val entries = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) } }
      remoteTips = entries.map { it.entry.manifest.id }.toSet(); remoteInspectionReady = true
      remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
-     if (selected == null && entries.size == 1) selected = entries.single().entry.manifest.id
      history = withContext(Dispatchers.IO) { manager.history() }
      graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
-     if(!selectedByUser)selected=graphHistory?.defaultSnapshot
+     reconcileHomeSelection()
      status = if (entries.isEmpty()) "此次未发现云端记录。" else "已读取云端记录。"
     } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
     finally { busy = false }
@@ -1006,58 +1026,40 @@ internal fun runSyncApplication(
         }
         override fun cancelConflict(token: Long) { comparisonAdapter.cancel(comparisonContext(), token) }
        })
-       Page.HOME -> {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-          Column(Modifier.weight(1f)) {
-           Text("像素地牢", style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
-           Text("存档自动同步  /  SHATTERED", color = muted, style = MaterialTheme.typography.caption)
-          }
-          Text(if (connected) "● 云端已连接" else "○ 等待登录", color = if (connected) green else muted, style = MaterialTheme.typography.body2)
-          Spacer(Modifier.width(20.dp))
-          Text("设置", Modifier.clickable(enabled = !busy && !connectingAtStartup) { navigate(Page.SETTINGS) }.padding(8.dp), color = green)
-         }
-         Surface(color = Color(0xFFE3EFE6)) {
-          Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-           Text(if (config?.onboardingProgress == OnboardingProgress.COMPLETE) automaticStatus else "自动上传暂停，请先选择上传或恢复。", color = green, style = MaterialTheme.typography.body2)
-           Text("本机：${device?.label ?: "正在读取"}", color = muted, style = MaterialTheme.typography.caption)
-          }
-         }
-         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          Button(enabled = config != null && !busy && !connectingAtStartup && gameStatus !is GameProcessStatus.Running,
-           onClick = { launchGame() }, modifier = Modifier.weight(1f)) {
-           Text(if (launchingGame) "正在启动…" else if (gameStatus is GameProcessStatus.Running) "游戏已运行" else "启动游戏")
-          }
-          OutlinedButton(enabled = !busy && !connectingAtStartup && (!connected || session != null && (pending || graphHistory?.currentFiles?.isNotEmpty()==true)), onClick = {
-           if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
-           else if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding()
-           else execute(operationEvents.begin(Action.PUSH))
-          }, modifier = Modifier.weight(1f)) { Text("上传") }
-          OutlinedButton(enabled = session != null && !busy && !connectingAtStartup && connected && (config?.onboardingProgress != OnboardingProgress.COMPLETE || !pending &&
-           (conflict != null || remoteTips.size > 1 || selected != null && restoreIssue == null)), onClick = { if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore() }, modifier = Modifier.weight(1f)) { Text("恢复") }
-         }
-         launchNotice?.let { Text(it, color = green, style = MaterialTheme.typography.body2) }
-         locationIssue?.let { CompactFeedback(it, "无法读取存档，请在设置中重新检查。") }
-         TextButton(enabled=session!=null&&!busy&&!connectingAtStartup,onClick={editDirectory()}) { Text("存档名称与单局身份") }
-         if (selected != null && restoreIssue != null && remoteTips.size <= 1 && conflict == null) CompactFeedback(restoreIssue!!, "暂不能恢复，请重新检查所选存档。")
-         if (pending) Text("上次上传尚未完成，请先重试上传。", color = Color(0xFF986337), style = MaterialTheme.typography.caption)
-         Card(Modifier.weight(1f).fillMaxWidth(), elevation = 0.dp) {
-          Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-           Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("完整档案历史", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
-            Text("${graphHistory?.cloud?.size ?: 0} 份云端记录", color = muted, style = MaterialTheme.typography.body2)
-           }
-           Text(if(selected==null)"默认恢复最新云端存档" else "恢复目标：${selection?.manifest?.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: selected!!.take(8)}",style=MaterialTheme.typography.caption,color=muted)
-           HistoryChart(graphHistory,selected,busy||connectingAtStartup,onSelect={selected=it;selectedByUser=true},onRename={id ->
-            if(id==null)editDirectory() else {renameSnapshot=id;historyName=graphHistory?.aliases?.get(id).orEmpty()}
-           })
-          }
-         }
-         if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
-         connectionNotice?.let { CompactFeedback(it, "连接需要处理，请打开设置。") }
-         CompactFeedback(status, "请查看操作结果。")
+       Page.HOME -> SharedHomeScreen(homeState(), object : SharedHomeActions {
+        override fun settings() { if (homeState().canInteract) navigate(Page.SETTINGS) }
+        override fun upload() {
+         if (!homeState().uploadEnabled) return
+         if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
+         else if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding()
+         else execute(operationEvents.begin(Action.PUSH))
         }
-       }
+        override fun restore() {
+         if (!homeState().restoreEnabled) return
+         if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore()
+        }
+        override fun launch() { if (homeState().launchEnabled) launchGame() }
+        override fun selectSnapshot(snapshotId: String) {
+         val current = homeState()
+         if (current.canInteract && current.history?.nodes?.any { it.selectable && it.snapshotId == snapshotId } == true) {
+          if (selected != snapshotId) restoreIssue = "正在校验实际版本…"
+          selected = snapshotId; selectedByUser = true
+         }
+        }
+        override fun rename(snapshotId: String?) {
+         val current = homeState()
+         if (!current.canInteract || session == null || current.history?.nodes?.any {
+           if (snapshotId == null) it.id == "local-current" else it.snapshotId == snapshotId
+          } != true) return
+         if (snapshotId == null) editDirectory()
+         else { renameSnapshot = snapshotId; historyName = graphHistory?.aliases?.get(snapshotId).orEmpty() }
+        }
+        override fun changeHistoryPage(page: Int) {
+         val current = homeState()
+         val presentation = current.history ?: return
+         if (current.canInteract && page in 0 until presentation.pages) homeHistoryPage = page
+        }
+       })
        Page.SETTINGS -> GuidedPage(
         title = "设置", subtitle = "",
         footer = { TextButton(enabled = !busy && !connectingAtStartup, onClick = { navigate(Page.HOME) }) { Text("返回存档") } }
@@ -1072,6 +1074,7 @@ internal fun runSyncApplication(
          targetError?.let { CompactFeedback(it, "游戏文件不可用，请重新选择。") }
          OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("更换游戏…") }
          Details { Text("存档位置：${pathAdapter.state.path}"); Text(processMessage(gameStatus)) }
+         TextButton(enabled = session != null && !busy && !connectingAtStartup, onClick = { editDirectory() }) { Text("存档名称与单局身份") }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH) }) { Text("修改存档路径") }

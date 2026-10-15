@@ -155,7 +155,7 @@ class AndroidUiFlowContract(unittest.TestCase):
     def test_short_home_automatic_status_preserves_real_service_and_conflict_result(self):
         home = body(MAIN, "private void renderHome()")
         self.assertIn("automaticStatusBrief()", home)
-        self.assertIn("if (!automaticStatus.isEmpty()) text(automaticStatus)", home)
+        self.assertIn('if (!automaticStatus.isEmpty()) homeStatus += "\\n" + automaticStatus', home)
         brief = body(MAIN, "private String automaticStatusBrief()")
         self.assertIn("AutoSyncService.status(this)", brief)
         self.assertIn('result.contains("HISTORY_CONFLICT")', brief)

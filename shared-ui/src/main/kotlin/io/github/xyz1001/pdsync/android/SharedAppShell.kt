@@ -69,7 +69,7 @@ internal data class SharedShellMetrics(val narrow: Boolean) {
 
 /**
  * The reference's single page shell. Hosts provide a bounded viewport, without their own padding,
- * scrolling or card. Only the content scrolls; header and bordered footer remain visible.
+ * scrolling or card. Only the content scrolls; header and an optional bordered footer remain visible.
  */
 @Composable
 fun SharedAppShell(
@@ -77,7 +77,8 @@ fun SharedAppShell(
     modifier: Modifier = Modifier,
     eyebrow: String? = null,
     game: SharedGameIdentity? = null,
-    footer: @Composable RowScope.() -> Unit,
+    headerActions: @Composable RowScope.() -> Unit = {},
+    footer: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     BoxWithConstraints(modifier.fillMaxSize().background(MaterialTheme.colors.background)) {
@@ -93,14 +94,14 @@ fun SharedAppShell(
             ) {
                 SharedShellLayout(
                     minimumHeight = 568.dp,
-                    header = { SharedPageHeader(title, eyebrow, game, metrics) },
+                    header = { SharedPageHeader(title, eyebrow, game, metrics, headerActions) },
                     body = {
                         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                             .padding(start = metrics.horizontal, end = metrics.horizontal,
                                 top = metrics.contentTop, bottom = metrics.contentBottom), content = content)
                     },
                     footer = {
-                        Column {
+                        if (footer != null) Column {
                             Divider(color = SharedUiColors.line, thickness = 1.dp)
                             Row(Modifier.fillMaxWidth().padding(horizontal = metrics.horizontal,
                                 vertical = metrics.footerVertical), verticalAlignment = Alignment.CenterVertically,
@@ -148,20 +149,24 @@ private fun SharedShellLayout(
 }
 
 @Composable
-private fun SharedPageHeader(title: String, eyebrow: String?, game: SharedGameIdentity?, metrics: SharedShellMetrics) {
-    Column(Modifier.fillMaxWidth().padding(start = metrics.horizontal, end = metrics.horizontal,
-        top = metrics.headerTop, bottom = metrics.headerBottom)) {
-        if (!eyebrow.isNullOrBlank()) {
-            Text(eyebrow, color = SharedUiColors.muted, fontSize = 12.sp, lineHeight = 16.sp,
-                letterSpacing = 0.96.sp)
-            Spacer(Modifier.height(8.dp))
+private fun SharedPageHeader(title: String, eyebrow: String?, game: SharedGameIdentity?, metrics: SharedShellMetrics,
+    actions: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = metrics.horizontal, end = metrics.horizontal,
+        top = metrics.headerTop, bottom = metrics.headerBottom), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            if (!eyebrow.isNullOrBlank()) {
+                Text(eyebrow, color = SharedUiColors.muted, fontSize = 12.sp, lineHeight = 16.sp,
+                    letterSpacing = 0.96.sp)
+                Spacer(Modifier.height(8.dp))
+            }
+            Text(title, fontSize = metrics.titleSize, lineHeight = metrics.titleSize * 1.2f,
+                fontWeight = FontWeight(650), letterSpacing = metrics.titleSize * -0.02f)
+            if (game != null && game.name.isNotBlank()) {
+                Text(game.summary, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                    color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.8.sp)
+            }
         }
-        Text(title, fontSize = metrics.titleSize, lineHeight = metrics.titleSize * 1.2f,
-            fontWeight = FontWeight(650), letterSpacing = metrics.titleSize * -0.02f)
-        if (game != null && game.name.isNotBlank()) {
-            Text(game.summary, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-                color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.8.sp)
-        }
+        Row(verticalAlignment = Alignment.CenterVertically, content = actions)
     }
 }
 

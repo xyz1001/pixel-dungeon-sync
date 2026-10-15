@@ -115,4 +115,83 @@ class HistoryPresentationTest {
   }
   assertEquals(before,history)
  }
+
+ @Test fun rowsUseGlobalSaveContentTimeInsteadOfIndependentLaneIndexes() {
+  fun at(id: String, time: String, parents: List<String> = emptyList()) = commit(id, parents).copy(
+   snapshot = commit(id, parents).snapshot.copy(metadata = SnapshotMetadata(
+    device = DeviceIdentity("source-device", "真实来源"), capturedAt = "2026-10-15T00:00:00Z",
+    fileModifiedAt = mapOf("game1/game.dat" to time))))
+  val history = state(listOf(
+   at("newest", "2026-10-12T00:00:00Z", listOf("middle")),
+   at("middle", "2026-10-09T00:00:00Z", listOf("base")),
+   at("base", "2026-10-08T00:00:00Z")), "base", newFiles, "restore")
+  val view = HistoryPresentation.from(history, 0)
+  val nodes = view.nodes.associateBy { it.id }
+  assertEquals(0, nodes.getValue("newest").row)
+  assertEquals(1, nodes.getValue("local-current").row)
+  assertEquals(2, nodes.getValue("middle").row)
+  assertEquals(3, nodes.getValue("base").row)
+  assertEquals(nodes.getValue("base").row, nodes.getValue("local-baseline").row)
+  assertEquals(4, view.rows)
+  assertEquals(setOf(HistoryEdge("middle", "newest"), HistoryEdge("base", "middle"),
+   HistoryEdge("base", "local-baseline"), HistoryEdge("local-baseline", "local-current", true)), view.edges.toSet())
+ }
+
+ @Test fun equalTimeNodesShareOnlyOppositeLanesAndOrderIsStableAcrossGraphInsertionOrder() {
+  val stamp = "2026-10-10T00:00:00Z"
+  fun at(id: String) = commit(id).let { it.copy(snapshot = it.snapshot.copy(metadata = SnapshotMetadata(
+   device = DeviceIdentity("source-device", "来源"), capturedAt = stamp,
+   fileModifiedAt = mapOf("game1/game.dat" to stamp)))) }
+  val commits = listOf(at("zeta"), at("alpha"), at("omega"))
+  val history = state(commits, "zeta", newFiles, "upload")
+  val first = HistoryPresentation.from(history, 0)
+  val reversed = HistoryPresentation.from(state(commits.reversed(), "zeta", newFiles, "upload"), 0)
+  assertEquals(first.nodes, reversed.nodes)
+  assertEquals(3, first.rows)
+  first.nodes.groupBy { it.row }.values.forEach { row -> assertEquals(row.size, row.map { it.column }.distinct().size) }
+  assertEquals(listOf("alpha", "omega", "zeta"), first.nodes.filter { it.column == 0 }.map { it.id })
+  assertEquals(2, first.nodes.filter { it.column == 1 }.map { it.row }.distinct().size)
+ }
+
+ @Test fun publicationTimeDoesNotPromoteUnknownSaveContentTime() {
+  val known = commit("known").let { it.copy(snapshot = it.snapshot.copy(metadata = SnapshotMetadata(
+   device = DeviceIdentity("source-device", "来源"), capturedAt = "2026-01-01T00:00:00Z",
+   fileModifiedAt = mapOf("game1/game.dat" to "2026-01-01T00:00:00Z")))) }
+  val unknown = commit("unknown").copy(operation = CommitOperationMetadata(
+   device = DeviceIdentity("source-device", "来源"), preparedAt = "2026-12-31T00:00:00Z"))
+  val view = HistoryPresentation.from(state(listOf(unknown, known)), 0)
+  assertEquals(listOf("known", "unknown"), view.nodes.map { it.id })
+  assertEquals("时间未知", view.nodes.last().time)
+ }
+
+ @Test fun completeRowPagingKeepsAllNodesReachableOnceAndEqualTimePairsTogether() {
+  fun at(index: Int) = commit("commit-%03d".format(index)).let { it.copy(snapshot = it.snapshot.copy(
+   metadata = SnapshotMetadata(device = DeviceIdentity("source-device", "来源"),
+    capturedAt = "2026-10-01T00:00:00Z", fileModifiedAt = mapOf("game1/game.dat" to
+     java.time.Instant.parse("2026-10-01T00:00:00Z").plusSeconds(index.toLong() * 3600).toString())))) }
+  val history = state((0..40).map(::at), "commit-000", newFiles, "restore").copy(
+   summary = SaveSummary(mapOf("game1" to "2026-09-01T00:00:00Z"), 7, 1))
+  val pages = (0 until HistoryPresentation.from(history, 0).pages).map { HistoryPresentation.from(history, it) }
+  val allNodes = pages.flatMap { it.nodes }
+  assertEquals(43, allNodes.size)
+  assertEquals(43, allNodes.map { it.id }.toSet().size)
+  assertEquals(1, allNodes.count { it.id == "local-current" })
+  assertTrue(pages.first().nodes.none { it.column == 1 })
+  val last = pages.last()
+  assertEquals(last.nodes.single { it.id == "commit-000" }.row,
+   last.nodes.single { it.id == "local-baseline" }.row)
+  assertEquals(setOf(HistoryEdge("commit-000", "local-baseline"),
+   HistoryEdge("local-baseline", "local-current", true)), last.edges.toSet())
+  assertEquals(41, allNodes.count { it.selectable && it.snapshotId != null })
+ }
+
+
+ @Test fun capturedAtWithoutSaveModificationTimesRemainsUnknown() {
+  val commit = commit("captured-only", files = emptyMap()).let { it.copy(snapshot = it.snapshot.copy(
+   metadata = SnapshotMetadata(device = DeviceIdentity("source-device", "来源"),
+    capturedAt = "2026-12-31T00:00:00Z", fileModifiedAt = emptyMap()))) }
+  val history = state(listOf(commit))
+  assertEquals("时间未知", HistoryPresentation.from(history, 0).nodes.single().time)
+ }
+
 }

@@ -1,37 +1,38 @@
-"""Production-view wiring contracts; geometry is executed by the JVM host checks."""
-import re
+"""Android consumes the shared measured history; geometry is executed in shared-ui JVM tests."""
 import unittest
 from pathlib import Path
+from test_embedded_install_contract import body
 
-SOURCE = (Path(__file__).resolve().parents[2] / "main/java/io/github/xyz1001/pdsync/android/MainActivity.java").read_text()
-TIMELINE = SOURCE[SOURCE.index("final class TimelineView"):SOURCE.index("private void renderDiscovery()")]
-DRAW = TIMELINE[TIMELINE.index("protected void onDraw(Canvas canvas)"):]
+REPO = Path(__file__).resolve().parents[4]
+MAIN = (REPO / 'android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java').read_text()
+ADAPTER = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidOnboardingComposition.kt').read_text()
+HISTORY = (REPO / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedHistorySection.kt').read_text()
 
 
 class HistoryRenderingContractTest(unittest.TestCase):
-    def test_edges_use_laid_out_card_bounds(self):
-        self.assertIn("HistoryArrowGeometry.between(from, to, cards", DRAW)
-        for getter in ("getLeft", "getTop", "getRight", "getBottom"):
-            self.assertIn("card." + getter + "()", DRAW)
-        self.assertNotRegex(DRAW, r"getWidth\(\)\s*\*")
-        self.assertNotIn("this.heights[", DRAW)
-        self.assertNotIn("historyNode.getColumn()", DRAW)
+    def test_android_has_no_independent_native_timeline(self):
+        self.assertNotIn('class TimelineView', MAIN)
+        self.assertNotIn('new TimelineView', MAIN)
+        self.assertNotIn('HistoryArrowGeometry', MAIN)
+        self.assertIn('SharedHomeScreen(state, actions)', body(ADAPTER, 'fun showHome('))
+        self.assertIn('HistoryPresentation.from(it, historyPage)', body(ADAPTER, 'fun showHome('))
 
-    def test_same_verified_edges_and_dashes_are_preserved(self):
-        self.assertIn("this.model.getEdges()", DRAW)
-        self.assertIn("bounds.get(historyEdge.getFromId())", DRAW)
-        self.assertIn("bounds.get(historyEdge.getToId())", DRAW)
-        self.assertIn("historyEdge.getDashed() ? new DashPathEffect", DRAW)
-        self.assertLess(DRAW.index("this.paint.setPathEffect(null)"), DRAW.index("if (arrow.hasHead)"))
-        self.assertEqual(3, DRAW.count("canvas.drawLine("))
+    def test_shared_edges_use_measured_cards_and_actual_graph_edges(self):
+        self.assertIn('sharedHistoryCanvasLayout(presentation, measured.mapValues', HISTORY)
+        self.assertIn('SharedHistoryNodeMeasurement(pair.first.height.toFloat(), pair.second.height.toFloat())', HISTORY)
+        self.assertIn('geometry.layout?.arrows?.forEach', HISTORY)
+        self.assertIn('arrow.edge.dashed', HISTORY)
+        self.assertIn('drawLine(color, arrow.start, arrow.tip', HISTORY)
+        self.assertNotIn('cubicTo(', HISTORY)
 
-    def test_edges_are_drawn_behind_cards_without_an_axis_or_outside_route(self):
-        self.assertNotIn("dispatchDraw", TIMELINE)
-        self.assertNotIn("drawPath", DRAW)
-        self.assertNotIn("drawText", DRAW)
-        self.assertNotIn("cubicTo", DRAW)
-        self.assertIn("canvas.drawLine(arrow.startX, arrow.startY, arrow.endX, arrow.endY", DRAW)
+    def test_only_history_has_horizontal_scroll_and_fixed_readable_lane_widths(self):
+        self.assertIn('Column(Modifier.fillMaxWidth().horizontalScroll(scroll)', HISTORY)
+        self.assertIn('Row(Modifier.width(560.dp)', HISTORY)
+        self.assertIn('Modifier.width(280.dp)', HISTORY)
+        self.assertIn('val cardWidth = 200.dp.roundToPx()', HISTORY)
+        self.assertIn('public void changeHistoryPage(', body(MAIN, 'private void renderHome()'))
+        self.assertNotIn('HorizontalScrollView', MAIN)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

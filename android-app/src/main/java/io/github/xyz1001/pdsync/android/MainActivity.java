@@ -14,10 +14,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Canvas;
-import android.graphics.DashPathEffect;
-import android.graphics.Paint;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -55,7 +51,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -83,8 +78,6 @@ import pdsync.OnboardingProgress;
 import pdsync.SaveSummary;
 import pdsync.SyncHistory;
 import pdsync.android.app.AndroidSyncFacade;
-import pdsync.presentation.HistoryEdge;
-import pdsync.presentation.HistoryNode;
 import pdsync.presentation.HistoryPresentation;
 import pdsync.presentation.SyncPage;
 
@@ -116,6 +109,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private LinearLayout footer;
     private SyncHistory history;
     private int historyPage;
+    private int sharedHomeRenderToken;
+    private String explicitHomeSelection;
+    private DiagnosticAction activeWorkAction = DiagnosticAction.OTHER;
     private AndroidSyncFacade.Inspection inspection;
     private InstallCoordinator installer;
     private SaveSummary localPreview;
@@ -235,6 +231,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.page = SyncPage.HOME;
             }
             this.selected = bundle.getString("selected");
+            this.explicitHomeSelection = bundle.getString("home.explicitSelection");
             this.historyPage = bundle.getInt("historyPage", 0);
             this.installedPickerState.setQuery(bundle.getString("installedPicker.query", ""));
             this.installedPickerState.setShowAll(bundle.getBoolean("installedPicker.showAll", false));
@@ -269,6 +266,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         bundle.putBoolean("diagnostics.return", diagnosticPickerReturn);
         bundle.putString("page", this.page.name());
         bundle.putString("selected", this.selected);
+        bundle.putString("home.explicitSelection", this.explicitHomeSelection);
         bundle.putInt("historyPage", this.historyPage);
         bundle.putString("installedPicker.query", this.installedPickerState.query());
         bundle.putBoolean("installedPicker.showAll", this.installedPickerState.showAll());
@@ -304,6 +302,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     @Override // android.app.Activity
     protected void onPause() {
         this.resumed = false;
+        ++this.sharedHomeRenderToken;
         this.comparisonProofState.reset();
         invalidatePathPreview();
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(false);
@@ -313,6 +312,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        ++this.sharedHomeRenderToken;
         this.comparisonProofState.reset();
         invalidatePathPreview();
         diagnosticExport.detach(this);
@@ -392,6 +392,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.details = "";
         this.feedbackError = false;
         this.busy = true;
+        this.activeWorkAction = action;
         this.notice = str;
         if (this.page == SyncPage.PATH && !this.sharedAppreciationOnly) {
             // PATH has no native status/root views. Publish busy state before starting I/O.
@@ -862,6 +863,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         resetPathPreview();
         this.cloudVerified = false;
         this.selected = null;
+        this.explicitHomeSelection = null;
         this.confirmedAction = null;
         this.confirmationMerge = null;
         this.progress = OnboardingProgress.PENDING;
@@ -1063,6 +1065,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         if (this.page != syncPage) {
+            ++this.sharedHomeRenderToken;
             this.comparisonProofState.reset();
             invalidatePathPreview();
         }
@@ -1100,6 +1103,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             renderSharedComparison();
             return;
         }
+        if (this.page == SyncPage.HOME) {
+            renderHome();
+            return;
+        }
         ScrollView scrollView;
         final int scrollY = (this.renderedPage != this.page || (scrollView = this.scroll) == null) ? 0 : scrollView.getScrollY();
         LinearLayout linearLayoutColumn = column();
@@ -1115,18 +1122,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         });
         LinearLayout linearLayoutRow = row();
         this.root.addView(linearLayoutRow);
-        linearLayoutRow.addView(label(this.page == SyncPage.HOME ? "像素地牢" : "像素地牢  /  存档同步", this.page == SyncPage.HOME ? 24 : 14, -14469589), new LinearLayout.LayoutParams(0, -2, 1.0f));
-        if (this.page == SyncPage.HOME) {
-            addButton(linearLayoutRow, "设置", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda49
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m76lambda$render$6$iogithubxyz1001pdsyncandroidMainActivity();
-                }
-            }, false);
-        }
-        if (this.page == SyncPage.HOME) {
-            this.root.addView(label(this.cloudVerified ? "存档自动同步  /  ● 云端已连接" : "存档自动同步  /  ○ 等待连接", 12, -10129303));
-        }
+        linearLayoutRow.addView(label("像素地牢  /  存档同步", 14, INK), new LinearLayout.LayoutParams(0, -2, 1.0f));
         String visibleNotice = visibleNotice();
         TextView textViewLabel = label(visibleNotice, 14, -13474224);
         textViewLabel.setVisibility(visibleNotice.isEmpty() ? View.GONE : View.VISIBLE);
@@ -1148,8 +1144,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.root.addView(linearLayoutColumn3);
         switch (AnonymousClass3.$SwitchMap$pdsync$presentation$SyncPage[this.page.ordinal()]) {
             case 1:
-                renderHome();
-                break;
+                throw new IllegalStateException("Home is hosted by the shared Compose screen");
             case 2:
                 renderSettings();
                 break;
@@ -1347,286 +1342,106 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         addButton(linearLayoutRow, "下一步", runnable2, true).setEnabled(z);
     }
 
+    /** The shared page only consumes this already-observed history; drawing never exports saves. */
     private void renderHome() {
-        String str2;
-        String str3;
-        AndroidSyncFacade.Inspection inspection;
-        if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE) {
-            text("自动上传已暂停");
-        }
+        final int renderToken = ++this.sharedHomeRenderToken;
+        final HomeActionContext owner = currentHomeContext(renderToken);
+        String homeStatus = this.cloudVerified
+                ? this.history != null && this.history.getClean() ? "已同步" : "云端已连接"
+                : this.connection == null ? "等待连接" : "存档待检查";
+        if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE)
+            homeStatus += " · 自动上传已暂停";
         String automaticStatus = automaticStatusBrief();
-        if (!automaticStatus.isEmpty()) text(automaticStatus);
-        text(selectedGameLabel());
-        if (!readyForSaves()) {
-            button("检查存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda3
-                @Override // java.lang.Runnable
-                public final void run() {
-                    if (MainActivity.this.rootGame != null) MainActivity.this.requestRootAuthorization();
-                    else MainActivity.this.m106x5451cefa();
-                }
-            });
-        }
-        LinearLayout linearLayoutRow = row();
-        this.body.addView(linearLayoutRow);
-        addButton(linearLayoutRow, "启动游戏", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda4
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.launchGame();
-            }
-        }, true).setEnabled(canRequestSaveAccess() && !this.readinessState.restorePending && ((inspection = this.inspection) == null || !inspection.getNeedsRestoreRecovery()));
-        addButton(linearLayoutRow, "上传", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda5
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.requestUpload();
-            }
-        }, true).setEnabled(canRequestSaveAccess());
-        addButton(linearLayoutRow, "恢复", this::requestRestore, true).setEnabled(restoreSupported() && canRequestSaveAccess() && this.connection != null);
-        if (!restoreSupported()) text("当前访问方式不支持恢复与合并写入。");
-        AndroidSyncFacade.Inspection inspection2 = this.inspection;
-        if (inspection2 != null && inspection2.isRetryablePending()) {
-            text("上次上传尚未完成，请先重试上传。");
-        }
-        AndroidSyncFacade.Inspection inspection3 = this.inspection;
-        if (inspection3 != null && inspection3.getNeedsRestoreRecovery()) {
-            text("有未完成恢复，上传已锁定。请在设置中检查恢复结果。");
-        }
-        heading("完整档案历史");
-        if (this.history == null) {
-            str2 = "尚未读取存档历史";
-        } else {
-            str2 = this.history.getCloud().size() + " 份云端记录";
-        }
-        text(str2);
-        if (this.selected == null) {
-            SyncHistory syncHistory = this.history;
-            str3 = (syncHistory == null || syncHistory.getGraph().getTips().size() <= 1) ? "默认恢复最新云端存档" : "请选择要恢复的云端分支";
-        } else {
-            str3 = "恢复目标：" + selectedName();
-        }
-        text(str3);
-        renderHistory();
-        button("重新检查存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda8
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m107xc9cbf53b();
-            }
-        });
-    }
-
-    /* renamed from: lambda$renderHome$10$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m106x5451cefa() {
-        navigate(SyncPage.DISCOVERY);
-        refreshReadiness();
-    }
-
-    /* renamed from: lambda$renderHome$11$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m107xc9cbf53b() {
-        refreshComparison(SyncPage.HOME);
-    }
-
-    private void renderHistory() {
-        SyncHistory syncHistory = this.history;
-        if (syncHistory == null) {
-            return;
-        }
-        final HistoryPresentation historyPresentationFrom = HistoryPresentation.from(syncHistory, this.historyPage);
-        LinearLayout linearLayoutRow = row();
-        this.body.addView(linearLayoutRow);
-        linearLayoutRow.addView(label("云端存档", 15, -14469589), new LinearLayout.LayoutParams(0, -2, 1.0f));
-        linearLayoutRow.addView(label("本机", 15, -14469589), new LinearLayout.LayoutParams(0, -2, 1.0f));
-        this.body.addView(new TimelineView(historyPresentationFrom), new LinearLayout.LayoutParams(-1, -2));
-        if (historyPresentationFrom.getPages() > 1) {
-            LinearLayout linearLayoutRow2 = row();
-            this.body.addView(linearLayoutRow2);
-            addButton(linearLayoutRow2, "较新", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda119
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m104x441503ed(historyPresentationFrom);
-                }
-            }, true).setEnabled(historyPresentationFrom.getPage() > 0);
-            linearLayoutRow2.addView(label((historyPresentationFrom.getPage() + 1) + " / " + historyPresentationFrom.getPages(), 14, -10129303));
-            addButton(linearLayoutRow2, "更早", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda120
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m105xb98f2a2e(historyPresentationFrom);
-                }
-            }, true).setEnabled(historyPresentationFrom.getPage() + 1 < historyPresentationFrom.getPages());
-        }
-    }
-
-    /* renamed from: lambda$renderHistory$12$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m104x441503ed(HistoryPresentation historyPresentation) {
-        this.historyPage = historyPresentation.getPage() - 1;
-        render();
-    }
-
-    /* renamed from: lambda$renderHistory$13$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m105xb98f2a2e(HistoryPresentation historyPresentation) {
-        this.historyPage = historyPresentation.getPage() + 1;
-        render();
-    }
-
-    /* JADX INFO: Access modifiers changed from: private */
-    final class TimelineView extends ViewGroup {
-        private int[] heights;
-        private final HistoryPresentation model;
-        private final Map<String, HistoryNode> nodes;
-        private final Paint paint;
-        private int[] tops;
-        private final Map<String, View> views;
-
-        TimelineView(HistoryPresentation historyPresentation) {
-            super(MainActivity.this);
-            this.views = new LinkedHashMap();
-            this.nodes = new LinkedHashMap();
-            this.paint = new Paint(1);
-            this.model = historyPresentation;
-            setWillNotDraw(false);
-            for (final HistoryNode historyNode : historyPresentation.getNodes()) {
-                LinearLayout linearLayoutColumn = MainActivity.this.column();
-                linearLayoutColumn.setPadding(MainActivity.this.dp(9), MainActivity.this.dp(10), MainActivity.this.dp(9), MainActivity.this.dp(7));
-                boolean z = historyNode.getSelectable() && historyNode.getSnapshotId().equals(MainActivity.this.selected);
-                GradientDrawable gradientDrawable = new GradientDrawable();
-                gradientDrawable.setColor(historyNode.getDirty() ? -5976 : z ? -2626595 : -1182996);
-                gradientDrawable.setCornerRadius(MainActivity.this.dp(7));
-                if (z) {
-                    gradientDrawable.setStroke(MainActivity.this.dp(2), -13474224);
-                }
-                linearLayoutColumn.setBackground(gradientDrawable);
-                TextView textViewLabel = MainActivity.this.label(historyNode.getName(), 14, -14469589);
-                textViewLabel.setTypeface(null, 1);
-                linearLayoutColumn.addView(textViewLabel);
-                linearLayoutColumn.addView(MainActivity.this.label(historyNode.getTime(), 12, -10129303));
-                linearLayoutColumn.addView(MainActivity.this.label(historyNode.getDetail(), 12, -10129303));
-                linearLayoutColumn.addView(MainActivity.this.label(historyNode.getStatus(), 12, -10129303));
-                if (historyNode.getSelectable()) {
-                    linearLayoutColumn.setContentDescription("选择恢复目标，" + historyNode.getName() + "，" + historyNode.getTime() + "，" + historyNode.getStatus());
-                    linearLayoutColumn.setFocusable(true);
-                    linearLayoutColumn.setClickable(true);
-                    linearLayoutColumn.setSelected(z);
-                    linearLayoutColumn.setOnClickListener(new View.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$TimelineView$$ExternalSyntheticLambda0
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            TimelineView.this.m151x357355b2(historyNode, view);
-                        }
-                    });
-                }
-                MainActivity.this.addButton(linearLayoutColumn, "命名", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$TimelineView$$ExternalSyntheticLambda1
-                    @Override // java.lang.Runnable
-                    public final void run() {
-                        TimelineView.this.m152x3b772111(historyNode);
+        if (!automaticStatus.isEmpty()) homeStatus += "\n" + automaticStatus;
+        String homeNotice = visibleNotice();
+        String capabilityNotice = restoreNeedsAttention()
+                ? "有未完成恢复，请在设置中检查恢复结果。"
+                : this.inspection != null && this.inspection.isRetryablePending()
+                ? "上次上传尚未完成，请重试上传。"
+                : !readyForSaves() ? "请在设置中重新检查存档。"
+                : !restoreSupported() ? "当前访问方式不支持恢复与合并写入。" : "";
+        if (!capabilityNotice.isEmpty() && !homeNotice.contains(capabilityNotice))
+            homeNotice = homeNotice.isEmpty() ? capabilityNotice : homeNotice + "\n" + capabilityNotice;
+        // These are platform capabilities, not permission inferred from a label, PID or timestamp.
+        final boolean canUpload = canRequestSaveAccess() && !restoreNeedsAttention();
+        final boolean canRestore = restoreSupported() && canRequestSaveAccess()
+                && this.connection != null && !restoreNeedsAttention();
+        final boolean canLaunch = canRequestSaveAccess() && !restoreNeedsAttention();
+        this.root = null;
+        this.status = null;
+        this.body = null;
+        this.footer = null;
+        this.scroll = null;
+        this.renderedPage = this.page;
+        AndroidOnboardingComposition.showHome(this, this.history, this.historyPage, selectedGameIdentity(),
+                homeStatus, isForegroundHome(), this.busy, canUpload, canRestore, canLaunch, homeOperation(),
+                this.selected, this.explicitHomeSelection, homeNotice, this.feedbackError, this.details,
+                new SharedHomeActions() {
+                    @Override public void settings() {
+                        if (isCurrentHomeAction(owner)) navigate(SyncPage.SETTINGS);
                     }
-                }, false).setTextSize(12.0f);
-                this.views.put(historyNode.getId(), linearLayoutColumn);
-                this.nodes.put(historyNode.getId(), historyNode);
-                addView(linearLayoutColumn);
-            }
-            if (historyPresentation.getLocalEmpty()) {
-                View viewLabel = MainActivity.this.label("无存档", 14, -10129303);
-                this.views.put("empty", viewLabel);
-                addView(viewLabel);
-            }
-        }
+                    @Override public void upload() {
+                        if (isCurrentHomeAction(owner) && canRequestSaveAccess() && !restoreNeedsAttention()) requestUpload();
+                    }
+                    @Override public void restore() {
+                        if (isCurrentHomeAction(owner) && restoreSupported() && canRequestSaveAccess()
+                                && connection != null && !restoreNeedsAttention()) requestRestore();
+                    }
+                    @Override public void launch() {
+                        if (isCurrentHomeAction(owner) && canRequestSaveAccess() && !restoreNeedsAttention()) launchGame();
+                    }
+                    @Override public void selectSnapshot(String snapshotId) {
+                        if (!isCurrentHomeAction(owner) || !hasHomeSnapshot(snapshotId)) return;
+                        selected = snapshotId;
+                        explicitHomeSelection = snapshotId;
+                        render();
+                    }
+                    @Override public void rename(String snapshotId) {
+                        if (!isCurrentHomeAction(owner) || history == null) return;
+                        if (snapshotId == null ? history.getLocalNodeCount() > 0 : hasHomeSnapshot(snapshotId))
+                            MainActivity.this.rename(snapshotId);
+                    }
+                    @Override public void changeHistoryPage(int requestedPage) {
+                        if (!isCurrentHomeAction(owner) || history == null) return;
+                        HistoryPresentation visible = HistoryPresentation.from(history, historyPage);
+                        if (requestedPage < 0 || requestedPage >= visible.getPages() || requestedPage == visible.getPage()) return;
+                        historyPage = requestedPage;
+                        render();
+                    }
+                });
+    }
 
-        /* renamed from: lambda$new$0$io-github-xyz1001-pdsync-android-MainActivity$TimelineView, reason: not valid java name */
-        /* synthetic */ void m151x357355b2(HistoryNode historyNode, View view) {
-            if (MainActivity.this.busy) {
-                return;
-            }
-            MainActivity.this.selected = historyNode.getSnapshotId();
-            MainActivity.this.render();
-        }
+    private boolean isForegroundHome() {
+        return this.resumed && !isDestroyed() && this.page == SyncPage.HOME && !this.sharedAppreciationOnly;
+    }
 
-        /* renamed from: lambda$new$1$io-github-xyz1001-pdsync-android-MainActivity$TimelineView, reason: not valid java name */
-        /* synthetic */ void m152x3b772111(HistoryNode historyNode) {
-            MainActivity.this.rename(historyNode.getSnapshotId());
-        }
+    private HomeActionContext currentHomeContext(int renderToken) {
+        try {
+            return new HomeActionContext(renderToken, this.connection, this.facade, this.inspection, this.history,
+                    SyncRuntime.currentSelectionToken(this) + "\n" + SyncRuntime.currentNamespace(this));
+        } catch (Exception unavailable) { return null; }
+    }
 
-        @Override // android.view.View
-        protected void onMeasure(int i, int i2) {
-            int row;
-            int size = View.MeasureSpec.getSize(i);
-            int iMax = Math.max(1, Math.round(size * 0.43f));
-            this.heights = new int[this.model.getRows()];
-            this.tops = new int[this.model.getRows()];
-            Arrays.fill(this.heights, MainActivity.this.dp(160));
-            Iterator<Map.Entry<String, View>> it = this.views.entrySet().iterator();
-            while (true) {
-                row = 0;
-                if (!it.hasNext()) {
-                    break;
-                }
-                Map.Entry<String, View> next = it.next();
-                next.getValue().measure(View.MeasureSpec.makeMeasureSpec(iMax, 1073741824), View.MeasureSpec.makeMeasureSpec(0, 0));
-                HistoryNode historyNode = this.nodes.get(next.getKey());
-                if (historyNode != null) {
-                    row = historyNode.getRow();
-                }
-                int[] iArr = this.heights;
-                iArr[row] = Math.max(iArr[row], next.getValue().getMeasuredHeight() + MainActivity.this.dp(14));
-            }
-            int i3 = 0;
-            while (true) {
-                int[] iArr2 = this.heights;
-                if (row >= iArr2.length) {
-                    setMeasuredDimension(size, i3);
-                    return;
-                } else {
-                    this.tops[row] = i3;
-                    i3 += iArr2[row];
-                    row++;
-                }
-            }
-        }
+    private boolean isCurrentHomeAction(HomeActionContext owner) {
+        return owner != null && owner.accepts(currentHomeContext(this.sharedHomeRenderToken), isForegroundHome(), this.busy);
+    }
 
-        @Override // android.view.ViewGroup, android.view.View
-        protected void onLayout(boolean z, int i, int i2, int i3, int i4) {
-            for (Map.Entry<String, View> entry : this.views.entrySet()) {
-                HistoryNode historyNode = this.nodes.get(entry.getKey());
-                int width = 0;
-                int row = historyNode == null ? 0 : historyNode.getRow();
-                int column = historyNode == null ? 1 : historyNode.getColumn();
-                View value = entry.getValue();
-                if (column != 0) {
-                    width = getWidth() - value.getMeasuredWidth();
-                }
-                int iDp = this.tops[row] + MainActivity.this.dp(6);
-                value.layout(width, iDp, value.getMeasuredWidth() + width, value.getMeasuredHeight() + iDp);
-            }
-        }
+    /** Full verified history owns target selection even when its card is on another page. */
+    private boolean hasHomeSnapshot(String snapshotId) {
+        if (snapshotId == null || this.history == null) return false;
+        for (AppendCommit commit : this.history.getCloud())
+            if (snapshotId.equals(commit.getSnapshot().getId())) return true;
+        return false;
+    }
 
-        @Override // android.view.View
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            if (this.tops == null) {
-                return;
-            }
-            // Use laid-out cards, never column-edge percentages or row-height estimates.
-            Map<String, HistoryArrowGeometry.Box> bounds = new LinkedHashMap<>();
-            for (Map.Entry<String, View> entry : this.views.entrySet()) {
-                View card = entry.getValue();
-                bounds.put(entry.getKey(), new HistoryArrowGeometry.Box(
-                        card.getLeft(), card.getTop(), card.getRight(), card.getBottom()));
-            }
-            List<HistoryArrowGeometry.Box> cards = new ArrayList<>(bounds.values());
-            this.paint.setStrokeWidth(MainActivity.this.dp(2));
-            this.paint.setStyle(Paint.Style.STROKE);
-            for (HistoryEdge historyEdge : this.model.getEdges()) {
-                HistoryArrowGeometry.Box from = bounds.get(historyEdge.getFromId());
-                HistoryArrowGeometry.Box to = bounds.get(historyEdge.getToId());
-                if (from == null || to == null) continue;
-                HistoryArrowGeometry.Arrow arrow = HistoryArrowGeometry.between(from, to, cards,
-                        MainActivity.this.dp(7), MainActivity.this.dp(4), MainActivity.this.dp(1));
-                if (arrow == null) continue;
-                this.paint.setColor(historyEdge.getDashed() ? -4879047 : -9004921);
-                this.paint.setPathEffect(historyEdge.getDashed() ? new DashPathEffect(new float[]{MainActivity.this.dp(6), MainActivity.this.dp(4)}, 0.0f) : null);
-                canvas.drawLine(arrow.startX, arrow.startY, arrow.endX, arrow.endY, this.paint);
-                this.paint.setPathEffect(null);
-                if (arrow.hasHead) {
-                    canvas.drawLine(arrow.leftX, arrow.leftY, arrow.tipX, arrow.tipY, this.paint);
-                    canvas.drawLine(arrow.rightX, arrow.rightY, arrow.tipX, arrow.tipY, this.paint);
-                }
-            }
+    private SharedHomeOperation homeOperation() {
+        if (!this.busy) return SharedHomeOperation.NONE;
+        switch (this.activeWorkAction) {
+            case PUSH: return SharedHomeOperation.UPLOAD;
+            case RESTORE: return SharedHomeOperation.RESTORE;
+            case MERGE: return SharedHomeOperation.MERGE;
+            case LAUNCH: return SharedHomeOperation.LAUNCH;
+            default: return SharedHomeOperation.NONE;
         }
     }
 
@@ -2004,6 +1819,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.inspection = null;
         this.cloudVerified = false;
         this.selected = null;
+        this.explicitHomeSelection = null;
         this.progress = OnboardingProgress.PENDING;
         this.onboardingActive = true;
         this.localPreview = null;
@@ -2604,6 +2420,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.inspection = null;
         this.history = null;
         this.selected = null;
+        this.explicitHomeSelection = null;
         this.cloudVerified = false;
         this.progress = OnboardingProgress.PENDING;
         this.onboardingActive = true;
@@ -2791,8 +2608,14 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                             boolean found = false;
                             for (AppendCommit commit : this.history.getCloud())
                                 if (commit.getSnapshot().getId().equals(this.selected)) found = true;
-                            if (!found) this.selected = this.history.getDefaultSnapshot();
-                        } else this.selected = null;
+                            if (!found) {
+                                this.selected = this.history.getDefaultSnapshot();
+                                this.explicitHomeSelection = null;
+                            }
+                        } else {
+                            this.selected = null;
+                            this.explicitHomeSelection = null;
+                        }
                         this.notice = comparisonCopy();
                         this.details = this.inspection == null ? "" : safeText(this.inspection.getMessage());
                     }
@@ -2881,6 +2704,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             String str = this.selected;
             if (str != null && !hashSet.contains(str)) {
                 this.selected = null;
+                this.explicitHomeSelection = null;
             }
             if (this.selected == null) {
                 this.selected = this.history.getDefaultSnapshot();
@@ -4311,6 +4135,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.inspection = null;
         this.history = null;
         this.selected = null;
+        this.explicitHomeSelection = null;
         this.cloudVerified = false;
         this.progress = OnboardingProgress.PENDING;
         this.onboardingActive = true;
