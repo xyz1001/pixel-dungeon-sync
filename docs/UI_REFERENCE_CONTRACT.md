@@ -106,6 +106,8 @@ technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
 
 ## Later requirements that override mock content
 
+- Step 2 omits the alternative/default path buttons; keep the path, save summary
+  and existing Back/Next navigation (2026-10-15 clarification).
 - Step 1 uses the selected game's real icon when available. The shared page has no
   details toggle; Desktop keeps the initial automatic scan, omits manual rescan,
   and labels the selected-game file chooser `重新选择` (2026-10-15 clarification).

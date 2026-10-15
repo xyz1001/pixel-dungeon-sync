@@ -57,16 +57,6 @@ private fun SharedSavePathContent(
         SharedForm {
             SharedTextField("存档路径", state.path, interactions::editPath,
                 enabled = !state.busy, readOnly = !state.editable, singleLine = false)
-            // Stack these controls so two long localized labels remain readable at 320px.
-            if (state.shows(SharedSavePathControl.CHOOSE_DIRECTORY)) {
-                SharedActionButton("选择其他存档路径", { interactions.perform(SharedSavePathControl.CHOOSE_DIRECTORY) },
-                    enabled = state.enables(SharedSavePathControl.CHOOSE_DIRECTORY), style = SharedButtonStyle.SECONDARY)
-                Spacer(Modifier.height(8.dp))
-            }
-            if (state.shows(SharedSavePathControl.USE_DEFAULT)) {
-                SharedActionButton("使用默认路径", { interactions.perform(SharedSavePathControl.USE_DEFAULT) },
-                    enabled = state.enables(SharedSavePathControl.USE_DEFAULT), style = SharedButtonStyle.TEXT)
-            }
             Spacer(Modifier.height(12.dp))
             val summary = savePathSummary(state.summary)
             if (summary != null) {

@@ -39,6 +39,18 @@ class SharedSavePathRenderTest {
     private val summary = SaveSummary((1..18).associate { "game$it" to "2026-10-14T12:34:00Z" }, 17, 20)
     private val game = SharedGameIdentity("很长的已选游戏名称用于检查真实文字换行和窄屏导航", "3.3.8")
 
+    @Test fun pathStepOmitsAlternativeDirectoryButtonsButKeepsPathPreviewAndNavigation() {
+        val source = Files.readString(Path.of("../shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedSavePathScreen.kt"))
+        assertFalse(source.contains("选择其他存档路径"))
+        assertFalse(source.contains("使用默认路径"))
+        assertFalse(source.contains("interactions.perform(SharedSavePathControl.CHOOSE_DIRECTORY)"))
+        assertFalse(source.contains("interactions.perform(SharedSavePathControl.USE_DEFAULT)"))
+        assertTrue(source.contains("SharedTextField(\"存档路径\""))
+        assertTrue(source.contains("savePathSummary(state.summary)"))
+        assertTrue(source.contains("SharedSavePathControl.BACK"))
+        assertTrue(source.contains("SharedSavePathControl.NEXT"))
+    }
+
     @Test fun actualSavePathPageWrapsLongPathsKeepsSlotTimesAndFooterAtAllReferenceWidths() {
         for (width in listOf(1165, 500, 320)) for (editable in listOf(true, false)) {
             val actions = Actions()
