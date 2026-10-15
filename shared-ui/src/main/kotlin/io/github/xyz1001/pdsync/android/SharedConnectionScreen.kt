@@ -58,8 +58,11 @@ private fun SharedConnectionContent(
             controller.refreshAccountStatus()
         }
     }
-    val appreciation = state.appreciation
     val setup = state.origin == ConnectionEntryModel.Origin.SETUP
+    LaunchedEffect(controller, state.officialExpired) {
+        if (setup && state.officialExpired) controller.openInlineAppreciation()
+    }
+    val appreciation = state.appreciation.takeUnless { state.appreciationInline }
     SharedAppShell(
         title = if (appreciation != null) state.appreciationLabel else if (setup) "连接云端" else "连接设置",
         eyebrow = if (setup && appreciation == null) "3 / 4" else null,
@@ -106,6 +109,11 @@ private fun SharedConnectionContent(
                             Text("用户名 ${state.username}")
                             Text(state.officialExpiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
                             if (state.officialAccessStatus.isNotEmpty()) SharedConnectionNotice(state.officialAccessStatus)
+                            if (setup && state.officialExpired) {
+                                SharedInlineAppreciationContent(state.appreciation, state.busy || state.appreciation == null,
+                                    controller::copyUsername, onSaveImage = onSaveImage,
+                                    imageSaveBusy = imageSaveBusy, imageSaveMessage = imageSaveMessage)
+                            }
                             if (!setup) Row(verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SharedActionButton(state.appreciationLabel, controller::openAppreciation,

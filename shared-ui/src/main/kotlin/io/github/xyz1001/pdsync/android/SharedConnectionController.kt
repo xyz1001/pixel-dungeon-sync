@@ -80,6 +80,8 @@ data class SharedConnectionState(
     val canGoBack: Boolean,
     val officialAuthenticated: Boolean,
     val showOfficialAccount: Boolean,
+    /** Confirmed server time plus trusted elapsed time, never an inferred authentication failure. */
+    val officialExpired: Boolean,
     val officialExpiry: String,
     val officialAccessStatus: String,
     /** Built-in account access or permission to verify custom DAV; never a synchronization baseline. */
@@ -90,6 +92,7 @@ data class SharedConnectionState(
     val appreciationLabel: String,
     val canAppreciate: Boolean,
     val appreciation: SharedAppreciationState?,
+    val appreciationInline: Boolean,
     val recoveryMessage: String,
     val recoveryLabel: String,
 ) {
@@ -155,6 +158,7 @@ class SharedConnectionController internal constructor(
     }
     private var officialSession: OfficialSession? = null
     private var pendingAppreciationOnly = false
+    private var pendingInlineAppreciation = false
     private var host: SharedConnectionHost? = null
     private val alive = AtomicBoolean(true)
     private val foreground = AtomicBoolean(false)
@@ -171,6 +175,7 @@ class SharedConnectionController internal constructor(
     private var appreciationClient: ManagedAccountClient? = null
     private var appreciationImage: ImageBitmap? = null
     private var appreciationOnly = false
+    private var appreciationInline = false
     private var appreciationLocalMessage = ""
     private var reportedBusy = false
     private var recoveryMessage = ""
@@ -181,6 +186,9 @@ class SharedConnectionController internal constructor(
     private var savedOfficialHistory = savedReentry?.takeIf(::isOfficial)?.let { config ->
         cache?.read(config.endpoint, config.username)?.let { config to it }
     }
+    // Only in-memory history copied from this controller's session shares its monotonic clock.
+    // Persisted history still requires its recorded boot identity, and neither history grants access.
+    private var savedOfficialHistoryIsCurrent = false
 
     var state by mutableStateOf(snapshot())
         private set
@@ -230,6 +238,12 @@ class SharedConnectionController internal constructor(
                 entered = true
                 restoreOfficialAccount()
             }
+            // Fulfil only an already requested inline open that waited for foreground admission.
+            // Ordinary resume/focus does not request or refresh account or image data.
+            if (pendingInlineAppreciation) {
+                pendingInlineAppreciation = false
+                openInlineAppreciation()
+            }
         }
     }
 
@@ -246,6 +260,7 @@ class SharedConnectionController internal constructor(
         officialPassword = ""
         officialSession = null
         savedOfficialHistory = null
+        savedOfficialHistoryIsCurrent = false
         pendingAppreciationOnly = false
         saved = null
         savedReentry = null
@@ -307,7 +322,7 @@ class SharedConnectionController internal constructor(
     }
     fun back() {
         if (!alive.get()) return
-        if (appreciationFlow != null) {
+        if (appreciationFlow != null && !appreciationInline) {
             val standalone = appreciationOnly
             closeAppreciation()
             publish()
@@ -480,11 +495,26 @@ class SharedConnectionController internal constructor(
         }
     }
 
-    fun openAppreciation() {
+    /** Step 3 renewals stay inside the connection form and never add a navigation level. */
+    fun openInlineAppreciation() {
+        if (!alive.get() || origin != ConnectionEntryModel.Origin.SETUP ||
+            !state.officialExpired || officialAccountForDraft() == null) return
+        // A saved expired account can already be visible while its one entry-time read is pending.
+        // Remember this presentation request so completion can open it without a focus listener.
+        pendingInlineAppreciation = true
+        if (!canStart()) return
+        openAppreciation(inline = true)
+        pendingInlineAppreciation = false
+    }
+
+    fun openAppreciation() = openAppreciation(inline = false)
+
+    private fun openAppreciation(inline: Boolean) {
         if (!canStart() || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
         val source = officialAccountForDraft() ?: return
         if (appreciationFlow != null && appreciationSource == source) return
         closeAppreciation()
+        appreciationInline = inline
         appreciationSource = source
         appreciationFlow = ManagedAccountFlow(source.username, cache?.read(source.endpoint, source.username),
             object : ManagedAccountFlow.Clock {
@@ -498,7 +528,7 @@ class SharedConnectionController internal constructor(
         refreshAppreciation()
     }
 
-    /** One load per explicit page open; focus/resume never requests data. Missing images retry once. */
+    /** One load per page or expired-inline entry; focus never refreshes it. Missing images retry once. */
     fun refreshAppreciation() {
         val flow = appreciationFlow ?: return
         val source = appreciationSource ?: return
@@ -582,7 +612,7 @@ class SharedConnectionController internal constructor(
                             ui.execute {
                                 if (current() && appreciationFlow === flow && appreciationClient === client) {
                                     officialSession?.takeIf { it.config == source }?.let {
-                                        savedOfficialHistory = it.config to it.record
+                                        retainOfficialHistory(it)
                                     }
                                     officialSession = null
                                     publish()
@@ -634,6 +664,11 @@ class SharedConnectionController internal constructor(
         return record
     }
 
+    private fun retainOfficialHistory(session: OfficialSession) {
+        savedOfficialHistory = session.config to session.record
+        savedOfficialHistoryIsCurrent = true
+    }
+
     private fun <T> execute(pending: Operation, work: () -> T, success: (T) -> Unit) {
         try {
             io.execute {
@@ -660,7 +695,7 @@ class SharedConnectionController internal constructor(
                     result.fold(success, { failure ->
                         proof = null
                         if (pending.accountRefresh) {
-                            officialSession?.let { savedOfficialHistory = it.config to it.record }
+                            officialSession?.let(::retainOfficialHistory)
                             officialSession = null
                         }
                         notice = safeFailure(failure, if (pending.config.official) "暂时无法完成，请重试。" else "连接测试未通过，请重试。")
@@ -669,6 +704,10 @@ class SharedConnectionController internal constructor(
                     publish()
                     deliverCommit()
                     if (pendingAppreciationOnly && officialAccountForDraft() != null) openAppreciationOnly()
+                    if (pendingInlineAppreciation) {
+                        pendingInlineAppreciation = false
+                        openInlineAppreciation()
+                    }
                 }
             }
         } catch (_: RuntimeException) {
@@ -764,6 +803,7 @@ class SharedConnectionController internal constructor(
         proof = null
         officialSession = null
         savedOfficialHistory = null
+        savedOfficialHistoryIsCurrent = false
         pendingAppreciationOnly = false
         closeAppreciation()
     }
@@ -775,6 +815,8 @@ class SharedConnectionController internal constructor(
         appreciationFlow?.close()
         appreciationFlow = null
         appreciationOnly = false
+        appreciationInline = false
+        pendingInlineAppreciation = false
         appreciationLocalMessage = ""
         appreciationSource = null
         appreciationImage = null
@@ -787,6 +829,7 @@ class SharedConnectionController internal constructor(
         val history = savedOfficialHistory?.takeIf { it.first == visibleAccount }
         val record = account?.record ?: history?.second
         val expired = if (account != null) officialExpired(account.record)
+            else if (history != null && savedOfficialHistoryIsCurrent) officialExpired(history.second)
             else record?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) == true
         val expiry = record?.let {
             if (it.expiresMs == null) "使用期限未设置"
@@ -799,19 +842,19 @@ class SharedConnectionController internal constructor(
         }
         return SharedConnectionState(origin, entry.mode(), current.endpoint, current.username, current.password,
             operation != null, operation != null && operation?.commitStarted != true,
-            canEditDraft(), appreciation != null || canEditDraft(),
-            account != null, visibleAccount != null, expiry, when {
+            canEditDraft(), (appreciation != null && !appreciationInline) || canEditDraft(),
+            account != null, visibleAccount != null, expired, expiry, when {
                 expired -> "服务已到期"
                 record?.active == false -> "服务未启用"
                 record?.expiresMs != null && record.serverTimeMs == null -> "使用期限待确认"
                 else -> ""
             },
             if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
-                canStart() && appreciation == null && account?.let(::hasOfficialAccess) == true
+                canStart() && (appreciation == null || appreciationInline) && account?.let(::hasOfficialAccess) == true
             else hasProof() || savedDraftForRevalidation() != null, notice, error,
             saved != null || origin == ConnectionEntryModel.Origin.SETTINGS,
             if (expired) "赞赏续期" else "赞赏",
-            visibleAccount != null, appreciation,
+            visibleAccount != null, appreciation, appreciationInline,
             recoveryMessage, recoveryLabel)
     }
     private fun deliverCommit() {
