@@ -5,7 +5,8 @@ import sys
 repo, output = map(Path, sys.argv[1:])
 base = repo / "android-app/src/main/java/io/github/xyz1001/pdsync/android"
 main = (base / "MainActivity.java").read_text()
-client = (base / "ManagedAccountClient.java").read_text()
+shared = repo / "core/src/main/java/io/github/xyz1001/pdsync/android"
+client = (shared / "ManagedAccountClient.java").read_text()
 
 
 def method(source, signature):

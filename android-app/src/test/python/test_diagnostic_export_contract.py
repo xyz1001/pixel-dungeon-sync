@@ -10,7 +10,8 @@ WRITER = (ROOT / 'DiagnosticExportWriter.java').read_text()
 STATE = (ROOT / 'DiagnosticExportState.java').read_text()
 SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 LOGGING = (ROOT / 'AndroidDiagnosticLogging.java').read_text()
-AUTH = (ROOT / 'OfficialServiceRegistrationClient.java').read_text()
+SHARED = Path(__file__).resolve().parents[4] / 'core/src/main/java/io/github/xyz1001/pdsync/android'
+AUTH = (SHARED / 'OfficialServiceRegistrationClient.java').read_text()
 
 class DiagnosticExportContract(unittest.TestCase):
     def test_settings_contains_only_one_export_button(self):

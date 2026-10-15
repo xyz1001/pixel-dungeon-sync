@@ -14,6 +14,6 @@ OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-managed-account.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 CP="$CORE:$(find -L "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
 "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -encoding UTF-8 -cp "$CP" -d "$OUT" \
-  "$REPO/android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountClient.java" \
+  "$REPO/core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountClient.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/ManagedAccountClientChecks.java"
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.ManagedAccountClientChecks

@@ -142,7 +142,8 @@ public final class ManagedAccountFlowChecks {
         Path base = sourceRoot.resolve("android-app/src/main/java/io/github/xyz1001/pdsync/android");
         String main = Files.readString(base.resolve("MainActivity.java"));
         String panel = Files.readString(base.resolve("ManagedAccountPanel.java"));
-        String login = Files.readString(base.resolve("OfficialServiceRegistrationClient.java"));
+        Path shared = sourceRoot.resolve("core/src/main/java/io/github/xyz1001/pdsync/android");
+        String login = Files.readString(shared.resolve("OfficialServiceRegistrationClient.java"));
         String official = method(main, "private void renderOfficialConnection()");
         String settings = method(main, "private void renderSettings()");
         check(official.contains("button(officialAppreciationLabel()") && official.contains("appreciationAccountForDraft()"), "Official page has an explicitly selected appreciation identity");

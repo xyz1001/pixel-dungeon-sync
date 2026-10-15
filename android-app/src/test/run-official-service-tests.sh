@@ -3,7 +3,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-SRC="$REPO/android-app/src/main/java/io/github/xyz1001/pdsync/android"
+SRC="$REPO/core/src/main/java/io/github/xyz1001/pdsync/android"
 JAVA=${JAVA_BIN:-java}
 RUNTIME=${PDSYNC_RUNTIME_LIB:?Set PDSYNC_RUNTIME_LIB to the existing pinned runtime jars}
 CORE=${PDSYNC_CORE_JAR:-$REPO/core/build/libs/core.jar}

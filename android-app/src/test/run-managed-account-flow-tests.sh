@@ -7,8 +7,8 @@ JAVA=${JAVA_BIN:-java}
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-managed-flow.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -encoding UTF-8 -Xlint:all,-options -Werror -d "$OUT" \
-  "$REPO/android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountFlow.java" \
-  "$REPO/android-app/src/main/java/io/github/xyz1001/pdsync/android/TrustedEntitlementCache.java" \
+  "$REPO/core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountFlow.java" \
+  "$REPO/core/src/main/java/io/github/xyz1001/pdsync/android/TrustedEntitlementCache.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/ManagedAccountFlowChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/TrustedEntitlementCacheChecks.java"
 "$JAVA" -cp "$OUT" io.github.xyz1001.pdsync.android.ManagedAccountFlowChecks "$REPO"
