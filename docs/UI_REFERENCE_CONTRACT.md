@@ -71,7 +71,7 @@ directories using the existing bounded path; preparation failures stay on compar
 and never become empty-cloud results, sync baselines or automatic uploads.
 
 After built-in login, hide credential fields and login/registration controls; show
-the usage expiry and appreciation action. Expired accounts keep expiry/appreciation
+the usage expiry and appreciation action with `赞赏可续期一年`. Expired accounts keep expiry/appreciation
 visible but Next disabled. Exact saved credentials reauthenticate through read-only
 account metadata on re-entry. Trusted historical expiry can remain visible after
 an expired saved account returns 401, labelled as last confirmed; cached history

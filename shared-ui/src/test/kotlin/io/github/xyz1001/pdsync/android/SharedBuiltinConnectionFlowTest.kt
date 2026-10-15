@@ -141,6 +141,8 @@ class SharedBuiltinConnectionFlowTest {
         val authenticated = source.substringAfter("if (state.showOfficialAccount) {").substringBefore("} else {")
         assertTrue(authenticated.contains("state.officialExpiry"))
         assertTrue(authenticated.contains("state.appreciationLabel"))
+        assertTrue(authenticated.contains("赞赏可续期一年"))
+        assertEquals(1, Regex("赞赏可续期一年").findAll(source).count())
         assertFalse(authenticated.contains("SharedTextField"))
         assertFalse(authenticated.contains("controller::register"))
     }

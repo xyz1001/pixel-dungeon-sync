@@ -94,8 +94,13 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
                             Text("用户名 ${state.username}")
                             Text(state.officialExpiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
                             if (state.officialAccessStatus.isNotEmpty()) SharedConnectionNotice(state.officialAccessStatus)
-                            SharedActionButton(state.appreciationLabel, controller::openAppreciation,
-                                enabled = !state.busy && state.canAppreciate, style = SharedButtonStyle.TEXT)
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SharedActionButton(state.appreciationLabel, controller::openAppreciation,
+                                    enabled = !state.busy && state.canAppreciate, style = SharedButtonStyle.TEXT)
+                                Text("赞赏可续期一年", modifier = Modifier.weight(1f),
+                                    color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
+                            }
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SharedActionButton("登录", controller::login, enabled = !state.busy,
