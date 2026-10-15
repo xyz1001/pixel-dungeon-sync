@@ -2,6 +2,10 @@ package io.github.xyz1001.pdsync.android
 
 import androidx.compose.ui.graphics.ImageBitmap
 import java.io.IOException
+import java.io.ByteArrayOutputStream
+import java.awt.image.BufferedImage
+import java.security.MessageDigest
+import javax.imageio.ImageIO
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
 import java.nio.file.Files
@@ -11,6 +15,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
@@ -39,6 +45,8 @@ class SharedConnectionControllerTest {
         var copyFailure = false
         var onProbe: (() -> Unit)? = null
         var onSave: (() -> Unit)? = null
+        var decodedImage: ImageBitmap? = null
+        var decodeCalls = 0
         override fun isSavedConnection(config: SharedConnectionConfig) = config == savedConnection
         override fun testConnection(config: SharedConnectionConfig): Boolean {
             probes++
@@ -59,7 +67,7 @@ class SharedConnectionControllerTest {
             if (copyFailure) throw IllegalStateException("SECRET clipboard state")
             copied = username
         }
-        override fun decodeImage(bytes: ByteArray): ImageBitmap? = null
+        override fun decodeImage(bytes: ByteArray): ImageBitmap? { decodeCalls++; return decodedImage }
     }
     private class Host : SharedConnectionHost {
         val backs = mutableListOf<ConnectionEntryModel.Back>()
@@ -76,6 +84,13 @@ class SharedConnectionControllerTest {
         var entitlementCalls = 0
         var publicCalls = 0
         var privateConstructs = 0
+        var metadataCalls = 0
+        var imageCalls = 0
+        var publicStatus = 503
+        var publicFailures = 0
+        var imageStatus = 200
+        var imageBytes: ByteArray? = null
+        var metadataHash: String? = null
         var active = true
         var expires = 10000L
         var serverTime = 1000L
@@ -106,7 +121,18 @@ class SharedConnectionControllerTest {
                     return response(request, """{"code":200,"data":{"source":"managed_ledger","username":"alice","expires_ms":$expires,"server_time_ms":$serverTime,"active":$active,"managed":true}}""")
                 }
                 publicCalls++
-                return response(request, "{}", 503)
+                if (request.url.toString() == ManagedAccountClient.APPRECIATION_URL) {
+                    metadataCalls++
+                    if (publicFailures > 0) { publicFailures--; return response(request, "{}", 503) }
+                    if (publicStatus != 200) return response(request, "{}", publicStatus)
+                    val hash = metadataHash ?: MessageDigest.getInstance("SHA-256").digest(imageBytes!!)
+                        .joinToString("") { "%02x".format(it.toInt() and 255) }
+                    return response(request, """{"code":200,"data":{"version":1,"payment_mode":"donation","image_path":"${ManagedAccountClient.IMAGE_PATH}","image_sha256":"$hash","term":"calendar_year","remark":"username"}}""")
+                }
+                imageCalls++
+                return Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                    .code(imageStatus).message("fixture")
+                    .body(imageBytes!!.toResponseBody("image/png".toMediaType())).build()
             }
         }
         companion object {
@@ -133,6 +159,14 @@ class SharedConnectionControllerTest {
         val controller = SharedConnectionController(origin, existing, "slot", ports, io, ui, clients)
         init { controller.attach(host); controller.foreground(true) }
         fun finish() { io.drain(); ui.drain() }
+        fun enableImage(width: Int = 1) {
+            clients.publicStatus = 200
+            clients.imageBytes = ByteArrayOutputStream().use { out ->
+                ImageIO.write(BufferedImage(width, 1, BufferedImage.TYPE_INT_ARGB), "png", out)
+                out.toByteArray()
+            }
+            ports.decodedImage = ImageBitmap(width, 1)
+        }
         fun official() {
             controller.choose(ConnectionEntryModel.Mode.OFFICIAL)
             controller.editUsername("alice")
@@ -447,7 +481,135 @@ class SharedConnectionControllerTest {
         f.controller.copyUsername()
         assertNull(f.ports.copied)
         f.controller.foreground(true)
-        assertTrue(f.controller.state.appreciation!!.canRefresh)
+        assertTrue(f.controller.state.appreciation!!.busy)
+        f.finish()
+        assertFalse(f.controller.state.appreciation!!.busy)
+        assertEquals(2, f.clients.metadataCalls)
+    }
+
+    @Test fun appreciationLoadsAutomaticallyAndRetainsImageAcrossRotationAndTransientFailure() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        f.controller.openAppreciation(); f.finish()
+        val image = assertNotNull(f.controller.state.appreciation!!.image)
+        assertEquals(1, f.clients.imageCalls)
+        val authCalls = f.clients.authCalls
+        f.controller.detach()
+        assertSame(image, f.controller.state.appreciation!!.image)
+        assertNull(f.controller.state.appreciation!!.username)
+        assertFalse(f.controller.state.appreciation!!.authenticated)
+        f.clients.publicStatus = 503; f.clients.entitlementFailure = true
+        f.controller.attach(Host()); f.controller.foreground(true)
+        assertSame(image, f.controller.state.appreciation!!.image)
+        f.finish()
+        assertSame(image, f.controller.state.appreciation!!.image)
+        assertFalse(f.controller.state.appreciation!!.authenticated)
+        assertEquals(2, f.clients.metadataCalls, "A cached image needs no retry on resume failure")
+        assertEquals(1, f.clients.imageCalls)
+        assertEquals(authCalls, f.clients.authCalls)
+        assertFalse(f.controller.state.canContinue)
+        assertFalse(f.controller.state.appreciation!!.message.contains("刷新"))
+        f.controller.back()
+        assertFalse(f.controller.state.canContinue, "Public image never restores revoked account access")
+    }
+
+    @Test fun sameHashReusesImageAndRepeatedForegroundOrOpenDoesNotRefetch() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        f.controller.openAppreciation(); f.finish()
+        val image = f.controller.state.appreciation!!.image
+        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        assertSame(image, f.controller.state.appreciation!!.image)
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        assertEquals(1, f.ports.decodeCalls)
+        repeat(4) {
+            f.controller.attach(Host()); f.controller.foreground(true)
+            f.controller.openAppreciation(); f.controller.refreshAccountStatus()
+        }
+        f.finish()
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+    }
+
+    @Test fun changedServerHashInvalidatesOldImageEvenWhenReplacementFails() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        f.controller.openAppreciation(); f.finish()
+        assertNotNull(f.controller.state.appreciation!!.image)
+        f.enableImage(width = 2); f.clients.imageStatus = 503
+        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        assertNull(f.controller.state.appreciation!!.image)
+        assertEquals(3, f.clients.imageCalls, "Only the missing replacement gets one retry")
+        assertFalse(f.controller.state.appreciation!!.busy)
+        assertFalse(f.controller.state.appreciation!!.message.contains("刷新"))
+        f.clients.imageStatus = 200
+        f.controller.foreground(false); f.controller.foreground(true); f.finish()
+        assertSame(f.ports.decodedImage, f.controller.state.appreciation!!.image)
+    }
+
+    @Test fun imageCacheAndLateResultsNeverCrossAccountChanges() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        f.controller.openAppreciation(); f.io.drain()
+        f.controller.editUsername("bob"); f.ui.drain()
+        assertNull(f.controller.state.appreciation)
+        assertFalse(f.controller.state.canAppreciate)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.editUsername("alice"); f.controller.editPassword("secret-password")
+        f.controller.login(); f.finish()
+        f.controller.openAppreciation(); f.finish()
+        assertNotNull(f.controller.state.appreciation!!.image)
+        assertEquals(2, f.clients.imageCalls, "A different account/draft cannot inherit the old public cache")
+    }
+
+    @Test fun missingImageRetriesOnceWithoutRepeatingPrivateOrAuthenticationRequests() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        val privateBefore = f.clients.entitlementCalls
+        f.clients.publicFailures = 1
+        f.controller.openAppreciation(); f.finish()
+        assertNotNull(f.controller.state.appreciation!!.image)
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        assertEquals(privateBefore + 1, f.clients.entitlementCalls)
+        assertEquals(1, f.clients.authCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertTrue(f.clients.requests.filter { it.url.toString() != ManagedAccountClient.ENTITLEMENT_URL &&
+            it.url.toString() in listOf(ManagedAccountClient.APPRECIATION_URL, ManagedAccountClient.IMAGE_URL) }
+            .all { it.header("Authorization") == null })
+    }
+
+    @Test fun persistentImageFailureStopsAfterTwoReadsAndNeverPolls() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish()
+        val privateBefore = f.clients.entitlementCalls
+        f.controller.openAppreciation(); f.finish()
+        assertEquals(2, f.clients.metadataCalls)
+        assertEquals(privateBefore + 1, f.clients.entitlementCalls)
+        assertNull(f.controller.state.appreciation!!.image)
+        assertFalse(f.controller.state.appreciation!!.busy)
+        assertEquals("赞赏码暂时无法加载。", f.controller.state.appreciation!!.message)
+        repeat(5) { f.controller.refreshAccountStatus(); f.controller.foreground(true); f.finish() }
+        assertEquals(2, f.clients.metadataCalls)
+    }
+
+    @Test fun rejectedOrInvalidImagesAreNotRetried() {
+        for (status in listOf(401, 403, 404, 429)) {
+            val f = Fixture(); f.official(); f.controller.login(); f.finish()
+            f.clients.publicStatus = status
+            f.controller.openAppreciation(); f.finish()
+            assertEquals(1, f.clients.metadataCalls, "HTTP $status must not be repeated")
+            assertNull(f.controller.state.appreciation!!.image)
+            assertFalse(f.controller.state.appreciation!!.busy)
+        }
+        val f = Fixture(); f.official(); f.controller.login(); f.finish(); f.enableImage()
+        f.clients.metadataHash = "0".repeat(64)
+        f.controller.openAppreciation(); f.finish()
+        assertEquals(1, f.clients.metadataCalls)
+        assertEquals(1, f.clients.imageCalls)
+        assertEquals(0, f.ports.decodeCalls, "Integrity failures never reach the platform decoder")
+        assertNull(f.controller.state.appreciation!!.image)
+        f.controller.back(); f.clients.metadataHash = null; f.ports.decodedImage = null
+        f.controller.openAppreciation(); f.finish()
+        assertEquals(2, f.clients.imageCalls, "A decode failure is not retried")
+        assertNull(f.controller.state.appreciation!!.image)
+        assertFalse(f.controller.state.appreciation!!.busy)
     }
 
     @Test fun appreciationOnlyAuthenticatesSavedAccountThenBackReturnsToSettings() {

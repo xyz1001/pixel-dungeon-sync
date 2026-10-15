@@ -59,9 +59,7 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
                 style = SharedButtonStyle.TEXT,
             )
             Spacer(Modifier.weight(1f))
-            if (appreciation != null) {
-                SharedActionButton("刷新", controller::refreshAppreciation, enabled = appreciation.canRefresh)
-            } else if (state.mode != ConnectionEntryModel.Mode.CHOICE) {
+            if (appreciation == null && state.mode != ConnectionEntryModel.Mode.CHOICE) {
                 SharedActionButton(if (setup) "下一步" else "保存", controller::continueConnection,
                     enabled = state.canContinue)
             }

@@ -170,7 +170,6 @@ class SharedConnectionController internal constructor(
     private var appreciationClient: ManagedAccountClient? = null
     private var appreciationImage: ImageBitmap? = null
     private var appreciationOnly = false
-    private var appreciationDecodeFailed = false
     private var appreciationLocalMessage = ""
     private var reportedBusy = false
     private var recoveryMessage = ""
@@ -219,15 +218,16 @@ class SharedConnectionController internal constructor(
                 proof = null
             }
         }
+        val wasForeground = foreground.get()
         val pending = operation
         if (pending == null) transition() else synchronized(pending) { transition() }
         if (!value) cancelAppreciationRequest()
         appreciationFlow?.foreground(value)
-        if (!value) appreciationImage = null
         publish()
         if (value) {
             deliverCommit()
-            restoreOfficialAccount()
+            if (!wasForeground && appreciationFlow != null) refreshAppreciation()
+            else restoreOfficialAccount()
         }
     }
 
@@ -482,6 +482,7 @@ class SharedConnectionController internal constructor(
     fun openAppreciation() {
         if (!canStart() || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
         val source = officialAccountForDraft() ?: return
+        if (appreciationFlow != null && appreciationSource == source) return
         closeAppreciation()
         appreciationSource = source
         appreciationFlow = ManagedAccountFlow(source.username, cache?.read(source.endpoint, source.username),
@@ -496,13 +497,12 @@ class SharedConnectionController internal constructor(
         refreshAppreciation()
     }
 
+    /** One load per open/resume; at most one retry while no usable public image exists. */
     fun refreshAppreciation() {
         val flow = appreciationFlow ?: return
         val source = appreciationSource ?: return
         val ticket = flow.refresh() ?: return
         cancelAppreciationRequest()
-        appreciationImage = null
-        appreciationDecodeFailed = false
         appreciationLocalMessage = ""
         var initialMessage: String? = null
         val client = try {
@@ -517,21 +517,45 @@ class SharedConnectionController internal constructor(
         try {
             io.execute {
                 var message = initialMessage
-                try {
-                    if (!current()) return@execute
-                    val metadata = client.appreciation()
-                    if (!current()) return@execute
-                    val bytes = client.paymentImage(metadata)
-                    if (!current()) return@execute
-                    ui.execute image@{
-                        if (!current() || appreciationFlow !== flow || appreciationClient !== client) return@image
-                        if (flow.image(ticket, bytes)) {
-                            appreciationImage = runCatching { ports.decodeImage(bytes) }.getOrNull()
-                            appreciationDecodeFailed = appreciationImage == null
+                var imageFailure: String? = null
+                // Public GETs only. Never repeat entitlement, authentication, registration or DAV.
+                for (attempt in 0..1) {
+                    try {
+                        if (!current()) return@execute
+                        val metadata = client.appreciation()
+                        if (!flow.metadata(ticket, metadata.imageSha256)) return@execute
+                        ui.execute metadata@{
+                            if (!current() || appreciationFlow !== flow || appreciationClient !== client) return@metadata
+                            if (!flow.hasImage(ticket)) appreciationImage = null
                             publish()
                         }
+                        if (flow.hasImage(ticket)) break
+                        val bytes = client.paymentImage(metadata)
+                        if (!current()) return@execute
+                        val decoded = runCatching { ports.decodeImage(bytes) }.getOrNull()
+                        if (decoded != null) {
+                            ui.execute image@{
+                                if (!current() || appreciationFlow !== flow || appreciationClient !== client) return@image
+                                if (flow.image(ticket, bytes)) {
+                                    appreciationImage = decoded
+                                    publish()
+                                }
+                            }
+                            imageFailure = null
+                            break
+                        }
+                        imageFailure = "赞赏码暂时无法显示。"
+                        break
+                    } catch (failure: Exception) {
+                        if (!current()) return@execute
+                        if (flow.hasImage(ticket)) break
+                        imageFailure = "赞赏码暂时无法加载。"
+                        // Security, malformed responses and rate limits are not transient retries.
+                        if (failure !is ManagedAccountClient.ManagedAccountException ||
+                            failure.kind !in setOf(ManagedAccountClient.FailureKind.NETWORK_ERROR,
+                                ManagedAccountClient.FailureKind.TIMEOUT, ManagedAccountClient.FailureKind.SERVER_ERROR)) break
                     }
-                } catch (failure: Exception) { message = safeFailure(failure, "暂时无法读取，请刷新。") }
+                }
                 // The public image neither sends credentials nor grants permission to read private metadata.
                 if (client.canReadEntitlement() && current()) {
                     try {
@@ -547,7 +571,8 @@ class SharedConnectionController internal constructor(
                             }
                         }
                     } catch (failure: Exception) {
-                        message = safeFailure(failure, "暂时无法读取，请刷新。")
+                        message = safeFailure(failure, "账号信息暂时无法更新。")
+                            .replace("请稍后刷新", "请稍后再试").replace("请刷新", "请稍后再试")
                         if (failure is ManagedAccountClient.ManagedAccountException &&
                             failure.kind in setOf(ManagedAccountClient.FailureKind.AUTHENTICATION_REQUIRED,
                                 ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED,
@@ -565,19 +590,15 @@ class SharedConnectionController internal constructor(
                         }
                     }
                 }
-                val result = message
+                val result = imageFailure ?: message
                 ui.execute completion@{
                     if (!current() || appreciationFlow !== flow || appreciationClient !== client) return@completion
-                    when {
-                        result != null -> flow.fail(ticket, result)
-                        appreciationDecodeFailed -> flow.fail(ticket, "赞赏码无法显示，请刷新。")
-                        else -> flow.complete(ticket)
-                    }
+                    if (result != null) flow.fail(ticket, result) else flow.complete(ticket)
                     publish()
                 }
             }
         } catch (_: RuntimeException) {
-            flow.fail(ticket, "暂时无法读取，请刷新。")
+            flow.fail(ticket, "暂时无法读取。")
             publish()
         }
     }
@@ -761,7 +782,7 @@ class SharedConnectionController internal constructor(
         val appreciation = appreciationFlow?.view()?.let {
             SharedAppreciationState(it.username ?: it.localUsername, it.entitlementLoaded,
                 ManagedAccountFlow.expiry(it), ManagedAccountFlow.accessStatus(it), appreciationLocalMessage.ifEmpty { it.message },
-                appreciationImage, it.busy, it.canRefresh)
+                appreciationImage.takeIf { _ -> it.image != null }, it.busy, it.canRefresh)
         }
         return SharedConnectionState(origin, entry.mode(), current.endpoint, current.username, current.password,
             operation != null, operation != null && operation?.commitStarted != true,

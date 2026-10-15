@@ -33,12 +33,12 @@ public final class ManagedAccountFlowChecks {
         check(flow.view().username.equals("account-a") && !flow.view().active, "Exact server username and inactive status are shown");
         check(flow.image(request, new byte[] {1, 2, 3}), "Inactive account can still see appreciation code");
         check(flow.complete(request), "Completion closes the public and private read sequence");
-        check(!flow.view().busy && flow.view().canRefresh, "Completion offers only manual refresh");
+        check(!flow.view().busy && flow.view().canRefresh, "Completion clears the in-flight marker");
         AtomicReference<String> copied = new AtomicReference<>();
         check(flow.copyUsername(flow.view().generation, copied::set) && copied.get().equals("account-a"), "Copy uses verified username");
         ManagedAccountFlow.Ticket again = flow.refresh();
-        check(flow.view().username == null && flow.view().image == null && flow.view().cachedExpiry,
-                "Refresh hides live proof and image but may retain explicitly historical verified expiry");
+        check(flow.view().username == null && Arrays.equals(flow.view().image, new byte[] {1, 2, 3}) && flow.view().cachedExpiry,
+                "Reload hides live proof but preserves the public image and historical verified expiry");
         check(!flow.entitlement(again, "account-b", 123L, true, true), "Mismatched authenticated account is rejected");
         check(flow.view().username == null && !flow.view().busy,
                 "Mismatched response cannot claim another account or leave a spinner");
@@ -51,15 +51,16 @@ public final class ManagedAccountFlowChecks {
         ManagedAccountFlow flow = visible("account-a");
         ManagedAccountFlow.Ticket first = flow.refresh();
         flow.entitlement(first, "account-a", 42L, true, true);
+        flow.image(first, new byte[] {7});
         long firstGeneration = flow.view().generation;
         flow.foreground(false);
-        check(flow.view().username == null && flow.view().expiresMs == null && flow.view().image == null,
-                "Background clears account presentation");
+        check(flow.view().username == null && flow.view().expiresMs == null && Arrays.equals(flow.view().image, new byte[] {7}),
+                "Background clears private account presentation while retaining the public image");
         check(!flow.entitlement(first, "account-a", 99L, true, true)
                 && !flow.image(first, new byte[] {9}) && !flow.fail(first, "stale"), "Background callbacks are discarded");
         check(!flow.copyUsername(firstGeneration, ignored -> { throw new AssertionError(); }), "Old button cannot copy in background");
         flow.foreground(true);
-        check(!flow.view().busy && flow.view().canRefresh, "Resume never silently polls or registers");
+        check(!flow.view().busy && flow.view().canRefresh, "The flow itself never polls or registers; the controller owns bounded read-only reloads");
         ManagedAccountFlow.Ticket second = flow.refresh();
         check(second.generation != first.generation, "Fresh foreground request owns a new generation");
         check(!flow.entitlement(first, "account-a", 99L, true, true), "Old request remains rejected after resume");
@@ -157,13 +158,14 @@ public final class ManagedAccountFlowChecks {
                 && allowed.contains("OfficialServiceRegistrationClient.DAV_URL.equals(account.endpoint)"),
                 "Saved credentials require both official provider and exact official endpoint");
         String verify = method(controller, "private fun verify(");
-        check(verify.contains("entitlement.requireSyncAccess()") && verify.contains("if (!ports.testConnection(candidate)) throw ProbeRejected()")
-                && verify.indexOf("entitlement.requireSyncAccess()") < verify.indexOf("ports.testConnection(candidate)"),
-                "Inactive account stops before DAV and active metadata alone cannot grant proof");
+        check(verify.contains("check(!candidate.official)") && verify.contains("if (!ports.testConnection(candidate)) throw ProbeRejected()"),
+                "Only custom connections use the DAV verification path");
         String commit = method(controller, "fun continueConnection()");
-        check(commit.indexOf("if (!hasProof())") < commit.indexOf("ports.saveAndActivate(candidate)")
+        check(commit.contains("officialSession?.takeIf { hasOfficialAccess(it) }")
+                && commit.contains("else if (hasProof()) proof!!.config else savedDraftForRevalidation()")
+                && commit.contains("else verify(candidate, pending)")
                 && commit.indexOf("verify(candidate, pending)") < commit.indexOf("ports.saveAndActivate(candidate)"),
-                "Explicit commit still requires current proof and a fresh test");
+                "Official commit requires current authenticated access; custom commit requires fresh DAV verification");
         String reads = method(controller, "fun refreshAppreciation()");
         check(reads.contains("client.entitlement()") && reads.contains("client.appreciation()") && reads.contains("client.paymentImage(metadata)"),
                 "Shared account page reads current official metadata and image");
@@ -174,12 +176,14 @@ public final class ManagedAccountFlowChecks {
         check(reads.contains("appreciationFlow !== flow") && reads.contains("appreciationClient !== client")
                 && reads.contains("flow.accepts(ticket)") && reads.contains("foreground.get()"),
                 "Delayed account callbacks require current visible source generation");
-        String selection = method(controller, "private fun officialAccountForDraft()");
-        check(selection.contains("verifiedOfficial?.takeIf") && selection.contains("saved?.takeIf") && selection.contains("it == current"),
-                "Only exact matching saved/authenticated credentials select private account access");
+        String selection = controller.substring(controller.indexOf("private fun officialAccountForDraft()"),
+                controller.indexOf("private fun hasOfficialAccess("));
+        check(selection.contains("officialSession?.config") && selection.contains("savedOfficialHistory?.first")
+                && selection.contains("isOfficial(it) && it == draft()"),
+                "Only exact matching authenticated accounts or trusted saved history select account display");
         String publicChoice = method(controller, "fun openAppreciation()");
-        check(publicChoice.contains("officialAccountForDraft()") && publicChoice.contains("copy(password = \"\")"),
-                "Unverified username can load public QR without forwarding typed password");
+        check(publicChoice.contains("officialAccountForDraft() ?: return") && publicChoice.contains("refreshAppreciation()"),
+                "Appreciation automatically loads only for an eligible account");
         check(method(controller, "fun foreground(").contains("cancelAppreciationRequest()")
                 && method(controller, "private fun cancelAppreciationRequest()").contains("cancelPending()"),
                 "Background invalidates and cancels account transport");
@@ -188,6 +192,8 @@ public final class ManagedAccountFlowChecks {
         String saved = method(main, "protected void onSaveInstanceState(");
         check(!saved.contains("password") && !saved.contains("official") && !saved.contains("session"),
                 "Account credentials and controller never enter saved-state Bundle");
+        check(!screen.contains("controller::refreshAppreciation") && !screen.contains("SharedActionButton(\"刷新\""),
+                "Appreciation does not ask the user to refresh a disappearing public image");
         check(screen.contains("赞赏时请备注用户名") && screen.contains("controller::copyUsername") && screen.contains("用户名（未验证）"),
                 "Shared page has explicit identity copy and labels unverified usernames");
         String restoreEntry = method(main, "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(");

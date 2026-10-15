@@ -46,7 +46,8 @@ final class ManagedAccountFlow {
     private long generation;
     private boolean visible = true, foreground;
     private Ticket pending;
-    private String username, message = "请刷新查看。";
+    private String username, message = "";
+    private String imageSha256;
     private boolean active, managed;
     private byte[] image;
 
@@ -70,11 +71,11 @@ final class ManagedAccountFlow {
     synchronized void foreground(boolean value) {
         if (!visible) return;
         foreground = value;
-        if (!value) { invalidate(); clear(); message = "请刷新查看。"; }
+        if (!value) { invalidate(); clearEntitlement(); message = ""; }
     }
     synchronized Ticket refresh() {
         if (!visible || !foreground || pending != null) return null;
-        invalidate(); clear(); message = "";
+        invalidate(); clearEntitlement(); message = "";
         pending = new Ticket(this, generation);
         return pending;
     }
@@ -106,6 +107,15 @@ final class ManagedAccountFlow {
         return true;
     }
 
+    /** A known server asset change invalidates only the public image, never account authority. */
+    synchronized boolean metadata(Ticket ticket, String sha256) {
+        if (!accepts(ticket) || sha256 == null || !sha256.matches("[0-9a-f]{64}")) return false;
+        if (!sha256.equals(imageSha256)) image = null;
+        imageSha256 = sha256;
+        return true;
+    }
+    synchronized boolean hasImage(Ticket ticket) { return accepts(ticket) && image != null; }
+
     /** The public image is independent of login, identity proof and private expiry metadata. */
     synchronized boolean image(Ticket ticket, byte[] png) {
         if (!accepts(ticket) || png == null || png.length == 0) return false;
@@ -120,7 +130,7 @@ final class ManagedAccountFlow {
     synchronized boolean fail(Ticket ticket, String safeMessage) {
         if (!accepts(ticket)) return false;
         pending = null;
-        message = safeMessage == null || safeMessage.isEmpty() ? "暂时无法读取，请刷新。" : safeMessage;
+        message = safeMessage == null || safeMessage.isEmpty() ? "暂时无法读取。" : safeMessage;
         return true;
     }
 
@@ -132,7 +142,7 @@ final class ManagedAccountFlow {
     }
     synchronized void close() {
         visible = foreground = false;
-        invalidate(); clear(); record = null; message = "";
+        invalidate(); clearEntitlement(); image = null; imageSha256 = null; record = null; message = "";
     }
     static String expiry(View view) {
         if (view.expiresMs == null) return view.entitlementLoaded ? "有效期 未设置" : "有效期 未知";
@@ -141,5 +151,5 @@ final class ManagedAccountFlow {
     }
     static String accessStatus(View view) { return view.expired ? "服务已到期" : ""; }
     private void invalidate() { generation++; pending = null; }
-    private void clear() { username = null; active = managed = false; image = null; }
+    private void clearEntitlement() { username = null; active = managed = false; }
 }
