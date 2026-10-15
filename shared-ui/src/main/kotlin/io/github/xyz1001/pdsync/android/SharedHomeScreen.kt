@@ -16,10 +16,8 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -93,13 +91,6 @@ private fun SharedHomeContent(state: SharedHomeState, actions: SharedHomeActions
         if (state.notice.isNotBlank()) Text(state.notice, Modifier.padding(top = 12.dp).then(observed("notice")),
             color = if (state.noticeError) MaterialTheme.colors.error else SharedUiColors.muted,
             fontSize = 14.sp, lineHeight = 22.4.sp)
-        if (state.details.isNotBlank()) {
-            var expanded by remember(state.details) { mutableStateOf(false) }
-            SharedActionButton(if (expanded) "收起详细信息" else "详细信息", { expanded = !expanded },
-                style = SharedButtonStyle.TEXT, modifier = observed("details-toggle"))
-            if (expanded) Text(state.details, observed("details"), color = SharedUiColors.muted,
-                fontSize = 12.sp, lineHeight = 19.2.sp)
-        }
         Spacer(Modifier.height(26.dp))
         SharedHistorySection(state.history, state.selectedSnapshotId, !state.canInteract,
             interactions::selectSnapshot, interactions::rename, interactions::changeHistoryPage,

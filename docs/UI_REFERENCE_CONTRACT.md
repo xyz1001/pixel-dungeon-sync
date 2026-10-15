@@ -103,6 +103,7 @@ snapshot proofs. UI alignment does not change transaction/backup guarantees.
 
 Compact header/status, Upload/Restore actions, selected/default restoration target
 and two-lane history. Keep the approved Launch Game action and real naming.
+Home has no details toggle or expanded diagnostic content.
 Cloud is left, local right. Visible nodes share rows by save-content time in
 newest-first order; local current/baseline are not pinned to row 0/1. Equal-time
 nodes in different lanes may align. Preserve true parents and transfer direction.

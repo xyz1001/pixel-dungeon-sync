@@ -30,6 +30,7 @@ import org.jetbrains.skia.EncodedImageFormat
 import pdsync.presentation.HistoryNode
 import pdsync.presentation.HistoryPresentation
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -95,6 +96,7 @@ class SharedHomeRenderTest {
                 }
                 assertEquals(status.left, target.left, .6f)
                 assertEquals(status.right, target.right, .6f)
+                assertFalse("details-toggle" in observed.elements)
                 assertFalse("details" in observed.elements)
                 assertTrue(host.calls.isEmpty(), "composition must not invoke a platform operation")
             } finally { scene.close() }
@@ -138,12 +140,41 @@ class SharedHomeRenderTest {
         } finally { scene.close() }
     }
 
-    @Test fun narrowHistoryScrollsOnItsOwnAndTechnicalDetailsStartCollapsed() {
+    @Test fun technicalDetailsNeverAddAnEntryOrContentToHome() {
+        for (width in listOf(1165, 560, 320)) {
+            val observed = Observation()
+            val host = Host(ready().copy(notice = "存档暂不可用，请重试。", noticeError = true))
+            val scene = scene(width, 1600, host, observed)
+            try {
+                val baseline = render(scene, "home-no-details-$width")
+                val baselineElements = observed.elements.toMap()
+                assertEquals(setOf("settings", "status", "upload", "restore", "launch", "target", "notice", "history"),
+                    baselineElements.keys)
+                assertEquals(26f, baselineElements.getValue("history").top - baselineElements.getValue("notice").bottom,
+                    .6f, "history follows the notice directly, without a replacement entry")
+                host.state = host.state.copy(details = "Retained watcher diagnostic\n" + "detail ".repeat(100))
+                val withDetails = render(scene, "home-ignores-details-$width")
+                assertEquals(baselineElements, observed.elements, "diagnostics must not change the home layout")
+                assertContentEquals(
+                    baseline.getRGB(0, 0, width, baseline.height, null, 0, width),
+                    withDetails.getRGB(0, 0, width, withDetails.height, null, 0, width),
+                    "diagnostics must not add visible text, buttons, or a replacement entry",
+                )
+                assertFalse("details-toggle" in observed.elements)
+                assertFalse("details" in observed.elements)
+                assertEquals(setOf("commit-a", "local-current"), observed.layout!!.cards.keys)
+                assertTrue(host.calls.isEmpty(), "diagnostic changes never invoke a platform operation")
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun narrowHistoryScrollsOnItsOwnWithoutTechnicalDetails() {
         val observed = Observation()
         val host = Host(ready().copy(details = "Retained watcher diagnostic\nA long diagnostic line " + "detail ".repeat(40)))
         val scene = scene(320, 1600, host, observed)
         try {
-            render(scene, "home-narrow-details-collapsed")
+            render(scene, "home-narrow-without-details")
+            assertFalse("details-toggle" in observed.elements)
             assertFalse("details" in observed.elements)
             val statusBefore = observed.elements.getValue("status")
             val targetBefore = observed.elements.getValue("target")
@@ -158,14 +189,9 @@ class SharedHomeRenderTest {
             assertEquals(statusBefore, observed.elements.getValue("status"))
             assertEquals(targetBefore, observed.elements.getValue("target"))
             assertTrue(observed.layout!!.cards.values.all { it.width == 200f })
-            click(scene, observed.elements.getValue("details-toggle").center)
-            render(scene, "home-narrow-details-open")
-            assertTrue(observed.elements.getValue("details").height > 0)
-            observed.elements.remove("details")
-            click(scene, observed.elements.getValue("details-toggle").center)
-            render(scene, "home-narrow-details-closed")
+            assertFalse("details-toggle" in observed.elements)
             assertFalse("details" in observed.elements)
-            assertTrue(host.calls.isEmpty(), "details and horizontal scroll never invoke business operations")
+            assertTrue(host.calls.isEmpty(), "horizontal scroll never invokes business operations")
         } finally { scene.close() }
     }
 
@@ -195,6 +221,7 @@ class SharedHomeRenderTest {
                 }
                 if (name == "empty") assertTrue(observed.layout!!.cards.isEmpty())
                 if (name == "loading") assertEquals(null, observed.layout)
+                assertFalse("details-toggle" in observed.elements)
                 assertFalse("details" in observed.elements)
                 assertTrue(host.calls.isEmpty())
             } finally { scene.close() }
