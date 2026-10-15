@@ -293,16 +293,38 @@ class AppendProfileSession(
  fun previewMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult = local.locked {
   buildMerge(conflict,store,stopped)
  }
+ /** The setup dialog previews only its exact session-bound comparison. The proof and merge
+  * preflight are checked under one physical-root lock; no save bytes or remote data are written. */
+ fun previewOnboardingMerge(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): RunMergeResult = local.locked {
+  revalidateComparison(comparison,store,stopped)
+  buildMerge(AppendConflict(comparison.observedTips,emptyList(),comparison.localFiles),store,stopped)
+ }
+ /** A confirmed setup preview cannot silently switch to newly observed local files or tips. */
+ fun mergeCurrent(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+  revalidateComparison(comparison,store,stopped)
+  mergeCurrentLocked(AppendConflict(comparison.observedTips,emptyList(),comparison.localFiles),store,stopped,enforceObservedTips=true)
+ }
  /** Preflight before publishing a unique local branch; then retain both sources in the merge DAG. */
  fun mergeCurrent(store:AppendStore,stopped:()->Boolean):AppendPushResult = local.locked {
   val graph=discover(store);require(graph.tips.isNotEmpty()) { "没有可合并的云端分支" }
   val observed=AppendConflict(graph.tips,emptyList(),currentFiles())
+  mergeCurrentLocked(observed,store,stopped)
+ }
+ private fun mergeCurrentLocked(observed:AppendConflict,store:AppendStore,stopped:()->Boolean,enforceObservedTips:Boolean=false):AppendPushResult {
   val preview=buildMerge(observed,store,stopped)
   local.checkRestore(preview.snapshot)
   val captured=local.capture(stopped,null)
   require(captured.manifest.files==observed.observedLocalFiles) { "预检后本机内容变化，请重新比较" }
   val localPlan=repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
-  when(val uploaded=publish(localPlan,store,stopped)) {
+  val expectedTips=(observed.observedTips-localPlan.commit.parents.toSet())+localPlan.commit.id
+  val uploaded=publish(localPlan,store,stopped)
+  if(enforceObservedTips) {
+   // Publishing our preserved local branch does not authorize merging a newly arrived device.
+   // Keep the real branches and require a fresh preview before any local apply/resolution.
+   val graph=discover(store)
+   if(graph.tips!=expectedTips)return AppendPushResult.Diverged(preserveConflict(graph,store,stopped))
+  }
+  return when(uploaded) {
    is AppendPushResult.Success -> uploaded
    is AppendPushResult.Diverged -> mergeLocked(uploaded.conflict,store,stopped)
   }
