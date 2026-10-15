@@ -21,7 +21,7 @@ data class SharedSettingsRow(
 
 /**
  * Platform-owned settings snapshot. No connection, account, game, path or ability is invented.
- * Maintenance is one entry point; its existing recovery/backup/forget confirmations stay in the host.
+ * The shared page may hide host capabilities without changing their underlying implementation.
  */
 data class SharedSettingsState(
     val game: SharedGameIdentity?,
@@ -44,10 +44,16 @@ interface SharedSettingsActions {
 }
 
 internal val SharedSettingsRow.hasAction: Boolean get() = !actionLabel.isNullOrBlank()
+/** These manual entry points are omitted on every host; automatic save checks and sync stay in the host. */
+private val SharedSettingsKey.visibleInSettings: Boolean
+    get() = this != SharedSettingsKey.RECHECK_SAVES && this != SharedSettingsKey.MAINTENANCE
+internal val SharedSettingsState.visibleRows: List<SharedSettingsRow>
+    get() = rows.filter { it.key.visibleInSettings }
 internal val SharedSettingsState.canInteract: Boolean get() = pageActive && !busy
 internal val SharedSettingsState.backEnabled: Boolean get() = canInteract && canReturn
 internal fun SharedSettingsState.actionEnabled(key: SharedSettingsKey): Boolean =
-    canInteract && rows.singleOrNull { it.key == key }?.let { it.hasAction && it.actionEnabled } == true
+    canInteract && key.visibleInSettings &&
+        rows.singleOrNull { it.key == key }?.let { it.hasAction && it.actionEnabled } == true
 
 /** Retained callbacks consult live capabilities and stop when the page leaves the composition. */
 internal class SharedSettingsInteractions(

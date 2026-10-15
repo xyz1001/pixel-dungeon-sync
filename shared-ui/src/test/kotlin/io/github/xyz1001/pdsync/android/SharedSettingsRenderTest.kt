@@ -113,6 +113,42 @@ class SharedSettingsRenderTest {
         }
     }
 
+    @Test fun manualSaveCheckAndManagementLeaveNoRowsButtonsOrReplacementAtAllReferenceWidths() {
+        val hiddenRows = listOf(
+            SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, "存档检查", "已找到存档", "检查", true),
+            SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "存档管理", "管理本地与云端存档", "管理", true),
+        )
+        val visibleRows = ready().rows + SharedSettingsRow(
+            SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传", "已开启", "关闭", true)
+        for (width in listOf(1165, 500, 320)) {
+            val observed = Observation()
+            val host = Host(ready().copy(rows = hiddenRows.take(1) + visibleRows + hiddenRows.drop(1)))
+            val baseline = scene(width, 757, Host(ready().copy(rows = visibleRows)), Observation())
+            val scene = scene(width, 757, host, observed)
+            try {
+                val actual = render(scene, "settings-hidden-manual-saves-$width")
+                val expected = render(baseline, "settings-visible-only-$width")
+                assertTrue(actual.getRGB(0, 0, width, 757, null, 0, width).contentEquals(
+                    expected.getRGB(0, 0, width, 757, null, 0, width)),
+                    "removed entries leave no content, empty space or replacement")
+                for (row in hiddenRows) {
+                    for (element in listOf("row", "title", "value", "action")) {
+                        assertFalse("$element:${row.key}" in observed.elements)
+                    }
+                    assertFalse(row.key in observed.lines)
+                }
+                for (row in visibleRows) {
+                    assertTrue("row:${row.key}" in observed.elements)
+                    click(scene, observed.elements.getValue("action:${row.key}").center)
+                }
+                click(scene, observed.elements.getValue("back").center)
+                assertEquals(visibleRows.map { it.key.name } + "back", host.calls)
+                assertEquals(hiddenRows.take(1) + visibleRows + hiddenRows.drop(1), host.state.rows,
+                    "the shared page does not mutate its host's capabilities")
+            } finally { scene.close(); baseline.close() }
+        }
+    }
+
     @Test fun longActionLabelsAlsoWrapWhileTheValueColumnRemainsReadable() {
         val observed = Observation()
         val host = Host(ready().copy(rows = listOf(

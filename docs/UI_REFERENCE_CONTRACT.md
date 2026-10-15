@@ -117,7 +117,8 @@ Reference: `app.mjs:21–61,111–112`, `model.mjs:180–233`, history CSS.
 
 Concise bordered horizontal rows with current value on the left and an action on
 the right, Return in the shared footer. Retain real log export and necessary
-maintenance capabilities in the same restrained presentation. No diagnostic or
+maintenance capabilities outside this page as required. Omit the manual
+`存档检查` and `存档管理` entries; automatic checking and sync remain unchanged. No diagnostic or
 technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
 
 ## Later requirements that override mock content

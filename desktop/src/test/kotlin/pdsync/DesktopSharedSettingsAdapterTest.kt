@@ -87,13 +87,13 @@ class DesktopSharedSettingsAdapterTest {
   assertTrue(result.actionEnabled(SharedSettingsKey.CLOUD_CONNECTION))
  }
 
- @Test fun pendingUploadUsesOneManagementEntryAndNeverExpandsDestructiveActionsOnThePage() {
+ @Test fun pendingUploadMetadataRemainsButManagementEntryIsHidden() {
   val result = state(ready().copy(pendingUpload = true))
   val row = result.rows.single { it.key == SharedSettingsKey.MAINTENANCE }
   assertEquals("有未完成的上传", row.currentValue)
   assertEquals("管理", row.actionLabel)
   assertFalse(result.rows.any { it.title.contains("归档") || it.actionLabel?.contains("归档") == true })
-  assertTrue(result.actionEnabled(SharedSettingsKey.MAINTENANCE))
+  assertFalse(result.actionEnabled(SharedSettingsKey.MAINTENANCE))
  }
 
  @Test fun busyStartupClosedInactiveAndCoveredPagesBlockEveryEntryAndReturn() {

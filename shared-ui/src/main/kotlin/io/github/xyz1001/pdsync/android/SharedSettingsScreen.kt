@@ -52,7 +52,7 @@ fun SharedSettingsScreen(state: SharedSettingsState, actions: SharedSettingsActi
                 SharedActionButton("返回", interactions::back, enabled = state.backEnabled,
                     style = SharedButtonStyle.TEXT, modifier = observedSettings("back", observer))
             }) {
-                state.rows.forEach { row ->
+                state.visibleRows.forEach { row ->
                     key(row.key) {
                         SharedSettingsRowView(row, narrow, state.actionEnabled(row.key),
                             onAction = { interactions.perform(row.key) }, observer = observer)
