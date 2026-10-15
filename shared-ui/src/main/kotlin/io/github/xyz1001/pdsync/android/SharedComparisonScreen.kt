@@ -53,8 +53,7 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
             Column(Modifier.fillMaxWidth().heightIn(min = 285.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 Text(state.headline, fontSize = 29.sp, lineHeight = 36.sp, fontWeight = FontWeight(650))
-                ComparisonNotice(state)
-                if (state.kind == OnboardingKind.IDENTICAL) ComparisonDetails(state, interactions)
+                if (state.kind != OnboardingKind.IDENTICAL || state.feedbackError) ComparisonNotice(state)
             }
         } else {
             val hasChoices = state.offers(SharedProgressChoice.LOCAL) || state.offers(SharedProgressChoice.CLOUD)

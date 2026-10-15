@@ -48,6 +48,27 @@ class SharedComparisonRenderTest {
         remoteChoices = listOf(SharedComparisonRemoteChoice("remote-a", "云端 · Android", "已进行3场游戏")),
         selectedId = "remote-a")
 
+    @Test fun identicalProgressOmitsDetailsAndOrdinaryNoticesAtEveryWidth() {
+        for (width in listOf(1165, 500, 320)) {
+            val current = state(OnboardingKind.IDENTICAL).copy(canCompleteWithoutTransfer = true)
+            assertEquals("进度已同步", current.headline)
+            val plain = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+                SharedComparisonScreen(current.copy(localDetails = "", remoteChoices = emptyList()), actions)
+            }
+            val detailed = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+                SharedComparisonScreen(current.copy(details = "diagnostic detail", canCopyDiagnostics = true,
+                    notice = "两边存档相同，确认后继续。"), actions)
+            }
+            try {
+                val expected = render(plain, "identical-plain-$width")
+                val actual = render(detailed, "identical-no-details-$width")
+                assertTrue(expected.getRGB(0, 0, width, 757, null, 0, width).contentEquals(
+                    actual.getRGB(0, 0, width, 757, null, 0, width)),
+                    "identical state must not render optional metadata, detail controls or redundant copy")
+            } finally { plain.close(); detailed.close() }
+        }
+    }
+
     @Test fun progressSelectionShowsOnlyChoiceCardsAndExistingNavigation() {
         val states = listOf(
             state(OnboardingKind.LOCAL_ONLY).copy(selectedProgress = SharedProgressChoice.LOCAL),

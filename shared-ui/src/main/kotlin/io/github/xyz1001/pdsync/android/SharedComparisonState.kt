@@ -134,7 +134,7 @@ internal val SharedComparisonState.headline: String
         retryablePending -> "上次上传尚未完成，请重试上传。"
         !hasObservation -> if (busy) "正在检查存档…" else "尚未完成检查，请重试。"
         completion == SharedComparisonCompletion.EMPTY -> if (feedbackError) "配置尚未完成" else "配置完成"
-        isSimpleCompletion && kind == OnboardingKind.IDENTICAL -> "两边进度相同"
+        isSimpleCompletion && kind == OnboardingKind.IDENTICAL -> "进度已同步"
         kind == OnboardingKind.IDENTICAL -> "尚未完成检查，请重试。"
         kind == OnboardingKind.LOCAL_ONLY -> "本机有存档"
         kind == OnboardingKind.REMOTE_ONLY -> "云端有存档"

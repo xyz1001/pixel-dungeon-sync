@@ -84,8 +84,9 @@ Reference layout: `app.mjs:94–102,155–162`; real state and account behavior:
 ### 4. Choose save
 
 - Both sides empty: concise configuration-complete state, Back and one Finish.
-- Verified identical: concise result, collapsed details and one Finish. No Upload,
-  Restore or Postpone actions. This later requirement supersedes the mock footer.
+- Verified identical: `进度已同步` and one Finish. No detail entry, progress expansion,
+  Back, Upload, Restore or Postpone actions. Keep real errors. This later requirement
+  supersedes the mock footer.
 - Local-only/cloud-only: progress choice card followed by one Finish, enabled
   after selection and current validation.
 - Different/conflict: one Handle Conflict action and a shared confirmation dialog
