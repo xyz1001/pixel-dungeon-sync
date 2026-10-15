@@ -16,6 +16,8 @@ import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -37,6 +39,12 @@ fun SharedConnectionScreen(controller: SharedConnectionController, game: SharedG
 @Composable
 private fun SharedConnectionContent(controller: SharedConnectionController, game: SharedGameIdentity?) {
     val state = controller.state
+    LaunchedEffect(controller, state.showOfficialAccount) {
+        while (state.showOfficialAccount) {
+            delay(1_000)
+            controller.refreshAccountStatus()
+        }
+    }
     val appreciation = state.appreciation
     val setup = state.origin == ConnectionEntryModel.Origin.SETUP
     SharedAppShell(
@@ -65,7 +73,7 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
             } else {
                 if (state.mode == ConnectionEntryModel.Mode.CHOICE) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SharedActionButton("使用官方服务", { controller.choose(ConnectionEntryModel.Mode.OFFICIAL) },
+                        SharedActionButton("使用内置服务", { controller.choose(ConnectionEntryModel.Mode.OFFICIAL) },
                             modifier = Modifier.fillMaxWidth(), style = SharedButtonStyle.SECONDARY)
                         SharedActionButton("自定义 WebDAV", { controller.choose(ConnectionEntryModel.Mode.CUSTOM) },
                             modifier = Modifier.fillMaxWidth(), style = SharedButtonStyle.SECONDARY)
@@ -75,24 +83,26 @@ private fun SharedConnectionContent(controller: SharedConnectionController, game
                         SharedTextField("WebDAV 地址", state.endpoint, controller::editEndpoint,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = state.canEdit)
                     }
-                    SharedTextField("用户名", state.username, controller::editUsername, enabled = state.canEdit)
-                    SharedTextField("密码", state.password, controller::editPassword,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = state.canEdit)
+                    if (state.mode == ConnectionEntryModel.Mode.CUSTOM || !state.showOfficialAccount) {
+                        SharedTextField("用户名", state.username, controller::editUsername, enabled = state.canEdit)
+                        SharedTextField("密码", state.password, controller::editPassword,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = state.canEdit)
+                    }
                     if (state.mode == ConnectionEntryModel.Mode.OFFICIAL) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.showOfficialAccount) {
+                            Text("用户名 ${state.username}")
+                            Text(state.officialExpiry, color = SharedUiColors.muted, style = MaterialTheme.typography.body2)
+                            if (state.officialAccessStatus.isNotEmpty()) SharedConnectionNotice(state.officialAccessStatus)
+                            SharedActionButton(state.appreciationLabel, controller::openAppreciation,
+                                enabled = !state.busy && state.canAppreciate, style = SharedButtonStyle.TEXT)
+                        } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SharedActionButton("登录", controller::login, enabled = !state.busy,
                                     style = SharedButtonStyle.SECONDARY)
                                 SharedActionButton("注册", controller::register, enabled = !state.busy,
                                     style = SharedButtonStyle.SECONDARY)
                             }
-                            if (state.canRetestOfficial) {
-                                SharedActionButton("测试连接", controller::testConnection, enabled = !state.busy,
-                                    style = SharedButtonStyle.SECONDARY)
-                            }
-                            SharedActionButton(state.appreciationLabel, controller::openAppreciation,
-                                enabled = !state.busy && state.canAppreciate, style = SharedButtonStyle.TEXT)
                         }
                     } else {
                         SharedActionButton("测试连接", controller::testConnection, enabled = !state.busy,

@@ -266,4 +266,36 @@ class DesktopConnectionAdapterTest {
   assertFalse(legacy.isSavedConnection(legacy.initialConnection!!))
  }
 
+ @Test fun builtInActivationPersistsWithoutRunningOrFakingDavProbe() {
+  val initial = original()
+  file.save(initial)
+  var probes = 0
+  val port = adapter(initial) { probes++; error("Built-in activation must not test DAV") }
+  val dto = connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true)
+  port.saveAuthenticatedOfficial(dto)
+  assertEquals(0, probes)
+  val saved = assertNotNull(file.load())
+  assertEquals("official", saved.connectionProvider)
+  assertEquals(DESKTOP_OFFICIAL_ROOT.removeSuffix("/"), saved.endpoint)
+  assertEquals("fixture-secret", saved.password)
+  assertEquals(initial.profile, saved.profile)
+  assertEquals(initial.selectedSaveRoot, saved.selectedSaveRoot)
+  assertEquals(initial.targetGame, saved.targetGame)
+  assertEquals(initial.autoUploadPaused, saved.autoUploadPaused)
+  assertEquals(OnboardingProgress.PENDING, saved.onboardingProgress)
+  assertEquals("fixture-secret", assertNotNull(port.appliedConnection).password)
+  assertFailsWith<IllegalStateException> { port.saveAuthenticatedOfficial(dto) }
+ }
+
+ @Test fun builtInActivationRejectsCustomProviderAlteredRootAndProfile() {
+  val port = adapter()
+  for (dto in listOf(connection(), connection(endpoint = "https://other.invalid/", official = true),
+   connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true).copy(profile = "different"))) {
+   assertFailsWith<IllegalArgumentException> { port.saveAuthenticatedOfficial(dto) }
+  }
+  assertNull(port.appliedConnection)
+  assertFalse(path.exists())
+  assertFailsWith<IllegalStateException> { port.saveAndActivate(connection()) }
+ }
+
 }

@@ -2688,6 +2688,13 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         try {
             AndroidSyncFacade activeFacade = sync();
             stage = SyncInspectionDiagnostics.Stage.INSPECT;
+            // Account authentication is not DAV verification. Prepare the bounded app namespace
+            // only inside the explicit setup comparison, never during automatic/history reads.
+            if (this.onboardingActive && this.page == SyncPage.COMPARISON
+                    && this.progress == OnboardingProgress.PENDING && isOfficialAccount(this.connection)) {
+                AndroidSyncFacade.ConnectionStatus preparedNamespace = activeFacade.connect();
+                if (!preparedNamespace.isSuccess()) throw new java.io.IOException(preparedNamespace.getMessage());
+            }
             AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
             this.inspection = inspectionInspect;
             DiagnosticLog.record(DiagnosticStage.VERIFY,

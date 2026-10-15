@@ -81,6 +81,18 @@ internal class DesktopConnectionAdapter(
   pending = null
  }
 
+ /** Built-in account activation deliberately does not create or reuse a DAV test result. */
+ override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) = synchronized(lock) {
+  check(!closed && !running && applied == null) { "连接页面已关闭或正在处理，请稍候。" }
+  require(config.official && isDesktopOfficialRoot(config.endpoint)) { "内置服务地址无效。" }
+  val candidate = configurationFor(config).validated().copy(saveRoot = "", rememberPassword = false, password = config.password)
+  configFile.save(candidate)
+  pending?.cancel()
+  pending = null
+  verified = null
+  applied = AppliedConnection(candidate, config.password)
+ }
+
  override fun cacheDirectory(): Path = SafePaths.checked(privateCache)
  override fun elapsedRealtimeMs(): Long = (System.nanoTime() / 1_000_000).coerceAtLeast(0)
  // A process cannot reliably identify the OS boot session on every desktop platform.

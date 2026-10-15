@@ -57,13 +57,25 @@ Reference: `app.mjs:80–92`, `model.mjs:316–324,338–352`.
 
 ### 3. Cloud connection
 
-Fresh setup begins with the approved official/custom choice. Custom connection
-uses address, username, password and Test Connection; official connection uses
-login/registration with the real service and existing appreciation/expiry flow.
-All subpages use the same shell, constrained form and footer. Test success stays
-on this page and enables Next; changing the tested fields invalidates that proof.
-An unchanged successfully saved configuration does not require arbitrary repeated
-tests. Failed test, Back and cancellation cannot discard saved configuration.
+Fresh setup offers `使用内置服务` and `自定义 WebDAV`. Custom connection keeps
+address, username, password and Test Connection: only its successful real DAV
+probe enables Next, and field changes invalidate that proof. Built-in service
+uses real login/registration and authenticated account expiry, with no Test
+Connection button or DAV probe on login/Next. A current, unexpired account enables
+Next; activation saves credentials without inventing a DAV proof or sync baseline.
+Actual comparison/synchronization still performs and validates real DAV requests.
+The explicit initial built-in comparison prepares only the two app-owned namespace
+directories using the existing bounded path; preparation failures stay on comparison
+and never become empty-cloud results, sync baselines or automatic uploads.
+
+After built-in login, hide credential fields and login/registration controls; show
+the usage expiry and appreciation action. Expired accounts keep expiry/appreciation
+visible but Next disabled. Exact saved credentials reauthenticate through read-only
+account metadata on re-entry. Trusted historical expiry can remain visible after
+an expired saved account returns 401, labelled as last confirmed; cached history
+never grants Next. New/unverified failed logins keep the form and no appreciation.
+All subpages use the same shell, constrained form and footer. Failed authentication,
+failed custom tests, Back and cancellation cannot discard saved configuration.
 Reference layout: `app.mjs:94–102,155–162`; real state and account behavior:
 `SharedConnectionController`, `ConnectionEntryModel` and production adapters.
 
@@ -112,6 +124,9 @@ technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
   details toggle; Desktop keeps the initial automatic scan, omits manual rescan,
   and labels the selected-game file chooser `重新选择` (2026-10-15 clarification).
 
+- Step 3 calls the service `内置服务`. Built-in Next is gated by authenticated,
+  current account access, while custom WebDAV keeps its separate test/proof gate.
+  Expiry/appreciation replace credential inputs after login (2026-10-15 clarification).
 - Official account login/registration, 72-hour trial, expiry and appreciation are
   real later features absent from the prototype. Do not revert to custom-only.
 - Count wording is `已进行x场游戏`; missing count displays zero without writing a

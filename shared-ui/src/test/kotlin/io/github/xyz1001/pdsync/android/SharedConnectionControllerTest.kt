@@ -27,8 +27,11 @@ class SharedConnectionControllerTest {
     }
     private class Ports : SharedConnectionPorts {
         var savedConnection: SharedConnectionConfig? = null
+        var cachePath: java.nio.file.Path? = null
         var probes = 0
         var saves = 0
+        var officialSaves = 0
+        var boot = 1
         var elapsed = 0L
         var probeResult = true
         var last: SharedConnectionConfig? = null
@@ -45,9 +48,13 @@ class SharedConnectionControllerTest {
         override fun saveAndActivate(config: SharedConnectionConfig) {
             onSave?.invoke(); saves++; last = config; savedConnection = config
         }
-        override fun cacheDirectory() = null
+        override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) {
+            officialSaves++
+            saveAndActivate(config)
+        }
+        override fun cacheDirectory() = cachePath
         override fun elapsedRealtimeMs() = elapsed
-        override fun bootCount() = 1
+        override fun bootCount() = boot
         override fun copyUsername(username: String) {
             if (copyFailure) throw IllegalStateException("SECRET clipboard state")
             copied = username
@@ -70,6 +77,9 @@ class SharedConnectionControllerTest {
         var publicCalls = 0
         var privateConstructs = 0
         var active = true
+        var expires = 10000L
+        var serverTime = 1000L
+        var entitlementFailure = false
         var authFailure = false
         var onAuth: (() -> Unit)? = null
         var onEntitlement: (() -> Unit)? = null
@@ -92,7 +102,8 @@ class SharedConnectionControllerTest {
                 if (request.url.toString() == ManagedAccountClient.ENTITLEMENT_URL) {
                     entitlementCalls++
                     onEntitlement?.invoke()
-                    return response(request, """{"code":200,"data":{"source":"managed_ledger","username":"alice","expires_ms":10000,"server_time_ms":1000,"active":$active,"managed":true}}""")
+                    if (entitlementFailure) return response(request, "{}", 401)
+                    return response(request, """{"code":200,"data":{"source":"managed_ledger","username":"alice","expires_ms":$expires,"server_time_ms":$serverTime,"active":$active,"managed":true}}""")
                 }
                 publicCalls++
                 return response(request, "{}", 503)
@@ -106,10 +117,17 @@ class SharedConnectionControllerTest {
     }
     private class Fixture(existing: SharedConnectionConfig? = null,
                           origin: ConnectionEntryModel.Origin = ConnectionEntryModel.Origin.SETUP,
-                          persisted: SharedConnectionConfig? = null) {
+                          persisted: SharedConnectionConfig? = null,
+                          cached: TrustedEntitlementCache.Record? = null) {
         val io = Queue()
         val ui = Queue()
-        val ports = Ports().apply { savedConnection = persisted }
+        val ports = Ports().apply {
+            savedConnection = persisted
+            if (cached != null) {
+                cachePath = Files.createTempDirectory("shared-account-cache-")
+                TrustedEntitlementCache(cachePath).write(cached)
+            }
+        }
         val clients = Clients()
         val host = Host()
         val controller = SharedConnectionController(origin, existing, "slot", ports, io, ui, clients)
@@ -279,18 +297,25 @@ class SharedConnectionControllerTest {
         assertEquals(1, f.host.commits.size)
     }
 
-    @Test fun officialLoginRequiresAuthenticatedEntitlementAndDavThenRechecksOnSave() {
+    @Test fun officialLoginAndNextUseAuthenticatedAccountAccessWithoutDavProbe() {
         val f = Fixture(); f.official()
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertFalse(f.controller.state.canAppreciate)
         f.controller.login(); f.finish()
         assertEquals(1, f.clients.authCalls)
         assertEquals(1, f.clients.entitlementCalls)
-        assertEquals(1, f.ports.probes)
+        assertEquals(0, f.ports.probes)
         assertEquals(0, f.ports.saves)
+        assertTrue(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.officialExpiry.startsWith("使用期限至 "))
+        assertTrue(f.controller.state.canAppreciate)
         assertTrue(f.controller.state.canContinue)
-        f.controller.continueConnection(); f.finish()
-        assertEquals(2, f.clients.entitlementCalls)
-        assertEquals(2, f.ports.probes)
+        f.controller.continueConnection(); f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.clients.entitlementCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(1, f.ports.officialSaves)
         assertEquals(1, f.ports.saves)
+        assertEquals(1, f.host.commits.size)
         assertTrue(f.ports.last!!.official)
     }
 
@@ -319,13 +344,16 @@ class SharedConnectionControllerTest {
         assertEquals(0, f.ports.saves)
     }
 
-    @Test fun successfulEntitlementWithFailedDavDoesNotGrantProof() {
+    @Test fun unavailableDavDoesNotGateBuiltInAccountActivationOrCreateDavProof() {
         val f = Fixture(); f.official(); f.ports.probeResult = false
         f.controller.login(); f.finish()
         assertEquals(1, f.clients.entitlementCalls)
-        assertEquals(1, f.ports.probes)
-        assertFalse(f.controller.state.canContinue)
-        assertEquals(0, f.ports.saves)
+        assertEquals(0, f.ports.probes)
+        assertTrue(f.controller.state.canContinue)
+        f.controller.testConnection(); f.finish()
+        assertEquals(0, f.ports.probes)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.ports.officialSaves)
     }
 
     @Test fun backgroundAfterAuthenticationPreventsEntitlementDavAndSave() {
@@ -397,24 +425,21 @@ class SharedConnectionControllerTest {
         assertFalse(f.controller.state.canContinue)
     }
 
-    @Test fun unverifiedAppreciationOnlyUsesPublicClientAndCopiesLocalUsername() {
+    @Test fun unverifiedAccountCannotOpenAppreciationOrReadPrivateMetadata() {
         val f = Fixture(); f.official()
         f.controller.openAppreciation(); f.finish()
-        assertEquals(1, f.clients.publicCalls)
+        assertFalse(f.controller.state.canAppreciate)
+        assertNull(f.controller.state.appreciation)
+        assertEquals(0, f.clients.publicCalls)
         assertEquals(0, f.clients.privateConstructs)
         assertEquals(0, f.clients.entitlementCalls)
         assertEquals(0, f.ports.probes)
         assertEquals(0, f.ports.saves)
-        assertFalse(f.controller.state.appreciation!!.authenticated)
-        assertTrue(f.clients.requests.all { it.header("Authorization") == null })
-        f.controller.copyUsername()
-        assertEquals("alice", f.ports.copied)
-        f.controller.back()
-        assertNull(f.controller.state.appreciation)
     }
 
     @Test fun backgroundCancelsAppreciationAndLateReplyCannotRevealIdentity() {
         val f = Fixture(); f.official()
+        f.controller.login(); f.finish()
         f.controller.openAppreciation()
         f.controller.foreground(false); f.finish()
         assertNull(f.controller.state.appreciation!!.username)
@@ -425,12 +450,16 @@ class SharedConnectionControllerTest {
         assertTrue(f.controller.state.appreciation!!.canRefresh)
     }
 
-    @Test fun appreciationOnlyBackReturnsToSettings() {
+    @Test fun appreciationOnlyAuthenticatesSavedAccountThenBackReturnsToSettings() {
         val existing = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
-        val f = Fixture(existing, ConnectionEntryModel.Origin.SETTINGS)
-        f.controller.openAppreciationOnly(); f.controller.back(); f.finish()
+        val f = Fixture(existing, ConnectionEntryModel.Origin.SETTINGS, persisted = existing)
+        f.controller.openAppreciationOnly(); f.finish()
+        assertTrue(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.appreciation != null)
+        f.controller.back(); f.finish()
         assertEquals(listOf(ConnectionEntryModel.Back.SETTINGS), f.host.backs)
-        assertEquals(0, f.clients.publicCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
     }
 
     @Test fun elapsedExpiryInvalidatesOfficialProofBeforeSave() {
@@ -504,14 +533,17 @@ class SharedConnectionControllerTest {
         assertEquals("", f.ports.last!!.username)
     }
 
-    @Test fun backgroundOfficialAccountCanRetestWithoutReplayingRegistration() {
+    @Test fun backgroundOfficialAccountReauthenticatesReadOnlyWithoutReplayingRegistration() {
         val f = Fixture(); f.official()
         f.controller.register(); f.finish()
-        f.controller.foreground(false); f.controller.foreground(true)
-        assertTrue(f.controller.state.canRetestOfficial)
-        f.controller.testConnection(); f.finish()
+        f.controller.foreground(false)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.foreground(true)
+        assertFalse(f.controller.state.canContinue)
+        f.finish()
         assertEquals(1, f.clients.authCalls)
         assertEquals(2, f.clients.entitlementCalls)
+        assertEquals(0, f.ports.probes)
         assertTrue(f.controller.state.canContinue)
     }
 
@@ -579,7 +611,7 @@ class SharedConnectionControllerTest {
                 .flatMap { Files.readAllLines(it).stream() }.toList()
         }
 
-    @Test fun authenticationAndDavShareOneDiagnosticOperationWithoutSecrets() {
+    @Test fun builtInAuthenticationDiagnosticsNeverClaimDavVerification() {
         val directory = Files.createTempDirectory("shared-connection-diagnostics-")
         DiagnosticLog.configure(directory, "1.0", "linux")
         val f = Fixture(); f.official()
@@ -589,7 +621,7 @@ class SharedConnectionControllerTest {
         val ids = lines.mapNotNull { Regex("\"operationId\":\"([^\"]+)\"").find(it)?.groupValues?.get(1) }.toSet()
         assertEquals(1, ids.size)
         assertTrue(lines.any { it.contains("\"httpMethod\":\"POST\"") })
-        assertTrue(lines.any { it.contains("\"httpMethod\":\"PROPFIND\"") })
+        assertFalse(lines.any { it.contains("\"httpMethod\":\"PROPFIND\"") })
         assertEquals(1, lines.count { it.contains("\"stage\":\"FINISHED\"") })
         assertFalse(lines.joinToString().contains("alice"))
         assertFalse(lines.joinToString().contains("secret-password"))
@@ -650,6 +682,7 @@ class SharedConnectionControllerTest {
 
     @Test fun unavailableClipboardReportsOnlySafeMessage() {
         val f = Fixture(); f.official(); f.ports.copyFailure = true
+        f.controller.login(); f.finish()
         f.controller.openAppreciation(); f.finish(); f.controller.copyUsername()
         assertTrue(f.controller.state.appreciation!!.message.contains("无法复制"))
         assertFalse(f.controller.state.appreciation!!.message.contains("SECRET"))
@@ -782,29 +815,188 @@ class SharedConnectionControllerTest {
         assertFalse(f.controller.state.canContinue)
     }
 
-    @Test fun savedOfficialReentryRequiresFreshEntitlementAndDavWithoutClaimingLogin() {
+    @Test fun savedOfficialReentryRequiresFreshReadOnlyAuthenticationBeforeNext() {
         val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
         val f = Fixture(saved, persisted = saved)
-        assertTrue(f.controller.state.canContinue)
-        assertEquals("", f.controller.state.notice)
-        assertEquals(0, f.clients.authCalls)
+        assertFalse(f.controller.state.canContinue)
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertFalse(f.controller.state.canAppreciate)
         assertEquals(0, f.clients.entitlementCalls)
-        f.controller.continueConnection(); f.finish()
+        f.finish()
+        assertTrue(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.canContinue)
         assertEquals(0, f.clients.authCalls)
         assertEquals(1, f.clients.entitlementCalls)
-        assertEquals(1, f.ports.probes)
-        assertEquals(1, f.ports.saves)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.clients.entitlementCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(1, f.ports.officialSaves)
     }
 
     @Test fun inactiveSavedOfficialAccountCannotReachDavOrPersistenceOnReentry() {
         val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
         val f = Fixture(saved, persisted = saved); f.clients.active = false
+        f.finish()
         f.controller.continueConnection(); f.finish()
         assertEquals(1, f.clients.entitlementCalls)
         assertEquals(0, f.ports.probes)
         assertEquals(0, f.ports.saves)
         assertFalse(f.controller.state.canContinue)
         assertTrue(f.host.commits.isEmpty())
+    }
+
+    @Test fun expiredAuthenticatedAccountShowsExpiryAndAppreciationButCannotContinue() {
+        val f = Fixture(); f.official(); f.clients.active = false; f.clients.serverTime = 10001L
+        f.controller.login(); f.finish()
+        assertTrue(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.canAppreciate)
+        assertEquals("赞赏续期", f.controller.state.appreciationLabel)
+        assertEquals("服务已到期", f.controller.state.officialAccessStatus)
+        assertTrue(f.controller.state.officialExpiry.startsWith("使用期限至 "))
+        assertFalse(f.controller.state.canContinue)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        f.controller.openAppreciation(); f.finish()
+        assertTrue(f.controller.state.appreciation != null)
+    }
+
+    @Test fun failedLoginAndFailedSavedAuthenticationNeverHideFormOrShowAppreciation() {
+        val f = Fixture(); f.official(); f.clients.authFailure = true
+        f.controller.login(); f.finish()
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertFalse(f.controller.state.canAppreciate)
+        assertFalse(f.controller.state.canContinue)
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val restored = Fixture(saved, persisted = saved); restored.clients.entitlementFailure = true
+        restored.finish()
+        assertFalse(restored.controller.state.officialAuthenticated)
+        assertFalse(restored.controller.state.canAppreciate)
+        assertFalse(restored.controller.state.canContinue)
+        assertTrue(restored.controller.state.error)
+        assertEquals(saved, restored.ports.savedConnection)
+    }
+
+    @Test fun trustedExpiryUsesMonotonicSessionEvenWhenDesktopBootIdIsUnavailable() {
+        val f = Fixture(); f.official(); f.ports.boot = -1
+        f.controller.login(); f.finish()
+        assertTrue(f.controller.state.canContinue)
+        f.ports.elapsed = 9001
+        f.controller.refreshAccountStatus()
+        assertEquals("服务已到期", f.controller.state.officialAccessStatus)
+        assertFalse(f.controller.state.canContinue)
+        assertTrue(f.controller.state.canAppreciate)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.saves)
+    }
+
+    @Test fun returningFromAppreciationRetainsAuthenticationAndRenewedAccess() {
+        val f = Fixture(); f.official(); f.clients.active = false; f.clients.serverTime = 10001
+        f.controller.login(); f.finish()
+        assertFalse(f.controller.state.canContinue)
+        f.controller.openAppreciation()
+        f.clients.active = true; f.clients.expires = 20000
+        f.finish(); f.controller.back()
+        assertTrue(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.canContinue)
+        assertEquals("", f.controller.state.officialAccessStatus)
+        assertEquals(0, f.ports.probes)
+    }
+
+    @Test fun savedOfficialBackBeforeAuthenticationDispatchCancelsWithoutSaving() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, persisted = saved)
+        assertTrue(f.controller.state.canGoBack)
+        f.controller.back(); f.finish()
+        assertEquals(listOf(ConnectionEntryModel.Back.PATH), f.host.backs)
+        assertEquals(0, f.clients.entitlementCalls)
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertEquals(0, f.ports.saves)
+    }
+
+    @Test fun builtInCancelAndBackgroundBeforeSaveAdmissionNeverPersist() {
+        for (cancel in listOf(true, false)) {
+            val f = Fixture(); f.official(); f.controller.login(); f.finish()
+            f.controller.continueConnection()
+            if (cancel) f.controller.cancel() else f.controller.foreground(false)
+            f.finish()
+            assertEquals(0, f.ports.saves)
+            assertEquals(0, f.ports.probes)
+            assertTrue(f.host.commits.isEmpty())
+        }
+    }
+
+    @Test fun expiredSavedAccountKeepsTrustedHistoryAndAppreciationAfter401WithoutGrantingNext() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val cached = TrustedEntitlementCache.Record(saved.endpoint, saved.username, 1000, false, 1001, 0, 1)
+        val f = Fixture(saved, persisted = saved, cached = cached)
+        f.clients.entitlementFailure = true; f.finish()
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.showOfficialAccount)
+        assertTrue(f.controller.state.canAppreciate)
+        assertTrue(f.controller.state.officialExpiry.startsWith("上次确认使用期限至 "))
+        assertEquals("服务已到期", f.controller.state.officialAccessStatus)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.saves)
+        f.controller.openAppreciation(); f.finish()
+        assertTrue(f.controller.state.appreciation != null)
+        f.controller.back()
+        assertFalse(f.controller.state.canContinue)
+        f.controller.editPassword("changed")
+        assertFalse(f.controller.state.showOfficialAccount)
+        assertFalse(f.controller.state.canAppreciate)
+    }
+
+    @Test fun cachedHistoryWithoutExactDurableCredentialsNeverHidesLoginOrGrantsAccess() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val cached = TrustedEntitlementCache.Record(saved.endpoint, saved.username, 1000, false, 1001, 0, 1)
+        val f = Fixture(saved.copy(password = "other-password"), persisted = saved, cached = cached)
+        f.finish()
+        assertFalse(f.controller.state.showOfficialAccount)
+        assertFalse(f.controller.state.canAppreciate)
+        assertFalse(f.controller.state.canContinue)
+        assertEquals(0, f.clients.entitlementCalls)
+    }
+
+    @Test fun appreciation401RevokesCurrentAccessButKeepsAuthenticatedHistoryVisible() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish()
+        assertTrue(f.controller.state.canContinue)
+        f.clients.entitlementFailure = true
+        f.controller.openAppreciation(); f.finish(); f.controller.back()
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertTrue(f.controller.state.showOfficialAccount)
+        assertTrue(f.controller.state.canAppreciate)
+        assertFalse(f.controller.state.canContinue)
+        assertTrue(f.controller.state.officialExpiry.startsWith("上次确认"))
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.saves)
+    }
+
+    @Test fun builtInExpiryBetweenNextClickAndSaveDispatchPreventsPersistence() {
+        val f = Fixture(); f.official(); f.controller.login(); f.finish()
+        f.controller.continueConnection()
+        f.ports.elapsed = 9001
+        f.finish()
+        assertEquals(0, f.ports.saves)
+        assertEquals(0, f.ports.probes)
+        assertTrue(f.host.commits.isEmpty())
+        assertFalse(f.controller.state.canContinue)
+        assertEquals("服务已到期", f.controller.state.officialAccessStatus)
+    }
+
+    @Test fun editingDuringSavedAccountRefreshRejectsItsLateAuthentication() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, persisted = saved)
+        f.io.drain()
+        f.controller.editUsername("bob")
+        f.ui.drain()
+        assertEquals("bob", f.controller.state.username)
+        assertEquals("", f.controller.state.password)
+        assertFalse(f.controller.state.officialAuthenticated)
+        assertFalse(f.controller.state.canAppreciate)
+        assertFalse(f.controller.state.canContinue)
+        assertEquals(0, f.ports.saves)
     }
 
 }

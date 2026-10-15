@@ -211,6 +211,39 @@ class AndroidFacadeReconstructionTest {
         assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
     }
 
+    @Test fun freshBuiltInSetupPreparesMissingNamespaceThenPerformsRealComparisonWithoutUpload() {
+        val bridge = FakeBridge()
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            val directories = mutableSetOf("/")
+            server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+                    val path = requireNotNull(request.path)
+                    return when (request.method) {
+                        "PROPFIND" -> if (path !in directories) okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                            else okhttp3.mockwebserver.MockResponse().setResponseCode(207).setBody(
+                                """<d:multistatus xmlns:d="DAV:"><d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>""")
+                        "MKCOL" -> { directories += path; okhttp3.mockwebserver.MockResponse().setResponseCode(201) }
+                        "GET" -> okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                        else -> okhttp3.mockwebserver.MockResponse().setResponseCode(405)
+                    }
+                }
+            }
+            server.start()
+            val actualConnection = AndroidConnection(server.url("/").toString(), "", "", "hero")
+            val facade = AndroidSyncFacade(temp.resolve("fresh-built-in"), actualConnection, bridge, identity)
+            assertTrue(facade.connect().isSuccess)
+            val comparison = facade.inspect()
+            assertEquals("LOCAL_ONLY", comparison.kind)
+            assertEquals(2, comparison.localFileCount)
+            assertTrue(comparison.remoteVersions.isEmpty())
+            val requests = List(server.requestCount) { server.takeRequest() }
+            assertEquals(listOf("/${identity.namespace}/", "/${identity.namespace}/hero/"),
+                requests.filter { it.method == "MKCOL" }.map { it.path })
+            assertTrue(requests.all { it.method in setOf("PROPFIND", "MKCOL", "GET") })
+            assertEquals(0, bridge.restores)
+        }
+    }
+
     @Test fun freshEmptyMirrorWithThreeLocalSlotsAndEmptyDavComparesWithoutAnyPut() {
         val slots=(1..3).associate { slot -> "game$slot/game.dat" to fixture(slot).getValue("game1/game.dat") }
         val bridge=FakeBridge(slots)

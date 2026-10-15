@@ -101,8 +101,16 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
         }
     }
 
-    /** The shared controller invokes this only for explicit Next/Save with current DAV proof. */
-    override fun saveAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
+    /** Custom WebDAV still requires the controller's current, real DAV proof. */
+    override fun saveAndActivate(config: SharedConnectionConfig) = persistAndActivate(config)
+
+    /** Built-in activation uses current authenticated account access, without claiming DAV was tested. */
+    override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) {
+        require(config.official && config.endpoint == TrustedEntitlementCache.OFFICIAL_ENDPOINT)
+        persistAndActivate(config)
+    }
+
+    private fun persistAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()

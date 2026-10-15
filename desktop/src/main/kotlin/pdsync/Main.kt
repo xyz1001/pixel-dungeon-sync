@@ -562,7 +562,14 @@ internal fun runSyncApplication(
      val manager = session ?: error(locationIssue ?: "默认存档尚未就绪")
      val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT, result = { if (it.kind == OnboardingKind.BLOCKED) DiagnosticResult.REJECTED else DiagnosticResult.SUCCEEDED }) {
       val target = manager.targetInfo()
-      manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
+      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
+      // Built-in login grants account access, not a DAV proof. Initial setup prepares only
+      // the app-owned collections here, as part of the real comparison after Next.
+      if (manager.config.connectionProvider == "official" && isDesktopOfficialRoot(manager.config.endpoint) &&
+          manager.config.onboardingProgress == OnboardingProgress.PENDING) {
+       store.ensureNamespace { !appClosed && page == Page.COMPARISON && pageGeneration == generation && config == inspectedConfig }
+      }
+      manager.compareOnboarding(store) {
        gameLauncher.status(target) is GameProcessStatus.Stopped
       }
      } }

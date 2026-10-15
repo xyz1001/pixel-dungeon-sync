@@ -32,14 +32,16 @@ data class SharedConnectionConfig(
 interface SharedConnectionPorts {
     /**
      * Read-only durable credential match. This permits an explicit Next to revalidate a saved
-     * connection, never claims authentication and never substitutes for a fresh DAV/entitlement check.
+     * custom connection or authenticate a built-in account. It never grants either kind of proof.
      * Missing, unreadable or temporary credentials must return false.
      */
     fun isSavedConnection(config: SharedConnectionConfig): Boolean = false
     /** Validate and perform the real platform DAV probe; do not save or activate. */
     fun testConnection(config: SharedConnectionConfig): Boolean
-    /** Called only after explicit Next/Save and a fresh successful probe. */
+    /** Custom WebDAV only: explicit Next/Save after a fresh successful DAV probe. */
     fun saveAndActivate(config: SharedConnectionConfig)
+    /** Built-in service only: authenticated, current account access. This is not DAV verification. */
+    fun saveAuthenticatedOfficial(config: SharedConnectionConfig) { error("Built-in account activation is not supported") }
     fun cacheDirectory(): Path?
     fun elapsedRealtimeMs(): Long
     fun bootCount(): Int
@@ -76,8 +78,11 @@ data class SharedConnectionState(
     val canCancel: Boolean,
     val canEdit: Boolean,
     val canGoBack: Boolean,
-    val canRetestOfficial: Boolean,
-    /** Next may start verification; this is never evidence of an authenticated connection. */
+    val officialAuthenticated: Boolean,
+    val showOfficialAccount: Boolean,
+    val officialExpiry: String,
+    val officialAccessStatus: String,
+    /** Built-in account access or permission to verify custom DAV; never a synchronization baseline. */
     val canContinue: Boolean,
     val notice: String,
     val error: Boolean,
@@ -148,7 +153,8 @@ class SharedConnectionController internal constructor(
         candidate.endpoint.isNotBlank() && (!candidate.official || isOfficial(candidate)) &&
             runCatching { ports.isSavedConnection(candidate) }.getOrDefault(false)
     }
-    private var verifiedOfficial: SharedConnectionConfig? = null
+    private var officialSession: OfficialSession? = null
+    private var pendingAppreciationOnly = false
     private var host: SharedConnectionHost? = null
     private val alive = AtomicBoolean(true)
     private val foreground = AtomicBoolean(false)
@@ -170,21 +176,25 @@ class SharedConnectionController internal constructor(
     private var recoveryMessage = ""
     private var recoveryLabel = ""
     private val cache = runCatching { ports.cacheDirectory()?.let(::TrustedEntitlementCache) }.getOrNull()
+    // Exact durable credentials may show previously authenticated metadata, including after an
+    // expired account returns 401. Display history can never enable Next or create a session.
+    private var savedOfficialHistory = savedReentry?.takeIf(::isOfficial)?.let { config ->
+        cache?.read(config.endpoint, config.username)?.let { config to it }
+    }
 
     var state by mutableStateOf(snapshot())
         private set
 
     private data class Operation(val generation: Long, val lifetime: Long, val config: SharedConnectionConfig,
                                  val register: Boolean = false, val commit: Boolean = false,
-                                 val editableDavTest: Boolean = false) {
+                                 val editableDavTest: Boolean = false, val accountRefresh: Boolean = false) {
         @Volatile var commitStarted: Boolean = false
         val trace = DiagnosticLog.begin(if (commit) DiagnosticAction.CONFIGURE else DiagnosticAction.CONNECT, false)
     }
-    private data class Proof(val generation: Long, val lifetime: Long, val config: SharedConnectionConfig,
-                             val entitlement: TrustedEntitlementCache.Record?)
-    private data class Verification(val record: TrustedEntitlementCache.Record?)
-    private data class Authentication(val config: SharedConnectionConfig, val verification: Verification?, val message: String,
-                                      val failure: DiagnosticFailure = DiagnosticFailure.NONE)
+    private data class Proof(val generation: Long, val lifetime: Long, val config: SharedConnectionConfig)
+    private data class OfficialSession(val config: SharedConnectionConfig, val record: TrustedEntitlementCache.Record,
+                                       val generation: Long, val lifetime: Long)
+    private data class Authentication(val config: SharedConnectionConfig, val record: TrustedEntitlementCache.Record?)
 
     fun attach(host: SharedConnectionHost) {
         if (!alive.get()) return
@@ -215,7 +225,10 @@ class SharedConnectionController internal constructor(
         appreciationFlow?.foreground(value)
         if (!value) appreciationImage = null
         publish()
-        if (value) deliverCommit()
+        if (value) {
+            deliverCommit()
+            restoreOfficialAccount()
+        }
     }
 
     fun close() {
@@ -229,7 +242,9 @@ class SharedConnectionController internal constructor(
         closeAppreciation()
         custom = custom.copy(password = "")
         officialPassword = ""
-        verifiedOfficial = null
+        officialSession = null
+        savedOfficialHistory = null
+        pendingAppreciationOnly = false
         saved = null
         savedReentry = null
         pendingCommit = null
@@ -299,7 +314,7 @@ class SharedConnectionController internal constructor(
         }
         // A DAV-only test has no durable effect; Back invalidates its late callback before navigating.
         // Authentication/registration and the persistence boundary keep their existing explicit cancellation.
-        if (operation?.editableDavTest == true) invalidateSource()
+        if (operation?.editableDavTest == true || operation?.accountRefresh == true) invalidateSource()
         // Editing a saved connection inside the wizard historically returns directly to Path.
         // New setup alone visits its chooser first; this distinction is shared by both hosts.
         val destination = if (origin == ConnectionEntryModel.Origin.SETUP && existingOnEntry && operation == null)
@@ -332,11 +347,11 @@ class SharedConnectionController internal constructor(
         closeAppreciation()
         savedReentry = null
         proof = null
-        verifiedOfficial = null
+        officialSession = null
         val requested = draft()
         val pending = Operation(generation.get(), lifetime.get(), requested, register)
         operation = pending
-        notice = "正在连接…"
+        notice = "正在登录…"
         error = false
         publish()
         val attempt = ConnectionAuthAttempt("${pending.generation}:${pending.lifetime}") {
@@ -345,46 +360,62 @@ class SharedConnectionController internal constructor(
                 else it.login(requested.username, requested.password)
             }
             val candidate = SharedConnectionConfig(account.endpoint, account.username, account.password, profile, true)
-            if (!canWork(pending)) return@ConnectionAuthAttempt Authentication(candidate, null, "已登录，请重新测试连接。", DiagnosticFailure.CANCELED)
-            try {
-                val result = verify(candidate, pending)
-                val expiry = result.record?.expiresMs
-                val message = if (register && expiry != null)
-                    "连接成功。有效至 ${SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(expiry))}。"
-                else "连接成功。"
-                Authentication(candidate, result, message)
-            } catch (failure: Exception) {
-                Authentication(candidate, null, safeFailure(failure, "已登录，连接测试未通过，请重试。"), diagnosticFailure(failure))
-            }
+            if (!canWork(pending)) Authentication(candidate, null)
+            else Authentication(candidate, readOfficialAccount(candidate, pending))
         }
         execute(pending, { attempt.await() }) { result ->
-            verifiedOfficial = result.config
-            proof = result.verification?.takeIf { canWork(pending) }?.let {
-                Proof(pending.generation, pending.lifetime, result.config, it.record)
-            }
-            notice = if (result.verification != null && proof == null) "已登录，请重新测试连接。" else result.message
-            error = proof == null
+            acceptOfficialAccount(result.config, result.record, pending)
         }
     }
 
-    fun testConnection() {
-        if (!canStart() || entry.mode() == ConnectionEntryModel.Mode.CHOICE) return
-        val candidate = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL) officialAccountForDraft() else draft()
-        if (candidate == null) {
-            notice = "请重新登录官方账号。"
-            error = true
-            publish()
-            return
+    /** Re-entry authenticates saved credentials with the read-only entitlement endpoint, never DAV. */
+    private fun restoreOfficialAccount() {
+        if (!canStart() || appreciationFlow != null || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
+        val candidate = savedReentry?.takeIf { it.official && it == draft() }
+            ?: officialSession?.takeIf { it.config == draft() && it.lifetime != lifetime.get() }?.config
+            ?: return
+        savedReentry = null
+        val pending = Operation(generation.get(), lifetime.get(), candidate, accountRefresh = true)
+        operation = pending
+        notice = "正在登录…"
+        error = false
+        publish()
+        execute(pending, { readOfficialAccount(candidate, pending) }) { record ->
+            acceptOfficialAccount(candidate, record, pending)
         }
+    }
+
+    private fun readOfficialAccount(candidate: SharedConnectionConfig, pending: Operation): TrustedEntitlementCache.Record {
+        checkWork(pending)
+        check(isOfficial(candidate))
+        val entitlement = clients.account(candidate).entitlement()
+        checkWork(pending)
+        return remember(candidate, entitlement)
+    }
+
+    private fun acceptOfficialAccount(candidate: SharedConnectionConfig, record: TrustedEntitlementCache.Record?, pending: Operation) {
+        officialSession = record?.takeIf { canWork(pending) && candidate == draft() }?.let {
+            OfficialSession(candidate, it, pending.generation, pending.lifetime)
+        }
+        notice = if (officialSession != null) "" else "请重新登录。"
+        error = officialSession == null
+    }
+
+    /** Updates elapsed expiry without any network request or wall-clock-based authorization. */
+    fun refreshAccountStatus() { publish() }
+
+    fun testConnection() {
+        if (!canStart() || entry.mode() != ConnectionEntryModel.Mode.CUSTOM) return
+        val candidate = draft()
         savedReentry = null
         proof = null
-        val pending = Operation(generation.get(), lifetime.get(), candidate, editableDavTest = !candidate.official)
+        val pending = Operation(generation.get(), lifetime.get(), candidate, editableDavTest = true)
         operation = pending
         notice = "正在测试连接…"
         error = false
         publish()
-        execute(pending, { verify(candidate, pending) }) { result ->
-            if (canWork(pending)) proof = Proof(pending.generation, pending.lifetime, candidate, result.record)
+        execute(pending, { verify(candidate, pending) }) {
+            if (canWork(pending)) proof = Proof(pending.generation, pending.lifetime, candidate)
             notice = if (proof != null) "连接测试通过。" else "请重新测试当前连接。"
             error = proof == null
         }
@@ -392,10 +423,12 @@ class SharedConnectionController internal constructor(
 
     fun continueConnection() {
         if (!canStart()) return
-        val candidate = if (hasProof()) proof!!.config else savedDraftForRevalidation()
+        val candidate = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL) {
+            officialSession?.takeIf { hasOfficialAccess(it) }?.config
+        } else if (hasProof()) proof!!.config else savedDraftForRevalidation()
         if (candidate == null) {
             proof = null
-            notice = "请先测试当前连接。"
+            notice = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL) "请先登录有效的内置服务账号。" else "请先测试当前连接。"
             error = true
             publish()
             return
@@ -408,48 +441,47 @@ class SharedConnectionController internal constructor(
         error = false
         publish()
         execute(pending, {
-            verify(candidate, pending)
+            if (candidate.official) {
+                checkWork(pending)
+                check(officialSession?.let { it.config == candidate && hasOfficialAccess(it) } == true)
+            } else verify(candidate, pending)
             // Cancellation/background/source edits before this point cannot write configuration.
             synchronized(pending) {
                 checkWork(pending)
+                if (candidate.official) check(officialSession?.let { it.config == candidate && hasOfficialAccess(it) } == true)
                 pending.commitStarted = true
             }
             ui.execute { if (operation === pending) publish() }
-            ports.saveAndActivate(candidate)
+            if (candidate.official) ports.saveAuthenticatedOfficial(candidate) else ports.saveAndActivate(candidate)
             candidate
         }) { committed ->
             saved = committed
-            verifiedOfficial = committed.takeIf { it.official }
             notice = "连接设置已保存。"
             pendingCommit = committed
         }
     }
 
-    private fun verify(candidate: SharedConnectionConfig, pending: Operation): Verification {
+    private fun verify(candidate: SharedConnectionConfig, pending: Operation) {
         checkWork(pending)
         require(candidate.endpoint.isNotBlank()) { "Invalid connection" }
-        val record = if (candidate.official) {
-            check(isOfficial(candidate))
-            val entitlement = clients.account(candidate).entitlement()
-            checkWork(pending)
-            val observed = remember(candidate, entitlement)
-            entitlement.requireSyncAccess()
-            observed
-        } else null
+        check(!candidate.official) // Account authorization is never promoted to a DAV proof.
         checkWork(pending)
         if (!ports.testConnection(candidate)) throw ProbeRejected()
         checkWork(pending)
-        return Verification(record)
     }
 
     fun openAppreciationOnly() {
+        pendingAppreciationOnly = true
         openAppreciation()
-        appreciationOnly = appreciationFlow != null
+        if (appreciationFlow != null) {
+            appreciationOnly = true
+            pendingAppreciationOnly = false
+        }
     }
 
     fun openAppreciation() {
         if (!canStart() || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
-        val source = officialAccountForDraft() ?: draft().takeIf { validUsername(it.username) }?.copy(password = "") ?: return
+        val source = officialAccountForDraft() ?: return
         closeAppreciation()
         appreciationSource = source
         appreciationFlow = ManagedAccountFlow(source.username, cache?.read(source.endpoint, source.username),
@@ -509,11 +541,29 @@ class SharedConnectionController internal constructor(
                             if (!current() || appreciationFlow !== flow || appreciationClient !== client) return@entitlement
                             if (flow.entitlement(ticket, entitlement.username, entitlement.expiresMs,
                                     entitlement.active, entitlement.managed, entitlement.serverTimeMs)) {
-                                remember(source, entitlement)
+                                val record = remember(source, entitlement)
+                                officialSession = OfficialSession(source, record, generation.get(), lifetime.get())
                                 publish()
                             }
                         }
-                    } catch (failure: Exception) { message = safeFailure(failure, "暂时无法读取，请刷新。") }
+                    } catch (failure: Exception) {
+                        message = safeFailure(failure, "暂时无法读取，请刷新。")
+                        if (failure is ManagedAccountClient.ManagedAccountException &&
+                            failure.kind in setOf(ManagedAccountClient.FailureKind.AUTHENTICATION_REQUIRED,
+                                ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED,
+                                ManagedAccountClient.FailureKind.ACCOUNT_INACTIVE,
+                                ManagedAccountClient.FailureKind.FORBIDDEN)) {
+                            ui.execute {
+                                if (current() && appreciationFlow === flow && appreciationClient === client) {
+                                    officialSession?.takeIf { it.config == source }?.let {
+                                        savedOfficialHistory = it.config to it.record
+                                    }
+                                    officialSession = null
+                                    publish()
+                                }
+                            }
+                        }
+                    }
                 }
                 val result = message
                 ui.execute completion@{
@@ -564,8 +614,7 @@ class SharedConnectionController internal constructor(
                 ui.execute completion@{
                     val current = accepts(pending) && operation === pending
                     val failure = if (!current || (!pending.commitStarted && !canWork(pending))) DiagnosticFailure.CANCELED
-                        else result.exceptionOrNull()?.let(::diagnosticFailure)
-                            ?: (result.getOrNull() as? Authentication)?.failure ?: DiagnosticFailure.NONE
+                        else result.exceptionOrNull()?.let(::diagnosticFailure) ?: DiagnosticFailure.NONE
                     pending.trace.record(DiagnosticStage.FINISHED,
                         when (failure) {
                             DiagnosticFailure.NONE -> DiagnosticResult.SUCCEEDED
@@ -576,11 +625,16 @@ class SharedConnectionController internal constructor(
                     operation = null
                     result.fold(success, { failure ->
                         proof = null
-                        notice = safeFailure(failure, "连接测试未通过，请重试。")
+                        if (pending.accountRefresh) {
+                            officialSession?.let { savedOfficialHistory = it.config to it.record }
+                            officialSession = null
+                        }
+                        notice = safeFailure(failure, if (pending.config.official) "暂时无法完成，请重试。" else "连接测试未通过，请重试。")
                         error = true
                     })
                     publish()
                     deliverCommit()
+                    if (pendingAppreciationOnly && officialAccountForDraft() != null) openAppreciationOnly()
                 }
             }
         } catch (_: RuntimeException) {
@@ -598,7 +652,7 @@ class SharedConnectionController internal constructor(
     private fun safeFailure(failure: Throwable, fallback: String): String = when (failure) {
         is OfficialServiceRegistrationClient.RegistrationException -> failure.userMessage()
         is ManagedAccountClient.ManagedAccountException -> failure.userMessage()
-        is StaleOperation -> "请重新测试当前连接。"
+        is StaleOperation -> "页面状态已变化，请重试。"
         else -> fallback // Never display raw transport, platform or server exception messages.
     }
     private fun diagnosticFailure(failure: Throwable): DiagnosticFailure = when (failure) {
@@ -639,31 +693,44 @@ class SharedConnectionController internal constructor(
     private fun canWork(pending: Operation) = accepts(pending) && foreground.get() && lifetime.get() == pending.lifetime
     private fun checkWork(pending: Operation) { if (!canWork(pending)) throw StaleOperation() }
     private fun canEditDraft() = alive.get() && pendingCommit == null &&
-        (operation == null || operation?.editableDavTest == true)
+        (operation == null || operation?.editableDavTest == true || operation?.accountRefresh == true)
     private fun canStart() = alive.get() && foreground.get() && host != null && operation == null && pendingCommit == null
     private fun hasProof(): Boolean {
         val current = proof ?: return false
         return alive.get() && foreground.get() && operation == null && appreciationFlow == null &&
-            current.generation == generation.get() && current.lifetime == lifetime.get() && current.config == draft() &&
-            current.entitlement?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) != true
+            current.generation == generation.get() && current.lifetime == lifetime.get() && current.config == draft()
     }
     private fun savedDraftForRevalidation(): SharedConnectionConfig? = savedReentry?.takeIf {
-        canStart() && appreciationFlow == null && entry.mode() != ConnectionEntryModel.Mode.CHOICE && it == draft()
+        canStart() && appreciationFlow == null && entry.mode() == ConnectionEntryModel.Mode.CUSTOM && !it.official && it == draft()
     }
     private fun draft() = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
         SharedConnectionConfig(TrustedEntitlementCache.OFFICIAL_ENDPOINT, officialUser, officialPassword, profile, true)
     else custom
-    private fun officialAccountForDraft(): SharedConnectionConfig? {
-        val current = draft()
-        return verifiedOfficial?.takeIf { isOfficial(it) && it == current }
-            ?: saved?.takeIf { isOfficial(it) && it == current }
+    private fun officialAccountForDraft(): SharedConnectionConfig? =
+        (officialSession?.config ?: savedOfficialHistory?.first)?.takeIf {
+        entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && isOfficial(it) && it == draft()
     }
+    private fun hasOfficialAccess(session: OfficialSession): Boolean {
+        val record = session.record
+        return alive.get() && foreground.get() && session.generation == generation.get() &&
+            session.lifetime == lifetime.get() && session.config == draft() && record.active &&
+            ports.elapsedRealtimeMs() >= record.elapsedMs &&
+            (record.expiresMs == null || record.serverTimeMs != null) && !officialExpired(record)
+    }
+    // This record was obtained in this controller lifetime. Unlike persisted display history, its
+    // monotonic timestamp is valid on desktop too, where the operating-system boot ID is unknown.
+    private fun officialExpired(record: TrustedEntitlementCache.Record): Boolean =
+        record.expiresMs != null && record.serverTimeMs != null &&
+            (record.serverTimeMs >= record.expiresMs ||
+                ports.elapsedRealtimeMs() - record.elapsedMs >= record.expiresMs - record.serverTimeMs)
     private fun invalidateSource() {
         savedReentry = null
         generation.incrementAndGet()
         operation = null
         proof = null
-        verifiedOfficial = null
+        officialSession = null
+        savedOfficialHistory = null
+        pendingAppreciationOnly = false
         closeAppreciation()
     }
     private fun cancelAppreciationRequest() {
@@ -681,8 +748,16 @@ class SharedConnectionController internal constructor(
     }
     private fun snapshot(): SharedConnectionState {
         val current = draft()
-        val cached = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && validUsername(current.username))
-            cache?.read(TrustedEntitlementCache.OFFICIAL_ENDPOINT, current.username) else null
+        val visibleAccount = officialAccountForDraft()
+        val account = officialSession?.takeIf { it.config == visibleAccount }
+        val history = savedOfficialHistory?.takeIf { it.first == visibleAccount }
+        val record = account?.record ?: history?.second
+        val expired = if (account != null) officialExpired(account.record)
+            else record?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) == true
+        val expiry = record?.let {
+            if (it.expiresMs == null) "使用期限未设置"
+            else "${if (account == null) "上次确认" else ""}使用期限至 ${SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(it.expiresMs))}"
+        }.orEmpty()
         val appreciation = appreciationFlow?.view()?.let {
             SharedAppreciationState(it.username ?: it.localUsername, it.entitlementLoaded,
                 ManagedAccountFlow.expiry(it), ManagedAccountFlow.accessStatus(it), appreciationLocalMessage.ifEmpty { it.message },
@@ -691,11 +766,18 @@ class SharedConnectionController internal constructor(
         return SharedConnectionState(origin, entry.mode(), current.endpoint, current.username, current.password,
             operation != null, operation != null && operation?.commitStarted != true,
             canEditDraft(), appreciation != null || canEditDraft(),
-            entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && officialAccountForDraft() != null,
-            hasProof() || savedDraftForRevalidation() != null, notice, error,
+            account != null, visibleAccount != null, expiry, when {
+                expired -> "服务已到期"
+                record?.active == false -> "服务未启用"
+                record?.expiresMs != null && record.serverTimeMs == null -> "使用期限待确认"
+                else -> ""
+            },
+            if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
+                canStart() && appreciation == null && account?.let(::hasOfficialAccess) == true
+            else hasProof() || savedDraftForRevalidation() != null, notice, error,
             saved != null || origin == ConnectionEntryModel.Origin.SETTINGS,
-            if (cached?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) == true) "赞赏续期" else "赞赏",
-            entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && validUsername(officialUser), appreciation,
+            if (expired) "赞赏续期" else "赞赏",
+            visibleAccount != null, appreciation,
             recoveryMessage, recoveryLabel)
     }
     private fun deliverCommit() {

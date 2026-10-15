@@ -156,7 +156,7 @@ class SharedAppShellRenderTest {
         controller.close()
     }
 
-    @Test fun chooserOfficialFormAndAppreciationShareTheNarrowShell() {
+    @Test fun chooserAndLoggedOutOfficialFormShareTheNarrowShell() {
         // Work is deliberately queued: rendering must not authenticate or contact an external service.
         val queued = mutableListOf<Runnable>()
         val controller = SharedConnectionController(
@@ -196,12 +196,11 @@ class SharedAppShellRenderTest {
         controller.editPassword("long-password-kept-private")
         renderState("official")
         controller.openAppreciation()
-        assertNotNull(controller.state.appreciation)
-        renderState("appreciation")
-        controller.back()
+        assertEquals(null, controller.state.appreciation)
+        assertFalse(controller.state.canAppreciate)
         assertEquals(ConnectionEntryModel.Mode.OFFICIAL, controller.state.mode)
         assertEquals("long_username_" + "x".repeat(49), controller.state.username)
-        assertTrue(queued.isNotEmpty())
+        assertTrue(queued.isEmpty())
         controller.close()
     }
 
