@@ -3663,44 +3663,29 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void renderConfirmation() {
-        String str = this.confirmationTitle;
-        if (str == null) {
-            str = "操作前确认";
-        }
-        heading(str);
-        String str2 = this.confirmationText;
-        if (str2 == null) {
-            str2 = "确认已失效，请重新选择。";
-        }
-        text(str2);
-        foot("取消", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda23
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.cancelConfirmation();
-            }
-        });
-        String str3 = this.confirmationButton;
-        if (str3 == null) {
-            str3 = "确认继续";
-        }
-        foot(str3, new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda24
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m82x868f6244();
-            }
-        }).setEnabled(this.confirmedAction != null);
-        Runnable runnable = this.confirmationMerge;
-        if (runnable != null) {
-            foot("合并", runnable);
-        }
+        final int token = this.settingsConfirmationToken;
+        final Runnable confirm = this.confirmedAction;
+        final Runnable merge = this.confirmationMerge;
+        String title = this.confirmationTitle == null ? "操作前确认" : this.confirmationTitle;
+        if (merge != null && "恢复存档".equals(title)) title = "如何处理冲突？";
+        SharedConfirmationState state = new SharedConfirmationState(token, title,
+                this.confirmationText == null ? "确认已失效，请重新选择。" : this.confirmationText,
+                this.confirmationButton == null ? "确认继续" : this.confirmationButton,
+                confirm != null, merge == null ? null : "合并", merge != null, this.busy,
+                this.feedbackError ? visibleNotice() : "");
+        this.body.addView(AndroidHomeDialogComposition.confirmationView(this, state,
+                () -> {
+                    if (isCurrentConfirmation(token) && this.confirmedAction == confirm && confirm != null) confirm.run();
+                }, merge == null ? null : () -> {
+                    if (isCurrentConfirmation(token) && this.confirmationMerge == merge) merge.run();
+                }, () -> {
+                    if (isCurrentConfirmation(token)) cancelConfirmation();
+                }), new LinearLayout.LayoutParams(0, 0));
     }
 
-    /* renamed from: lambda$renderConfirmation$87$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m82x868f6244() {
-        Runnable runnable = this.confirmedAction;
-        if (runnable != null) {
-            runnable.run();
-        }
+    private boolean isCurrentConfirmation(int token) {
+        return this.resumed && !isDestroyed() && !this.busy && this.page == SyncPage.CONFIRM
+                && this.settingsConfirmationToken == token;
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -4311,50 +4296,28 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     /* JADX INFO: Access modifiers changed from: private */
-    public void rename(final String str) {
-        if (str == null) {
+    public void rename(final String snapshotId) {
+        if (snapshotId == null) {
             editCurrent();
             return;
         }
-        final EditText editText = new EditText(this);
-        editText.setSingleLine(true);
-        editText.setHint("本机显示名称");
-        SyncHistory syncHistory = this.history;
-        editText.setText(syncHistory == null ? "" : syncHistory.getAliases().get(str));
-        new AlertDialog.Builder(this).setTitle("历史存档名称").setMessage("保存在此设备，不改写已发布的历史。").setView(editText).setNegativeButton("取消", (DialogInterface.OnClickListener) null).setPositiveButton("保存", new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda57
-            @Override // android.content.DialogInterface.OnClickListener
-            public final void onClick(DialogInterface dialogInterface, int i) {
-                MainActivity.this.m74lambda$rename$122$iogithubxyz1001pdsyncandroidMainActivity(str, editText, dialogInterface, i);
-            }
-        }).show();
-    }
-
-    /* renamed from: lambda$rename$120$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ Object m72lambda$rename$120$iogithubxyz1001pdsyncandroidMainActivity(String str, EditText editText) throws Exception {
-        sync().renameHistory(str, editText.getText().toString());
-        // Renaming is an explicit update. Refresh the complete observation, never only its mirror.
-        readComparison();
-        return null;
-    }
-
-    /* renamed from: lambda$rename$121$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m73lambda$rename$121$iogithubxyz1001pdsyncandroidMainActivity(Object obj) throws Exception {
-        this.notice = "名称已保存。";
-    }
-
-    /* renamed from: lambda$rename$122$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m74lambda$rename$122$iogithubxyz1001pdsyncandroidMainActivity(final String str, final EditText editText, DialogInterface dialogInterface, int i) {
-        work(DiagnosticAction.CONFIGURE, "正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda11
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m72lambda$rename$120$iogithubxyz1001pdsyncandroidMainActivity(str, editText);
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda12
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m73lambda$rename$121$iogithubxyz1001pdsyncandroidMainActivity(obj);
-            }
-        });
+        final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
+        SyncHistory observedHistory = this.history;
+        String alias = observedHistory == null ? null : observedHistory.getAliases().get(snapshotId);
+        AndroidHomeDialogComposition.showNaming(this, this.sharedHomeRenderToken, alias == null ? "" : alias,
+                "保存在此设备，不改写已发布的历史。", name -> {
+                    if (!isCurrentHomeAction(owner)) {
+                        this.notice = "存档已变化，请重新命名。";
+                        render();
+                        return;
+                    }
+                    work(DiagnosticAction.CONFIGURE, "正在保存名称…", () -> {
+                        sync().renameHistory(snapshotId, name);
+                        // An explicit update refreshes the full observation, never only its mirror.
+                        readComparison();
+                        return null;
+                    }, result -> this.notice = "名称已保存。");
+                }, null);
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -4363,54 +4326,22 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             refreshComparison(SyncPage.HOME);
             return;
         }
-        final EditText editText = new EditText(this);
-        editText.setSingleLine(true);
-        editText.setHint("存档名称");
-        SyncHistory syncHistory = this.history;
-        editText.setText(syncHistory == null ? "" : syncHistory.getCurrentName());
-        final AndroidSyncFacade.Inspection inspection = this.inspection;
-        new AlertDialog.Builder(this).setTitle("存档名称与单局身份").setView(editText).setMessage("存档在同步器未观察期间发生变化时，需要确认是否仍为原来的一局。不能确定时请保留待确认。").setNegativeButton("关闭", (DialogInterface.OnClickListener) null).setNeutralButton("确认单局身份", new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda153
-            @Override // android.content.DialogInterface.OnClickListener
-            public final void onClick(DialogInterface dialogInterface, int i) {
-                MainActivity.this.m40xb1707a89(dialogInterface, i);
+        final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
+        final AndroidSyncFacade.Inspection observed = this.inspection;
+        final String initialName = this.history == null ? "" : this.history.getCurrentName();
+        AndroidHomeDialogComposition.showNaming(this, this.sharedHomeRenderToken, initialName, "", name -> {
+            if (!isCurrentHomeAction(owner)) {
+                this.notice = "存档已变化，请重新命名。";
+                render();
+                return;
             }
-        }).setPositiveButton("保存名称", new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda154
-            @Override // android.content.DialogInterface.OnClickListener
-            public final void onClick(DialogInterface dialogInterface, int i) {
-                MainActivity.this.m43x11deed4c(inspection, editText, dialogInterface, i);
-            }
-        }).show();
-    }
-
-    /* renamed from: lambda$editCurrent$123$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m40xb1707a89(DialogInterface dialogInterface, int i) {
-        chooseRunIdentity();
-    }
-
-    /* renamed from: lambda$editCurrent$124$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ Object m41x26eaa0ca(AndroidSyncFacade.Inspection inspection, EditText editText) throws Exception {
-        sync().renameCurrent(inspection, editText.getText().toString());
-        readComparison();
-        return null;
-    }
-
-    /* renamed from: lambda$editCurrent$125$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m42x9c64c70b(Object obj) throws Exception {
-        this.notice = "名称已保存。";
-    }
-
-    /* renamed from: lambda$editCurrent$126$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m43x11deed4c(final AndroidSyncFacade.Inspection inspection, final EditText editText, DialogInterface dialogInterface, int i) {
-        work(DiagnosticAction.CONFIGURE, "正在保存名称…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda54
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m41x26eaa0ca(inspection, editText);
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda55
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m42x9c64c70b(obj);
-            }
+            work(DiagnosticAction.CONFIGURE, "正在保存名称…", () -> {
+                sync().renameCurrent(observed, name);
+                readComparison();
+                return null;
+            }, result -> this.notice = "名称已保存。");
+        }, () -> {
+            if (isCurrentHomeAction(owner)) chooseRunIdentity();
         });
     }
 

@@ -103,13 +103,17 @@ internal fun SharedConfirmationDialogBody(
         { currentConfirm(it) }, { currentSecondary(it) }, { currentDismiss(it) }) }
     Surface(modifier, color = MaterialTheme.colors.surface, shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, SharedUiColors.line)) {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(state.title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
-            if (state.message.isNotBlank()) Text(state.message, color = SharedUiColors.muted, fontSize = 14.sp, lineHeight = 22.sp)
-            content()
-            if (state.details.isNotBlank()) Text(state.details, color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.sp)
-            if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // A small window or the keyboard may reduce the dialog's height. Keep Cancel/Save/
+            // Overwrite reachable while only the content (including maintenance details) scrolls.
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(state.title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+                if (state.message.isNotBlank()) Text(state.message, color = SharedUiColors.muted, fontSize = 14.sp, lineHeight = 22.sp)
+                content()
+                if (state.details.isNotBlank()) Text(state.details, color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.sp)
+                if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             FlowRow(Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {

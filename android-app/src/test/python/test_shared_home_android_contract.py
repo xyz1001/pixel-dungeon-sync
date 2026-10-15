@@ -135,15 +135,41 @@ class SharedHomeAndroidContract(unittest.TestCase):
                           'getClean()', 'getBaselineCommit()', 'getSummary()', '.historyPresentation('):
             self.assertNotIn(forbidden, evidence)
 
-    def test_native_confirmation_and_real_rename_identity_remain_explicit_boundaries(self):
-        self.assertIn('showConfirmation(', body(MAIN, 'public void requestRestore()'))
-        self.assertIn('navigate(SyncPage.CONFLICT)', body(MAIN, 'public void requestRestore()'))
-        self.assertIn('new AlertDialog.Builder', body(MAIN, 'public void rename(final String str)'))
-        self.assertIn('editCurrent()', body(MAIN, 'public void rename(final String str)'))
-        self.assertIn('确认单局身份', body(MAIN, 'public void editCurrent()'))
-        self.assertIn('chooseRunIdentity()', body(MAIN, 'void m40xb1707a89('))
-        self.assertIn('sync().renameHistory(str, editText.getText().toString())', MAIN)
-        self.assertIn('sync().renameCurrent(inspection, editText.getText().toString())', MAIN)
+    def test_shared_confirmation_and_naming_keep_real_host_action_boundaries(self):
+        restore = body(MAIN, 'public void requestRestore()')
+        self.assertIn('showConfirmation(', restore)
+        self.assertIn('navigate(SyncPage.CONFLICT)', restore)
+        # Protected local bytes still restore directly; UI migration adds no universal prompt.
+        protected = body(restore, 'if (syncHistory != null && syncHistory.getCurrentProtected())')
+        self.assertIn('operation(DiagnosticAction.RESTORE', protected)
+        self.assertIn('return;', protected)
+        self.assertNotIn('showConfirmation(', protected)
+        rename = body(MAIN, 'public void rename(final String snapshotId)')
+        current = body(MAIN, 'public void editCurrent()')
+        for naming in (rename, current):
+            self.assertIn('AndroidHomeDialogComposition.showNaming(', naming)
+            self.assertIn('isCurrentHomeAction(owner)', naming)
+            self.assertNotIn('new AlertDialog.Builder', naming)
+            self.assertNotIn('EditText', naming)
+        self.assertIn('editCurrent()', rename)
+        self.assertIn('chooseRunIdentity()', current)
+        self.assertIn('sync().renameHistory(snapshotId, name)', rename)
+        self.assertIn('sync().renameCurrent(observed, name)', current)
+        self.assertIn('readComparison()', rename)
+        self.assertIn('readComparison()', current)
+        confirmation = body(MAIN, 'private void renderConfirmation()')
+        self.assertIn('SharedConfirmationState(', confirmation)
+        self.assertIn('AndroidHomeDialogComposition.confirmationView(', confirmation)
+        self.assertIn('isCurrentConfirmation(token)', confirmation)
+        self.assertIn('this.confirmedAction == confirm', confirmation)
+        self.assertIn('this.confirmationMerge == merge', confirmation)
+        adapter = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidHomeDialogComposition.kt').read_text()
+        self.assertIn('SharedNamingDialog(SharedNamingState(', adapter)
+        self.assertIn('SharedConfirmationDialog(state,', adapter)
+        self.assertIn('onDismiss = { close() }', adapter)
+        self.assertIn('确认单局身份', adapter)
+        for forbidden in ('sync()', 'restoreSelected(', 'mergeConflict(', 'renameHistory(', 'renameCurrent('):
+            self.assertNotIn(forbidden, adapter)
 
 
 if __name__ == '__main__':
