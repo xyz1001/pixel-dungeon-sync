@@ -18,6 +18,11 @@ sealed interface AppendPushResult {
  data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
  data class Diverged(val conflict: AppendConflict): AppendPushResult
 }
+sealed interface AutomaticPushResult {
+ data class Published(val result: AppendPushResult): AutomaticPushResult
+ /** No upload plan, object, commit or sync baseline was created by this skipped attempt. */
+ data class Skipped(val comparison: OnboardingComparison): AutomaticPushResult
+}
 
 /**
  * Desktop-only v2 facade. ProfileSession supplies filesystem safeguards and the same root OS lock,
@@ -522,7 +527,15 @@ class AppendProfileSession(
   commit
  }
 
- /** Upload is explicit, including a retry of an already frozen operation. Never freeze empty saves. */
+ /** Automatic work must compare complete live history before freezing or retrying any upload.
+  * The same session-bound proof is revalidated by onboardingUpload under the physical-root lock. */
+ fun automaticPush(store: AppendStore, stopped: () -> Boolean): AutomaticPushResult {
+  val comparison = compareOnboarding(store, stopped)
+  if (!AutomaticUploadEligibility.allows(comparison)) return AutomaticPushResult.Skipped(comparison)
+  return AutomaticPushResult.Published(onboardingUpload(comparison, store, stopped))
+ }
+
+ /** Upload follows an explicit choice or the strict automatic gate, including a frozen retry. Never freeze empty saves. */
  fun onboardingUpload(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   revalidateComparison(comparison, store, stopped, allowPending = true)
   val plan = repository.pending() ?: run {

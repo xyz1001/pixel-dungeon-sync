@@ -4,7 +4,8 @@ package pdsync
 object OnboardingGate {
  @JvmStatic fun resumedProgress(progress: OnboardingProgress, trustedTarget: Boolean, hasBaseline: Boolean): OnboardingProgress = when {
   !trustedTarget -> OnboardingProgress.PENDING
-  progress == OnboardingProgress.COMPLETE && !hasBaseline -> OnboardingProgress.PENDING
+  // Explicit setup completion (including BOTH_EMPTY) is not a claim of sync ancestry.
+  // Only legacy settings need a real baseline to infer a returning setup decision.
   progress == OnboardingProgress.LEGACY -> if (hasBaseline) OnboardingProgress.COMPLETE else OnboardingProgress.PENDING
   else -> progress
  }

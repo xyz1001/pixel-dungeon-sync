@@ -33,4 +33,22 @@ class AutomaticUploadTest {
  @Test fun `unchanged persisted baseline does not produce startup duplicate`() {
   val c=AutomaticUpload(); c.establishBaseline(a); c.observe(a,false,true,100); assertFalse(c.ready(999999))
  }
+ @Test fun `skipped comparison does not loop even for a frozen pending upload`() {
+  val c=AutomaticUpload(); c.observe(a,false,true,0); c.started(); c.skipped()
+  c.observe(a,false,true,10000)
+  assertFalse(c.ready(999999,pending=true)); assertTrue(c.needsAttention); assertFalse(c.waitingForRetry)
+  c.retryAllowed(); assertTrue(c.ready(999999,pending=true))
+ }
+ @Test fun `new content or observed game exit can request a fresh comparison after skip`() {
+  val changed=AutomaticUpload(); changed.observe(a,false,true,0); changed.started(); changed.skipped()
+  changed.observe(b,false,true,100); assertFalse(changed.ready(2599)); assertTrue(changed.ready(2600))
+  val exit=AutomaticUpload(); exit.observe(a,false,true,0); exit.started(); exit.skipped()
+  exit.observe(a,true,false,100); exit.observe(a,false,true,200)
+  assertFalse(exit.ready(2699)); assertTrue(exit.ready(2700))
+ }
+ @Test fun `skip never marks unpublished content as the settled baseline`() {
+  val c=AutomaticUpload(); c.establishBaseline(a); c.observe(b,false,true,0); c.started(); c.skipped()
+  c.observe(a,false,true,100)
+  assertFalse(c.ready(999999)); assertFalse(c.needsAttention)
+ }
 }

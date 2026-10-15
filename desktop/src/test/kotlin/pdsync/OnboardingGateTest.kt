@@ -24,9 +24,15 @@ class OnboardingGateTest {
   assertEquals(OnboardingProgress.DEFERRED, OnboardingGate.resumedProgress(OnboardingProgress.DEFERRED, true, true))
   assertEquals(OnboardingProgress.PENDING, OnboardingGate.resumedProgress(OnboardingProgress.PENDING, true, true))
  }
- @Test fun completedEmptyDecisionRechecksAfterRestartUntilRealBaselineExists() {
-  assertEquals(OnboardingProgress.PENDING, OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false))
+ @Test fun completedEmptyDecisionSurvivesRestartWithoutManufacturingSyncAncestry() {
+  assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false))
   assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, true))
+ }
+ @Test fun completedEmptyRestartDoesNotPretendThatExistingFilesChangedFromAnEmptyBaseline() {
+  val scheduler = AutomaticUpload(quietMillis = 2500)
+  assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false))
+  scheduler.observe(mapOf("game1/game.dat" to "unobserved-while-closed"), false, true, 0)
+  assertFalse(scheduler.shouldUpload(100000, true, true, true, false, false, false))
  }
  @Test fun firstSaveImmediatelyAfterEmptyDecisionIsNotMistakenForCleanStartup() {
   val scheduler = AutomaticUpload(quietMillis = 2500)

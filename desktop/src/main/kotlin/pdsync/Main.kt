@@ -31,7 +31,7 @@ private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
 private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
 private enum class SetupAction { UPLOAD, RESTORE, ADOPT, MERGE }
-private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null)
+private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null, val automaticSkipped: Boolean = false)
 private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
@@ -347,7 +347,13 @@ internal fun runSyncApplication(
       }
       val completed = when (action) {
        Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult("本地快照已保存，可随时从历史中恢复。") }
-       Action.PUSH -> pushed(manager.push(store(), stopped))
+       Action.PUSH -> if (!isAutomatic) pushed(manager.push(store(), stopped)) else when (val automaticResult = manager.automaticPush(store(), stopped)) {
+        is AutomaticPushResult.Published -> pushed(automaticResult.result)
+        is AutomaticPushResult.Skipped -> OperationResult(
+         if (automaticResult.comparison.kind in setOf(OnboardingKind.BOTH_EMPTY, OnboardingKind.IDENTICAL)) "本次没有需要自动上传的变化。"
+         else "自动上传已跳过：${automaticResult.comparison.blocker ?: "请检查本机与云端进度后明确选择。"}",
+         automaticSkipped = true)
+       }
        Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。", appliedFiles = it.restored.files) }
        Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。恢复提交已冻结，将自动上传；暂停时可点击上传。", appliedFiles = it.restored.files) }
        Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult("所选云端历史已恢复，原始历史保留。恢复结果待上传。",appliedFiles=it.restored.files)}
@@ -358,7 +364,7 @@ internal fun runSyncApplication(
        Action.MERGE_CURRENT -> pushed(manager.mergeCurrent(store(),stopped)).let {result->if(result.conflict==null)result.copy(appliedFiles=manager.observedFiles()) else result}
        Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
       }
-      trace.outcome(if (completed.conflict != null) DiagnosticResult.CONFLICT else DiagnosticResult.SUCCEEDED)
+      trace.outcome(when { completed.automaticSkipped -> DiagnosticResult.SKIPPED; completed.conflict != null -> DiagnosticResult.CONFLICT; else -> DiagnosticResult.SUCCEEDED })
       trace.record(OperationEvent.WORK_SUCCEEDED)
       completed
      } }
@@ -367,7 +373,9 @@ internal fun runSyncApplication(
      remoteReadAt = 0L
      if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE,Action.MERGE,Action.MERGE_CURRENT)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
-     if (action == Action.PUSH) {
+     if (result.automaticSkipped) {
+      automatic.skipped(); automaticStatus = result.message
+     } else if (action == Action.PUSH) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
       if (baseline != null) automatic.succeeded(baseline) else automatic.failed(now, false)
      } else if (result.appliedFiles != null) automatic.applied(result.appliedFiles, now)
@@ -376,7 +384,7 @@ internal fun runSyncApplication(
       if (files != null) automatic.applied(files, now) else automatic.retryAllowed()
      }
      if (result.conflict != null) automaticStatus = "存在多个存档分支，自动上传已暂停，点击恢复选择。"
-     if (result.conflict != null) navigate(Page.CONFLICT)
+     if (result.conflict != null && !isAutomatic) navigate(Page.CONFLICT)
     } catch (e: CancellationException) {
      terminalFailure = OperationFailure.CANCELED
      if (action == Action.PUSH) automatic.failed(monotonicMillis(), false)

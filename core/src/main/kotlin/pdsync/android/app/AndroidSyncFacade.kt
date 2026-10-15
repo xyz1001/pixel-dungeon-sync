@@ -57,7 +57,7 @@ class AndroidSyncFacade internal constructor(
   val remoteVersions=immutable(remoteVersions)
   /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
   fun diagnosticBlockReason():String? = blockReason?.name
-  val canAutoUpload get()=!needsRestoreRecovery && comparison?.let(::automaticEligible)==true
+  val canAutoUpload get()=!needsRestoreRecovery && comparison?.let(AutomaticUploadEligibility::allows)==true
   val canCompleteWithoutTransfer get()=!needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.BOTH_EMPTY || it.kind==OnboardingKind.IDENTICAL && it.baselineLineage==OnboardingLineage.SAME_TIP }==true
   val canKeepLocalProgress get()=!needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.DIFFERENT && it.baselineLineage==OnboardingLineage.SAME_TIP && it.baselineId!=null && it.observedTips==setOf(it.baselineId) && !it.retryablePending }==true
  }
@@ -129,7 +129,7 @@ class AndroidSyncFacade internal constructor(
     }
    }
    if(comparison.kind in setOf(OnboardingKind.IDENTICAL,OnboardingKind.BOTH_EMPTY)) return@locked AutoUploadResult("UNCHANGED","No changed local snapshot needs uploading.",null,false)
-   if(!automaticEligible(comparison)) {
+   if(!AutomaticUploadEligibility.allows(comparison)) {
     val choice=comparison.observedTips.size>1 || comparison.kind==OnboardingKind.DIFFERENT || comparison.retryablePending
     val reason=comparison.blockReason ?: when {choice->SyncBlockReason.HISTORY_CONFLICT;comparison.kind==OnboardingKind.REMOTE_ONLY->SyncBlockReason.REMOTE_ONLY;comparison.baselineLineage==OnboardingLineage.BLOCKED->SyncBlockReason.BASELINE_UNVERIFIED;else->SyncBlockReason.COMPARISON_FAILED}
     return@locked autoBlocked(if(choice)"SKIPPED_CONFLICT" else "SKIPPED_UNCERTAIN",reason,choice || comparison.kind==OnboardingKind.REMOTE_ONLY)
@@ -145,7 +145,7 @@ class AndroidSyncFacade internal constructor(
    if(e is InterruptedException)Thread.currentThread().interrupt()
    else if(!anyUnresolvedRestore()) {
     val observation=runCatching {session.compareOnboarding(store,mirrorStopped)}.getOrNull()
-    if(observation!=null && !automaticEligible(observation) && (observation.observedTips.size>1 || observation.kind==OnboardingKind.DIFFERENT || observation.retryablePending)) return@locked autoBlocked("SKIPPED_CONFLICT",observation.blockReason ?: SyncBlockReason.HISTORY_CONFLICT,true)
+    if(observation!=null && !AutomaticUploadEligibility.allows(observation) && (observation.observedTips.size>1 || observation.kind==OnboardingKind.DIFFERENT || observation.retryablePending)) return@locked autoBlocked("SKIPPED_CONFLICT",observation.blockReason ?: SyncBlockReason.HISTORY_CONFLICT,true)
    }
    if(reason==SyncBlockReason.COMPARISON_FAILED)reason=SyncBlockReason.UPLOAD_NOT_CONFIRMED
    autoBlocked("RETRY_LATER",reason,false)
@@ -324,12 +324,6 @@ class AndroidSyncFacade internal constructor(
   private val sharedControlledSessions=AndroidControlledSessions()
   @JvmStatic fun cancelControlledSession(root:Path,token:String){sharedControlledSessions.cancel(SafePaths.checked(root),token)}
   @JvmStatic fun hasUnresolvedRestore(root:Path):Boolean {val base=SafePaths.checked(root);if(Files.exists(base.resolve("android-restore.json"),LinkOption.NOFOLLOW_LINKS))return true;val dir=SafePaths.checked(base.resolve("restore-journals"));if(!Files.exists(dir,LinkOption.NOFOLLOW_LINKS))return false;require(Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)){"Restore recovery storage is damaged."};return Files.list(dir).use {it.anyMatch {p->p.fileName.toString().endsWith(".json")}}}
-  private fun automaticEligible(c:OnboardingComparison):Boolean {
-   if(c.observedTips.size>1)return false
-   if(c.retryablePending) {val pending=c.pendingCommit ?: return false;return c.observedTips==pending.parents.toSet() || c.observedTips==setOf(pending.id)}
-   if(c.kind==OnboardingKind.BLOCKED || c.localFiles.isEmpty())return false
-   return c.kind==OnboardingKind.LOCAL_ONLY || c.kind==OnboardingKind.DIFFERENT && c.baselineLineage==OnboardingLineage.SAME_TIP
-  }
   private fun <T> immutable(values:List<T>):List<T> = Collections.unmodifiableList(ArrayList(values))
   private fun <K,V> immutableMap(values:Map<K,V>):Map<K,V> = Collections.unmodifiableMap(LinkedHashMap(values))
   private fun deleteTree(root:Path){if(!Files.exists(root,LinkOption.NOFOLLOW_LINKS))return;Files.walk(root).use {it.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)}}
