@@ -13,12 +13,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
 import java.nio.file.Path
 import pdsync.presentation.HistoryPresentation
+import io.github.xyz1001.pdsync.android.ConnectionEntryModel
+import io.github.xyz1001.pdsync.android.SharedConnectionConfig
+import io.github.xyz1001.pdsync.android.SharedConnectionController
+import io.github.xyz1001.pdsync.android.SharedConnectionHost
+import io.github.xyz1001.pdsync.android.SharedConnectionScreen
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import javax.swing.SwingUtilities
 
 private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
@@ -73,6 +80,7 @@ internal fun runSyncApplication(
   var connectionNotice by remember { mutableStateOf<String?>(null) }
   var page by remember { mutableStateOf(if (config == null) Page.DISCOVERY else Page.HOME) }
   var pageGeneration by remember { mutableStateOf(0L) }
+  var connectionReturnPage by remember { mutableStateOf(Page.HOME) }
   var onboardingActive by remember { mutableStateOf(config == null || config?.onboardingProgress in setOf(OnboardingProgress.PENDING, OnboardingProgress.DEFERRED)) }
   var setupDraft by remember { mutableStateOf(config ?: newConnectionConfig().copy(targetGame = runCatching { setupSelection.load() }.getOrNull().orEmpty())) }
   var discovery by remember { mutableStateOf<InstallationDiscoveryResult?>(null) }
@@ -128,6 +136,9 @@ internal fun runSyncApplication(
   val historyScroll = rememberLazyListState()
 
   fun navigate(next: Page) {
+   if (next == Page.CONNECTION && page != Page.CONNECTION) {
+    connectionReturnPage = if (page == Page.SETTINGS) Page.SETTINGS else if (onboardingActive) Page.PATH else Page.HOME
+   }
    pageGeneration++; page = next; closeBlocked = false
   }
   suspend fun reconnectSaved(saved: AppConfig) {
@@ -1003,9 +1014,10 @@ internal fun runSyncApplication(
        Page.CONNECTION -> key(pageGeneration) {
         val generation = pageGeneration
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
-        ConnectionPage(settingsMode, configFile, if (onboardingActive) setupDraft else config, password, connectionNotice, busy || connectingAtStartup, onboardingActive,
+        DesktopSharedConnectionPage(window, configFile, if (onboardingActive) setupDraft else config, password,
+         if (connectionReturnPage == Page.PATH) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
          onBusy = { if (current()) busy = it },
-         onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(if (onboardingActive) Page.PATH else Page.HOME) },
+         onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(connectionReturnPage) },
          onApplied = { applied, note ->
           if (current()) {
            config = applied.config; setupDraft = applied.config; password = applied.password; connected = true
@@ -1070,106 +1082,46 @@ private fun CompactFeedback(raw: String, fallback: String) {
  if (summary != raw) Details("问题详情", raw) { SelectionContainer { Text(raw, style = MaterialTheme.typography.caption) } }
 }
 
+/** The same controller and composable are used by Android; this host only supplies desktop I/O. */
 @Composable
-private fun ConnectionPage(mode: SettingsMode, configFile: ConfigFile, initial: AppConfig?, currentPassword: String, initialNotice: String?, busy: Boolean, onboarding: Boolean, onBusy: (Boolean) -> Unit, onDismiss: () -> Unit, onApplied: (AppliedConnection, String?) -> Unit) {
- val controller = remember { ConnectionSetup(initial) }
- val lifetime = remember { ConnectionPageLifetime() }
- var draft by remember { mutableStateOf(initial ?: newConnectionConfig()) }
- var secret by remember { mutableStateOf(currentPassword) }
- var message by remember { mutableStateOf(initialNotice) }
- var failed by remember { mutableStateOf(false) }
- var connectionVerified by remember { mutableStateOf(false) }
- // Both the UI state and lifetime reservation change synchronously before recomposition.
- var inFlight by remember { mutableStateOf(false) }
- var closed by remember { mutableStateOf(false) }
- val scope = rememberCoroutineScope()
- val controlsBusy = busy || inFlight
- DisposableEffect(controller, lifetime) {
+private fun DesktopSharedConnectionPage(
+ window: java.awt.Window,
+ configFile: ConfigFile,
+ initial: AppConfig?,
+ currentPassword: String,
+ origin: ConnectionEntryModel.Origin,
+ onBusy: (Boolean) -> Unit,
+ onDismiss: () -> Unit,
+ onApplied: (AppliedConnection, String?) -> Unit
+) {
+ val adapter = remember { DesktopConnectionAdapter(initial, currentPassword, configFile, workspace.resolve(".local/official-account-cache")) }
+ val io = remember { Executors.newSingleThreadExecutor { task -> Thread(task, "pdsync-connection").apply { isDaemon = true } } }
+ val ui = remember { Executor { task -> if (SwingUtilities.isEventDispatchThread()) task.run() else SwingUtilities.invokeLater(task) } }
+ val controller = remember { SharedConnectionController(origin, adapter.initialConnection, adapter.profile, adapter, io, ui) }
+ val latestDismiss by rememberUpdatedState(onDismiss)
+ val latestApplied by rememberUpdatedState(onApplied)
+ val latestBusy by rememberUpdatedState(onBusy)
+ DisposableEffect(controller, window) {
+  controller.attach(object : SharedConnectionHost {
+   override fun onBusyChanged(busy: Boolean) { latestBusy(busy) }
+   override fun onBack(destination: ConnectionEntryModel.Back) { latestBusy(false); latestDismiss() }
+   override fun onCommitted(config: SharedConnectionConfig) {
+    latestBusy(false)
+    adapter.appliedConnection?.let { latestApplied(it, null) }
+   }
+  })
+  val visibility = observeDesktopConnectionWindow(window, controller::foreground)
   onDispose {
-   closed = true
-   lifetime.close { controller.cancel() }
-   secret = ""
+   visibility.close()
+   controller.foreground(false)
+   controller.detach()
+   controller.close()
+   adapter.close()
+   io.shutdownNow()
+   latestBusy(false)
   }
  }
- LaunchedEffect(initialNotice) { if (!inFlight && !failed) message = initialNotice }
- fun edit(value: AppConfig = draft, password: String = secret) {
-  if (busy || inFlight || closed) return
-  val next = ConnectionDraft(draft, password).editingConfig(value)
-  draft = next.config; secret = next.password
-  connectionVerified=false
-  controller.update(draft,secret)
-  // Keep the last failure visible while correcting inputs, until the next explicit attempt.
- }
- fun cancel() {
-  if (busy || inFlight || closed) return
-  closed = true; lifetime.close { controller.cancel() }; secret = ""; onDismiss()
- }
- fun connect(apply: Boolean = false) {
-  if (busy || inFlight || closed) return
-  if(apply && !connectionVerified)return
-  if(!apply)connectionVerified=false
-  val ticket = lifetime.begin() ?: return
-  inFlight = true; onBusy(true); failed = false; message = null
-  val submitted = ConnectionDraft(draft, secret)
-  scope.launch {
-   var applied: AppliedConnection? = null
-   var note: String? = null
-   var verified = false
-   var finished = false
-   try {
-    controller.update(submitted.config, submitted.password)
-    when (val checked = if(apply)ConnectionTestResult.Success(false) else withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONNECT, result = { if (it is ConnectionTestResult.Success) DiagnosticResult.SUCCEEDED else DiagnosticResult.FAILED }) { controller.connect() } }) {
-     is ConnectionTestResult.Failure -> if (lifetime.isCurrent(ticket)) { message = checked.message; failed = true }
-     is ConnectionTestResult.Success -> {
-      verified = true
-      connectionVerified=true;message="连接测试通过。"
-      if(apply)applied = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONFIGURE) {
-       lifetime.persist(ticket) {
-        controller.applyFilePassword(configFile)
-       }
-      } }
-     }
-    }
-   } catch (e: CancellationException) { throw e }
-   catch (e: Exception) {
-    if (lifetime.isCurrent(ticket)) {
-     message = if (verified) "连接已通过，但本机设置未保存：${e.message ?: "请检查配置文件写入权限后重试"}" else "连接未完成，请检查地址、网络与服务状态后重试。"
-     failed = true
-    }
-   } finally {
-    finished = lifetime.finish(ticket)
-    if (finished) { inFlight = false; onBusy(false) }
-   }
-   // There is no suspension between finish and publication. The parent also checks page generation.
-   if (finished && !closed) applied?.let {
-    closed = true
-    onApplied(it, note)
-    secret = ""
-   }
-  }
- }
- GuidedPage(
-  title = if (onboarding) "3 / 4  连接云端" else if (mode == SettingsMode.UNLOCK) "欢迎回来，连接云端" else if (initial == null) "让存档跟着你" else "连接设置",
-  subtitle = "",
-  footer = {
-   // Feedback and the single submit action remain visible independently of form scrolling.
-   message?.let { CompactFeedback(it, "连接未完成，请检查填写内容后重试。") }
-   if (controlsBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-    TextButton(enabled = !controlsBusy, onClick = { cancel() }) { Text("返回") }
-    Spacer(Modifier.weight(1f))
-    Button(enabled = !controlsBusy && connectionVerified, onClick = { connect(true) }) { Text(if(onboarding)"下一步" else "保存") }
-   }
-  }
- ) {
-  Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-   OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("WebDAV 地址") }, placeholder = { Text("https://example.com/dav") }, singleLine = true)
-   OutlinedTextField(draft.username, { edit(draft.copy(username = it)) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("用户名") }, singleLine = true)
-   OutlinedTextField(secret, { edit(password = it) }, Modifier.fillMaxWidth(), enabled = !controlsBusy, label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-   OutlinedButton(enabled=!controlsBusy,onClick={connect()}) { Text(if(inFlight)"正在测试…" else "测试连接") }
-   Text("密码可留空。测试会检查并准备本应用的同步目录。",style=MaterialTheme.typography.caption,color=muted)
-  }
- }
+ SharedConnectionScreen(controller)
 }
 
 @Composable
