@@ -74,6 +74,7 @@ internal fun runSyncApplication(
   val pathAdapter = remember {
    DesktopSavePathAdapter(config?.selectedSaveRoot ?: pathResult.getOrNull()?.toString().orEmpty(), pathResult.getOrNull()?.toString(), location)
   }
+  val pathNavigation = remember { DesktopSavePathNavigation() }
   var password by remember { mutableStateOf("") }
   var connected by remember { mutableStateOf(false) }
   var connectionNotice by remember { mutableStateOf<String?>(null) }
@@ -586,6 +587,7 @@ internal fun runSyncApplication(
     } catch (e: Exception) { discoveryNotice = "尚不能继续：${e.message}" }
     finally { busy = false }
     if (proceed) {
+     pathNavigation.beginSetup()
      navigate(Page.PATH)
     }
    }
@@ -609,7 +611,10 @@ internal fun runSyncApplication(
       inspectSelectedSaveDirectory(root)
       if(config!=null)configFile.save(next)
      }
-     if (current()) { setupDraft=next;if(config!=null)config=next;proceed=true }
+     if (current()) {
+      setupDraft=next;if(config!=null)config=next
+      onboardingActive=true;pathNavigation.beginSetup();proceed=true
+     }
     } catch(e:CancellationException) { throw e }
     catch(e:Exception) { if (current()) pathAdapter.showError(e.message) }
     finally { busy=false }
@@ -991,24 +996,34 @@ internal fun runSyncApplication(
          override fun next() { if (canAct()) continueDiscovery() }
         })
        }
-       Page.PATH -> SharedSavePathScreen(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
+       Page.PATH -> key(pageGeneration) {
+        val generation = pageGeneration
+        fun current() = !appClosed && page == Page.PATH && pageGeneration == generation
+        SharedSavePathScreen(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
         adapter = pathAdapter,
-        canAct = { !busy && !connectingAtStartup && !appClosed && page == Page.PATH },
+        canAct = { !busy && !connectingAtStartup && current() },
         choose = {
          busy = true
          scope.launch {
           pathAdapter.chooseDirectoryUsing(
            choose = { NativeFolderChooser.choose(it) },
-           canPublish = { !appClosed && page == Page.PATH },
+           canPublish = ::current,
            onBusyChanged = { busy = it }
           )
          }
         },
-        goBack = { navigate(Page.DISCOVERY) },
+        goBack = {
+         val previous = pathNavigation.cancel(pathAdapter)
+         if (previous == null) navigate(Page.DISCOVERY) else {
+          setupDraft = previous.setupDraft; onboardingActive = previous.onboardingActive
+          navigate(Page.SETTINGS)
+         }
+        },
         continuePath = { continuePath() }
        ), game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
         SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
        })
+       }
        Page.COMPARISON -> SharedComparisonScreen(comparisonState(), object : SharedComparisonActions {
         override fun back() {
          if (comparisonState().canInteract && comparisonAdapter.dialog == null) {
@@ -1109,7 +1124,9 @@ internal fun runSyncApplication(
           when (action) {
            SharedSettingsKey.GAME -> selectTargetGame()
            SharedSettingsKey.SAVE_PATH -> {
-            onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH)
+            val savedPath = config?.selectedSaveRoot?.takeIf { it.isNotBlank() } ?: pathAdapter.state.path
+            pathNavigation.beginSettings(pathAdapter, savedPath, setupDraft, onboardingActive)
+            setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH)
            }
            SharedSettingsKey.CLOUD_CONNECTION -> openConnection(SettingsMode.FULL)
            SharedSettingsKey.AUTOMATIC_UPLOAD -> setAutomaticPaused(config?.autoUploadPaused != true)
