@@ -20,11 +20,16 @@ final class SyncRuntime {
     private static final String PREFS = "sync-presentation-v2";
     private static volatile SecureConnectionStore.Connection connection;
     private static volatile GamePreparationService.PreparedPair selected;
+    // SharedPreferences may expose new memory values even when its disk commit fails.
+    private static final java.util.Set<String> failedOnboardingWrites = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static RootGameBridge rootBackend;
     private static String rootBackendToken;
 
     SyncRuntime() {
     }
+
+    /** In-memory identity only; never loads credentials or requests game access. */
+    static SecureConnectionStore.Connection currentConnection() { return connection; }
 
     static void setConnection(SecureConnectionStore.Connection connection2) {
         connection = connection2;
@@ -247,20 +252,25 @@ final class SyncRuntime {
     static OnboardingProgress onboardingProgress(Context context, SecureConnectionStore.Connection connection2) {
         if (prefs(context).getBoolean("backendComparisonRequired", false)) return OnboardingProgress.PENDING;
         try {
-            return OnboardingProgress.valueOf(prefs(context).getString("onboarding." + scope(context, connection2), "PENDING"));
+            String key = "onboarding." + scope(context, connection2);
+            if (failedOnboardingWrites.contains(key)) return OnboardingProgress.PENDING;
+            return OnboardingProgress.valueOf(prefs(context).getString(key, "PENDING"));
         } catch (Exception unused) {
             return OnboardingProgress.PENDING;
         }
     }
 
     static void setOnboardingProgress(Context context, SecureConnectionStore.Connection connection2, OnboardingProgress onboardingProgress) {
+        String key = null;
         try {
-            if (prefs(context).edit().putString("onboarding." + scope(context, connection2), onboardingProgress.name())
+            key = "onboarding." + scope(context, connection2);
+            if (!prefs(context).edit().putString(key, onboardingProgress.name())
                     .putBoolean("backendComparisonRequired", false).commit()) {
-            } else {
                 throw new IOException("无法保存配置进度。");
             }
+            failedOnboardingWrites.remove(key);
         } catch (Exception e) {
+            if (key != null) failedOnboardingWrites.add(key);
             throw new IllegalStateException("无法保存配置进度，自动上传仍暂停。", e);
         }
     }

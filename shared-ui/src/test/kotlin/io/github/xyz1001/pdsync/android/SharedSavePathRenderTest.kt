@@ -78,6 +78,9 @@ class SharedSavePathRenderTest {
                 val name = "path-display-only-$width-$editable"
                 render(scene, name)
                 val nodes = semanticsNodes(scene)
+                assertTrue(nodes.any { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == "2 / 3" } == true
+                })
                 val pathNode = nodes.single { node ->
                     node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == path } == true
                 }

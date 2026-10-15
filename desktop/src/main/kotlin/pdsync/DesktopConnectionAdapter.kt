@@ -51,7 +51,8 @@ internal class DesktopConnectionAdapter(
    pending?.cancel()
    pending = null
    verified = null
-   val next = configurationFor(config)
+   // This is still an in-memory draft. Only the explicit completion action persists it.
+   val next = configurationFor(config).copy(onboardingProgress = OnboardingProgress.COMPLETE)
    setupFactory(next).also {
     it.update(next, config.password)
     pending = it
@@ -72,7 +73,7 @@ internal class DesktopConnectionAdapter(
   }
  }
 
- /** Only the shared controller's explicit Next/Save action reaches this local-file write. */
+ /** Only the shared controller's explicit Complete/Save action writes the completed configuration. */
  override fun saveAndActivate(config: SharedConnectionConfig) = synchronized(lock) {
   check(!closed && !running && applied == null && sameConnection(verified, config)) { "请先成功测试当前配置，再保存。" }
   val candidate = checkNotNull(pending) { "请先成功测试当前配置，再保存。" }
@@ -85,7 +86,8 @@ internal class DesktopConnectionAdapter(
  override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) = synchronized(lock) {
   check(!closed && !running && applied == null) { "连接页面已关闭或正在处理，请稍候。" }
   require(config.official && isDesktopOfficialRoot(config.endpoint)) { "内置服务地址无效。" }
-  val candidate = configurationFor(config).validated().copy(saveRoot = "", rememberPassword = false, password = config.password)
+  val candidate = configurationFor(config).validated().copy(saveRoot = "", rememberPassword = false,
+   password = config.password, onboardingProgress = OnboardingProgress.COMPLETE)
   configFile.save(candidate)
   pending?.cancel()
   pending = null

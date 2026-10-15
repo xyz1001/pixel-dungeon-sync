@@ -38,7 +38,7 @@ class MainComparisonContractTest(unittest.TestCase):
         self.assertLess(body.index('"BLOCKED"'), body.index("this.cloudVerified = true"))
 
     def test_render_and_choices_do_not_read_or_write_mirror(self):
-        for name in ("renderSharedComparison", "renderHome", "renderConfirmation", "versionChoice", "cancelConfirmation"):
+        for name in ("renderHome", "renderConfirmation", "cancelConfirmation"):
             body = method(name)
             for operation in ("sync()", ".inspect()", ".historyPresentation(", ".exportTo(", "readComparison()", "replaceMirror("):
                 self.assertNotIn(operation, body, name)
@@ -50,24 +50,8 @@ class MainComparisonContractTest(unittest.TestCase):
         self.assertNotIn(".run()", body)
         self.assertIn("cancelConfirmation();", method("onBackPressed"))
 
-    def test_local_completion_revalidates_before_persisting_complete(self):
-        body = method("completeLocalProgress")
-        self.assertIn("observed.getCanKeepLocalProgress()", body)
-        self.assertIn("owner != this.facade", body)
-        self.assertLess(body.index("owner.completeOnboarding(observed)"), body.index("SyncRuntime.setOnboardingProgress"))
-        self.assertNotIn(".upload(", body)
-        self.assertNotIn(".restore", body)
 
-    def test_empty_completion_uses_core_guard(self):
-        body = method("m29xb53dc5d7")
-        self.assertIn("EmptySetupCompletion.canFinish", body)
-        self.assertLess(body.index(".completeOnboarding(this.inspection)"), body.index("SyncRuntime.setOnboardingProgress"))
 
-    def test_identical_baseline_completion_uses_core_guard(self):
-        body = method("completeReadyComparison")
-        self.assertIn("observed.getCanCompleteWithoutTransfer()", body)
-        self.assertLess(body.index("owner.completeOnboarding(observed)"), body.index("SyncRuntime.setOnboardingProgress"))
-        self.assertNotIn(".upload(", body)
 
     def test_return_and_launch_preserve_existing_monitoring_gates(self):
         self.assertIn("AutoSyncService.knownReturn(this)", method("onResume"))

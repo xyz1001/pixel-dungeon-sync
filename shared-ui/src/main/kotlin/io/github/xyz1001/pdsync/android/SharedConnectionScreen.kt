@@ -65,7 +65,7 @@ private fun SharedConnectionContent(
     val appreciation = state.appreciation.takeUnless { state.appreciationInline }
     SharedAppShell(
         title = if (appreciation != null) state.appreciationLabel else if (setup) "连接云端" else "连接设置",
-        eyebrow = if (setup && appreciation == null) "3 / 4" else null,
+        eyebrow = if (setup && appreciation == null) "3 / 3" else null,
         game = game,
         onboardingStep = if (setup) 3 else null,
         footer = {
@@ -77,7 +77,7 @@ private fun SharedConnectionContent(
             )
             Spacer(Modifier.weight(1f))
             if (appreciation == null && state.mode != ConnectionEntryModel.Mode.CHOICE) {
-                SharedActionButton(if (setup) "下一步" else "保存", controller::continueConnection,
+                SharedActionButton(if (setup) "完成" else "保存", controller::continueConnection,
                     enabled = state.canContinue)
             }
         },

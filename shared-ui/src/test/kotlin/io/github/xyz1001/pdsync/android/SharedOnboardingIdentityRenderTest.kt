@@ -30,10 +30,10 @@ class SharedOnboardingIdentityRenderTest {
 
     @Test fun shellOmitsTheWholeIdentityAfterFirstStep() {
         val game = identity()
-        for (width in listOf(1165, 500, 320)) for (step in 2..4) {
+        for (width in listOf(1165, 500, 320)) for (step in 2..3) {
             fun pixels(selected: SharedGameIdentity?) = render(width, "shell-$step-$width-${selected != null}") {
                 SharedConnectionTheme {
-                    SharedAppShell("Setup", eyebrow = "$step / 4", game = selected, onboardingStep = step) {
+                    SharedAppShell("Setup", eyebrow = "$step / 3", game = selected, onboardingStep = step) {
                         Text("Page content")
                     }
                 }

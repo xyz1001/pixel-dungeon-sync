@@ -31,7 +31,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         for page in ("Home", "Settings", "Discovery", "Conflict", "Confirmation"):
             self.assertIn("render" + page + "()", route)
         self.assertIn("renderSharedSavePath()", route)
-        self.assertIn("renderSharedComparison()", route)
+        self.assertNotIn("renderSharedComparison()", route)
 
     def test_platform_adapter_is_typed_and_keeps_only_application_context(self):
         ports = ADAPTER[ADAPTER.index("internal class AndroidConnectionPorts"):]
@@ -77,7 +77,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
                           "RootSelectionStore", "GamePreparationService", "clearBaseline", "delete", ".restore", ".upload"):
             self.assertNotIn(forbidden, ADAPTER)
         committed = body(MAIN, "private boolean drainSharedCommit()")
-        self.assertIn("refreshComparison(SyncPage.COMPARISON)", committed)
+        self.assertIn("refreshComparison(SyncPage.HOME)", committed)
         for forbidden in ("setNamespace", "setPreparedGame", "setRootGame", "delete", "clearBaseline"):
             self.assertNotIn(forbidden, committed)
 
@@ -181,12 +181,13 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(render.index("this.sharedConnectionSession != visibleSession"),
                         render.index("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())"))
 
-    def test_commit_preserves_runtime_connection_identity_for_history_guards(self):
+    def test_commit_preserves_exact_verified_runtime_identity_for_history_guards(self):
         commit = body(MAIN, "private boolean drainSharedCommit()")
-        self.assertLess(commit.index("this.connection = AndroidConnectionComposition.toStored(config)"),
-                        commit.index("SyncRuntime.setConnection(this.connection)"))
-        self.assertLess(commit.index("SyncRuntime.setConnection(this.connection)"),
-                        commit.index("refreshComparison(SyncPage.COMPARISON)"))
+        self.assertLess(commit.index("owner.completedConnection(config)"), commit.index("this.connection = committed"))
+        self.assertLess(commit.index("if (committed == null)"), commit.index("OnboardingProgress.COMPLETE"))
+        self.assertNotIn("toStored(config)", commit)
+        self.assertLess(commit.index("this.connection = committed"), commit.index("refreshComparison(SyncPage.HOME)"))
+
 
     def test_system_back_dispatches_once_to_existing_navigation_and_shared_controller(self):
         create = body(MAIN, "public void onCreate(")

@@ -6,12 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import pdsync.SaveSummary
-import pdsync.OnboardingKind
 import pdsync.SyncHistory
-import pdsync.android.app.AndroidSyncFacade
 import pdsync.presentation.HistoryPresentation
 
 /** Thin Android host. Path resolution, read/proof checks and operations stay in MainActivity. */
@@ -89,78 +86,6 @@ object AndroidOnboardingComposition {
         activity.setContent {
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 SharedSavePathScreen(state, actions, game)
-            }
-        }
-    }
-
-    /** Map the actual facade observation; presentation counts never prove equality or permission. */
-    @JvmStatic
-    fun showComparison(
-        activity: ComponentActivity,
-        observed: AndroidSyncFacade.Inspection?,
-        history: SyncHistory?,
-        game: SharedGameIdentity?,
-        localDevice: String,
-        cloudVerified: Boolean,
-        restoreSupported: Boolean,
-        configured: Boolean,
-        pageActive: Boolean,
-        busy: Boolean,
-        selectedProgress: SharedProgressChoice?,
-        selectedId: String?,
-        notice: String,
-        details: String,
-        canCopyDiagnostics: Boolean,
-        confirmation: SharedComparisonConfirmation?,
-        feedbackError: Boolean,
-        appreciationSession: AndroidConnectionComposition.Session?,
-        actions: SharedComparisonActions,
-    ) {
-        val kind = observed?.kind?.let { runCatching { OnboardingKind.valueOf(it) }.getOrDefault(OnboardingKind.BLOCKED) }
-        val summary = savePathSummary(history?.summary)
-        val state = SharedComparisonState(
-            kind = kind,
-            cloudVerified = cloudVerified,
-            needsRestoreRecovery = observed?.needsRestoreRecovery == true,
-            retryablePending = observed?.isRetryablePending == true,
-            canCompleteWithoutTransfer = observed?.canCompleteWithoutTransfer == true,
-            canAdoptRemote = observed?.canAdoptRemote == true,
-            canKeepLocalProgress = observed?.canKeepLocalProgress == true,
-            restoreSupported = restoreSupported,
-            pageActive = pageActive,
-            configured = configured,
-            busy = busy,
-            game = game,
-            localLabel = history?.currentName?.takeIf(String::isNotBlank) ?: localDevice,
-            localDetails = summary?.let { (listOf(it.headline) + it.slots).joinToString("\n") }.orEmpty(),
-            localFileCount = observed?.localFileCount,
-            remoteChoices = observed?.remoteVersions.orEmpty().map { remote ->
-                SharedComparisonRemoteChoice(remote.snapshotId, remote.displayName,
-                    listOfNotNull(remote.deviceLabel, HistoryPresentation.time(remote.capturedAt), remote.versionSummary)
-                        .filter(String::isNotBlank).joinToString(" · "))
-            },
-            selectedProgress = selectedProgress,
-            selectedId = selectedId,
-            notice = notice,
-            details = details,
-            canCopyDiagnostics = canCopyDiagnostics,
-            confirmation = confirmation,
-            feedbackError = feedbackError,
-        )
-        activity.setContent {
-            // Register even for custom DAV; a previous, disposed session cannot export a new image.
-            val imageSave = AndroidConnectionComposition.rememberImageSave(appreciationSession)
-            val appreciation: (@Composable () -> Unit)? = appreciationSession?.let { session ->
-                {
-                    SharedInlineAppreciation(session.controller,
-                        onSaveImage = imageSave.onSaveImage,
-                        imageSaveBusy = imageSave.busy,
-                        imageSaveMessage = imageSave.message,
-                    )
-                }
-            }
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedComparisonScreen(state, actions, appreciation = appreciation)
             }
         }
     }

@@ -112,7 +112,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
                           'readComparison()', 'freshExport(', 'replaceMirror(', '.historyPresentation(', '.exportTo('):
             self.assertNotIn(forbidden, home)
         self.assertIn('sync().upload(inspection)', body(MAIN, 'AndroidSyncFacade.OperationResult m146lambda$upload$71$'))
-        self.assertIn('requireOfficialSyncAccess(account)', body(MAIN, 'String snapshotId, boolean replace, ComparisonProofState.Ticket proof)'))
+        self.assertIn('requireOfficialSyncAccess(account)', body(MAIN, 'private AndroidSyncFacade.OperationResult restoreForCurrentAccount('))
         self.assertIn('requestRootAuthorization()', MAIN)
         self.assertIn('refreshComparison(SyncPage.HOME)', body(MAIN, 'void m130x445a4530()'))
         self.assertIn('检查未完成恢复', body(MAIN, 'private void showSettingsMaintenance('))

@@ -34,21 +34,16 @@ import pdsync.DiagnosticStage
 
 /** Android owns platform services only. The same screen and controller compile on desktop. */
 object AndroidConnectionComposition {
-    /** No navigation, account activation, or comparison-busy callback leaves the inline panel. */
-    private object ReadOnlyHost : SharedConnectionHost {
-        override fun onBack(destination: ConnectionEntryModel.Back) = Unit
-        override fun onCommitted(config: SharedConnectionConfig) = Unit
-        override fun onBusyChanged(busy: Boolean) = Unit
-    }
-
     /** No Activity is retained here. Only the controller's detachable host points at the current UI. */
     class Session internal constructor(
         val controller: SharedConnectionController,
         val imageExport: AppreciationImageExport,
         private val app: Context,
         private val io: ExecutorService,
+        private val ports: AndroidConnectionPorts,
     ) : AutoCloseable {
-        fun attachReadOnlyHost() = controller.attach(ReadOnlyHost)
+        fun completedConnection(config: SharedConnectionConfig): SecureConnectionStore.Connection? =
+            ports.completedConnection(config)
 
         fun requestImageSave(): Boolean = imageExport.request(
             controller.currentAppreciationPng(), controller.currentAppreciationScope())
@@ -71,21 +66,9 @@ object AndroidConnectionComposition {
         val io = Executors.newSingleThreadExecutor()
         val handler = Handler(Looper.getMainLooper())
         val ui = Executor { task -> handler.post(task) }
-        return Session(SharedConnectionController(origin, fromStored(existing), profile,
-            AndroidConnectionPorts(context.applicationContext), io, ui),
-            AppreciationImageExport(io, ui), context.applicationContext, io)
-    }
-
-    /** Read-only Step 4 session: even an accidental controller action cannot activate an account. */
-    @JvmStatic
-    fun createReadOnlyAppreciation(context: Context, existing: SecureConnectionStore.Connection): Session {
-        val io = Executors.newSingleThreadExecutor()
-        val handler = Handler(Looper.getMainLooper())
-        val ui = Executor { task -> handler.post(task) }
-        return Session(SharedConnectionController(ConnectionEntryModel.Origin.SETTINGS,
-            fromStored(existing), existing.profile,
-            AndroidConnectionPorts(context.applicationContext, readOnly = true), io, ui),
-            AppreciationImageExport(io, ui), context.applicationContext, io)
+        val ports = AndroidConnectionPorts(context.applicationContext)
+        return Session(SharedConnectionController(origin, fromStored(existing), profile, ports, io, ui),
+            AppreciationImageExport(io, ui), context.applicationContext, io, ports)
     }
 
     internal data class ImageSaveUi(
@@ -94,7 +77,7 @@ object AndroidConnectionComposition {
         val message: String,
     )
 
-    /** Both hosts keep this launcher at a stable, unconditional composition position. */
+    /** Setup and settings keep this launcher at a stable, unconditional composition position. */
     @Composable
     internal fun rememberImageSave(session: Session?): ImageSaveUi {
         // A retained session owns the exact requested PNG through the picker and rotation.
@@ -149,8 +132,33 @@ object AndroidConnectionComposition {
 }
 
 /** Application-context-only, typed adapter. It never chooses a game, source, namespace, or baseline. */
-internal class AndroidConnectionPorts(context: Context, private val readOnly: Boolean = false) : SharedConnectionPorts {
+internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts {
     private val app = context.applicationContext
+    // Captured metadata only. It never opens Root or reads save files.
+    private val entrySelection = runCatching { SyncRuntime.currentSelectionToken(app) }.getOrNull()
+    private val entryNamespace = runCatching { SyncRuntime.currentNamespace(app) }.getOrNull()
+    private val entryConnection = SyncRuntime.currentConnection()
+    @Volatile private var completed: SecureConnectionStore.Connection? = null
+
+    private fun currentSelection(): Boolean = runCatching {
+        entrySelection != null && entryNamespace != null &&
+            entrySelection == SyncRuntime.currentSelectionToken(app) &&
+            entryNamespace == SyncRuntime.currentNamespace(app)
+    }.getOrDefault(false)
+
+    private fun requireEntryContext() {
+        check(currentSelection() && SyncRuntime.currentConnection() === entryConnection) { "设置已变化，请重试。" }
+    }
+
+    /** A delayed callback cannot activate a different game's or account's completion. */
+    fun completedConnection(config: SharedConnectionConfig): SecureConnectionStore.Connection? = runCatching {
+        val candidate = completed ?: return@runCatching null
+        candidate.takeIf {
+            currentSelection() && SyncRuntime.currentConnection() === candidate &&
+                AndroidConnectionComposition.fromStored(candidate) == config &&
+                SyncRuntime.onboardingProgress(app, candidate) == OnboardingProgress.COMPLETE
+        }
+    }.getOrNull()
 
     /** Durable credential equality is only permission to start fresh verification on Next. */
     override fun isSavedConnection(config: SharedConnectionConfig): Boolean = runCatching {
@@ -165,11 +173,12 @@ internal class AndroidConnectionPorts(context: Context, private val readOnly: Bo
     }.getOrDefault(false)
 
     override fun testConnection(config: SharedConnectionConfig): Boolean = diagnostic(DiagnosticStage.CONNECTION) {
-        check(!readOnly) { "Read-only appreciation cannot probe a connection" }
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()
+            requireEntryContext()
             val success = SyncRuntime.facade(app, candidate).connect().isSuccess
+            requireEntryContext()
             if (!success) throw IOException("Connection probe failed")
             success
         }
@@ -185,15 +194,19 @@ internal class AndroidConnectionPorts(context: Context, private val readOnly: Bo
     }
 
     private fun persistAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
-        check(!readOnly) { "Read-only appreciation cannot activate a connection" }
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()
-            // Failed authentication, Back, cancellation and test-only paths never reach persistence.
+            requireEntryContext()
+            // Fail closed if saving credentials or the final completion marker fails.
+            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.PENDING)
             if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)
+            requireEntryContext()
+            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.COMPLETE)
+            requireEntryContext()
             AutoSyncService.cancelForConnectionChange(app)
             SyncRuntime.setConnection(candidate)
-            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.PENDING)
+            completed = candidate
         }
     }
 

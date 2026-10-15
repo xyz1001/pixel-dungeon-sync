@@ -46,7 +46,7 @@ class DesktopSharedConnectionFlowTest {
   username = "alice", password = "fixture-secret", targetGame = "/fixture/game.jar", selectedSaveRoot = "/fixture/saves",
   autoUploadPaused = true, onboardingProgress = OnboardingProgress.COMPLETE)
 
- @Test fun setupChoiceTestsBeforeExplicitNextAndDuplicateClicksOnlyCommitOnce() {
+ @Test fun setupChoiceTestsBeforeExplicitCompleteAndDuplicateClicksOnlyCommitOnce() {
   val path = temp.resolve("new.json"); val file = ConfigFile(path)
   var probes = 0
   val fresh = newConnectionConfig().copy(targetGame = "/fixture/game.jar", selectedSaveRoot = "/fixture/saves")
@@ -72,6 +72,8 @@ class DesktopSharedConnectionFlowTest {
   assertEquals(1, page.host.committed.size)
   assertEquals("", assertNotNull(file.load()).password)
   assertEquals(fresh.profile, file.load()!!.profile)
+  assertEquals(OnboardingProgress.COMPLETE, file.load()!!.onboardingProgress)
+  assertFalse(temp.resolve("manager").exists(), "Completing connection must not create sync state")
   assertEquals(listOf(false, true, false, true, false), page.host.busy)
   page.close()
  }

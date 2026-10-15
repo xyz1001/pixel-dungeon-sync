@@ -21,14 +21,10 @@ class SyncInspectionDiagnosticsContract(unittest.TestCase):
         self.assertLess(catch.index("throw error;"), catch.index("throw SyncInspectionDiagnostics.at(stage, error);"))
         for changed in ("this.", "setOnboardingProgress", ".upload(", ".restore(", "readComparison()", "return;"):
             self.assertNotIn(changed, catch)
-        # The finally block transfers failure ownership only; it must not replace diagnostic flow.
-        finalizer = block(body, "finally")
-        self.assertIn("finishReinspection(reinspectionOwner,", finalizer)
-        for mutation in ("setOnboardingProgress", ".upload(", ".restore(", "return;"):
-            self.assertNotIn(mutation, finalizer)
+        self.assertNotIn("finishReinspection", body)
 
-    def test_onboarding_next_reaches_the_wrapped_read_only_comparison(self):
-        self.assertIn("refreshComparison(SyncPage.COMPARISON)", method("drainSharedCommit"))
+    def test_onboarding_next_reaches_home_before_wrapped_history_inspection(self):
+        self.assertIn("refreshComparison(SyncPage.HOME)", method("drainSharedCommit"))
         next_step = method("m66x99ceaa21")
         self.assertLess(next_step.index("readInstallationReadiness()"), next_step.index("readComparison()"))
         self.assertLess(next_step.index("if (!readyForSaves())"), next_step.index("readComparison()"))

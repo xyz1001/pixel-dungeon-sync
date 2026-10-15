@@ -19,7 +19,7 @@ class ManualPaymentUiContract(unittest.TestCase):
         for forbidden in ("sandboxPaymentSession", "showSandboxPaymentPreview", "ManualPaymentPanel",
                           "new ManualPaymentSession(", "ManualPaymentSession.AuthenticatedIdentity"):
             self.assertNotIn(forbidden, MAIN)
-        for page in ("renderDiscovery", "renderSharedSavePath", "renderSharedComparison", "renderHome"):
+        for page in ("renderDiscovery", "renderSharedSavePath", "renderHome"):
             self.assertNotIn("ManualPayment", body(MAIN, "private void " + page + "()"))
         self.assertIn("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())", MAIN)
 

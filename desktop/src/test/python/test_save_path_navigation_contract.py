@@ -40,7 +40,7 @@ class SavePathNavigationContract(unittest.TestCase):
         self.assertNotIn("configFile.save", back)
         self.assertNotIn("config =", back)
 
-    def test_successful_commit_still_requires_connection_and_comparison(self):
+    def test_successful_path_commit_still_requires_connection_completion(self):
         commit = body(MAIN, "fun continuePath()")
         self.assertIn("onboardingProgress=OnboardingProgress.PENDING", commit)
         self.assertLess(commit.index("inspectSelectedSaveDirectory(root)"), commit.index("configFile.save(next)"))

@@ -126,13 +126,13 @@ public final class AndroidUiFlowChecks {
                 "Similar labels, timestamps or counts never suppress genuinely different bytes");
     }
 
-    private static void startupUsesExistingBaselinePolicy() {
+    private static void startupKeepsConfigurationSeparateFromBaseline() {
         check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, true) == OnboardingProgress.COMPLETE,
                 "Configured trusted target with baseline resumes completed/Home");
         check(OnboardingGate.resumedProgress(OnboardingProgress.LEGACY, true, true) == OnboardingProgress.COMPLETE,
                 "Existing verified legacy configuration resumes Home");
-        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.PENDING,
-                "Completed BOTH_EMPTY without a real baseline must compare again after restart");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.COMPLETE,
+                "Completed configuration resumes Home without manufacturing a sync baseline");
         for (OnboardingProgress progress : OnboardingProgress.values()) {
             check(OnboardingGate.resumedProgress(progress, false, true) == OnboardingProgress.PENDING,
                     "Untrusted target cannot resume Home: " + progress);
@@ -143,12 +143,19 @@ public final class AndroidUiFlowChecks {
         check(OnboardingGate.allowsAutomatic(OnboardingProgress.COMPLETE, false, true), "Verified completed Home keeps existing automatic gate");
     }
 
-    private static void fourStepPresentationMatchesPc() {
-        check("1 / 4  选择游戏".equals(AppPresentation.DISCOVERY_TITLE), "Step one is game selection");
-        check("2 / 4  设置存档路径".equals(AppPresentation.PATH_TITLE), "Step two is save path preview");
-        check("3 / 4  连接云端".equals(AppPresentation.CONNECTION_TITLE), "Step three is DAV connection");
-        check("4 / 4  选择存档".equals(AppPresentation.COMPARISON_TITLE), "Step four is save comparison");
-        check("4 / 4  配置完成".equals(AppPresentation.COMPLETE_TITLE), "Verified empty comparison is completed setup");
+    private static void pendingConfigurationCannotSkipConnection() {
+        check(OnboardingGate.resumedProgress(OnboardingProgress.PENDING, true, false) == OnboardingProgress.PENDING,
+                "New setup remains pending until Step 3 completes");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.PENDING, true, true) == OnboardingProgress.PENDING,
+                "An old save baseline cannot complete the connection step");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.COMPLETE,
+                "Three-step completion is independent of save ancestry");
+    }
+
+    private static void threeStepPresentationMatchesPc() {
+        check("1 / 3  选择游戏".equals(AppPresentation.DISCOVERY_TITLE), "Step one is game selection");
+        check("2 / 3  设置存档路径".equals(AppPresentation.PATH_TITLE), "Step two is save path preview");
+        check("3 / 3  连接云端".equals(AppPresentation.CONNECTION_TITLE), "Step three completes configuration");
     }
 
     public static void main(String[] args) throws Exception {
@@ -156,8 +163,9 @@ public final class AndroidUiFlowChecks {
         passwordMayBeEmptyAndFailedDavDoesNotSave();
         onlyVerifiedEmptyComparisonOffersFinish();
         identicalCompletionUsesExactCoreProofAndOneAction();
-        startupUsesExistingBaselinePolicy();
-        fourStepPresentationMatchesPc();
+        startupKeepsConfigurationSeparateFromBaseline();
+        pendingConfigurationCannotSkipConnection();
+        threeStepPresentationMatchesPc();
         System.out.println("Android UI flow: " + checks + " checks passed");
     }
 }

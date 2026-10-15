@@ -20,7 +20,7 @@ class SharedGameSelectionAndroidContract(unittest.TestCase):
         self.assertLess(route.index(game), route.index('ScrollView scrollView'))
         self.assertIn('SharedGameSelectionScreen(state, actions)', BRIDGE)
         self.assertIn('SharedGameSelectionScreen(discoveryState, object : SharedGameSelectionActions', DESKTOP)
-        self.assertIn('SharedAppShell(title = "选择游戏", eyebrow = "1 / 4"', SCREEN)
+        self.assertIn('SharedAppShell(title = "选择游戏", eyebrow = "1 / 3"', SCREEN)
         self.assertEqual(1, SCREEN.count('SharedActionButton("下一步"'))
         self.assertNotIn('private void renderRootDiscovery()', MAIN)
 

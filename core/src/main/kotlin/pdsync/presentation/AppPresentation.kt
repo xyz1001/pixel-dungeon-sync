@@ -1,14 +1,14 @@
 package pdsync.presentation
 
-/** Shared screen identities and copy recovered from the versionCode 13 Android APK. */
+/** Shared screen identities. COMPARISON remains readable for legacy saved navigation only. */
 enum class SyncPage { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
 
 object AppPresentation {
- const val DISCOVERY_TITLE = "1 / 4  选择游戏"
- const val PATH_TITLE = "2 / 4  设置存档路径"
- const val CONNECTION_TITLE = "3 / 4  连接云端"
- const val COMPARISON_TITLE = "4 / 4  选择存档"
- const val COMPLETE_TITLE = "4 / 4  配置完成"
+ const val DISCOVERY_TITLE = "1 / 3  选择游戏"
+ const val PATH_TITLE = "2 / 3  设置存档路径"
+ const val CONNECTION_TITLE = "3 / 3  连接云端"
+ const val COMPARISON_TITLE = "选择存档"
+ const val COMPLETE_TITLE = "配置完成"
  const val HISTORY_TITLE = "完整档案历史"
  const val AUTOMATIC_PAUSED = "自动上传暂停，请先选择上传或恢复。"
  const val CONFLICT_TITLE = "存档发生冲突"

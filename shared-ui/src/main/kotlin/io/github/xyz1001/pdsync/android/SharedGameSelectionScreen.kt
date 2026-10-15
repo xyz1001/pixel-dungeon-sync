@@ -52,7 +52,7 @@ fun SharedGameSelectionScreen(state: SharedGameSelectionState, actions: SharedGa
         DisposableEffect(interactions) { onDispose { interactions.dispose() } }
         val observer = LocalSharedGameSelectionLayoutObserver.current
         fun measured(name: String) = Modifier.onGloballyPositioned { observer?.element(name, it.boundsInRoot()) }
-        SharedAppShell(title = "选择游戏", eyebrow = "1 / 4", footer = {
+        SharedAppShell(title = "选择游戏", eyebrow = "1 / 3", footer = {
             Spacer(Modifier.weight(1f))
             SharedActionButton("下一步", interactions::next, measured("next"), enabled = state.nextEnabled)
         }) {

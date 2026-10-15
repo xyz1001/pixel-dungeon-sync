@@ -23,6 +23,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SharedGameSelectionRenderTest {
+    @Test fun selectionStartsAThreeStepWizard() {
+        val source = Files.readString(Path.of("../shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedGameSelectionScreen.kt"))
+        assertTrue(source.contains("eyebrow = \"1 / 3\""))
+        assertFalse(source.contains("1 / 4"))
+    }
     private class Observation : SharedGameSelectionLayoutObserver {
         val bounds = mutableMapOf<String, Rect>()
         val lines = mutableMapOf<String, Int>()

@@ -19,7 +19,8 @@ class RootUiContract(unittest.TestCase):
         for operation in ('inspectReady(', 'observeLifecycle(', 'exportTo(', 'probeRootAuthorization('):
             self.assertNotIn(operation, root)
         initial = body(MAIN, 'Object m68x764cc8a4(')
-        self.assertIn('z && this.rootGame == null && readyForSaves()', initial)
+        self.assertNotIn('readComparison()', initial)
+        self.assertNotIn('checkRootAccess()', initial)
         resumed = body(MAIN, 'void m69xebc6eee5(')
         self.assertIn('this.rootGame == null && this.page == SyncPage.HOME', resumed)
 

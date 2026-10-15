@@ -92,6 +92,30 @@ class AutomaticPushSafetyTest {
   }
  }
 
+ @Test fun threeStepConfigurationCompletionCannotInventAncestryOrPublishOverExistingRemote() {
+  val store = Memory(); val remote = publish(session("remote progress"), store)
+  for (content in listOf<String?>(null, "independent local progress", "remote progress")) {
+   val local = session(content)
+   val before = content?.let { local.root.resolve("game1/game.dat").readBytes() }
+   val writes = store.writes
+   val file = ConfigFile(temp.resolve("completed-${sequence++}.json"))
+   // The third step saves only configuration. It has made no comparison or progress choice.
+   file.save(local.config.copy(selectedSaveRoot = local.root.toString(), onboardingProgress = OnboardingProgress.COMPLETE))
+   val saved = assertNotNull(file.load())
+   val restarted = AppendProfileSession(saved.copy(saveRoot = saved.selectedSaveRoot!!),
+    local.directory.parent.parent, versions = versions, captureQuietMillis = 0)
+   assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(saved.onboardingProgress, true, false))
+   assertNull(restarted.baseline()); assertFalse(restarted.hasPending()); assertEquals(writes, store.writes)
+   // A later genuine exit event still runs the unchanged conservative automatic gate.
+   val comparison = skippedWithoutWrites(restarted, store)
+   assertEquals(OnboardingLineage.NONE, comparison.baselineLineage)
+   assertEquals(setOf(remote.id), comparison.observedTips)
+   assertNull(restarted.baseline()); assertFalse(restarted.hasPending())
+   if (before == null) assertFalse(local.root.resolve("game1/game.dat").exists())
+   else assertContentEquals(before, local.root.resolve("game1/game.dat").readBytes())
+  }
+ }
+
  @Test fun verifiedLocalOnlyEventCanCreateTheFirstRealCommit() {
   val local = session(); val store = Memory()
   val result = assertIs<AutomaticPushResult.Published>(local.automaticPush(store) { true })

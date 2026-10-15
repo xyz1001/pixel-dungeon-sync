@@ -1,4 +1,4 @@
-"""The optional Step 4 account panel is read-only and page scoped on desktop."""
+"""The retired Step 4 account panel is unreachable from desktop navigation."""
 from pathlib import Path
 import unittest
 
@@ -7,11 +7,11 @@ MAIN = (ROOT / 'desktop/src/main/kotlin/pdsync/Main.kt').read_text()
 PANEL = (ROOT / 'desktop/src/main/kotlin/pdsync/DesktopComparisonAppreciation.kt').read_text()
 
 class InlineAppreciationContract(unittest.TestCase):
-    def test_comparison_gates_panel_to_builtin_connection(self):
-        comparison = MAIN.split('Page.COMPARISON -> SharedComparisonScreen(', 1)[1].split('Page.HOME ->', 1)[0]
-        self.assertIn('it.connectionProvider == "official" && isDesktopOfficialRoot(it.endpoint)', comparison)
-        self.assertIn('DesktopComparisonAppreciation(account, password, configFile,', comparison)
-        self.assertNotIn('openAppreciation', comparison)
+    def test_removed_fourth_step_never_renders_its_old_panel(self):
+        self.assertNotIn('Page.COMPARISON', MAIN)
+        self.assertNotIn('SharedComparisonScreen(', MAIN)
+        self.assertNotIn('DesktopComparisonAppreciation(', MAIN)
+        self.assertIn('SharedConnectionScreen(controller, game)', MAIN)
 
     def test_controller_identity_is_connection_not_comparison_or_window(self):
         self.assertIn('key(config.endpoint, config.username, password, config.profile, config.connectionProvider)', PANEL)
