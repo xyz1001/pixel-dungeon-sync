@@ -65,7 +65,8 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("SyncRuntime.facade(app, candidate).connect().isSuccess", probe)
         for mutation in (".save(", "setConnection(", "setOnboardingProgress(", "forget("):
             self.assertNotIn(mutation, probe)
-        save = body(ADAPTER, "override fun saveAndActivate(")
+        self.assertIn("override fun saveAndActivate(config: SharedConnectionConfig) = persistAndActivate(config)", ADAPTER)
+        save = body(ADAPTER, "private fun persistAndActivate(")
         self.assertIn("if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)", save)
         self.assertLess(save.index(".save(candidate)"), save.index("SyncRuntime.setConnection(candidate)"))
         self.assertIn("AutoSyncService.cancelForConnectionChange(app)", save)
@@ -209,7 +210,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
             self.assertNotIn(action, saved)
         self.assertIn(".getOrDefault(false)", ADAPTER)
 
-    def test_fresh_verification_remains_mandatory_before_android_persistence(self):
+    def test_custom_dav_proof_and_fresh_builtin_account_access_remain_distinct_before_persistence(self):
         commit = body(COMMON, "fun continueConnection()")
         self.assertIn("if (hasProof()) proof!!.config else savedDraftForRevalidation()", commit)
         self.assertLess(commit.index("if (candidate == null)"), commit.index("ports.saveAndActivate(candidate)"))
@@ -217,8 +218,15 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(commit.index("verify(candidate, pending)"), commit.index("ports.saveAndActivate(candidate)"))
         self.assertLess(commit.index("checkWork(pending)"), commit.index("ports.saveAndActivate(candidate)"))
         verify = body(COMMON, "private fun verify(")
-        self.assertLess(verify.index("entitlement.requireSyncAccess()"), verify.index("ports.testConnection(candidate)"))
         self.assertIn("if (!ports.testConnection(candidate)) throw ProbeRejected()", verify)
+        self.assertIn("!candidate.official", verify)
+        self.assertIn("officialSession?.takeIf { hasOfficialAccess(it) }?.config", commit)
+        self.assertIn("ports.saveAuthenticatedOfficial(candidate)", commit)
+        self.assertIn("else verify(candidate, pending)", commit)
+        builtin = body(ADAPTER, "override fun saveAuthenticatedOfficial(")
+        self.assertIn("config.official && config.endpoint == TrustedEntitlementCache.OFFICIAL_ENDPOINT", builtin)
+        self.assertIn("persistAndActivate(config)", builtin)
+        self.assertNotIn(".connect()", builtin)
 
 
 if __name__ == "__main__":
