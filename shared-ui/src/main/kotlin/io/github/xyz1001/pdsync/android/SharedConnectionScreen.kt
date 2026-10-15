@@ -27,6 +27,13 @@ import androidx.compose.ui.unit.dp
 /** One physical UI source, compiled by both desktop JVM and Android. */
 @Composable
 fun SharedConnectionScreen(controller: SharedConnectionController) {
+    SharedConnectionTheme {
+        SharedConnectionContent(controller)
+    }
+}
+
+@Composable
+private fun SharedConnectionContent(controller: SharedConnectionController) {
     val state = controller.state
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
