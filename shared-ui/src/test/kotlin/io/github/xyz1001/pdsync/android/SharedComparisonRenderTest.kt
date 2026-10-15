@@ -83,7 +83,7 @@ class SharedComparisonRenderTest {
             }
             val expected = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
                 SharedConnectionTheme {
-                    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", game = current.game,
+                    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", onboardingStep = 4,
                         footer = {
                             SharedActionButton("上一步", {}, style = SharedButtonStyle.TEXT)
                             Spacer(Modifier.weight(1f))
@@ -105,7 +105,7 @@ class SharedComparisonRenderTest {
                 val expectedImage = render(expected, "$name-expected")
                 assertTrue(actualImage.getRGB(0, 0, width, 757, null, 0, width).contentEquals(
                     expectedImage.getRGB(0, 0, width, 757, null, 0, width)),
-                    "choice cards retain identity and navigation without extra status copy: $name")
+                    "choice cards retain navigation without game identity or extra status copy: $name")
             } finally { actual.close(); expected.close() }
         }
     }

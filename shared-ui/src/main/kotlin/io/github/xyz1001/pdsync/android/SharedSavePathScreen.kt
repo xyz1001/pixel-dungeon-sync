@@ -45,7 +45,7 @@ private fun SharedSavePathContent(
     val notice = NoviceCopy.feedback(state.notice, "无法读取存档，请重试。")
     val details = state.details.ifBlank { state.notice.takeIf { it != notice }.orEmpty() }
     SharedAppShell(
-        title = "设置存档路径", eyebrow = "2 / 4", game = game,
+        title = "设置存档路径", eyebrow = "2 / 4", game = game, onboardingStep = 2,
         footer = {
             SharedActionButton("上一步", { interactions.perform(SharedSavePathControl.BACK) },
                 enabled = state.enables(SharedSavePathControl.BACK), style = SharedButtonStyle.TEXT)

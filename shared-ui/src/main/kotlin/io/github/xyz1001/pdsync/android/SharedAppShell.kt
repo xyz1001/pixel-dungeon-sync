@@ -84,6 +84,7 @@ fun SharedAppShell(
     modifier: Modifier = Modifier,
     eyebrow: String? = null,
     game: SharedGameIdentity? = null,
+    onboardingStep: Int? = null,
     headerActions: @Composable RowScope.() -> Unit = {},
     footer: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
@@ -101,7 +102,11 @@ fun SharedAppShell(
             ) {
                 SharedShellLayout(
                     minimumHeight = 568.dp,
-                    header = { SharedPageHeader(title, eyebrow, game, metrics, headerActions) },
+                    header = {
+                        // Later setup pages focus on their task; the selected identity remains on home.
+                        val headerGame = game.takeIf { onboardingStep == null || onboardingStep <= 1 }
+                        SharedPageHeader(title, eyebrow, headerGame, metrics, headerActions)
+                    },
                     body = {
                         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                             .padding(start = metrics.horizontal, end = metrics.horizontal,

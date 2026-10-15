@@ -42,7 +42,7 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
     val currentState by rememberUpdatedState(state)
     val currentActions by rememberUpdatedState(actions)
     val interactions = remember { SharedComparisonInteractions({ currentState }, { currentActions }) }
-    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", game = state.game,
+    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", game = state.game, onboardingStep = 4,
         footer = {
             if (state.showsBack) SharedActionButton("上一步", interactions::back,
                 enabled = state.canInteract && state.activeConfirmation == null, style = SharedButtonStyle.TEXT)

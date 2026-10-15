@@ -63,6 +63,7 @@ private fun SharedConnectionContent(
         title = if (appreciation != null) state.appreciationLabel else if (setup) "连接云端" else "连接设置",
         eyebrow = if (setup && appreciation == null) "3 / 4" else null,
         game = game,
+        onboardingStep = if (setup) 3 else null,
         footer = {
             SharedActionButton(
                 label = if (setup && appreciation == null) "上一步" else "返回",
