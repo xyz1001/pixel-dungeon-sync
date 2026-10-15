@@ -106,6 +106,10 @@ technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
 
 ## Later requirements that override mock content
 
+- Step 1 uses the selected game's real icon when available. The shared page has no
+  details toggle; Desktop keeps the initial automatic scan, omits manual rescan,
+  and labels the selected-game file chooser `重新选择` (2026-10-15 clarification).
+
 - Official account login/registration, 72-hour trial, expiry and appreciation are
   real later features absent from the prototype. Do not revert to custom-only.
 - Count wording is `已进行x场游戏`; missing count displays zero without writing a

@@ -970,8 +970,7 @@ internal fun runSyncApplication(
          selectionStatus = if (selectedGame != null) "已找到" else "",
          location = selectedGame?.path.orEmpty(),
          rows = listOf(
-          SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) "选择游戏 JAR…" else "更换游戏 JAR…"),
-          SharedGameSelectionRow(SharedGameSelectionControl.RESCAN, "重新扫描"),
+          SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) "选择游戏 JAR…" else "重新选择"),
          ),
          candidates = discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true }.orEmpty().map {
           SharedGameCandidate(it.path, gameIdentity(it), it.path)

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.LinearProgressIndicator
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.RadioButton
@@ -23,10 +22,8 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +50,6 @@ fun SharedGameSelectionScreen(state: SharedGameSelectionState, actions: SharedGa
         val currentActions by rememberUpdatedState(actions)
         val interactions = remember { SharedGameSelectionInteractions({ currentState }, { currentActions }) }
         DisposableEffect(interactions) { onDispose { interactions.dispose() } }
-        var detailsExpanded by remember(state.selectionId) { mutableStateOf(false) }
         val observer = LocalSharedGameSelectionLayoutObserver.current
         fun measured(name: String) = Modifier.onGloballyPositioned { observer?.element(name, it.boundsInRoot()) }
         SharedAppShell(title = "选择游戏", eyebrow = "1 / 4", footer = {
@@ -120,25 +116,6 @@ fun SharedGameSelectionScreen(state: SharedGameSelectionState, actions: SharedGa
                     Text(state.notice, color = if (state.noticeError) MaterialTheme.colors.error else SharedUiColors.muted,
                         modifier = measured("notice"))
                     Spacer(Modifier.height(8.dp))
-                }
-                if (state.location.isNotBlank() || state.details.isNotBlank()) {
-                    SharedActionButton(if (detailsExpanded) "收起详细信息" else "详细信息", { detailsExpanded = !detailsExpanded },
-                        measured("details"), style = SharedButtonStyle.TEXT)
-                    if (detailsExpanded) {
-                        SelectionContainer {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (state.location.isNotBlank()) Text(state.location, fontSize = 12.sp,
-                                    color = SharedUiColors.muted, modifier = measured("location"), onTextLayout = {
-                                        observer?.text("location", it.lineCount, it.hasVisualOverflow)
-                                    })
-                                if (state.details.isNotBlank()) Text(state.details, fontSize = 12.sp, color = SharedUiColors.muted)
-                            }
-                        }
-                        if (state.canCopyDiagnostics) SharedActionButton("复制诊断",
-                            { interactions.perform(SharedGameSelectionControl.COPY_DIAGNOSTICS) },
-                            enabled = state.actionEnabled(SharedGameSelectionControl.COPY_DIAGNOSTICS),
-                            style = SharedButtonStyle.TEXT)
-                    }
                 }
                 if (state.busy) {
                     Spacer(Modifier.height(12.dp))
