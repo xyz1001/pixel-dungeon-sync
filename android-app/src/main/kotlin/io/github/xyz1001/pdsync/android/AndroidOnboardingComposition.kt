@@ -15,6 +15,16 @@ import pdsync.presentation.HistoryPresentation
 
 /** Thin Android host. Path resolution, read/proof checks and operations stay in MainActivity. */
 object AndroidOnboardingComposition {
+    /** The host supplies a snapshot and real callbacks; recomposition never reads platform state. */
+    @JvmStatic
+    fun showSettings(activity: ComponentActivity, state: SharedSettingsState, actions: SharedSettingsActions) {
+        activity.setContent {
+            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                SharedSettingsScreen(state, actions)
+            }
+        }
+    }
+
     @JvmStatic
     fun showSavePath(
         activity: ComponentActivity,

@@ -92,8 +92,15 @@ paging does not export saves or mutate the mirror. History is ordered globally b
 save-content time before pagination; same-column straight arrows use measured
 card geometry. Platform adapters retain their operation and stale-callback guards.
 
+Both settings hosts now render `SharedSettingsScreen`: bordered current-value/action
+rows and a fixed Return footer. Hosts provide only supported capabilities. File and
+directory selection, log export, system authorization and existing maintenance
+confirmations remain platform operations. Maintenance actions are grouped behind
+one entry instead of being expanded into routine settings. Retained callbacks
+recheck the current page, account and capabilities before invoking those operations.
+
 This is not completion of the full shared UI. Discovery/game selection,
-home conflict/confirmation, naming dialogs and settings still need to move to
+home conflict/confirmation and naming dialogs still need to move to
 common Compose pages and shared presentation state. Android package
 installation, Root/embedded bridge access, SAF and foreground observation remain
 platform capabilities. Desktop JAR selection, native directory chooser and process

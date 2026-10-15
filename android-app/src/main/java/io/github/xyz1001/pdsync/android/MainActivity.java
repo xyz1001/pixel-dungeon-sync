@@ -35,7 +35,6 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import io.github.xyz1001.pdsync.android.BridgeClient;
@@ -110,6 +109,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private SyncHistory history;
     private int historyPage;
     private int sharedHomeRenderToken;
+    private int sharedSettingsRenderToken;
+    private int settingsConfirmationToken;
+    private AlertDialog settingsDialog;
     private String explicitHomeSelection;
     private DiagnosticAction activeWorkAction = DiagnosticAction.OTHER;
     private AndroidSyncFacade.Inspection inspection;
@@ -303,6 +305,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     protected void onPause() {
         this.resumed = false;
         ++this.sharedHomeRenderToken;
+        ++this.sharedSettingsRenderToken;
+        dismissSettingsDialog();
         this.comparisonProofState.reset();
         invalidatePathPreview();
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(false);
@@ -313,6 +317,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     @Override // android.app.Activity
     protected void onDestroy() {
         ++this.sharedHomeRenderToken;
+        ++this.sharedSettingsRenderToken;
+        dismissSettingsDialog();
         this.comparisonProofState.reset();
         invalidatePathPreview();
         diagnosticExport.detach(this);
@@ -1066,6 +1072,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         if (this.page != syncPage) {
             ++this.sharedHomeRenderToken;
+            ++this.sharedSettingsRenderToken;
+            dismissSettingsDialog();
+            if (this.page == SyncPage.CONFIRM) ++this.settingsConfirmationToken;
             this.comparisonProofState.reset();
             invalidatePathPreview();
         }
@@ -1107,6 +1116,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             renderHome();
             return;
         }
+        if (this.page == SyncPage.SETTINGS) {
+            renderSettings();
+            return;
+        }
         ScrollView scrollView;
         final int scrollY = (this.renderedPage != this.page || (scrollView = this.scroll) == null) ? 0 : scrollView.getScrollY();
         LinearLayout linearLayoutColumn = column();
@@ -1146,8 +1159,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             case 1:
                 throw new IllegalStateException("Home is hosted by the shared Compose screen");
             case 2:
-                renderSettings();
-                break;
+                throw new IllegalStateException("Settings is hosted by the shared Compose screen");
             case 3:
                 renderDiscovery();
                 break;
@@ -3630,13 +3642,33 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2) {
+        boolean fromSettings = this.page == SyncPage.SETTINGS
+                || this.page == SyncPage.CONFIRM && this.confirmationReturn == SyncPage.SETTINGS;
+        SettingsActionContext settingsOwner = fromSettings ? currentSettingsContext(this.sharedSettingsRenderToken) : null;
+        int settingsTicket = ++this.settingsConfirmationToken;
         this.confirmationReturn = this.page == SyncPage.CONFIRM ? this.confirmationReturn : this.page;
         this.confirmationTitle = str;
         this.confirmationText = str2;
         this.confirmationButton = str3;
-        this.confirmedAction = runnable;
-        this.confirmationMerge = runnable2;
+        this.confirmedAction = fromSettings ? guardSettingsConfirmation(settingsOwner, settingsTicket, runnable) : runnable;
+        this.confirmationMerge = fromSettings ? guardSettingsConfirmation(settingsOwner, settingsTicket, runnable2) : runnable2;
         navigate(SyncPage.CONFIRM);
+    }
+
+    private Runnable guardSettingsConfirmation(SettingsActionContext owner, int ticket, Runnable action) {
+        if (owner == null || action == null) return null;
+        return () -> {
+            if (!this.resumed || isDestroyed() || this.busy || this.page != SyncPage.CONFIRM
+                    || this.confirmationReturn != SyncPage.SETTINGS || ticket != this.settingsConfirmationToken) return;
+            if (!owner.sameTarget(currentSettingsContext(this.sharedSettingsRenderToken))) {
+                cancelConfirmation();
+                this.notice = "设置已变化，请重新选择操作。";
+                render();
+                return;
+            }
+            ++this.settingsConfirmationToken;
+            action.run();
+        };
     }
 
     private void renderConfirmation() {
@@ -3682,6 +3714,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void cancelConfirmation() {
+        ++this.settingsConfirmationToken;
         this.confirmedAction = null;
         this.confirmationMerge = null;
         this.notice = "已取消选择，双方存档未改变。";
@@ -3712,105 +3745,205 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return str2 == null ? "尚未选择" : str2.substring(0, Math.min(8, str2.length()));
     }
 
+    /** Real settings values and capabilities; the shared page owns all settings layout. */
     private void renderSettings() {
-        String str;
-        heading("设置");
-        button("导出日志", this::chooseDiagnosticDirectory).setEnabled(!diagnosticExport.busy());
-        Switch r0 = new Switch(this);
-        r0.setText("自动上传");
-        r0.setChecked(automaticObservationSupported() && !SyncRuntime.isAutoUploadPaused(this));
-        r0.setEnabled(automaticObservationSupported());
-        this.body.addView(r0);
-        r0.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda74
-            @Override // android.widget.CompoundButton.OnCheckedChangeListener
-            public final void onCheckedChanged(CompoundButton compoundButton, boolean z) {
-                MainActivity.this.m128x5965f8ae(compoundButton, z);
-            }
-        });
-        str = selectedGameLabel();
-        text(str);
-        button("更换游戏…", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda78
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m129xcee01eef();
-            }
-        });
-        button("重新检查存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda79
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m130x445a4530();
-            }
-        });
-        button("云端连接设置", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda80
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m131xb9d46b71();
-            }
-        });
-        if (isOfficialAccount(this.connection)) button(officialAppreciationLabel(this.connection.username), () -> showManagedAccount(this.connection));
-        button("重新检查四步引导", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda81
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m132x2f4e91b2();
-            }
-        });
-        if (selectedGamePackage() != null) {
-            button("关联 PC 档案", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda82
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.editNamespace();
-                }
-            });
+        dismissSettingsDialog();
+        final SettingsActionContext owner = currentSettingsContext(++this.sharedSettingsRenderToken);
+        final SettingsCapabilities capabilities = settingsCapabilities();
+        final boolean selectedGame = selectedGamePackage() != null;
+        final boolean automaticSupported = selectedGame && automaticObservationSupported();
+        final boolean automaticPaused = SyncRuntime.isAutoUploadPaused(this);
+        List<SharedSettingsRow> rows = new ArrayList<>();
+        rows.add(new SharedSettingsRow(SharedSettingsKey.GAME, "游戏", selectedGameLabel()
+                + (selectedGame ? "\n" + settingsAccessStatus() : ""), "更换", capabilities.canChangeGame));
+        rows.add(new SharedSettingsRow(SharedSettingsKey.CLOUD_CONNECTION, "云端连接", settingsConnectionValue(),
+                "修改", !this.installer.hasActiveRequest()));
+        if (isOfficialAccount(this.connection)) {
+            rows.add(new SharedSettingsRow(SharedSettingsKey.ACCOUNT_APPRECIATION, "官方账号", this.connection.username,
+                    officialAppreciationLabel(this.connection.username), !this.installer.hasActiveRequest()));
         }
-        button("允许同步通知（可选）", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda83
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m133xa4c8b7f3();
-            }
-        });
-        heading("恢复与待上传操作");
-        if (restoreNeedsAttention()) {
-            button("检查未完成恢复", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda84
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m135x8fbd0475();
-                }
-            }).setEnabled(restoreSupported());
-            button("保留备份并放弃未完成操作", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda85
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m112xc8b22aac();
-                }
-            });
+        if (selectedGame) rows.add(new SharedSettingsRow(SharedSettingsKey.SAVE_PATH, "存档位置", savePathLabel(), null, false));
+        rows.add(new SharedSettingsRow(SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传",
+                !selectedGame ? "尚未选择游戏" : !automaticSupported ? "当前访问方式不支持"
+                        : automaticPaused ? "已暂停" : this.progress == OnboardingProgress.COMPLETE ? "已开启" : "已开启 · 完成引导后生效",
+                automaticSupported ? automaticPaused ? "开启" : "暂停" : null, capabilities.canToggleAutomatic));
+        if (selectedGame) rows.add(new SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, "存档检查",
+                restoreNeedsAttention() ? "有未完成恢复" : this.cloudVerified ? "已检查" : "待检查", "重新检查",
+                !this.installer.hasActiveRequest()));
+        rows.add(new SharedSettingsRow(SharedSettingsKey.REVIEW_SETUP, "四步引导",
+                this.progress == OnboardingProgress.COMPLETE ? "已完成" : "尚未完成", "重新检查", capabilities.canChangeGame));
+        if (selectedGame) rows.add(new SharedSettingsRow(SharedSettingsKey.LINK_PROFILE, "PC 档案关联",
+                this.selectedNamespace.isEmpty() ? "按游戏来源隔离" : this.selectedNamespace + " · "
+                        + (this.connection == null ? this.draftProfile : this.connection.profile), "修改", capabilities.canChangeGame));
+        if (Build.VERSION.SDK_INT >= 33) {
+            boolean notificationsAllowed = checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED;
+            rows.add(new SharedSettingsRow(SharedSettingsKey.SYNC_NOTIFICATIONS, "同步通知",
+                    notificationsAllowed ? "已允许" : "未允许", notificationsAllowed ? null : "允许", !notificationsAllowed));
         }
-        button("恢复中断前备份", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda86
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m116x9e9ac3b0();
-            }
-        }).setEnabled(backupRecoverySupported());
-        if (!backupRecoverySupported()) text("当前访问方式不支持中断事务恢复。");
-        AndroidSyncFacade.Inspection inspection2 = this.inspection;
-        if (inspection2 != null && inspection2.isRetryablePending()) {
-            button("检查并归档中断的待上传操作", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda75
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m120x74835cb4();
-                }
-            });
+        rows.add(new SharedSettingsRow(SharedSettingsKey.EXPORT_LOGS, "日志", diagnosticExport.busy() ? "正在导出…" : "导出到所选目录",
+                "导出日志", !diagnosticExport.busy()));
+        if (capabilities.hasMaintenance() || !this.details.isEmpty()) {
+            rows.add(new SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "恢复与维护",
+                    restoreNeedsAttention() ? "有未完成恢复" : this.inspection != null && this.inspection.isRetryablePending()
+                            ? "有待上传操作" : "按需检查", "打开", true));
         }
-        button("忘记已保存的连接信息", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda76
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m124xed71190d();
+        this.root = null;
+        this.status = null;
+        this.body = null;
+        this.footer = null;
+        this.scroll = null;
+        this.renderedPage = this.page;
+        SharedSettingsState state = new SharedSettingsState(selectedGameIdentity(), rows, isForegroundSettings(),
+                this.busy, true, visibleNotice(), this.feedbackError);
+        AndroidOnboardingComposition.showSettings(this, state, new SharedSettingsActions() {
+            @Override public void perform(SharedSettingsKey key) {
+                if (!isCurrentSettingsAction(owner)) return;
+                SettingsCapabilities current = settingsCapabilities();
+                switch (key) {
+                    case GAME:
+                        if (current.canChangeGame) m129xcee01eef();
+                        break;
+                    case CLOUD_CONNECTION:
+                        if (!installer.hasActiveRequest()) m131xb9d46b71();
+                        break;
+                    case ACCOUNT_APPRECIATION:
+                        if (!installer.hasActiveRequest() && isOfficialAccount(MainActivity.this.connection))
+                            showManagedAccount(MainActivity.this.connection);
+                        break;
+                    case AUTOMATIC_UPLOAD:
+                        if (current.canToggleAutomatic) m128x5965f8ae(null, SyncRuntime.isAutoUploadPaused(MainActivity.this));
+                        break;
+                    case RECHECK_SAVES:
+                        if (selectedGamePackage() != null && !installer.hasActiveRequest()) m130x445a4530();
+                        break;
+                    case REVIEW_SETUP:
+                        if (current.canChangeGame) m132x2f4e91b2();
+                        break;
+                    case LINK_PROFILE:
+                        if (selectedGamePackage() != null && current.canChangeGame) editNamespace();
+                        break;
+                    case SYNC_NOTIFICATIONS:
+                        if (Build.VERSION.SDK_INT >= 33) m133xa4c8b7f3();
+                        break;
+                    case EXPORT_LOGS:
+                        if (!diagnosticExport.busy()) chooseDiagnosticDirectory();
+                        break;
+                    case MAINTENANCE:
+                        if (current.hasMaintenance() || !details.isEmpty()) showSettingsMaintenance(owner);
+                        break;
+                    case SAVE_PATH:
+                        break; // The trusted private path is read-only on Android.
+                }
+            }
+            @Override public void back() {
+                if (isCurrentSettingsAction(owner)) m125x62eb3f4e();
             }
         });
-        foot("返回存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda77
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m125x62eb3f4e();
-            }
+    }
+
+    private boolean isForegroundSettings() {
+        return this.resumed && !isDestroyed() && this.page == SyncPage.SETTINGS && !this.sharedAppreciationOnly;
+    }
+
+    private SettingsActionContext currentSettingsContext(int renderToken) {
+        try {
+            return new SettingsActionContext(renderToken, this.connection, this.facade, this.inspection,
+                    SyncRuntime.currentSelectionToken(this) + "\n" + SyncRuntime.currentNamespace(this));
+        } catch (Exception unavailable) { return null; }
+    }
+
+    private boolean isCurrentSettingsContext(SettingsActionContext owner) {
+        return owner != null && owner.accepts(currentSettingsContext(this.sharedSettingsRenderToken), isForegroundSettings(), this.busy);
+    }
+
+    private boolean isCurrentSettingsAction(SettingsActionContext owner) {
+        return this.settingsDialog == null && isCurrentSettingsContext(owner);
+    }
+
+    private SettingsCapabilities settingsCapabilities() {
+        return new SettingsCapabilities(selectedGamePackage() != null, automaticObservationSupported(), restoreSupported(),
+                backupRecoverySupported(), restoreNeedsAttention(), this.inspection != null && this.inspection.isRetryablePending(),
+                this.connection != null, this.connection != null || !this.connectionLoadError.isEmpty(), this.installer.hasActiveRequest());
+    }
+
+    private String settingsConnectionValue() {
+        if (this.connection == null) return this.connectionLoadError.isEmpty() ? "尚未连接" : "连接信息待检查";
+        return (isOfficialAccount(this.connection) ? "官方账号" : "WebDAV")
+                + (this.connection.username.isEmpty() ? "" : " · " + this.connection.username);
+    }
+
+    /** Concise observed status only. Root selection alone is never displayed as verified access. */
+    private String settingsAccessStatus() {
+        String mode = this.rootGame != null ? "Root" : this.readinessState.embeddedBridge ? "内置存档桥" : "旧版存档桥";
+        String state;
+        if (this.installer.hasActiveRequest()) state = "等待系统确认";
+        else if (restoreNeedsAttention()) state = "需检查恢复";
+        else if (readyForSaves()) state = "可读取存档";
+        else if (this.readinessState.access == InstallationReadiness.AccessStatus.FIRST_LAUNCH_NEEDED) state = "需启动游戏";
+        else if (this.readinessState.access == InstallationReadiness.AccessStatus.GAME_BUSY) state = "游戏运行中";
+        else state = "待检查";
+        return mode + " · " + state;
+    }
+
+    /** One entry point; every item invokes the existing operation/confirmation rather than a new flow. */
+    private void showSettingsMaintenance(SettingsActionContext owner) {
+        if (!isCurrentSettingsAction(owner)) return;
+        SettingsCapabilities capabilities = settingsCapabilities();
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (capabilities.canRecoverRestore) {
+            labels.add("检查未完成恢复");
+            actions.add(() -> { if (settingsCapabilities().canRecoverRestore) m135x8fbd0475(); });
+        }
+        if (capabilities.canDiscardRestore) {
+            labels.add("保留备份并放弃未完成操作");
+            actions.add(() -> { if (settingsCapabilities().canDiscardRestore) m112xc8b22aac(); });
+        }
+        if (capabilities.canRecoverBackup) {
+            labels.add(this.rootGame != null ? "核对 Root 中断事务" : "恢复中断前备份");
+            actions.add(() -> { if (settingsCapabilities().canRecoverBackup) m116x9e9ac3b0(); });
+        }
+        if (capabilities.canArchiveUpload) {
+            labels.add("检查并归档中断的待上传操作");
+            actions.add(() -> { if (settingsCapabilities().canArchiveUpload) m120x74835cb4(); });
+        }
+        if (capabilities.canForgetConnection) {
+            labels.add("忘记已保存的连接信息");
+            actions.add(() -> { if (settingsCapabilities().canForgetConnection) m124xed71190d(); });
+        }
+        if (!this.details.isEmpty()) {
+            labels.add("查看诊断");
+            actions.add(() -> showSettingsDiagnostics(owner));
+        }
+        if (labels.isEmpty()) return;
+        showSettingsDialog(new AlertDialog.Builder(this).setTitle("恢复与维护")
+                .setItems(labels.toArray(new String[0]), (dialog, index) -> {
+                    if (this.settingsDialog != dialog || !isCurrentSettingsContext(owner)) return;
+                    this.settingsDialog = null;
+                    actions.get(index).run();
+                }).setNegativeButton("取消", null).create());
+    }
+
+    private void showSettingsDiagnostics(SettingsActionContext owner) {
+        if (!isCurrentSettingsAction(owner) || this.details.isEmpty()) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle("诊断信息")
+                .setMessage(safeText(this.details)).setNegativeButton("关闭", null);
+        if (!this.diagnosticReport.isEmpty()) builder.setPositiveButton("复制诊断", (dialog, which) -> {
+            if (this.settingsDialog == dialog && isCurrentSettingsContext(owner)) copyDiagnostic();
         });
+        showSettingsDialog(builder.create());
+    }
+
+    private void showSettingsDialog(AlertDialog dialog) {
+        this.settingsDialog = dialog;
+        dialog.setOnDismissListener(ignored -> { if (this.settingsDialog == dialog) this.settingsDialog = null; });
+        dialog.show();
+    }
+
+    private void dismissSettingsDialog() {
+        AlertDialog dialog = this.settingsDialog;
+        this.settingsDialog = null;
+        if (dialog != null) dialog.dismiss();
     }
 
     /* renamed from: lambda$renderSettings$90$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4059,6 +4192,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void editNamespace() {
+        final SettingsActionContext owner = currentSettingsContext(this.sharedSettingsRenderToken);
+        if (!isCurrentSettingsAction(owner) || !settingsCapabilities().canChangeGame) return;
         LinearLayout linearLayoutColumn = column();
         final EditText editText = new EditText(this);
         editText.setSingleLine(true);
@@ -4071,12 +4206,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         SecureConnectionStore.Connection connection = this.connection;
         editText2.setText(connection == null ? "default" : connection.profile);
         linearLayoutColumn.addView(editText2);
-        new AlertDialog.Builder(this).setTitle("关联同一游戏的 PC 档案").setView(linearLayoutColumn).setMessage("仅当你已确认两端是同一游戏、兼容存档格式时使用。官方破碎的已有空间通常为 shattered，档案通常为 default。留空游戏标识可恢复按来源隔离。").setNegativeButton("取消", (DialogInterface.OnClickListener) null).setPositiveButton("检查关联", new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda9
+        showSettingsDialog(new AlertDialog.Builder(this).setTitle("关联同一游戏的 PC 档案").setView(linearLayoutColumn).setMessage("仅当你已确认两端是同一游戏、兼容存档格式时使用。官方破碎的已有空间通常为 shattered，档案通常为 default。留空游戏标识可恢复按来源隔离。").setNegativeButton("取消", (DialogInterface.OnClickListener) null).setPositiveButton("检查关联", new DialogInterface.OnClickListener() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda9
             @Override // android.content.DialogInterface.OnClickListener
             public final void onClick(DialogInterface dialogInterface, int i) {
+                if (MainActivity.this.settingsDialog != dialogInterface || !isCurrentSettingsContext(owner)
+                        || !settingsCapabilities().canChangeGame) return;
+                MainActivity.this.settingsDialog = null;
                 MainActivity.this.m47x6b6b32d0(editText, editText2, dialogInterface, i);
             }
-        }).show();
+        }).create());
     }
 
     /* renamed from: lambda$editNamespace$117$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4608,6 +4746,12 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         String message = diagnosticExport.consumeOutcome();
         if (message != null) Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
         if (!this.busy) render();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 8103 && isForegroundSettings() && !this.busy) render();
     }
 
     @Override // android.app.Activity

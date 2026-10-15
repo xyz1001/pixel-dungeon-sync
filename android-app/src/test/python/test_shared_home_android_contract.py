@@ -115,7 +115,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('requireOfficialSyncAccess(account)', body(MAIN, 'String snapshotId, boolean replace, ComparisonProofState.Ticket proof)'))
         self.assertIn('requestRootAuthorization()', MAIN)
         self.assertIn('refreshComparison(SyncPage.HOME)', body(MAIN, 'void m130x445a4530()'))
-        self.assertIn('检查未完成恢复', body(MAIN, 'private void renderSettings()'))
+        self.assertIn('检查未完成恢复', body(MAIN, 'private void showSettingsMaintenance('))
 
     def test_native_confirmation_and_real_rename_identity_remain_explicit_boundaries(self):
         self.assertIn('showConfirmation(', body(MAIN, 'public void requestRestore()'))

@@ -1060,29 +1060,73 @@ internal fun runSyncApplication(
          if (current.canInteract && page in 0 until presentation.pages) homeHistoryPage = page
         }
        })
-       Page.SETTINGS -> GuidedPage(
-        title = "设置", subtitle = "",
-        footer = { TextButton(enabled = !busy && !connectingAtStartup, onClick = { navigate(Page.HOME) }) { Text("返回存档") } }
-       ) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-          Text("自动上传", Modifier.weight(1f))
-          Switch(checked = config?.autoUploadPaused != true, enabled = config != null && !busy, onCheckedChange = { setAutomaticPaused(!it) })
+       Page.SETTINGS -> key(pageGeneration) {
+        val generation = pageGeneration
+        val initialStatus = remember { status }
+        var managementOpen by remember { mutableStateOf(false) }
+        var managementGeneration by remember { mutableStateOf(0L) }
+        fun current() = !appClosed && page == Page.SETTINGS && pageGeneration == generation
+        fun settingsContext() = DesktopSettingsContext(
+         config = config,
+         game = targetInfo?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+         savePath = pathAdapter.state.path, hasSession = session != null, connected = connected,
+         pendingUpload = pending, currentName = graphHistory?.currentName.orEmpty(),
+         pageActive = current(), busy = busy, connectingAtStartup = connectingAtStartup, appClosed = appClosed,
+         managementOpen = managementOpen, editorOpen = directoryEditor != null || renameSnapshot != null,
+         targetError = targetError, locationIssue = locationIssue,
+         operationNotice = status.takeIf { it != initialStatus }, diagnosticExportNotice = diagnosticExportNotice,
+        )
+        fun settingsState() = DesktopSharedSettingsAdapter.state(settingsContext())
+        SharedSettingsScreen(settingsState(), DesktopSharedSettingsActions(
+         state = ::settingsState, pageCurrent = ::current,
+         performAction = { action ->
+          diagnosticExportNotice = null
+          when (action) {
+           SharedSettingsKey.GAME -> selectTargetGame()
+           SharedSettingsKey.SAVE_PATH -> {
+            onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH)
+           }
+           SharedSettingsKey.CLOUD_CONNECTION -> openConnection(SettingsMode.FULL)
+           SharedSettingsKey.AUTOMATIC_UPLOAD -> setAutomaticPaused(config?.autoUploadPaused != true)
+           SharedSettingsKey.RECHECK_SAVES -> loadProfile(config)
+           SharedSettingsKey.REVIEW_SETUP -> {
+            onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery()
+           }
+           SharedSettingsKey.EXPORT_LOGS -> exportDiagnosticLogs()
+           SharedSettingsKey.MAINTENANCE -> { managementGeneration++; managementOpen = true }
+           else -> Unit
+          }
+         },
+         goBack = { navigate(Page.HOME) },
+        ))
+        if (managementOpen) {
+         val dialogGeneration = managementGeneration
+         fun dialogCurrent() = current() && managementOpen && managementGeneration == dialogGeneration
+         fun dismissManagement() { if (dialogCurrent() && !busy && !connectingAtStartup) managementOpen = false }
+         val maintenance = DesktopSettingsMaintenanceActions(::settingsContext, ::dialogCurrent) { action ->
+          managementOpen = false
+          when (action) {
+           DesktopSettingsMaintenance.EDIT_DIRECTORY -> editDirectory()
+           DesktopSettingsMaintenance.ARCHIVE_PENDING -> requestConfirmation(Action.ARCHIVE)
+          }
          }
-         Divider()
-         Text(targetInfo?.let { "Shattered ${it.displayVersion}" } ?: "尚未选择游戏")
-         targetError?.let { CompactFeedback(it, "游戏文件不可用，请重新选择。") }
-         OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("更换游戏…") }
-         Details { Text("存档位置：${pathAdapter.state.path}"); Text(processMessage(gameStatus)) }
-         TextButton(enabled = session != null && !busy && !connectingAtStartup, onClick = { editDirectory() }) { Text("存档名称与单局身份") }
-         TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
-         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
-         TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH) }) { Text("修改存档路径") }
-         TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.DISCOVERY); rescanDiscovery() }) { Text("重新检查四步引导") }
-         if (pending) TextButton(enabled = !busy && !connectingAtStartup, onClick = { requestConfirmation(Action.ARCHIVE) }) { Text("检查并归档中断的待上传操作") }
-         Divider()
-         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { exportDiagnosticLogs() }) { Text("导出日志") }
-         diagnosticExportNotice?.let { Text(it, style = MaterialTheme.typography.body2) }
+         AlertDialog(onDismissRequest = ::dismissManagement, title = { Text("存档管理") },
+          text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+           verticalArrangement = Arrangement.spacedBy(8.dp)) {
+           TextButton(enabled = settingsContext().maintenanceEnabled(DesktopSettingsMaintenance.EDIT_DIRECTORY),
+            onClick = { maintenance.perform(DesktopSettingsMaintenance.EDIT_DIRECTORY) }) { Text("存档名称与单局身份") }
+           if (pending) TextButton(enabled = settingsContext().maintenanceEnabled(DesktopSettingsMaintenance.ARCHIVE_PENDING),
+            onClick = { maintenance.perform(DesktopSettingsMaintenance.ARCHIVE_PENDING) }) { Text("检查未完成的上传") }
+           Details {
+            SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+             Text(processMessage(gameStatus))
+             listOfNotNull(targetError, locationIssue, directoryNotice, diagnosticExportNotice,
+              status.takeIf { it != initialStatus }).filter(String::isNotBlank).distinct().forEach { Text(it) }
+            } }
+           }
+          } },
+          confirmButton = { TextButton(enabled = !busy && !connectingAtStartup,
+           onClick = ::dismissManagement) { Text("关闭") } })
         }
        }
        Page.CONNECTION -> key(pageGeneration) {

@@ -16,8 +16,9 @@ AUTH = (SHARED / 'OfficialServiceRegistrationClient.java').read_text()
 class DiagnosticExportContract(unittest.TestCase):
     def test_settings_contains_only_one_export_button(self):
         settings = body(MAIN, 'private void renderSettings()')
-        self.assertEqual(MAIN.count('button("导出日志"'), 1)
-        self.assertIn('button("导出日志", this::chooseDiagnosticDirectory).setEnabled(!diagnosticExport.busy())', settings)
+        self.assertEqual(settings.count('new SharedSettingsRow(SharedSettingsKey.EXPORT_LOGS,'), 1)
+        self.assertIn('"导出日志", !diagnosticExport.busy()', settings)
+        self.assertIn('if (!diagnosticExport.busy()) chooseDiagnosticDirectory()', settings)
         start = body(MAIN, 'private void chooseDiagnosticDirectory()')
         for forbidden in ('work(', 'sync(', 'SyncRuntime.', 'requestReadinessRefresh(', 'Root', 'Network'):
             self.assertNotIn(forbidden, start)

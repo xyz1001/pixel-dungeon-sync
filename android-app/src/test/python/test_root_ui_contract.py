@@ -94,7 +94,8 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('accessCapabilities.restoreSupported', body(MAIN, 'private boolean restoreSupported()'))
         self.assertIn('accessCapabilities.interruptedBackupRecovery', body(MAIN, 'private boolean backupRecoverySupported()'))
         self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private void renderHome()'))
-        self.assertIn('.setEnabled(backupRecoverySupported())', body(MAIN, 'private void renderSettings()'))
+        self.assertIn('backupRecoverySupported()', body(MAIN, 'private SettingsCapabilities settingsCapabilities()'))
+        self.assertIn('if (capabilities.canRecoverBackup)', body(MAIN, 'private void showSettingsMaintenance('))
         for signature in ('public void requestRestore()', 'public void previewMerge()', 'void m87x12f15700()'):
             self.assertIn('if (!allowRestoreAction()) return;', body(MAIN, signature))
         for signature in ('AndroidSyncFacade.OperationResult m141x92df934d(', 'AndroidSyncFacade.OperationResult m142x859b98e(',
@@ -126,8 +127,9 @@ class RootUiContract(unittest.TestCase):
         self.assertNotIn('processPresent', policy)
         self.assertIn('this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground)', SERVICE)
         settings = body(MAIN, 'private void renderSettings()')
-        self.assertIn('r0.setEnabled(automaticObservationSupported())', settings)
-        self.assertNotIn('r0.setEnabled(this.rootGame == null)', settings)
+        self.assertIn('selectedGame && automaticObservationSupported()', settings)
+        self.assertIn('capabilities.canToggleAutomatic', settings)
+        self.assertIn('if (current.canToggleAutomatic)', settings)
 
 
 if __name__ == '__main__':

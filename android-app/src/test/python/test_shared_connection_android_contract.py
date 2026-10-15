@@ -121,7 +121,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_settings_appreciation_uses_same_controller_and_screen(self):
         settings = body(MAIN, "private void renderSettings()")
         self.assertIn("isOfficialAccount(this.connection)", settings)
-        self.assertIn("showManagedAccount(this.connection)", settings)
+        self.assertIn("showManagedAccount(MainActivity.this.connection)", settings)
         route = body(MAIN, "private void showManagedAccount(")
         self.assertIn("AndroidConnectionComposition.create(getApplicationContext(), source, source.profile,", route)
         self.assertIn("ConnectionEntryModel.Origin.SETTINGS", route)
