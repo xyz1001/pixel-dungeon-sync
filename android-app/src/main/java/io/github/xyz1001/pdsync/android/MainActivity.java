@@ -3379,44 +3379,56 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void renderConflict() {
-        heading("存档发生冲突");
-        text("请选择要继续的进度。");
-        if (this.inspection == null || kind() != OnboardingKind.BRANCHED) {
-            text("分支已变化，请重新比较。");
-            foot("重新比较", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda143
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m83x9a039aa7();
-                }
-            });
-            return;
-        }
-        boolean z = false;
-        for (AndroidSyncFacade.Version version : this.inspection.getRemoteVersions()) {
-            versionChoice(version);
-            if (version.getSnapshotId().equals(this.selected)) {
-                z = true;
+        final LinearLayout ownerRoot = this.root;
+        final AndroidSyncFacade.Inspection observed = this.inspection;
+        final AndroidSyncFacade ownerFacade = this.facade;
+        final SecureConnectionStore.Connection ownerConnection = this.connection;
+        final HomeActionContext ownerContext = currentHomeContext(this.sharedHomeRenderToken);
+        final SharedBranchChoiceActions actions = new SharedBranchChoiceActions() {
+            private boolean current() {
+                return root == ownerRoot && page == SyncPage.CONFLICT && resumed && !isDestroyed()
+                        && !busy && !sharedAppreciationOnly && inspection == observed && facade == ownerFacade
+                        && connection == ownerConnection && ownerContext != null
+                        && ownerContext.accepts(currentHomeContext(sharedHomeRenderToken), true, busy);
             }
-        }
-        SyncHistory syncHistory = this.history;
-        if (syncHistory != null && !syncHistory.getCurrentProtected()) {
-            text("本机还有未同步进度。可以先上传本机，保留两份，再选择要继续的进度。");
-            button("上传本机，保留两份", this::upload);
-        }
-        foot("取消", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda144
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m84xf7dc0e8();
+            private boolean hasBranch(String snapshotId) {
+                if (observed == null || kind() != OnboardingKind.BRANCHED || !cloudVerified) return false;
+                for (AndroidSyncFacade.Version branch : observed.getRemoteVersions())
+                    if (branch.getSnapshotId().equals(snapshotId)) return true;
+                return false;
             }
-        });
-        foot("覆盖为所选存档", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda145
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m87x12f15700();
+            private boolean canResolve() {
+                return current() && observed != null && kind() == OnboardingKind.BRANCHED && cloudVerified
+                        && connection != null && restoreSupported() && !restoreNeedsAttention()
+                        && !observed.isRetryablePending();
             }
-        }).setEnabled(z && restoreSupported());
-        foot("合并", this::previewMerge).setEnabled(restoreSupported());
-        if (!restoreSupported()) text("当前 Root 后端不能恢复或合并写入；可以保留双方或手动上传本机。");
+            @Override public void select(String snapshotId) {
+                if (!current() || !hasBranch(snapshotId)) return;
+                selected = snapshotId;
+                render();
+            }
+            @Override public void back() { if (current()) m84xf7dc0e8(); }
+            @Override public void refresh() { if (current()) m83x9a039aa7(); }
+            @Override public void overwrite(String snapshotId) {
+                if (canResolve() && hasBranch(snapshotId) && snapshotId.equals(selected))
+                    m86xfa720d6a(observed, snapshotId);
+            }
+            @Override public void merge() { if (canResolve()) previewMerge(); }
+            @Override public void preserveLocal() {
+                if (current() && cloudVerified && observed != null && kind() == OnboardingKind.BRANCHED
+                        && connection != null && !restoreNeedsAttention() && history != null
+                        && !history.getCurrentProtected()) upload();
+            }
+        };
+        // render() supplies a legacy root for this route. Replace all of its chrome, rather than
+        // nesting the shared card inside a second heading, scroll view or footer.
+        ownerRoot.removeAllViews();
+        ownerRoot.setPadding(0, 0, 0, 0);
+        ownerRoot.setOnApplyWindowInsetsListener(null);
+        ownerRoot.addView(AndroidBranchChoiceComposition.view(this, observed, this.history,
+                selectedGameIdentity(), this.selected, this.resumed && !isDestroyed(), this.busy,
+                this.connection != null, this.cloudVerified, restoreSupported(), restoreNeedsAttention(),
+                visibleNotice(), this.details, actions), new LinearLayout.LayoutParams(-1, -1));
     }
 
     /* renamed from: lambda$renderConflict$76$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */

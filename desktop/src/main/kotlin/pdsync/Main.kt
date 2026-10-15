@@ -1198,6 +1198,9 @@ internal fun runSyncApplication(
        }
        Page.CONFLICT -> conflict?.let { value ->
         ConflictPage(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected,
+         game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
+          SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+         }, pending = pending,
          onSelect = { if (!busy && !connectingAtStartup) conflictSelection = it },
          onBack = { if (!busy && !connectingAtStartup) navigate(Page.HOME) },
          onConfirm = { execute(operationEvents.begin(Action.RESOLVE)) },
@@ -1295,38 +1298,33 @@ private fun DesktopSharedConnectionPage(
 }
 
 @Composable
-private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit, onConfirm: () -> Unit, onMerge: () -> Unit) {
- GuidedPage(
-  title = "存档发生冲突",
-  subtitle = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；图鉴次数取最大，排行榜去重后保留最高分11条。累计统计缺少完整证据时保守取较大值，可能少计；格式损坏或超出六槽仍停止，原始快照保留。",
-  footer = {
-   restoreIssue?.let { Text("选择后校验：$it", color = Color(0xFF986337), style = MaterialTheme.typography.caption) }
-   Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    TextButton(enabled = !busy, onClick = onBack) { Text("取消") }
-    Spacer(Modifier.weight(1f))
-    OutlinedButton(enabled = !busy && connected && selected != null && restoreIssue == null, onClick = onConfirm) { Text("覆盖为所选存档") }
-    Spacer(Modifier.width(8.dp))
-    Button(enabled = !busy && connected, onClick = onMerge) { Text("合并") }
-   }
-  }
- ) {
-  Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-   value.branches.forEach { branch ->
-    val m = branch.snapshot.manifest
-    Surface(color = if (selected == m.id) Color(0xFFE3EFE6) else Color.White, shape = MaterialTheme.shapes.small) {
-     Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { onSelect(m.id) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-      RadioButton(selected = selected == m.id, onClick = { onSelect(m.id) }, enabled = !busy)
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-       Text(m.metadata?.device?.label ?: "设备未知")
-       Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
-       if (m.files == value.observedLocalFiles) Text("与当前本地进度一致", color = green, style = MaterialTheme.typography.caption)
-       Details { Text("${m.files.size} 个文件 · ${m.saveVersions?.summary() ?: m.version}") }
-      }
-     }
-    }
-   }
-  }
- }
+private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean,
+ game: SharedGameIdentity?, pending: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit,
+ onConfirm: () -> Unit, onMerge: () -> Unit) {
+ val state = SharedBranchChoiceState(
+  observation = value,
+  branches = value.branches.map { branch ->
+   val manifest = branch.snapshot.manifest
+   SharedBranchChoice(manifest.id,
+    manifest.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: manifest.metadata?.device?.label ?: "设备未知",
+    listOfNotNull(manifest.metadata?.device?.label,
+     pdsync.presentation.HistoryPresentation.time(manifest.metadata?.latestFileModifiedAt),
+     "${manifest.files.size} 个文件", "与当前本机进度一致".takeIf { manifest.files == value.observedLocalFiles })
+     .joinToString(" · "))
+  },
+  selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
+  observationCurrent = true, resolutionBlocked = pending,
+  overwriteSupported = restoreIssue == null, mergeSupported = true,
+  notice = if (pending) "有未完成操作，请返回主页处理。" else if (selected != null) restoreIssue.orEmpty() else "",
+ )
+ SharedBranchChoiceScreen(state, object : SharedBranchChoiceActions {
+  override fun select(snapshotId: String) = onSelect(snapshotId)
+  override fun back() = onBack()
+  override fun refresh() = onBack()
+  override fun overwrite(snapshotId: String) { if (snapshotId == selected) onConfirm() }
+  override fun merge() = onMerge()
+  override fun preserveLocal() = Unit
+ })
 }
 
 @Composable

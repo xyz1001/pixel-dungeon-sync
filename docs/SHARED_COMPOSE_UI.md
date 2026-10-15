@@ -59,6 +59,11 @@ explicit build inputs. Signing remains outside source control.
 
 ## Remaining migration boundaries
 
+The four ordinary setup pages now use `SharedGameSelectionScreen`,
+`SharedSavePathScreen`, `SharedConnectionScreen` and `SharedComparisonScreen`.
+Game identity, selected source presentation, common shell and navigation are shared;
+hosts still supply actual installed-app/APK/JAR choices, verification and preparation.
+
 The shared save-path slice uses `SharedSavePathScreen` and its capability-gated
 state/actions on both platforms. Android supplies its PackageManager/Root path
 and an existing guarded export preview; desktop supplies its editable path and
@@ -99,12 +104,23 @@ confirmations remain platform operations. Maintenance actions are grouped behind
 one entry instead of being expanded into routine settings. Retained callbacks
 recheck the current page, account and capabilities before invoking those operations.
 
-This is not completion of the full shared UI. Discovery/game selection,
-home conflict/confirmation and naming dialogs still need to move to
-common Compose pages and shared presentation state. Android package
+The remaining ordinary multi-head chooser now uses `SharedBranchChoiceScreen` on
+both platforms. It displays real observed branch IDs and summaries, leaves selection
+non-mutating, and exposes one Handle Conflict action with the common Cancel/
+Overwrite/Merge dialog. Confirmation is bound to its observation, selection and
+capabilities; stale or consumed callbacks cannot resolve a new selection. Desktop
+retains `checkResolution`; Android retains its actual restore/merge capability and
+preview flow. Both retain the core pending/recovery guards. Android's separately
+supported local-preservation upload is not turned into an implicit branch choice.
+
+Routine naming uses `SharedNamingDialog`, and routine conflict/operation confirmation
+uses `SharedConfirmationDialog`. The ordinary four-step flow, home/history, settings,
+branch chooser and routine dialogs now compile from common physical UI sources.
+Remaining host UI is limited to actual system selectors, installation/Root access,
+specific run-identity maintenance and system maintenance menus. Android package
 installation, Root/embedded bridge access, SAF and foreground observation remain
 platform capabilities. Desktop JAR selection, native directory chooser and process
-launch/observation remain desktop capabilities.
+launch/observation, and each platform's file/transaction operations remain host-owned.
 
 Follow-up pages must retain the approved four-step interaction and later explicit
 product changes, including a single Finish action for verified identical content,
@@ -119,3 +135,11 @@ switches, late asynchronous responses, failed persistence, empty custom password
 registration recovery and authenticated entitlement plus DAV gating. Android
 rotation/background behavior and native selectors require actual platform testing;
 host tests and compilation alone are not device validation.
+
+The current actual desktop interaction environment is Linux, with a minimum window
+width of approximately 750 pixels. Shared offscreen Compose renders also exercise
+320- and 500-pixel viewports, including the branch chooser's scrolling body and fixed
+footer. These are not claims of actual Android device or 320-pixel desktop-window
+testing. Android lifecycle, installation/authorization and SAF interaction have not
+been verified on a device in this pass; final build/test results must be reported
+separately from the shared-source and offscreen evidence.
