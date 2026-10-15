@@ -146,7 +146,7 @@ public final class ManagedAccountFlowChecks {
         String screen = Files.readString(common.resolve("SharedConnectionScreen.kt"));
         String login = Files.readString(sourceRoot.resolve("core/src/main/java/io/github/xyz1001/pdsync/android/OfficialServiceRegistrationClient.java"));
         String settings = method(main, "private void renderSettings()");
-        check(settings.contains("isOfficialAccount(this.connection)") && settings.contains("showManagedAccount(this.connection)"),
+        check(settings.contains("isOfficialAccount(this.connection)") && settings.contains("showManagedAccount(MainActivity.this.connection)"),
                 "Saved official account remains directly reachable from Settings");
         check(method(main, "private void showManagedAccount(").contains("getController().openAppreciationOnly()"),
                 "Settings appreciation mounts the same shared controller");
@@ -190,13 +190,20 @@ public final class ManagedAccountFlowChecks {
                 "Account credentials and controller never enter saved-state Bundle");
         check(screen.contains("赞赏时请备注用户名") && screen.contains("controller::copyUsername") && screen.contains("用户名（未验证）"),
                 "Shared page has explicit identity copy and labels unverified usernames");
-        String restore = method(main, "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(");
-        check(restore.contains("isOfficialAccount(account)") && restore.contains(".entitlement()"), "Restore requires current official authority");
-        check(restore.contains("this.connection != account") && restore.contains("entitlement.requireSyncAccess()"),
+        String restoreEntry = method(main, "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(");
+        check(restoreEntry.contains("restoreForCurrentAccount(inspection, snapshotId, replace, null)"),
+                "Ordinary restore delegates to the same proof-aware current-account path");
+        String restore = method(main, "String snapshotId, boolean replace, ComparisonProofState.Ticket proof)");
+        String authority = method(main, "private void requireOfficialSyncAccess(");
+        check(authority.contains("isOfficialAccount(account)") && authority.contains(".entitlement()"), "Restore requires current official authority");
+        check(authority.contains("this.connection != account") && authority.contains("entitlement.requireSyncAccess()"),
                 "Only a stable active official account may begin restore");
-        check(!restore.contains("restoreSelectedReadOnly") && restore.contains("sync().restoreSelected(inspection, snapshotId, replace)")
-                && restore.indexOf("entitlement.requireSyncAccess()") < restore.indexOf("sync().restoreSelected"),
+        check(!restore.contains("restoreSelectedReadOnly") && restore.contains("owner.restoreSelected(inspection, snapshotId, replace)")
+                && restore.indexOf("requireOfficialSyncAccess(account)") < restore.indexOf("owner.restoreSelected"),
                 "Inactive official stops before download; active and custom keep existing restore path");
+        check(restore.contains("if (proof != null) requireSharedComparisonProof(proof)")
+                && restore.contains("proof == null ? sync() : (AndroidSyncFacade) proof.context.facade"),
+                "Comparison restore also retains its frozen facade/proof identity");
         String cache = method(controller, "private fun remember(");
         check(cache.contains("source.username == entitlement.username") && cache.contains("entitlement.serverTimeMs")
                 && !cache.contains("source.password"), "Cache accepts authenticated matching metadata, never credentials");

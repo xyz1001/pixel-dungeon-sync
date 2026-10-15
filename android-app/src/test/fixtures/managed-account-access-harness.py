@@ -25,6 +25,8 @@ def method(source, signature):
 production = "\n".join(method(main, name) for name in (
     "private static boolean isOfficialAccount(",
     "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(",
+    "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection inspection,\n            String snapshotId, boolean replace, ComparisonProofState.Ticket proof)",
+    "private void requireOfficialSyncAccess(",
 ))
 gate = method(client, "void requireSyncAccess()")
 harness = r'''
@@ -37,6 +39,13 @@ public final class ManagedAccountAccessHarness {
     private static final android.content.Context APP = new android.content.Context();
     private android.content.Context getApplicationContext() { return APP; }
     private AndroidSyncFacade sync() { return facade; }
+    // This harness executes the ordinary restore branch. The dedicated comparison-proof suite
+    // verifies non-null tickets; accidentally entering that branch here must fail.
+    private void requireSharedComparisonProof(ComparisonProofState.Ticket proof) { throw new AssertionError("Unexpected comparison proof"); }
+    static final class ComparisonProofState {
+        static final class Context { Object facade; }
+        static final class Ticket { Context context; }
+    }
     private static void rememberEntitlement(android.content.Context app, SecureConnectionStore.Connection account,
                                             ManagedAccountClient.Entitlement entitlement) { saved++; }
     static final class OfficialServiceRegistrationClient { static final String DAV_URL = "https://webdav.xyz1001.top:8443/"; }
