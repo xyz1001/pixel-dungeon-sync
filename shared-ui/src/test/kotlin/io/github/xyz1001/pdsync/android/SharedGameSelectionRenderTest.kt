@@ -47,7 +47,7 @@ class SharedGameSelectionRenderTest {
     private fun ready() = SharedGameSelectionState(
         game = SharedGameIdentity("Shattered Pixel Dungeon", "4.0.2"), selectionId = "/games/selected.jar",
         selectionStatus = "已找到", location = "/games/selected.jar", pageActive = true, canContinue = true,
-        rows = listOf(SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, "更换游戏 JAR…")),
+        rows = listOf(SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, "重新选择")),
     )
     private fun scene(width: Int, height: Int, host: Host, observed: Observation) =
         ImageComposeScene(width = width, height = height, density = Density(1f)) {
@@ -113,9 +113,8 @@ class SharedGameSelectionRenderTest {
         try {
             render(scene, "game-selection-long-320")
             assertTrue(observed.lines.getValue("game-name") > 1)
-            click(scene, observed.bounds.getValue("details").center)
-            render(scene, "game-selection-expanded-320")
-            assertTrue(observed.lines.getValue("location") > 1)
+            assertFalse("details" in observed.bounds)
+            assertFalse("location" in observed.bounds)
             assertTrue(observed.overflow.isEmpty())
             val footer = observed.bounds.getValue("next")
             host.state = host.state.copy(rows = SharedGameSelectionControl.entries.filter {
