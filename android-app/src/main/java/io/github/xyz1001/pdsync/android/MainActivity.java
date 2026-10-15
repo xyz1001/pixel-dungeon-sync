@@ -668,6 +668,12 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return this.rootGame != null ? this.rootGame.gamePackage : this.prepared == null ? null : this.prepared.gamePackage;
     }
 
+    private SharedGameIdentity selectedGameIdentity() {
+        if (this.rootGame != null) return new SharedGameIdentity(this.rootGame.gameLabel, this.rootGame.gameVersionName);
+        if (this.prepared != null) return new SharedGameIdentity(this.prepared.gameLabel, this.prepared.gameVersionName);
+        return null;
+    }
+
     private String selectedGameLabel() {
         return this.rootGame != null ? this.rootGame.gameLabel + " " + this.rootGame.gameVersionName
                 : this.prepared == null ? "尚未选择游戏" : this.prepared.gameLabel + " " + this.prepared.gameVersionName;
@@ -2339,7 +2345,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.status = label("", 14, GREEN);
         this.scroll = null;
         this.renderedPage = this.page;
-        AndroidConnectionComposition.show(this, visibleSession);
+        AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity());
     }
 
     private void closeSharedConnection() {

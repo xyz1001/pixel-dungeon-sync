@@ -53,11 +53,11 @@ object AndroidConnectionComposition {
     }
 
     @JvmStatic
-    fun show(activity: ComponentActivity, session: Session) {
+    fun show(activity: ComponentActivity, session: Session, game: SharedGameIdentity?) {
         activity.setContent {
             // Android target 36 is edge-to-edge. Keep system bars/IME handling out of desktop UI.
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedConnectionScreen(session.controller)
+                SharedConnectionScreen(session.controller, game)
             }
         }
     }

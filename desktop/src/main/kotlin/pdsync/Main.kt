@@ -22,6 +22,7 @@ import io.github.xyz1001.pdsync.android.ConnectionEntryModel
 import io.github.xyz1001.pdsync.android.SharedConnectionConfig
 import io.github.xyz1001.pdsync.android.SharedConnectionController
 import io.github.xyz1001.pdsync.android.SharedConnectionHost
+import io.github.xyz1001.pdsync.android.SharedGameIdentity
 import io.github.xyz1001.pdsync.android.SharedConnectionScreen
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -1016,6 +1017,9 @@ internal fun runSyncApplication(
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
         DesktopSharedConnectionPage(window, configFile, if (onboardingActive) setupDraft else config, password,
          if (connectionReturnPage == Page.PATH) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
+         game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
+          SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+         },
          onBusy = { if (current()) busy = it },
          onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(connectionReturnPage) },
          onApplied = { applied, note ->
@@ -1090,6 +1094,7 @@ private fun DesktopSharedConnectionPage(
  initial: AppConfig?,
  currentPassword: String,
  origin: ConnectionEntryModel.Origin,
+ game: SharedGameIdentity?,
  onBusy: (Boolean) -> Unit,
  onDismiss: () -> Unit,
  onApplied: (AppliedConnection, String?) -> Unit
@@ -1121,7 +1126,7 @@ private fun DesktopSharedConnectionPage(
    latestBusy(false)
   }
  }
- SharedConnectionScreen(controller)
+ SharedConnectionScreen(controller, game)
 }
 
 @Composable

@@ -11,17 +11,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SharedConnectionThemeTest {
-    @Test fun paletteKeepsExistingDesktopGreenAndBrown() {
+    @Test fun paletteMatchesReferenceSurfaceAndText() {
         val colors = sharedConnectionColors()
         assertEquals(Color(0xFF326650), colors.primary)
-        assertEquals(Color(0xFF8A6B42), colors.secondary)
+        assertEquals(Color(0xFFE9EFEA), colors.secondary)
+        assertEquals(Color(0xFFEFF3EF), colors.background)
+        assertEquals(Color(0xFF213B30), colors.onSurface)
+        assertEquals(Color.White, colors.surface)
         assertTrue(colors.isLight)
     }
 
-    @Test fun shapesKeepExistingDesktopCornerSizes() {
-        assertEquals(RoundedCornerShape(8.dp), sharedConnectionShapes.small)
+    @Test fun shapesMatchReferenceButtonsCardsAndShell() {
+        assertEquals(RoundedCornerShape(10.dp), sharedConnectionShapes.small)
         assertEquals(RoundedCornerShape(14.dp), sharedConnectionShapes.medium)
-        assertEquals(RoundedCornerShape(18.dp), sharedConnectionShapes.large)
+        assertEquals(RoundedCornerShape(22.dp), sharedConnectionShapes.large)
     }
 
     @Test fun publicScreenOwnsThemeAndAndroidHasNoCompetingDefaultTheme() {
@@ -32,13 +35,13 @@ class SharedConnectionThemeTest {
         val entry = screen.substringAfter("fun SharedConnectionScreen(")
             .substringBefore("private fun SharedConnectionContent(")
         assertTrue(entry.contains("SharedConnectionTheme {"))
-        assertTrue(entry.contains("SharedConnectionContent(controller)"))
+        assertTrue(entry.contains("SharedConnectionContent(controller, game)"))
         val android = Files.readString(root.resolve(
             "android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidConnectionComposition.kt"))
-        assertTrue(android.contains("SharedConnectionScreen(session.controller)"))
+        assertTrue(android.contains("SharedConnectionScreen(session.controller,"))
         assertFalse(android.contains("import androidx.compose.material.MaterialTheme"))
         assertFalse(android.contains("MaterialTheme {"))
         val desktop = Files.readString(root.resolve("desktop/src/main/kotlin/pdsync/Main.kt"))
-        assertTrue(desktop.contains("SharedConnectionScreen(controller)"))
+        assertTrue(desktop.contains("SharedConnectionScreen(controller,"))
     }
 }
