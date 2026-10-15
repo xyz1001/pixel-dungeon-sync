@@ -734,8 +734,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private SharedGameIdentity selectedGameIdentity() {
-        if (this.rootGame != null) return new SharedGameIdentity(this.rootGame.gameLabel, this.rootGame.gameVersionName);
-        if (this.prepared != null) return new SharedGameIdentity(this.prepared.gameLabel, this.prepared.gameVersionName);
+        if (this.rootGame != null) return new SharedGameIdentity(this.rootGame.gameLabel, this.rootGame.gameVersionName,
+                AndroidGameIcon.load(this, this.rootGame.gamePackage, this.rootGame.sourceApkSetSha256, null));
+        if (this.prepared != null) return new SharedGameIdentity(this.prepared.gameLabel, this.prepared.gameVersionName,
+                AndroidGameIcon.load(this, this.prepared.gamePackage, this.prepared.sourceApkSetSha256, this.prepared.gameApk));
         return null;
     }
 

@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,7 +55,9 @@ import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.sp
 
 /** Display metadata from the selected real game. No placeholder identity is supplied by the UI. */
-data class SharedGameIdentity(val name: String, val version: String? = null) {
+data class SharedGameIdentity @JvmOverloads constructor(
+    val name: String, val version: String? = null, val icon: ImageBitmap? = null,
+) {
     val summary: String get() = name + version?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
 }
 
@@ -162,8 +169,13 @@ private fun SharedPageHeader(title: String, eyebrow: String?, game: SharedGameId
             Text(title, fontSize = metrics.titleSize, lineHeight = metrics.titleSize * 1.2f,
                 fontWeight = FontWeight(650), letterSpacing = metrics.titleSize * -0.02f)
             if (game != null && game.name.isNotBlank()) {
-                Text(game.summary, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-                    color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.8.sp)
+                Row(Modifier.padding(top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    game.icon?.let {
+                        Image(it, contentDescription = null, modifier = Modifier.size(24.dp), contentScale = ContentScale.Fit)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(game.summary, color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 20.8.sp)
+                }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, content = actions)

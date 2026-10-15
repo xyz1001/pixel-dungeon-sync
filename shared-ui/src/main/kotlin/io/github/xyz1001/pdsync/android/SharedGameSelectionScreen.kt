@@ -1,6 +1,7 @@
 package io.github.xyz1001.pdsync.android
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,8 +68,14 @@ fun SharedGameSelectionScreen(state: SharedGameSelectionState, actions: SharedGa
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Surface(Modifier.size(58.dp), color = SharedUiColors.secondary, shape = RoundedCornerShape(14.dp)) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(state.game?.name?.firstOrNull()?.toString() ?: "?", fontSize = 28.sp,
-                                        color = MaterialTheme.colors.primary)
+                                    if (state.game != null && state.game.icon != null) {
+                                        Image(state.game.icon, contentDescription = null,
+                                            modifier = Modifier.size(48.dp).then(measured("game-icon")),
+                                            contentScale = ContentScale.Fit)
+                                    } else {
+                                        Text(state.game?.name?.firstOrNull()?.toString() ?: "?", fontSize = 28.sp,
+                                            modifier = measured("game-icon-fallback"), color = MaterialTheme.colors.primary)
+                                    }
                                 }
                             }
                             Column(Modifier.weight(1f)) {
