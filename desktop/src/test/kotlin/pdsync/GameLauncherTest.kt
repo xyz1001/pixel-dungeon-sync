@@ -15,7 +15,9 @@ class GameLauncherTest {
  @TempDir lateinit var root: Path
  private fun target(path: Path = root.resolve("selected game.jar"), trusted: Boolean = true) =
   TargetGame(path.toString(), "3.3.8", 896, "fixture", trusted, 802, "identified fixture")
- private fun context() = SavePathContext("Linux", root.resolve("home with spaces").toString(), mapOf("XDG_DATA_HOME" to root.resolve("data with spaces").toString()))
+ // Filesystem-backed fixtures must match @TempDir's native path syntax, including Windows drives.
+ private fun context() = SavePathContext(System.getProperty("os.name"), root.resolve("home with spaces").toString(), mapOf("XDG_DATA_HOME" to root.resolve("data with spaces").toString()))
+ private fun javaName() = if (GameProcessPlatform.current() == GameProcessPlatform.WINDOWS) "javaw.exe" else "java"
  private fun defaultRoot(): Path = DefaultProfileLocation(context()).prepareDefaultDirectory()
  private class Child(var alive: Boolean = true, val id: Long = 123) : Process() {
   override fun getOutputStream() = ByteArrayOutputStream()
@@ -31,10 +33,10 @@ class GameLauncherTest {
  private fun launcher(
   state: (TargetGame?) -> GameProcessStatus = { GameProcessStatus.Stopped },
   inspect: (Path) -> TargetGame? = { target(it) },
-  java: () -> Path? = { root.resolve("runtime/bin/java") },
+  java: () -> Path? = { root.resolve("runtime/bin/${javaName()}") },
   start: (GameLaunchPlan) -> Process = { Child() },
   pathContext: SavePathContext = context(),
-  platform: GameProcessPlatform = GameProcessPlatform.LINUX
+  platform: GameProcessPlatform = GameProcessPlatform.current()
  ) = GameLauncher(state, pathContext, platform, inspect, java, start, 0)
 
  @Test fun launchesSelectedJarWithSeparateArgumentsAndMatchingHome() {
@@ -42,7 +44,11 @@ class GameLauncherTest {
   val jar = root.resolve("游戏 folder/name ; $(not-a-command).jar")
   val result = launcher(start = { seen = it; Child() }).launch(jar.toString(), defaultRoot().toString())
   assertIs<GameLaunchResult.Started>(result)
-  assertEquals(listOf(root.resolve("runtime/bin/java").toString(), "-Duser.home=${context().userHome}", "-jar", jar.toString()), seen!!.command)
+  assertEquals(buildList {
+   add(root.resolve("runtime/bin/${javaName()}").toString())
+   if (GameProcessPlatform.current() == GameProcessPlatform.MAC) add("-XstartOnFirstThread")
+   add("-Duser.home=${context().userHome}"); add("-jar"); add(jar.toString())
+  }, seen!!.command)
   assertEquals(jar.parent, seen!!.directory)
  }
  @Test fun defaultSelectionWithoutDirectoryDoesNotCreateOrRewriteSaves() {
@@ -63,7 +69,8 @@ class GameLauncherTest {
   assertContains(assertIs<GameLaunchResult.Failed>(result).message, "存档位置")
  }
  @Test fun invalidXdgNeverFallsBackToAnotherDirectory() {
-  val context = context().copy(environment = mapOf("XDG_DATA_HOME" to "relative"))
+  // This policy check is deliberately Linux-only; do not mix in native Windows temp paths.
+  val context = SavePathContext("Linux", "/fixture-home", mapOf("XDG_DATA_HOME" to "relative"))
   val result = launcher(pathContext = context, start = { fail("must not launch") }).launch(target().path, null)
   assertContains(assertIs<GameLaunchResult.Failed>(result).message, "存档位置")
  }
@@ -171,14 +178,16 @@ class GameLauncherTest {
   assertFalse(plan.command.any { it == "cmd" || it == "start" || it == "-XstartOnFirstThread" })
  }
  @Test fun currentRuntimeJavaWinsOverEnvironmentFallbacks() {
-  val java = root.resolve("runtime/bin/java")
-  assertEquals(java, gameJavaExecutable(root.resolve("runtime").toString(), mapOf("JAVA_HOME" to root.resolve("jdk").toString(), "PATH" to root.resolve("tools").toString()), GameProcessPlatform.LINUX) { true })
+  val java = root.resolve("runtime/bin/${javaName()}")
+  assertEquals(java, gameJavaExecutable(root.resolve("runtime").toString(), mapOf("JAVA_HOME" to root.resolve("jdk").toString(), "PATH" to root.resolve("tools").toString()), GameProcessPlatform.current()) { true })
  }
  @Test fun strippedRuntimeFallsBackToExplicitJavaHomeThenPath() {
-  val jdk = root.resolve("jdk/bin/java"); val path = root.resolve("tools/java")
-  val environment = mapOf("JAVA_HOME" to root.resolve("jdk").toString(), "PATH" to root.resolve("tools").toString())
-  assertEquals(jdk, gameJavaExecutable(root.resolve("stripped").toString(), environment, GameProcessPlatform.LINUX) { it == jdk || it == path })
-  assertEquals(path, gameJavaExecutable(root.resolve("stripped").toString(), environment, GameProcessPlatform.LINUX) { it == path })
+  val platform = GameProcessPlatform.current()
+  val jdk = root.resolve("jdk/bin/${javaName()}"); val path = root.resolve("tools/${javaName()}")
+  val environment = mapOf("JAVA_HOME" to root.resolve("jdk").toString(),
+   "PATH" to listOf(root.resolve("missing-tools"), root.resolve("tools")).joinToString(java.io.File.pathSeparator))
+  assertEquals(jdk, gameJavaExecutable(root.resolve("stripped").toString(), environment, platform) { it == jdk || it == path })
+  assertEquals(path, gameJavaExecutable(root.resolve("stripped").toString(), environment, platform) { it == path })
  }
  @Test fun noRuntimeLauncherNeverFallsBackToSyncExecutableOrWorkingDirectory() {
   val candidates = mutableListOf<Path>()
