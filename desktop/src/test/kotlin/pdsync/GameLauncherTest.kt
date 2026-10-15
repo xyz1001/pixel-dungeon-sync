@@ -212,11 +212,34 @@ class GameLauncherTest {
  @Test fun realJvmEarlyExitIsReportedAndRetryRemainsAvailable() {
   val jar = root.resolve("invalid-launch.jar")
   Files.writeString(jar, "not a runnable jar")
-  val launch = GameLauncher({ GameProcessStatus.Stopped }, context(), GameProcessPlatform.current(),
-   inspect = { target(it) }, startupMillis = 3000)
-  repeat(2) {
-   assertContains(assertIs<GameLaunchResult.Failed>(launch.launch(jar.toString(), null)).message, "已退出")
-   assertEquals(GameProcessStatus.Stopped, launch.status(target(jar)))
+  // javaw can show a blocking error dialog for an invalid JAR on Windows.
+  val consoleJava = assertNotNull(gameJavaExecutable(usable = {
+   Files.isRegularFile(it) && Files.isExecutable(it) && it.fileName.toString() in setOf("java", "java.exe")
+  }))
+  val children = mutableListOf<Process>()
+  try {
+   val launch = GameLauncher({ GameProcessStatus.Stopped }, context(), GameProcessPlatform.current(),
+    inspect = { target(it) }, javaExecutable = { consoleJava }, start = { plan ->
+     val process = ProcessBuilder(plan.command).directory(plan.directory.toFile())
+      .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+     children.add(process)
+     process.outputStream.close()
+     // Establish an exited real child before probing it; host startup speed is not the assertion.
+     // The mock-child tests separately cover both outcomes of the production startup window.
+     assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Invalid-JAR fixture JVM did not exit")
+     assertNotEquals(0, process.exitValue())
+     process
+    }, startupMillis = 0)
+   repeat(2) {
+    assertContains(assertIs<GameLaunchResult.Failed>(launch.launch(jar.toString(), null)).message, "已退出")
+    assertEquals(GameProcessStatus.Stopped, launch.status(target(jar)))
+   }
+   assertEquals(2, children.size)
+  } finally {
+   children.forEach { process ->
+    if (process.isAlive) process.destroyForcibly()
+    assertTrue(process.waitFor(10, TimeUnit.SECONDS), "Fixture JVM must exit before temporary-directory cleanup")
+   }
   }
  }
  @Test fun actualJavaResolverSelectsAnExecutableWithJavaName() {
