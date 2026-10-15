@@ -42,7 +42,14 @@ explicit build inputs. Signing remains outside source control.
 - Existing connection edits preserve their values and permit changing service.
 - Login and registration share the deployed protocol and never silently retry
   registration. Unknown registration outcomes do not create another account.
-- A current successful DAV test is required before Next/Save; edits invalidate it.
+- New or edited drafts require a current successful DAV test before Next/Save;
+  edits and background transitions invalidate that proof. An unchanged connection
+  matching durable endpoint, account, password, profile and provider may use
+  Next/Save directly after reopening. This only starts a fresh DAV verification
+  (and authenticated official entitlement check); persistence and activation still
+  require success. Saved configuration never implies login or reusable DAV proof.
+  Any edit, service change or new attempt consumes this saved re-entry permission;
+  reverting a field cannot revive it. Missing or unreadable saved credentials fail closed.
 - Passwords may be empty for custom WebDAV. Official registration uses its own
   current server rules; existing-account login has its separate rules.
 - Appreciation only displays the server asset, username and expiry. Public image

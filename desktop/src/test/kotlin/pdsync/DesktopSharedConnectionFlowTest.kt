@@ -94,18 +94,26 @@ class DesktopSharedConnectionFlowTest {
   val path = temp.resolve("existing.json"); val file = ConfigFile(path)
   file.save(existing())
   val before = path.readBytes()
-  val setup = page(ConnectionEntryModel.Origin.SETUP, existing(), "fixture-secret", file)
+  var probes = 0
+  val setup = page(ConnectionEntryModel.Origin.SETUP, existing(), "fixture-secret", file) { probes++; null }
   setup.controller.testConnection(); setup.finish()
   assertTrue(setup.controller.state.canContinue)
   setup.close()
-  val settings = page(ConnectionEntryModel.Origin.SETTINGS, assertNotNull(file.load()), "fixture-secret", file)
+  val settings = page(ConnectionEntryModel.Origin.SETTINGS, assertNotNull(file.load()), "fixture-secret", file) { probes++; null }
   assertEquals(ConnectionEntryModel.Mode.CUSTOM, settings.controller.state.mode)
   assertEquals("alice", settings.controller.state.username)
   assertEquals("fixture-secret", settings.controller.state.password)
   assertTrue(settings.controller.state.showChangeService)
-  assertFalse(settings.controller.state.canContinue)
+  // Existing durable credentials permit a fresh verification, not the previous page's proof.
+  assertTrue(settings.controller.state.canContinue)
+  assertEquals(1, probes)
   settings.controller.continueConnection()
-  assertTrue(settings.io.tasks.isEmpty())
+  assertEquals(1, settings.io.tasks.size)
+  assertContentEquals(before, path.readBytes())
+  settings.controller.cancel(); settings.finish()
+  assertEquals(1, probes)
+  assertFalse(settings.controller.state.canContinue)
+  assertTrue(settings.host.committed.isEmpty())
   settings.controller.back()
   assertEquals(listOf(ConnectionEntryModel.Back.SETTINGS), settings.host.back)
   assertContentEquals(before, path.readBytes())
@@ -207,4 +215,65 @@ class DesktopSharedConnectionFlowTest {
   assertFalse(page.controller.state.canContinue)
   page.close()
  }
+ @Test fun committedWizardConnectionCanReturnAndReverifyWithoutSeparateTestClick() {
+  val path = temp.resolve("saved-reentry.json"); val file = ConfigFile(path)
+  var probes = 0
+  val first = page(ConnectionEntryModel.Origin.SETUP, newConnectionConfig(), "", file) { probes++; null }
+  first.controller.choose(ConnectionEntryModel.Mode.CUSTOM)
+  first.controller.editEndpoint("https://custom.invalid/dav/")
+  first.controller.editUsername("alice")
+  first.controller.editPassword("fixture-secret")
+  first.controller.testConnection(); first.finish()
+  first.controller.continueConnection(); first.finish()
+  assertEquals(2, probes)
+  val saved = assertNotNull(file.load())
+  assertEquals("https://custom.invalid/dav", saved.endpoint)
+  first.close()
+  // Hosts can retain the entered slash even though ConfigFile canonicalizes it on disk.
+  val returned = page(ConnectionEntryModel.Origin.SETUP, saved.copy(endpoint = saved.endpoint + "/"),
+   "fixture-secret", file) { probes++; null }
+  assertTrue(returned.controller.state.canContinue)
+  assertEquals(2, probes)
+  returned.controller.continueConnection(); returned.finish()
+  assertEquals(3, probes)
+  assertEquals(1, returned.host.committed.size)
+  assertNotNull(returned.adapter.appliedConnection)
+  returned.close()
+ }
+
+ @Test fun returningToUntestedDurableConnectionCannotSaveWhenFreshDavFails() {
+  val path = temp.resolve("saved-reentry-failure.json"); val file = ConfigFile(path)
+  file.save(existing())
+  val before = path.readBytes()
+  var probes = 0
+  val returned = page(ConnectionEntryModel.Origin.SETUP, existing(), "fixture-secret", file) {
+   probes++; throw java.io.IOException("fixture failure")
+  }
+  assertTrue(returned.controller.state.canContinue)
+  returned.controller.continueConnection(); returned.finish()
+  assertEquals(1, probes)
+  assertFalse(returned.controller.state.canContinue)
+  assertTrue(returned.controller.state.error)
+  assertTrue(returned.host.committed.isEmpty())
+  assertNull(returned.adapter.appliedConnection)
+  assertContentEquals(before, path.readBytes())
+  returned.close()
+ }
+
+ @Test fun successfulUnsavedDraftCannotGrantNextToNewPage() {
+  val path = temp.resolve("unsaved-reentry.json"); val file = ConfigFile(path)
+  val draft = existing()
+  val first = page(ConnectionEntryModel.Origin.SETUP, draft, "fixture-secret", file)
+  first.controller.testConnection(); first.finish()
+  assertTrue(first.controller.state.canContinue)
+  assertFalse(path.exists())
+  first.close()
+  val returned = page(ConnectionEntryModel.Origin.SETUP, draft, "fixture-secret", file)
+  assertFalse(returned.controller.state.canContinue)
+  returned.controller.continueConnection()
+  assertTrue(returned.io.tasks.isEmpty())
+  assertFalse(path.exists())
+  returned.close()
+ }
+
 }

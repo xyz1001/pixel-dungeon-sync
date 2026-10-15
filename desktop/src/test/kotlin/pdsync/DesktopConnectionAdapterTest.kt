@@ -223,4 +223,47 @@ class DesktopConnectionAdapterTest {
   val port = adapter(password = "")
   assertEquals("", assertNotNull(port.initialConnection).password)
  }
+ @Test fun savedCredentialMatchEnablesOnlyRevalidationAndHonorsSlashNormalization() {
+  file.save(original())
+  val port = adapter()
+  val dto = connection(endpoint = "https://custom.invalid/dav/")
+  assertTrue(port.isSavedConnection(dto))
+  assertFailsWith<IllegalStateException> { port.saveAndActivate(dto) }
+  assertNull(port.appliedConnection)
+  port.close()
+  assertFalse(port.isSavedConnection(dto))
+ }
+
+ @Test fun savedCredentialMatchRejectsMissingUnreadableOrChangedCredentials() {
+  assertFalse(adapter().isSavedConnection(connection()))
+  file.save(original().copy(password = null))
+  assertFalse(adapter(password = "").isSavedConnection(connection(password = "")))
+  file.save(original())
+  val port = adapter()
+  listOf(connection(endpoint = "https://different.invalid/dav"), connection(username = "bob"),
+   connection(password = ""), connection().copy(profile = "different-profile"),
+   connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true)).forEach {
+   assertFalse(port.isSavedConnection(it))
+  }
+  path.writeText("broken")
+  assertFalse(port.isSavedConnection(connection()))
+ }
+
+ @Test fun persistedEmptyPasswordRemainsAnExactSavedCredentialValue() {
+  file.save(original().copy(password = ""))
+  assertTrue(adapter(password = "").isSavedConnection(connection(password = "")))
+  assertFalse(adapter(password = "different").isSavedConnection(connection(password = "different")))
+ }
+
+ @Test fun savedOfficialRevalidationKeepsExplicitProviderAndExactRootRules() {
+  file.save(original().copy(endpoint = DESKTOP_OFFICIAL_ROOT, connectionProvider = "official"))
+  val official = adapter(assertNotNull(file.load()))
+  assertTrue(official.isSavedConnection(connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true)))
+  assertFalse(official.isSavedConnection(connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = false)))
+  file.save(original().copy(endpoint = "https://webdav.xyz1001.top:8443/dav/", connectionProvider = "official"))
+  val legacy = adapter(assertNotNull(file.load()))
+  assertFalse(legacy.initialConnection!!.official)
+  assertFalse(legacy.isSavedConnection(legacy.initialConnection!!))
+ }
+
 }

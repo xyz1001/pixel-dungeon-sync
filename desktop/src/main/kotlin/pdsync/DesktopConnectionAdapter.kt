@@ -30,6 +30,20 @@ internal class DesktopConnectionAdapter(
  val profile: String get() = original.profile
  val appliedConnection: AppliedConnection? get() = synchronized(lock) { applied }
 
+ /** A durable match only enables a new verification; it never creates the adapter's DAV proof. */
+ override fun isSavedConnection(config: SharedConnectionConfig): Boolean = synchronized(lock) {
+  if (closed || applied != null) return@synchronized false
+  runCatching {
+   val stored = configFile.load() ?: return@runCatching false
+   val storedPassword = stored.password ?: return@runCatching false
+   // Use ConfigFile's own validation/canonicalization, including its removed trailing slash.
+   val candidate = configurationFor(config).validated()
+   stored.endpoint == candidate.endpoint && stored.username == candidate.username &&
+    stored.profile == candidate.profile && stored.connectionProvider == candidate.connectionProvider &&
+    storedPassword == config.password
+  }.getOrDefault(false)
+ }
+
  /** This is the existing production DAV connect/provision path, never an invented success. */
  override fun testConnection(config: SharedConnectionConfig): Boolean {
   val candidate = synchronized(lock) {

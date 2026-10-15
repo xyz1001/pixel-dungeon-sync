@@ -198,9 +198,22 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertNotIn("safeDrawingPadding", SCREEN)
         self.assertNotIn("imePadding", SCREEN)
 
-    def test_shared_proof_gate_remains_mandatory_before_android_persistence(self):
+    def test_saved_reentry_is_a_durable_match_without_authentication_or_runtime_activation(self):
+        saved = body(ADAPTER, "override fun isSavedConnection(")
+        self.assertIn("candidate.validate()", saved)
+        self.assertIn("candidate.isTemporary", saved)
+        self.assertIn("SecureConnectionStore(app).load()", saved)
+        for field in ("endpoint", "username", "password", "profile", "provider"):
+            self.assertIn("stored." + field + " == candidate." + field, saved)
+        for action in (".save(", "setConnection(", "setOnboardingProgress(", ".connect(", ".login("):
+            self.assertNotIn(action, saved)
+        self.assertIn(".getOrDefault(false)", ADAPTER)
+
+    def test_fresh_verification_remains_mandatory_before_android_persistence(self):
         commit = body(COMMON, "fun continueConnection()")
-        self.assertLess(commit.index("if (!hasProof())"), commit.index("ports.saveAndActivate(candidate)"))
+        self.assertIn("if (hasProof()) proof!!.config else savedDraftForRevalidation()", commit)
+        self.assertLess(commit.index("if (candidate == null)"), commit.index("ports.saveAndActivate(candidate)"))
+        self.assertLess(commit.index("savedReentry = null"), commit.index("verify(candidate, pending)"))
         self.assertLess(commit.index("verify(candidate, pending)"), commit.index("ports.saveAndActivate(candidate)"))
         self.assertLess(commit.index("checkWork(pending)"), commit.index("ports.saveAndActivate(candidate)"))
         verify = body(COMMON, "private fun verify(")

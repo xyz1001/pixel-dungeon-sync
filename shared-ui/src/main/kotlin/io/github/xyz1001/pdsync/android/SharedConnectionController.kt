@@ -30,6 +30,12 @@ data class SharedConnectionConfig(
 
 /** Durable platform services only. Implementations must not retain an Activity or a window. */
 interface SharedConnectionPorts {
+    /**
+     * Read-only durable credential match. This permits an explicit Next to revalidate a saved
+     * connection, never claims authentication and never substitutes for a fresh DAV/entitlement check.
+     * Missing, unreadable or temporary credentials must return false.
+     */
+    fun isSavedConnection(config: SharedConnectionConfig): Boolean = false
     /** Validate and perform the real platform DAV probe; do not save or activate. */
     fun testConnection(config: SharedConnectionConfig): Boolean
     /** Called only after explicit Next/Save and a fresh successful probe. */
@@ -71,6 +77,7 @@ data class SharedConnectionState(
     val canEdit: Boolean,
     val canGoBack: Boolean,
     val canRetestOfficial: Boolean,
+    /** Next may start verification; this is never evidence of an authenticated connection. */
     val canContinue: Boolean,
     val notice: String,
     val error: Boolean,
@@ -135,6 +142,12 @@ class SharedConnectionController internal constructor(
     private var officialUser = existing?.takeIf { isOfficial(it) }?.username ?: ""
     private var officialPassword = existing?.takeIf { isOfficial(it) }?.password ?: ""
     private var saved = existing?.copy(profile = profile)
+    // A saved draft may enter verification directly on re-entry. It is not a DAV proof, is
+    // never populated by testing, and is consumed by any edit or explicit connection attempt.
+    private var savedReentry = saved?.takeIf { candidate ->
+        candidate.endpoint.isNotBlank() && (!candidate.official || isOfficial(candidate)) &&
+            runCatching { ports.isSavedConnection(candidate) }.getOrDefault(false)
+    }
     private var verifiedOfficial: SharedConnectionConfig? = null
     private var host: SharedConnectionHost? = null
     private val alive = AtomicBoolean(true)
@@ -218,6 +231,7 @@ class SharedConnectionController internal constructor(
         officialPassword = ""
         verifiedOfficial = null
         saved = null
+        savedReentry = null
         pendingCommit = null
         publish()
     }
@@ -316,6 +330,7 @@ class SharedConnectionController internal constructor(
     private fun authenticate(register: Boolean) {
         if (!canStart() || entry.mode() != ConnectionEntryModel.Mode.OFFICIAL) return
         closeAppreciation()
+        savedReentry = null
         proof = null
         verifiedOfficial = null
         val requested = draft()
@@ -361,6 +376,7 @@ class SharedConnectionController internal constructor(
             publish()
             return
         }
+        savedReentry = null
         proof = null
         val pending = Operation(generation.get(), lifetime.get(), candidate, editableDavTest = !candidate.official)
         operation = pending
@@ -376,14 +392,15 @@ class SharedConnectionController internal constructor(
 
     fun continueConnection() {
         if (!canStart()) return
-        if (!hasProof()) {
+        val candidate = if (hasProof()) proof!!.config else savedDraftForRevalidation()
+        if (candidate == null) {
             proof = null
             notice = "请先测试当前连接。"
             error = true
             publish()
             return
         }
-        val candidate = proof!!.config
+        savedReentry = null
         proof = null
         val pending = Operation(generation.get(), lifetime.get(), candidate, commit = true)
         operation = pending
@@ -630,6 +647,9 @@ class SharedConnectionController internal constructor(
             current.generation == generation.get() && current.lifetime == lifetime.get() && current.config == draft() &&
             current.entitlement?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) != true
     }
+    private fun savedDraftForRevalidation(): SharedConnectionConfig? = savedReentry?.takeIf {
+        canStart() && appreciationFlow == null && entry.mode() != ConnectionEntryModel.Mode.CHOICE && it == draft()
+    }
     private fun draft() = if (entry.mode() == ConnectionEntryModel.Mode.OFFICIAL)
         SharedConnectionConfig(TrustedEntitlementCache.OFFICIAL_ENDPOINT, officialUser, officialPassword, profile, true)
     else custom
@@ -639,6 +659,7 @@ class SharedConnectionController internal constructor(
             ?: saved?.takeIf { isOfficial(it) && it == current }
     }
     private fun invalidateSource() {
+        savedReentry = null
         generation.incrementAndGet()
         operation = null
         proof = null
@@ -671,7 +692,7 @@ class SharedConnectionController internal constructor(
             operation != null, operation != null && operation?.commitStarted != true,
             canEditDraft(), appreciation != null || canEditDraft(),
             entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && officialAccountForDraft() != null,
-            hasProof(), notice, error,
+            hasProof() || savedDraftForRevalidation() != null, notice, error,
             saved != null || origin == ConnectionEntryModel.Origin.SETTINGS,
             if (cached?.expired(ports.elapsedRealtimeMs(), ports.bootCount()) == true) "赞赏续期" else "赞赏",
             entry.mode() == ConnectionEntryModel.Mode.OFFICIAL && validUsername(officialUser), appreciation,

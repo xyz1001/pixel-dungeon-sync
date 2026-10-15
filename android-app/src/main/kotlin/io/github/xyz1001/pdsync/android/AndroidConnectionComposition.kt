@@ -79,6 +79,18 @@ object AndroidConnectionComposition {
 internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts {
     private val app = context.applicationContext
 
+    /** Durable credential equality is only permission to start fresh verification on Next. */
+    override fun isSavedConnection(config: SharedConnectionConfig): Boolean = runCatching {
+        val candidate = AndroidConnectionComposition.toStored(config)
+        candidate.validate()
+        if (candidate.isTemporary) return@runCatching false
+        val stored = SecureConnectionStore(app).load() ?: return@runCatching false
+        // Keep the store's existing official-root migration and provider rules authoritative.
+        stored.endpoint == candidate.endpoint && stored.username == candidate.username &&
+            stored.password == candidate.password && stored.profile == candidate.profile &&
+            stored.provider == candidate.provider
+    }.getOrDefault(false)
+
     override fun testConnection(config: SharedConnectionConfig): Boolean = diagnostic(DiagnosticStage.CONNECTION) {
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)

@@ -26,6 +26,7 @@ class SharedConnectionControllerTest {
         fun drain() { while (pending.isNotEmpty()) pending.removeFirst().run() }
     }
     private class Ports : SharedConnectionPorts {
+        var savedConnection: SharedConnectionConfig? = null
         var probes = 0
         var saves = 0
         var elapsed = 0L
@@ -35,12 +36,15 @@ class SharedConnectionControllerTest {
         var copyFailure = false
         var onProbe: (() -> Unit)? = null
         var onSave: (() -> Unit)? = null
+        override fun isSavedConnection(config: SharedConnectionConfig) = config == savedConnection
         override fun testConnection(config: SharedConnectionConfig): Boolean {
             probes++
             onProbe?.invoke()
             return probeResult
         }
-        override fun saveAndActivate(config: SharedConnectionConfig) { onSave?.invoke(); saves++; last = config }
+        override fun saveAndActivate(config: SharedConnectionConfig) {
+            onSave?.invoke(); saves++; last = config; savedConnection = config
+        }
         override fun cacheDirectory() = null
         override fun elapsedRealtimeMs() = elapsed
         override fun bootCount() = 1
@@ -101,10 +105,11 @@ class SharedConnectionControllerTest {
         }
     }
     private class Fixture(existing: SharedConnectionConfig? = null,
-                          origin: ConnectionEntryModel.Origin = ConnectionEntryModel.Origin.SETUP) {
+                          origin: ConnectionEntryModel.Origin = ConnectionEntryModel.Origin.SETUP,
+                          persisted: SharedConnectionConfig? = null) {
         val io = Queue()
         val ui = Queue()
-        val ports = Ports()
+        val ports = Ports().apply { savedConnection = persisted }
         val clients = Clients()
         val host = Host()
         val controller = SharedConnectionController(origin, existing, "slot", ports, io, ui, clients)
@@ -661,6 +666,145 @@ class SharedConnectionControllerTest {
         val changed = Fixture(saved, ConnectionEntryModel.Origin.SETUP)
         changed.controller.showChooser(); changed.controller.back()
         assertEquals(listOf(ConnectionEntryModel.Back.PATH), changed.host.backs)
+    }
+
+    @Test fun savedUnchangedConnectionReentersThroughFreshVerificationOnly() {
+        val first = Fixture(); first.custom()
+        first.controller.testConnection(); first.finish()
+        first.controller.continueConnection(); first.finish()
+        val saved = first.ports.last!!
+        first.controller.close()
+        val returned = Fixture(saved, persisted = saved)
+        assertTrue(returned.controller.state.canContinue)
+        assertEquals("", returned.controller.state.notice)
+        assertEquals(0, returned.ports.probes)
+        assertEquals(0, returned.ports.saves)
+        returned.controller.continueConnection(); returned.controller.continueConnection()
+        assertFalse(returned.controller.state.canContinue)
+        returned.finish()
+        assertEquals(1, returned.ports.probes)
+        assertEquals(1, returned.ports.saves)
+        assertEquals(listOf(saved), returned.host.commits)
+    }
+
+    @Test fun unsavedTestCannotEnableRecreatedController() {
+        val first = Fixture(); first.custom()
+        first.controller.testConnection(); first.finish()
+        val draft = SharedConnectionConfig(first.controller.state.endpoint, first.controller.state.username,
+            first.controller.state.password, "slot", false)
+        first.controller.close()
+        val returned = Fixture(draft)
+        assertFalse(returned.controller.state.canContinue)
+        returned.controller.continueConnection(); returned.finish()
+        assertEquals(0, returned.ports.probes)
+        assertEquals(0, returned.ports.saves)
+    }
+
+    @Test fun savedCredentialMismatchNeverEnablesDirectRevalidation() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val changes = listOf(saved.copy(endpoint = "https://different.example.test/"),
+            saved.copy(username = "another"), saved.copy(password = ""), saved.copy(official = true))
+        changes.forEach { changed ->
+            val f = Fixture(changed, persisted = saved)
+            assertFalse(f.controller.state.canContinue)
+            f.controller.continueConnection(); f.finish()
+            assertEquals(0, f.ports.probes)
+            assertEquals(0, f.ports.saves)
+        }
+        val differentProfile = Fixture(saved, persisted = saved.copy(profile = "other-slot"))
+        assertFalse(differentProfile.controller.state.canContinue)
+    }
+
+    @Test fun editingThenRestoringSavedPasswordCannotRestoreReentryPermission() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val f = Fixture(saved, persisted = saved)
+        assertTrue(f.controller.state.canContinue)
+        f.controller.editPassword("changed")
+        f.controller.editPassword(saved.password)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        f.controller.testConnection(); f.finish()
+        assertTrue(f.controller.state.canContinue)
+    }
+
+    @Test fun switchingSavedAccountOrServiceConsumesReentryPermission() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val f = Fixture(saved, persisted = saved)
+        f.controller.editUsername("another")
+        assertEquals("", f.controller.state.password)
+        f.controller.editUsername(saved.username); f.controller.editPassword(saved.password)
+        assertFalse(f.controller.state.canContinue)
+        val switched = Fixture(saved, persisted = saved)
+        switched.controller.showChooser(); switched.controller.choose(ConnectionEntryModel.Mode.CUSTOM)
+        assertEquals(saved.username, switched.controller.state.username)
+        assertFalse(switched.controller.state.canContinue)
+    }
+
+    @Test fun savedReentryFailureDoesNotWriteOrLeaveAReusablePermission() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val f = Fixture(saved, persisted = saved); f.ports.probeResult = false
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertEquals(saved, f.ports.savedConnection)
+        assertFalse(f.controller.state.canContinue)
+        assertTrue(f.controller.state.error)
+        assertTrue(f.host.commits.isEmpty())
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.ports.probes)
+    }
+
+    @Test fun savedReentrySurvivesIdleBackgroundButNeverRevivesInterruptedVerification() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val f = Fixture(saved, persisted = saved)
+        f.controller.foreground(false)
+        assertFalse(f.controller.state.canContinue)
+        f.controller.foreground(true)
+        assertTrue(f.controller.state.canContinue)
+        assertEquals(0, f.ports.probes)
+        f.ports.onProbe = { f.controller.foreground(false) }
+        f.controller.continueConnection(); f.finish()
+        f.controller.foreground(true)
+        assertFalse(f.controller.state.canContinue)
+        assertEquals(1, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertTrue(f.host.commits.isEmpty())
+    }
+
+    @Test fun savedReentryCancelledBeforeDispatchCannotWrite() {
+        val saved = SharedConnectionConfig("https://dav.example.test/", "saved", "secret", "slot", false)
+        val f = Fixture(saved, persisted = saved)
+        f.controller.continueConnection(); f.controller.cancel(); f.finish()
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertFalse(f.controller.state.canContinue)
+    }
+
+    @Test fun savedOfficialReentryRequiresFreshEntitlementAndDavWithoutClaimingLogin() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, persisted = saved)
+        assertTrue(f.controller.state.canContinue)
+        assertEquals("", f.controller.state.notice)
+        assertEquals(0, f.clients.authCalls)
+        assertEquals(0, f.clients.entitlementCalls)
+        f.controller.continueConnection(); f.finish()
+        assertEquals(0, f.clients.authCalls)
+        assertEquals(1, f.clients.entitlementCalls)
+        assertEquals(1, f.ports.probes)
+        assertEquals(1, f.ports.saves)
+    }
+
+    @Test fun inactiveSavedOfficialAccountCannotReachDavOrPersistenceOnReentry() {
+        val saved = SharedConnectionConfig(ManagedAccountClient.DAV_URL, "alice", "secret-password", "slot", true)
+        val f = Fixture(saved, persisted = saved); f.clients.active = false
+        f.controller.continueConnection(); f.finish()
+        assertEquals(1, f.clients.entitlementCalls)
+        assertEquals(0, f.ports.probes)
+        assertEquals(0, f.ports.saves)
+        assertFalse(f.controller.state.canContinue)
+        assertTrue(f.host.commits.isEmpty())
     }
 
 }
