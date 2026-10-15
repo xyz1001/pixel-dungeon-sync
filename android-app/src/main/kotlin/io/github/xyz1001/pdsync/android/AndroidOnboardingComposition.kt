@@ -15,6 +15,15 @@ import pdsync.presentation.HistoryPresentation
 
 /** Thin Android host. Path resolution, read/proof checks and operations stay in MainActivity. */
 object AndroidOnboardingComposition {
+    @JvmStatic
+    fun showGameSelection(activity: ComponentActivity, state: SharedGameSelectionState, actions: SharedGameSelectionActions) {
+        activity.setContent {
+            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                SharedGameSelectionScreen(state, actions)
+            }
+        }
+    }
+
     /** The host supplies a snapshot and real callbacks; recomposition never reads platform state. */
     @JvmStatic
     fun showSettings(activity: ComponentActivity, state: SharedSettingsState, actions: SharedSettingsActions) {

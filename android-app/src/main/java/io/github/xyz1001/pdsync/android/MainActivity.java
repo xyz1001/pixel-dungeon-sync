@@ -124,6 +124,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private final PathPreviewState pathPreviewState = new PathPreviewState();
     private boolean pathPreviewPosted;
     private int sharedPathRenderToken;
+    private int sharedGameRenderToken;
+    private boolean gameFilePickerOpen;
     private final ComparisonProofState comparisonProofState = new ComparisonProofState();
     private ComparisonProofState.Ticket activeSharedComparisonClaim;
     private int sharedComparisonRenderToken;
@@ -1104,6 +1106,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         closeSharedConnection();
+        if (this.page == SyncPage.DISCOVERY) {
+            renderDiscovery();
+            return;
+        }
         if (this.page == SyncPage.PATH) {
             renderSharedSavePath();
             return;
@@ -1161,8 +1167,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             case 2:
                 throw new IllegalStateException("Settings is hosted by the shared Compose screen");
             case 3:
-                renderDiscovery();
-                break;
+                throw new IllegalStateException("Game selection is hosted by the shared Compose screen");
             case 4:
                 throw new IllegalStateException("Save path is hosted by the shared Compose screen");
             case 5:
@@ -1469,142 +1474,111 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
     }
 
-    private void renderRootDiscovery() {
-        heading("1 / 4  选择游戏 · Root");
-        text(selectedGameLabel() + "\n" + this.rootGame.gamePackage);
-        text(this.readinessState.installationDescription());
-        text(this.readinessState.accessDescription());
-        text("直接访问现有安装，不准备、重签名、安装或卸载游戏。选择 Root 模式后，检查、同步、恢复及已开启的退出监听可向 Root 管理器请求所选游戏的访问权限；是否保留授权由 Root 管理器决定。选择本身不代表访问成功。");
-        if (!restoreSupported()) text("当前后端不支持恢复与合并写入；读取和上传仍需实际访问检查。");
-        if (!backupRecoverySupported()) text("当前后端不支持中断事务恢复。");
-        text(automaticObservationSupported()
-                ? "完成存档比较并开启自动上传后，从本应用启动游戏可进行退出监听；只有可靠的空闲状态与稳定存档才会尝试无冲突上传。"
-                : "当前后端不支持退出监听，请手动检查和上传。");
-        button("检查 Root 存档访问", this::requestRootAuthorization)
-                .setEnabled(!this.installer.hasActiveRequest());
-        button("启动所选游戏", this::launchSelectedRootGame)
-                .setEnabled(this.readinessState.identityVerified && !this.installer.hasActiveRequest() && !restoreNeedsAttention());
-        button("更换 Root 游戏…", this::chooseRootInstalled)
-                .setEnabled(!this.installer.hasActiveRequest() && !restoreNeedsAttention());
-        button("切换为内置存档桥", this::switchToEmbedded)
-                .setEnabled(!this.installer.hasActiveRequest() && !restoreNeedsAttention());
-        if (restoreNeedsAttention()) {
-            text("有未完成恢复，不能切换游戏或访问方式。请先核对恢复记录。");
-            button("查看恢复记录", () -> navigate(SyncPage.SETTINGS));
-        }
-        foot("下一步", this::m103x3c55a874).setEnabled(canRequestSaveAccess());
+    /** Step 1 uses the same Compose identity card, controls and fixed footer on both platforms. */
+    private void renderDiscovery() {
+        final int renderToken = ++this.sharedGameRenderToken;
+        this.root = null;
+        this.body = null;
+        this.footer = null;
+        this.scroll = null;
+        this.status = null;
+        this.renderedPage = this.page;
+        AndroidOnboardingComposition.showGameSelection(this, gameSelectionState(), new SharedGameSelectionActions() {
+            @Override public void perform(SharedGameSelectionControl control) {
+                if (!isCurrentGameAction(renderToken) || !gameSelectionState().actionEnabled(control)) return;
+                switch (control) {
+                    case CHOOSE_INSTALLED: chooseInstalled(); break;
+                    case CHOOSE_FILE: pickApks(); break;
+                    case CHOOSE_ROOT: chooseRootInstalled(); break;
+                    case SWITCH_TO_EMBEDDED: switchToEmbedded(); break;
+                    case CHECK_ACCESS: requestRootAuthorization(); break;
+                    case LAUNCH_GAME: launchSelectedRootGame(); break;
+                    case ACTIVATE_BRIDGE: activateHelper(); break;
+                    case INITIALIZE_GAME: launchGameForInitialization(); break;
+                    case OPEN_RECOVERY: navigate(SyncPage.SETTINGS); break;
+                    case CONTINUE_INSTALLATION: continueInstallation(); break;
+                    case OPEN_SYSTEM_CONFIRMATION: openInstallConfirmation(); break;
+                    case CANCEL_INSTALLATION: m96x62f97958(); break;
+                    case CHECK_EXPIRED_REQUEST: m100xdbe735b1(); break;
+                    case CLEAN_LEGACY_REQUEST: confirmObsoleteLegacyCleanup(); break;
+                    case OPEN_INSTALL_SETTINGS: m102xc6db8233(); break;
+                    case RESCAN: refreshReadiness(); break;
+                    case COPY_DIAGNOSTICS: copyDiagnostic(); break;
+                }
+            }
+            @Override public void chooseCandidate(String id) { /* Android uses its filtered installed-app dialog. */ }
+            @Override public void next() {
+                if (isCurrentGameAction(renderToken) && gameSelectionState().getNextEnabled()) m103x3c55a874();
+            }
+        });
     }
 
-    private void renderDiscovery() {
-        if (this.rootGame != null) { renderRootDiscovery(); return; }
-        InstallationReadiness installationReadinessWithSystemRequest = this.readinessState.withSystemRequest(this.installer.hasActiveRequest());
-        heading("1 / 4  选择游戏");
-        button("可选：使用 Root 访问已安装游戏", this::chooseRootInstalled)
-                .setEnabled(!this.installer.hasActiveRequest() && !this.readinessState.restorePending);
-        text(installationReadinessWithSystemRequest.installationDescription());
-        if (this.prepared != null) {
-            text(installationReadinessWithSystemRequest.accessDescription());
-        }
-        if (this.prepared != null && this.prepared.embeddedBridge()
-                && HelperActivationPolicy.canOffer(installationReadinessWithSystemRequest, this.bridgeAccessCode, false)) {
-            text("内置存档桥暂未连接。可打开游戏中的存档桥页面，再返回这里重新核验。");
-            button("启用游戏内置存档桥", this::activateHelper);
-        }
-        if (installationReadinessWithSystemRequest.canInitializeGame()) {
-            button("启动游戏一次", this::launchGameForInitialization);
-        }
-        if (installationReadinessWithSystemRequest.restorePending || installationReadinessWithSystemRequest.access == InstallationReadiness.AccessStatus.RECOVERY_NEEDED) {
-            button("检查恢复记录", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda65
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m91x1796ba13();
-                }
-            });
-        }
-        text("选择已安装游戏，或选择完整的一组 APK。应用会核对包身份、版本、分包与签名，追加存档桥 DEX 与必要清单并在本机签名。原游戏 DEX 和资源逐项保留；只安装这一组游戏 APK。");
-        button("从已安装应用中选择", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda66
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.chooseInstalled();
+    private boolean isCurrentGameAction(int renderToken) {
+        return renderToken == this.sharedGameRenderToken && this.resumed && !isDestroyed()
+                && this.page == SyncPage.DISCOVERY && !this.sharedAppreciationOnly && !this.busy && !this.gameFilePickerOpen;
+    }
+
+    /** Describes capabilities only. APK preparation, Root probes and destructive confirmations remain in their original adapters. */
+    private SharedGameSelectionState gameSelectionState() {
+        InstallationReadiness ready = this.readinessState.withSystemRequest(this.installer.hasActiveRequest());
+        List<SharedGameSelectionRow> rows = new ArrayList<>();
+        boolean activeRequest = this.installer.hasActiveRequest();
+        boolean recovery = restoreNeedsAttention();
+        String warning = recovery ? "有未完成恢复，请先检查恢复记录。" : "";
+        String extra = ready.installationDescription() + "\n" + ready.accessDescription();
+        String location = selectedGamePackage();
+        if (this.rootGame != null) {
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHECK_ACCESS, "检查 Root 存档访问", !activeRequest));
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.LAUNCH_GAME, "启动所选游戏", ready.identityVerified && !activeRequest && !recovery));
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_ROOT, "更换 Root 游戏…", !activeRequest && !recovery));
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.SWITCH_TO_EMBEDDED, "切换为内置存档桥", !activeRequest && !recovery));
+            if (recovery) rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.OPEN_RECOVERY, "查看恢复记录", true));
+            extra += "\nRoot 检查、同步与恢复会请求所选游戏的访问权限，是否保留授权由 Root 管理器决定。";
+            if (!restoreSupported()) extra += "\n当前访问方式不支持恢复与合并写入。";
+            if (!backupRecoverySupported()) extra += "\n当前访问方式不支持中断事务恢复。";
+            if (!automaticObservationSupported()) extra += "\n当前访问方式不支持退出监听，请手动检查和上传。";
+        } else {
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_INSTALLED, "从已安装应用中选择", !activeRequest && !recovery));
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, this.prepared == null ? "选择 APK…" : "更换 APK…", !activeRequest && !recovery));
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_ROOT, "使用 Root 选择游戏…", !activeRequest && !recovery));
+            if (this.prepared != null && this.prepared.embeddedBridge()
+                    && HelperActivationPolicy.canOffer(ready, this.bridgeAccessCode, false))
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.ACTIVATE_BRIDGE, "启用游戏内置存档桥", true));
+            if (ready.canInitializeGame()) rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.INITIALIZE_GAME, "启动游戏一次", true));
+            if (recovery) rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.OPEN_RECOVERY, "检查恢复记录", true));
+            if (this.prepared != null) {
+                extra += "\n" + pairSummary(this.prepared);
+                if (activeRequest || ready.canContinueInstallation()) extra += "\n系统安装／卸载记录：\n" + this.installer.summary();
+                if (ready.canContinueInstallation()) rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CONTINUE_INSTALLATION, "检查并继续安装", true));
+                if (!this.prepared.embeddedBridge()) warning = "旧版准备记录仅供恢复核对。处理未完成恢复后，请从原始 APK 重新准备游戏。";
             }
-        });
-        if (this.prepared != null && !this.prepared.embeddedBridge()) {
-            text("检测到旧版共享 UID 准备记录。它仅保留供恢复核对。请先处理未完成恢复，再从原始 APK 重新准备游戏；不再安装或升级独立助手。");
-        }
-        button(this.prepared == null ? "选择游戏…" : "更换游戏…", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda68
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.pickApks();
+            boolean obsolete = this.installer.hasObsoleteLegacyRequest(this.prepared);
+            if (obsolete) {
+                warning = "请先在 Android 系统界面取消并关闭旧版安装／卸载请求，再核对清理。";
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CLEAN_LEGACY_REQUEST, "核对并清理旧版请求", true));
             }
-        });
-        GamePreparationService.PreparedPair preparedPair4 = this.prepared;
-        if (preparedPair4 != null) {
-            text(pairSummary(this.prepared));
-            if (this.installer.hasActiveRequest() || installationReadinessWithSystemRequest.canContinueInstallation()) {
-                text("上次系统安装／卸载记录（单次请求）：\n" + this.installer.summary());
+            if (this.installer.hasConfirmation() && !obsolete)
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.OPEN_SYSTEM_CONFIRMATION, "继续系统安装／卸载确认", true));
+            if (activeRequest && !obsolete) {
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CANCEL_INSTALLATION, "取消待处理安装", true));
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.CHECK_EXPIRED_REQUEST, "检查失效系统请求", true));
             }
-            if (installationReadinessWithSystemRequest.canContinueInstallation()) {
-                button("检查并继续安装", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda69
-                    @Override // java.lang.Runnable
-                    public final void run() {
-                        MainActivity.this.continueInstallation();
-                    }
-                });
-            }
+            if (ready.canContinueInstallation() && !getPackageManager().canRequestPackageInstalls())
+                rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.OPEN_INSTALL_SETTINGS, "打开系统安装设置", true));
+            if (ready.requiresGameUninstall()) warning = "替换前必须卸载原游戏，会永久删除全部本地存档和战绩。APK 备份不能恢复存档。卸载和安装仍需在 Android 系统界面分别确认。";
+            rows.add(new SharedGameSelectionRow(SharedGameSelectionControl.RESCAN, "重新检查状态", true));
+            extra += "\n选择完整的一组 APK；原游戏代码和资源逐项保留。签名私钥仅保留在本机 Android Keystore，卸载主程序或清除数据会失去密钥，之后可能必须再次卸载游戏。WebDAV 不备份密钥。";
         }
-        boolean obsoleteLegacyRequest = this.installer.hasObsoleteLegacyRequest(this.prepared);
-        if (obsoleteLegacyRequest) {
-            text("旧版安装／卸载请求不会继续。请先在 Android 原系统界面中点击取消并关闭；返回后可核对并清理旧请求。");
-            button("核对并清理旧版请求", this::confirmObsoleteLegacyCleanup);
+        String message = visibleNotice();
+        if (!this.busy && !this.feedbackError && message.length() > 64) {
+            extra += "\n" + message;
+            message = !canRequestSaveAccess() && this.prepared != null ? ready.accessDescription() : "";
         }
-        if (this.installer.hasConfirmation() && !obsoleteLegacyRequest) {
-            button("继续系统安装／卸载确认", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda70
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.openInstallConfirmation();
-                }
-            });
-        }
-        if (this.installer.hasActiveRequest() && !obsoleteLegacyRequest) {
-            button("取消待处理安装", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda71
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m96x62f97958();
-                }
-            });
-            button("检查失效系统请求", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda59
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m100xdbe735b1();
-                }
-            });
-        }
-        if (installationReadinessWithSystemRequest.canContinueInstallation() && !getPackageManager().canRequestPackageInstalls()) {
-            button("允许本应用请求安装 · 打开系统设置", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda60
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m102xc6db8233();
-                }
-            });
-        }
-        if (installationReadinessWithSystemRequest.requiresGameUninstall()) {
-            text("本次替换必须先卸载原游戏。卸载会不可逆地永久删除全部本地存档和战绩。\n\nAPK 备份不是存档备份，不能恢复已删除的存档。卸载前取消会保留原版；卸载后中断只能保留已准备好的安装包，不能找回存档。\n\n卸载和安装都仍需在 Android 系统界面单独确认。");
-        }
-        text("本机签名私钥仅保留在主程序的 Android Keystore 中，不上传、不交给游戏。清除数据或卸载主程序会失去密钥，之后可能必须再次卸载游戏。WebDAV 不备份密钥。");
-        LinearLayout linearLayoutRow = row();
-        this.footer.addView(linearLayoutRow);
-        addButton(linearLayoutRow, "重新检查状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda61
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.refreshReadiness();
-            }
-        }, true);
-        addButton(linearLayoutRow, "下一步", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda62
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m103x3c55a874();
-            }
-        }, true).setEnabled(installationReadinessWithSystemRequest.canContinue());
+        if (!this.details.isEmpty()) extra += "\n" + this.details;
+        SharedGameIdentity game = selectedGameIdentity();
+        return new SharedGameSelectionState(game, location, game == null ? "" : this.rootGame != null ? "Root" : ready.canContinue() ? "已就绪" : "已选择",
+                location == null ? "" : location, rows, Collections.emptyList(), this.resumed && this.page == SyncPage.DISCOVERY && !this.sharedAppreciationOnly,
+                this.busy || this.gameFilePickerOpen, canRequestSaveAccess(), message, this.feedbackError, warning, extra, !this.diagnosticReport.isEmpty());
     }
 
     /* renamed from: lambda$renderDiscovery$14$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -1714,6 +1688,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: lambda$renderDiscovery$26$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m103x3c55a874() {
+        if (this.busy || this.gameFilePickerOpen || !this.resumed || isDestroyed() || this.page != SyncPage.DISCOVERY) return;
         if (canRequestSaveAccess()) {
             this.onboardingActive = true;
             navigate(SyncPage.PATH);
@@ -1723,6 +1698,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void pickApks() {
+        if (this.busy || this.gameFilePickerOpen || isDestroyed()) return;
         if (this.rootGame != null) { this.notice = "Root 模式不准备或安装游戏；请先明确切换为内置存档桥。"; render(); return; }
         if (this.installer.hasActiveRequest()) {
             this.notice = "请先完成或取消当前系统安装。";
@@ -1733,8 +1709,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         type.putExtra("android.intent.extra.ALLOW_MULTIPLE", true);
         type.addFlags(1);
         try {
-            startActivityForResult(type, 8101);
+            this.gameFilePickerOpen = true;
+            render();
+            startActivityForResult(type, PICK_APK);
         } catch (ActivityNotFoundException unused) {
+            this.gameFilePickerOpen = false;
             this.notice = "设备没有可用的系统文件选择器。";
             render();
         }
@@ -4781,6 +4760,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.cloudVerified = false;
             this.notice = i2 == -1 ? "游戏内置存档桥页面已返回，正在重新核验连接与存档访问。" : "游戏内置存档桥页面已关闭，正在重新检查；尚不能确认存档访问就绪。";
             requestReadinessRefresh();
+            return;
+        }
+        if (i == PICK_APK) this.gameFilePickerOpen = false;
+        if (i == PICK_APK && (i2 != RESULT_OK || intent == null)) {
+            render(); // Cancel keeps the current prepared game and Root selection unchanged.
             return;
         }
         if (i == 8101 && i2 == -1 && intent != null) {

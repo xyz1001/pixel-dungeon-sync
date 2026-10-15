@@ -36,10 +36,12 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('SyncRuntime.probeRootAuthorization(this)', check)
         self.assertIn('AccessStatus.RECOVERY_NEEDED', check)
         self.assertLess(check.index('inspectReady()'), check.index('AccessStatus.READY'))
-        discovery = body(MAIN, 'private void renderRootDiscovery()')
-        check_button = discovery.split('button("检查 Root 存档访问"', 1)[1].split(';', 1)[0]
+        discovery = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
+        check_button = discovery.split('SharedGameSelectionControl.CHECK_ACCESS', 1)[1].split(';', 1)[0]
         self.assertNotIn('restorePending', check_button)
-        self.assertIn('!this.installer.hasActiveRequest()', check_button)
+        self.assertNotIn('!recovery', check_button)
+        self.assertIn('!activeRequest', check_button)
+        self.assertIn('boolean activeRequest = this.installer.hasActiveRequest()', discovery)
 
     def test_restart_allows_deliberate_operations_without_claiming_ready(self):
         requestable = body(MAIN, 'private boolean canRequestSaveAccess()')
@@ -54,7 +56,7 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('if (this.rootGame != null) checkRootAccess()', explicit_compare)
 
     def test_root_rendering_does_not_start_io(self):
-        for signature in ('private void renderRootDiscovery()', 'private void renderHome()', 'private void renderSettings()'):
+        for signature in ('private SharedGameSelectionState gameSelectionState()', 'private void renderHome()', 'private void renderSettings()'):
             rendering = body(MAIN, signature)
             for operation in ('.inspectReady(', '.exportTo(', '.observeLifecycle(', 'probeRootAuthorization('):
                 self.assertNotIn(operation, rendering)

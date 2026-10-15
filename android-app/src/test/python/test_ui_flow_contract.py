@@ -14,6 +14,7 @@ MAIN = (ROOT / "MainActivity.java").read_text()
 STORE = (ROOT / "SecureConnectionStore.java").read_text()
 CONNECTION_FILE = (ROOT / "WebDavConnectionFile.java").read_text()
 SHARED = Path(__file__).resolve().parents[4] / "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android"
+GAME_SCREEN = (SHARED / "SharedGameSelectionScreen.kt").read_text()
 PATH_SCREEN = (SHARED / "SharedSavePathScreen.kt").read_text()
 PATH_STATE = (SHARED / "SharedSavePathState.kt").read_text()
 COMPARISON = (SHARED / "SharedComparisonScreen.kt").read_text()
@@ -23,10 +24,8 @@ ADAPTER = (Path(__file__).resolve().parents[4] / "android-app/src/main/kotlin/io
 
 class AndroidUiFlowContract(unittest.TestCase):
     def test_four_steps_keep_existing_forward_and_back_navigation(self):
-        for method, title in (
-            ("renderDiscovery", "1 / 4  选择游戏"),
-        ):
-            self.assertIn(title, body(MAIN, "private void " + method + "()"))
+        self.assertIn('title = "选择游戏", eyebrow = "1 / 4"', GAME_SCREEN)
+        self.assertIn('showGameSelection(this, gameSelectionState()', body(MAIN, "private void renderDiscovery()"))
         self.assertIn('title = "设置存档路径", eyebrow = "2 / 4"', PATH_SCREEN)
         self.assertIn('title = "选择存档", eyebrow = "4 / 4"', COMPARISON)
         self.assertIn("navigate(SyncPage.PATH)", body(MAIN, "void m103x3c55a874("))

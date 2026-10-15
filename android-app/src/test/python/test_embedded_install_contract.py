@@ -26,9 +26,11 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         self.assertIn('getAssets().open("bridge-runtime.dex")', MAIN)
         for removed in ('helper-unsigned.apk', 'prepareHelperUpdate(', 'this.prepared.helperApk', 'this.prepared.helperPackage'):
             self.assertNotIn(removed, MAIN)
-        discovery = body(MAIN, 'private void renderDiscovery()')
-        self.assertIn('追加存档桥 DEX', discovery)
-        self.assertIn('原游戏 DEX 和资源逐项保留', discovery)
+        discovery = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
+        prepare = body(MAIN, 'GamePreparationService.PreparedPair m58lambda$prepare$33')
+        self.assertIn('getAssets().open("bridge-runtime.dex")', prepare)
+        self.assertIn('prepareSelectedApks(list, z, runtimeDex)', prepare)
+        self.assertIn('原游戏代码和资源逐项保留', discovery)
         self.assertNotIn('只修改共享 UID', discovery)
         self.assertNotIn('更新存档助手', discovery)
 
@@ -140,8 +142,8 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         ui = body(MAIN, 'private void confirmObsoleteLegacyCleanup()')
         self.assertIn('先在 Android 旧安装／卸载对话框点击取消并关闭', ui)
         self.assertIn('cancelObsoleteLegacyRequest(true)', ui)
-        discovery = body(MAIN, 'private void renderDiscovery()')
-        self.assertIn('this.installer.hasConfirmation() && !obsoleteLegacyRequest', discovery)
+        discovery = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
+        self.assertIn('this.installer.hasConfirmation() && !obsolete', discovery)
 
     def test_runtime_binding_rechecked_after_successful_reply(self):
         exchange = body(CLIENT, 'private Bundle exchange(')

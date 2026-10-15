@@ -945,35 +945,51 @@ internal fun runSyncApplication(
      }
      Box(Modifier.weight(1f).fillMaxWidth()) {
       when (page) {
-       Page.DISCOVERY -> GuidedPage(
-        title = "1 / 4  选择游戏", subtitle = "",
-        footer = {
-         discoveryNotice?.let { CompactFeedback(it, "检查未完成，请重新选择游戏或重试。") }
-         if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
-         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          TextButton(enabled = !busy && !connectingAtStartup, onClick = { rescanDiscovery() }) { Text("重新扫描") }
-          Spacer(Modifier.weight(1f))
-          Button(enabled = !busy && !connectingAtStartup && discoveredTarget?.trusted == true, onClick = { continueDiscovery() }) { Text("下一步") }
-         }
-        }
-       ) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-         discoveredTarget?.let { Text("Shattered Pixel Dungeon ${it.displayVersion}", fontWeight = FontWeight.Medium) }
-         DiscoveryCopy.game(discovery, discoveredTarget).takeIf { it.isNotEmpty() }?.let { Text(it, color = muted) }
-         discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true && it.isNotEmpty() }?.forEach { game ->
-          Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { discoveredTarget = game; discoveryNotice = null }, verticalAlignment = Alignment.CenterVertically) {
-           RadioButton(selected = discoveredTarget?.path == game.path, onClick = { discoveredTarget = game }, enabled = !busy)
-           Column { Text("Shattered ${game.displayVersion}"); Details { SelectionContainer { Text(game.path) } } }
+       Page.DISCOVERY -> {
+        val gamePageGeneration = pageGeneration
+        val selectedGame = discoveredTarget?.takeIf { it.trusted }
+        val discoveryState = SharedGameSelectionState(
+         game = selectedGame?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+         selectionId = selectedGame?.path,
+         selectionStatus = if (selectedGame != null) "已找到" else "",
+         location = selectedGame?.path.orEmpty(),
+         rows = listOf(
+          SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) "选择游戏 JAR…" else "更换游戏 JAR…"),
+          SharedGameSelectionRow(SharedGameSelectionControl.RESCAN, "重新扫描"),
+         ),
+         candidates = discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true }.orEmpty().map {
+          SharedGameCandidate(it.path, SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion), it.path)
+         },
+         pageActive = !appClosed && page == Page.DISCOVERY,
+         busy = busy || connectingAtStartup,
+         canContinue = selectedGame != null,
+         notice = discoveryNotice?.let { NoviceCopy.feedback(it, "检查未完成，请重新选择游戏或重试。") }
+          ?: DiscoveryCopy.game(discovery, discoveredTarget),
+         noticeError = discoveryNotice != null,
+         details = buildList {
+          add("存档位置：${pathAdapter.state.path}")
+          discovery?.defaultSave?.reason?.let { add(it) }
+          discovery?.diagnostics?.let { addAll(it) }
+          discoveryNotice?.let { add(it) }
+         }.joinToString("\n"),
+        )
+        SharedGameSelectionScreen(discoveryState, object : SharedGameSelectionActions {
+         private fun canAct() = !busy && !connectingAtStartup && !appClosed && page == Page.DISCOVERY && pageGeneration == gamePageGeneration
+         override fun perform(control: SharedGameSelectionControl) {
+          if (!canAct()) return
+          when (control) {
+           SharedGameSelectionControl.CHOOSE_FILE -> chooseSetupGame()
+           SharedGameSelectionControl.RESCAN -> rescanDiscovery()
+           else -> Unit
           }
          }
-         OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text(if (discoveredTarget == null) "选择游戏…" else "更换游戏…") }
-         Details {
-          Text("存档位置：${pathAdapter.state.path}")
-          discoveredTarget?.let { Text("游戏文件：${it.path}") }
-          discovery?.defaultSave?.reason?.let { Text(it) }
-          discovery?.diagnostics?.forEach { Text(it) }
+         override fun chooseCandidate(id: String) {
+          if (!canAct()) return
+          val candidate = discovery?.trustedTargets?.singleOrNull { it.path == id && it.trusted } ?: return
+          discoveredTarget = candidate; discoveryNotice = null
          }
-        }
+         override fun next() { if (canAct()) continueDiscovery() }
+        })
        }
        Page.PATH -> SharedSavePathScreen(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
         adapter = pathAdapter,
