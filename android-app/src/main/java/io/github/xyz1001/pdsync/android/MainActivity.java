@@ -126,6 +126,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private final PathPreviewState pathPreviewState = new PathPreviewState();
     private boolean pathPreviewPosted;
     private int sharedPathRenderToken;
+    private final ComparisonProofState comparisonProofState = new ComparisonProofState();
+    private ComparisonProofState.Ticket activeSharedComparisonClaim;
+    private int sharedComparisonRenderToken;
+    private String comparisonDialogMessage = "";
+    private String comparisonDialogDetails = "";
     private final Handler pathPreviewHandler = new Handler(Looper.getMainLooper());
     private final Runnable pathPreviewEntry = this::m111x434ac419;
     private boolean readinessRefreshPending;
@@ -299,6 +304,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     @Override // android.app.Activity
     protected void onPause() {
         this.resumed = false;
+        this.comparisonProofState.reset();
         invalidatePathPreview();
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(false);
         if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this);
@@ -307,6 +313,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        this.comparisonProofState.reset();
         invalidatePathPreview();
         diagnosticExport.detach(this);
         if (this.sharedConnectionSession != null) {
@@ -324,6 +331,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     public void onBackPressed() {
         if (this.sharedConnectionSession != null && (this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly)) {
             this.sharedConnectionSession.getController().back();
+            return;
+        }
+        if (this.page == SyncPage.COMPARISON && !this.busy && this.comparisonProofState.dialog() != null) {
+            cancelSharedConflict(this.comparisonProofState.dialog().token);
             return;
         }
         if (this.busy) {
@@ -348,7 +359,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.page == SyncPage.PATH) {
             navigate(SyncPage.DISCOVERY);
         } else if (this.page == SyncPage.COMPARISON) {
-            postpone();
+            navigate(SyncPage.CONNECTION);
         } else {
             // The AndroidX dispatcher also receives system/predictive Back on modern Android.
             // Disable our forwarding callback only while invoking its ordinary Activity fallback.
@@ -374,6 +385,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy || isDestroyed()) {
             return;
         }
+        final ComparisonProofState.Ticket comparisonClaim = this.activeSharedComparisonClaim;
         invalidatePathPreview();
         if (!preserveAutomaticHistory) this.automaticHistoryState.outcome = null;
         this.diagnosticReport = "";
@@ -396,13 +408,13 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
             public final void run() {
-                MainActivity.this.m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(task, done, trace);
+                MainActivity.this.m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(task, done, trace, comparisonClaim);
             }
         });
     }
 
     /* renamed from: lambda$work$2$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(Task task, final Done done, final DiagnosticTrace trace) {
+    /* synthetic */ void m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(Task task, final Done done, final DiagnosticTrace trace, final ComparisonProofState.Ticket comparisonClaim) {
         final Object objRun;
         try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
             trace.record(AndroidDiagnosticLogging.stage(trace.getAction()), DiagnosticResult.STARTED);
@@ -416,7 +428,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda105
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result, failure, details);
+                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result, failure, details, comparisonClaim);
                 }
             });
         } catch (Exception e) {
@@ -425,14 +437,14 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda106
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(e);
+                    MainActivity.this.m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(e, comparisonClaim);
                 }
             });
         }
     }
 
     /* renamed from: lambda$work$0$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result, DiagnosticFailure failure, DiagnosticDetails details) {
+    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result, DiagnosticFailure failure, DiagnosticDetails details, ComparisonProofState.Ticket comparisonClaim) {
         if (isDestroyed()) {
             trace.record(DiagnosticStage.FINISHED, result, failure, details);
             return;
@@ -448,7 +460,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             AndroidDiagnosticLogging.failure(trace, trace.getAction() == DiagnosticAction.LAUNCH
                     ? DiagnosticStage.GAME_LAUNCH : DiagnosticStage.REFRESH, e);
             AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
-            reportError(e);
+            reportWorkFailure(e, comparisonClaim);
         }
         render();
         drainReadinessRefresh();
@@ -456,7 +468,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     /* renamed from: lambda$work$1$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(Exception exc) {
+    /* synthetic */ void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(Exception exc, ComparisonProofState.Ticket comparisonClaim) {
         if (isDestroyed()) {
             return;
         }
@@ -465,11 +477,36 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.sharedReloadPending = false;
             this.connectionLoadError = "连接设置读取失败，请重试。";
         }
-        reportError(exc);
+        reportWorkFailure(exc, comparisonClaim);
         rememberCurrentAutomaticHistory();
         render();
         drainReadinessRefresh();
         drainAutomaticHistoryRefresh();
+    }
+
+    /** A rejected Finish/write must allow a fresh inspection, never reuse its stale frozen proof. */
+    private void reportWorkFailure(Exception failure, ComparisonProofState.Ticket comparisonClaim) {
+        if (comparisonClaim != null) {
+            // A previous job cannot clear a newer account, observation, choice or page.
+            boolean pageActive = this.page == SyncPage.COMPARISON && !this.sharedAppreciationOnly;
+            if (!this.comparisonProofState.invalidateFailure(comparisonClaim, currentComparisonContext(),
+                    pageActive) && !invalidateUninspectedComparisonFailure(comparisonClaim, pageActive)) return;
+            this.cloudVerified = false;
+            this.inspection = null;
+            this.history = null;
+            this.comparisonDialogMessage = "";
+            this.comparisonDialogDetails = "";
+        }
+        reportError(failure);
+    }
+
+    /** A failed re-read still owns its diagnostic before an Inspection exists, but only for its target. */
+    private boolean invalidateUninspectedComparisonFailure(ComparisonProofState.Ticket comparisonClaim, boolean pageActive) {
+        if (this.inspection != null) return false;
+        try {
+            return this.comparisonProofState.invalidateUninspectedFailure(comparisonClaim, this.facade, this.connection,
+                    SyncRuntime.currentSelectionToken(this) + "\n" + SyncRuntime.currentNamespace(this), pageActive);
+        } catch (Exception unavailable) { return false; }
     }
 
     private DiagnosticResult diagnosticWorkResult(DiagnosticAction action, Object result) {
@@ -814,6 +851,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void resetAccessSelection() {
+        this.comparisonProofState.reset();
         this.rootGame = null;
         this.accessCapabilities = null;
         this.prepared = null;
@@ -854,6 +892,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy || isDestroyed()) {
             return;
         }
+        this.comparisonProofState.reset();
         this.readinessRefreshPending = false;
         if (this.automaticHistoryState.outcome != null) this.automaticHistoryState.outcome.applied = false;
         final boolean z = this.initialLoad;
@@ -1023,7 +1062,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy) {
             return;
         }
-        if (this.page != syncPage) invalidatePathPreview();
+        if (this.page != syncPage) {
+            this.comparisonProofState.reset();
+            invalidatePathPreview();
+        }
         if (syncPage != SyncPage.CONNECTION) closeSharedConnection();
         if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
         this.detailsExpanded = false;
@@ -1038,6 +1080,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* JADX INFO: Access modifiers changed from: private */
     public void render() {
         if (isDestroyed()) return;
+        if (!this.busy && this.activeSharedComparisonClaim != null) {
+            this.comparisonProofState.releaseClaim(this.activeSharedComparisonClaim);
+            this.activeSharedComparisonClaim = null;
+        }
+        if (this.page != SyncPage.COMPARISON) this.comparisonProofState.reset();
         if (this.page != SyncPage.PATH || this.sharedAppreciationOnly) invalidatePathPreview();
         if (drainSharedCommit()) return;
         if (this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly) {
@@ -1047,6 +1094,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         closeSharedConnection();
         if (this.page == SyncPage.PATH) {
             renderSharedSavePath();
+            return;
+        }
+        if (this.page == SyncPage.COMPARISON) {
+            renderSharedComparison();
             return;
         }
         ScrollView scrollView;
@@ -1110,8 +1161,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             case 5:
                 throw new IllegalStateException("Connection is hosted by the shared Compose screen");
             case 6:
-                renderComparison();
-                break;
+                throw new IllegalStateException("Comparison is hosted by the shared Compose screen");
             case 7:
                 renderConflict();
                 break;
@@ -2480,7 +2530,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.draftLoaded = true;
     }
 
-    /** Connection/account and save-path UI are shared; discovery and comparison remain native. */
+    /** Connection/account, save path and comparison use the same shared Compose pages. */
     private void renderSharedConnection() {
         if (!this.draftLoaded) loadDraft();
         if (this.sharedConnectionSession == null) {
@@ -2796,6 +2846,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void readComparison() throws Exception {
+        final ComparisonProofState.Ticket reinspectionOwner = this.activeSharedComparisonClaim;
+        final boolean ownedReinspection = this.comparisonProofState.beginReinspection(reinspectionOwner,
+                currentComparisonContext(), isForegroundComparison());
+        if (!ownedReinspection) this.comparisonProofState.reset();
         this.cloudVerified = false;
         this.history = null;
         this.inspection = null;
@@ -2836,6 +2890,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             if (InstallDiagnostics.find(error) != null || PreparationDiagnostics.find(error) != null
                     || BridgeDiagnostics.find(error) != null) throw error;
             throw SyncInspectionDiagnostics.at(stage, error);
+        } finally {
+            // This is failure ownership only. A refreshed observation never inherits action intent.
+            if (ownedReinspection) this.comparisonProofState.finishReinspection(reinspectionOwner,
+                    currentComparisonContext(), isForegroundComparison());
         }
     }
 
@@ -2921,91 +2979,269 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return NoviceCopy.comparison(this.cloudVerified || kind() == OnboardingKind.BLOCKED ? kind() : null, this.busy);
     }
 
-    private void renderComparison() {
-        if (showEmptyCompletion()) {
-            heading(this.feedbackError ? "4 / 4  配置尚未完成" : "4 / 4  配置完成");
-            if (!this.feedbackError) text("配置完成");
-            foot("上一步", () -> navigate(SyncPage.CONNECTION));
-            foot("完成", this::completeEmpty).setEnabled(!this.busy && this.onboardingActive && this.connection != null);
-            return;
+    private void renderSharedComparison() {
+        if (this.comparisonProofState.bind(currentComparisonContext())) {
+            this.comparisonDialogMessage = "";
+            this.comparisonDialogDetails = "";
         }
-        heading("4 / 4  选择存档");
-        text(comparisonCopy());
-        if (!this.cloudVerified && kind() != OnboardingKind.BLOCKED) {
-            foot("上一步", () -> navigate(SyncPage.CONNECTION));
-            foot("重新比较", () -> refreshComparison(SyncPage.COMPARISON));
-            return;
-        }
-        AndroidSyncFacade.Inspection observed = this.inspection;
-        AndroidUiFlowPolicy.IdenticalCompletion identical = AndroidUiFlowPolicy.identicalCompletion(
-                kind() == null ? null : kind().name(), this.cloudVerified,
-                observed != null && observed.getNeedsRestoreRecovery(),
-                observed != null && observed.isRetryablePending(),
-                observed != null && observed.getCanCompleteWithoutTransfer(),
-                observed != null && observed.getCanAdoptRemote());
-        if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE) {
-            foot("完成", identical == AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM
-                    ? this::completeReadyComparison : this::adopt);
-            return;
-        }
-        if (this.inspection != null) {
-            text("本机 · " + Build.MODEL + "\n" + OnboardingGate.localFileCountLabel(kind(), this.inspection.getLocalFileCount(), this.inspection.isRetryablePending()));
-            Iterator<AndroidSyncFacade.Version> it = this.inspection.getRemoteVersions().iterator();
-            while (it.hasNext()) {
-                versionChoice(it.next());
-            }
-            if (this.inspection.getNeedsRestoreRecovery()) {
-                button("检查未完成恢复", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda134
-                    @Override // java.lang.Runnable
-                    public final void run() {
-                        MainActivity.this.m79x1639f6e();
+        final int renderToken = ++this.sharedComparisonRenderToken;
+        ComparisonProofState.Ticket dialog = this.comparisonProofState.dialog();
+        SharedComparisonConfirmation confirmation = dialog == null ? null : new SharedComparisonConfirmation(
+                dialog.token, dialog.stage == ComparisonProofState.Stage.MERGE_REVIEW
+                    ? SharedComparisonConfirmationStage.MERGE_REVIEW : SharedComparisonConfirmationStage.CONFLICT,
+                this.comparisonDialogMessage.isEmpty() ? "将先备份，再替换本机存档。请退出游戏，并暂停其他存档同步。" : this.comparisonDialogMessage,
+                this.comparisonDialogDetails,
+                dialog.stage == ComparisonProofState.Stage.CONFLICT && restoreSupported(),
+                dialog.stage == ComparisonProofState.Stage.MERGE_REVIEW && restoreSupported());
+        ComparisonProofState.Progress choice = this.comparisonProofState.progress();
+        this.root = null;
+        this.status = null;
+        this.body = null;
+        this.footer = null;
+        this.scroll = null;
+        this.renderedPage = this.page;
+        AndroidOnboardingComposition.showComparison(this, this.inspection, this.history, selectedGameIdentity(),
+                Build.MODEL, this.cloudVerified, restoreSupported(), this.connection != null,
+                isForegroundComparison(), this.busy,
+                choice == null ? null : SharedProgressChoice.valueOf(choice.name()), this.comparisonProofState.selectedId(),
+                visibleNotice(), this.details, !this.diagnosticReport.isEmpty(), confirmation, this.feedbackError,
+                new SharedComparisonActions() {
+                    @Override public void back() { if (isCurrentComparisonAction(renderToken)) navigate(SyncPage.CONNECTION); }
+                    @Override public void refresh() { if (isCurrentComparisonAction(renderToken)) refreshComparison(SyncPage.COMPARISON); }
+                    @Override public void selectProgress(SharedProgressChoice value) {
+                        if (isCurrentComparisonAction(renderToken)) selectSharedProgress(value);
                     }
+                    @Override public void selectRemote(String snapshotId) {
+                        if (isCurrentComparisonAction(renderToken)) selectSharedRemote(snapshotId);
+                    }
+                    @Override public void finish(SharedComparisonCompletion mode) {
+                        if (isCurrentComparisonAction(renderToken)) finishSharedComparison(mode);
+                    }
+                    @Override public void handleConflict() { if (isCurrentComparisonAction(renderToken)) openSharedConflict(); }
+                    @Override public void upload() { if (isCurrentComparisonAction(renderToken)) MainActivity.this.upload(); }
+                    @Override public void openRecovery() { if (isCurrentComparisonAction(renderToken)) navigate(SyncPage.SETTINGS); }
+                    @Override public void copyDiagnostics() { if (isCurrentComparisonAction(renderToken)) copyDiagnostic(); }
+                    @Override public void confirmConflict(long token) { if (isCurrentComparisonAction(renderToken)) confirmSharedConflict(token); }
+                    @Override public void previewMerge(long token) { if (isCurrentComparisonAction(renderToken)) previewSharedMerge(token); }
+                    @Override public void confirmMerge(long token) { if (isCurrentComparisonAction(renderToken)) confirmSharedMerge(token); }
+                    @Override public void cancelConflict(long token) { if (isCurrentComparisonAction(renderToken)) cancelSharedConflict(token); }
                 });
-            }
+    }
+
+    private boolean isForegroundComparison() {
+        return this.resumed && !isDestroyed() && this.page == SyncPage.COMPARISON && !this.sharedAppreciationOnly;
+    }
+
+    private boolean isCurrentComparisonAction(int renderToken) {
+        return renderToken == this.sharedComparisonRenderToken && isForegroundComparison() && !this.busy;
+    }
+
+    private ComparisonProofState.Context currentComparisonContext() {
+        if (this.facade == null || this.connection == null || this.inspection == null) return null;
+        try {
+            return new ComparisonProofState.Context(this.facade, this.connection, this.inspection,
+                    SyncRuntime.currentSelectionToken(this) + "\n" + SyncRuntime.currentNamespace(this));
+        } catch (Exception unavailable) { return null; }
+    }
+
+    private boolean usableSharedComparison() {
+        return this.comparisonProofState.matches(currentComparisonContext()) && this.cloudVerified
+                && this.inspection != null && kind() != null && kind() != OnboardingKind.BLOCKED
+                && !this.inspection.getNeedsRestoreRecovery() && !this.inspection.isRetryablePending();
+    }
+
+    private boolean hasSharedRemote(String snapshotId) {
+        if (snapshotId == null || this.inspection == null) return false;
+        for (AndroidSyncFacade.Version remote : this.inspection.getRemoteVersions())
+            if (snapshotId.equals(remote.getSnapshotId())) return true;
+        return false;
+    }
+
+    private void selectSharedProgress(SharedProgressChoice choice) {
+        if (!usableSharedComparison() || this.comparisonProofState.dialog() != null) return;
+        boolean local = choice == SharedProgressChoice.LOCAL;
+        boolean offered = local ? kind() == OnboardingKind.LOCAL_ONLY
+                || kind() == OnboardingKind.DIFFERENT && this.inspection.getCanKeepLocalProgress()
+                : kind() == OnboardingKind.REMOTE_ONLY
+                || kind() == OnboardingKind.DIFFERENT && this.inspection.getCanKeepLocalProgress();
+        if (!offered) return;
+        String soleRemote = this.inspection.getRemoteVersions().size() == 1
+                ? this.inspection.getRemoteVersions().get(0).getSnapshotId() : null;
+        this.comparisonProofState.selectProgress(ComparisonProofState.Progress.valueOf(choice.name()), soleRemote);
+        renderSharedComparison();
+    }
+
+    private void selectSharedRemote(String snapshotId) {
+        if (!usableSharedComparison() || !hasSharedRemote(snapshotId)) return;
+        if (this.comparisonProofState.selectRemote(snapshotId) == null) return;
+        this.comparisonDialogMessage = "";
+        this.comparisonDialogDetails = "";
+        renderSharedComparison();
+    }
+
+    private ComparisonProofState.Ticket captureSharedFinish() {
+        ComparisonProofState.Ticket proof = this.comparisonProofState.capture(currentComparisonContext(),
+                isForegroundComparison(), this.busy);
+        if (proof != null) this.activeSharedComparisonClaim = proof;
+        return proof;
+    }
+
+    private void requireSharedComparisonProof(ComparisonProofState.Ticket proof) throws IOException {
+        requireSharedComparisonProof(proof, false);
+    }
+
+    private void requireSharedComparisonProof(ComparisonProofState.Ticket proof, boolean allowPendingUpload) throws IOException {
+        if (!this.comparisonProofState.claimedCurrent(proof, currentComparisonContext(), isForegroundComparison())
+                || this.inspection == null || this.inspection.getNeedsRestoreRecovery()
+                || (!this.cloudVerified && !(allowPendingUpload && this.inspection.isRetryablePending())))
+            throw new IOException("存档或连接状态已变化，请重新比较后选择。");
+    }
+
+    private void finishSharedComparison(SharedComparisonCompletion mode) {
+        if (!usableSharedComparison() || this.comparisonProofState.dialog() != null) return;
+        ComparisonProofState.Progress choice = this.comparisonProofState.progress();
+        switch (mode) {
+            case EMPTY: if (kind() == OnboardingKind.BOTH_EMPTY) completeEmpty(); break;
+            case CONFIRM:
+                if (kind() == OnboardingKind.IDENTICAL && this.inspection.getCanCompleteWithoutTransfer()) completeReadyComparison();
+                break;
+            case ADOPT: if (kind() == OnboardingKind.IDENTICAL && this.inspection.getCanAdoptRemote()) adopt(); break;
+            case KEEP_LOCAL:
+                if (kind() == OnboardingKind.DIFFERENT && choice == ComparisonProofState.Progress.LOCAL
+                        && this.inspection.getCanKeepLocalProgress()) completeLocalProgress();
+                break;
+            case UPLOAD_LOCAL:
+                if (kind() == OnboardingKind.LOCAL_ONLY && choice == ComparisonProofState.Progress.LOCAL) upload();
+                break;
+            case RESTORE_REMOTE:
+                if (kind() == OnboardingKind.REMOTE_ONLY && choice == ComparisonProofState.Progress.CLOUD)
+                    restoreSharedRemote();
+                break;
+            default: break;
         }
-        LinearLayout linearLayoutRow = row();
-        this.footer.addView(linearLayoutRow);
-        addButton(linearLayoutRow, "上一步", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda135
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m80x76ddc5af();
-            }
-        }, true);
-        addButton(linearLayoutRow, "重新比较", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda136
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m81xec57ebf0();
-            }
-        }, true);
-        AndroidSyncFacade.Inspection inspection = this.inspection;
-        if (inspection != null && inspection.getCanKeepLocalProgress()) {
-            foot("完成", this::completeLocalProgress);
-        } else if (inspection != null && inspection.getCanCompleteWithoutTransfer()) {
-            foot("完成", this::completeReadyComparison);
+    }
+
+    private void restoreSharedRemote() {
+        if (!usableSharedComparison() || kind() != OnboardingKind.REMOTE_ONLY
+                || this.inspection.getLocalFileCount() != 0 || !restoreSupported()
+                || !hasSharedRemote(this.comparisonProofState.selectedId())) return;
+        final ComparisonProofState.Ticket proof = captureSharedFinish();
+        if (proof == null) return;
+        final AndroidSyncFacade.Inspection observed = (AndroidSyncFacade.Inspection) proof.context.inspection;
+        operation(DiagnosticAction.RESTORE, "正在恢复云端存档…", () -> {
+            requireSharedComparisonProof(proof);
+            if (!"REMOTE_ONLY".equals(observed.getKind()) || observed.getLocalFileCount() != 0)
+                throw new IOException("本机存档已变化，请重新比较。");
+            requireRestoreSupport();
+            return restoreForCurrentAccount(observed, proof.snapshotId, false, proof);
+        }, "已恢复并核对游戏存档。");
+    }
+
+    private void openSharedConflict() {
+        if (!usableSharedComparison() || (kind() != OnboardingKind.DIFFERENT && kind() != OnboardingKind.BRANCHED)) return;
+        if (this.comparisonProofState.openConflict() == null) return;
+        this.comparisonDialogMessage = "";
+        this.comparisonDialogDetails = "";
+        renderSharedComparison();
+    }
+
+    private void cancelSharedConflict(long token) {
+        if (this.comparisonProofState.cancel(token, currentComparisonContext(), isForegroundComparison(), this.busy)) {
+            this.comparisonDialogMessage = "";
+            this.comparisonDialogDetails = "";
+            renderSharedComparison();
         }
-        if (inspection != null && (inspection.getLocalFileCount() > 0 || this.inspection.isRetryablePending())) {
-            foot(this.inspection.isRetryablePending() ? "重试上传" : this.inspection.getRemoteVersions().isEmpty() ? "上传本机存档" : "上传本机，保留两份", this::upload).setEnabled(kind() != OnboardingKind.BLOCKED || this.inspection.isRetryablePending());
-        }
-        AndroidSyncFacade.Inspection inspection2 = this.inspection;
-        if (inspection2 == null || !inspection2.getCanAdoptRemote()) {
-            AndroidSyncFacade.Inspection inspection3 = this.inspection;
-            if (inspection3 != null && !inspection3.getRemoteVersions().isEmpty()) {
-                foot("恢复所选云端存档", this::requestRestore).setEnabled(restoreSupported() && this.selected != null && kind() != OnboardingKind.BLOCKED);
+    }
+
+    private ComparisonProofState.Ticket claimSharedConflict(long token, ComparisonProofState.Stage stage) {
+        if (!usableSharedComparison() || !restoreSupported()) return null;
+        ComparisonProofState.Ticket proof = this.comparisonProofState.claim(token, currentComparisonContext(),
+                isForegroundComparison(), this.busy, stage);
+        if (proof != null) this.activeSharedComparisonClaim = proof;
+        return proof;
+    }
+
+    private void confirmSharedConflict(long token) {
+        if (!hasSharedRemote(this.comparisonProofState.selectedId())
+                || (kind() != OnboardingKind.DIFFERENT && kind() != OnboardingKind.BRANCHED)) return;
+        final ComparisonProofState.Ticket proof = claimSharedConflict(token, ComparisonProofState.Stage.CONFLICT);
+        if (proof == null) return;
+        final AndroidSyncFacade owner = (AndroidSyncFacade) proof.context.facade;
+        final AndroidSyncFacade.Inspection observed = (AndroidSyncFacade.Inspection) proof.context.inspection;
+        operation(DiagnosticAction.RESOLVE, "正在恢复并核验所选进度…", () -> {
+            requireSharedComparisonProof(proof);
+            requireRestoreSupport();
+            if ("BRANCHED".equals(observed.getKind())) {
+                requireOfficialSyncAccess((SecureConnectionStore.Connection) proof.context.connection);
+                requireSharedComparisonProof(proof);
+                return owner.resolveConflict(observed, proof.snapshotId);
             }
-        } else if (!inspection2.getCanKeepLocalProgress() && !inspection2.getCanCompleteWithoutTransfer()) {
-            foot("完成", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda139
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.adopt();
-                }
-            });
-        }
-        foot("稍后处理", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda140
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.postpone();
+            return restoreForCurrentAccount(observed, proof.snapshotId, true, proof);
+        }, "已恢复并核对游戏存档。");
+    }
+
+    private static final class ComparisonMergeOutcome {
+        AndroidSyncFacade.MergePreview preview;
+        Exception failure;
+    }
+
+    private void requireSharedMergePreview(ComparisonProofState.Ticket proof) throws IOException {
+        if (!this.comparisonProofState.current(proof.token, currentComparisonContext(), isForegroundComparison(),
+                false, ComparisonProofState.Stage.CONFLICT) || !usableSharedComparison())
+            throw new IOException("存档或连接状态已变化，请重新比较后选择。");
+    }
+
+    private void previewSharedMerge(long token) {
+        if (!usableSharedComparison() || !restoreSupported()
+                || !this.comparisonProofState.current(token, currentComparisonContext(), isForegroundComparison(),
+                        this.busy, ComparisonProofState.Stage.CONFLICT)) return;
+        final ComparisonProofState.Ticket proof = this.comparisonProofState.dialog();
+        final AndroidSyncFacade owner = (AndroidSyncFacade) proof.context.facade;
+        final AndroidSyncFacade.Inspection observed = (AndroidSyncFacade.Inspection) proof.context.inspection;
+        work(DiagnosticAction.MERGE, "正在检查能否合并…", () -> {
+            ComparisonMergeOutcome result = new ComparisonMergeOutcome();
+            try {
+                requireSharedMergePreview(proof);
+                requireRestoreSupport();
+                requireOfficialSyncAccess((SecureConnectionStore.Connection) proof.context.connection);
+                requireSharedMergePreview(proof);
+                result.preview = owner.previewMerge(observed);
+            } catch (Exception failure) { result.failure = failure; }
+            return result;
+        }, result -> {
+            if (!this.comparisonProofState.current(proof.token, currentComparisonContext(), isForegroundComparison(),
+                    this.busy, ComparisonProofState.Stage.CONFLICT)) return;
+            boolean allowed = result.failure == null && result.preview != null && result.preview.isAllowed();
+            ComparisonProofState.Ticket reviewed = this.comparisonProofState.review(proof,
+                    currentComparisonContext(), isForegroundComparison(), this.busy, allowed);
+            if ((allowed && reviewed == null) || (!allowed && this.comparisonProofState.dialog() == null)) return;
+            this.notice = "";
+            this.feedbackError = false;
+            if (allowed) {
+                this.comparisonDialogMessage = "合并后使用 " + result.preview.getSlotCount() + " 个槽位（最多 6 个）。";
+                this.comparisonDialogDetails = safeText(String.join("\n", result.preview.getDecisions()))
+                        + "\n先备份再替换本机，并发布合并版本。";
+            } else {
+                this.comparisonDialogMessage = "无法安全合并，请选择要继续的进度。";
+                this.comparisonDialogDetails = result.failure != null ? safeError(result.failure)
+                        : result.preview == null ? "未能完成合并检查，请重试。" : safeText(result.preview.getMessage());
+                if (result.failure != null) captureDiagnostic(result.failure);
             }
         });
+    }
+
+    private void confirmSharedMerge(long token) {
+        final ComparisonProofState.Ticket proof = claimSharedConflict(token, ComparisonProofState.Stage.MERGE_REVIEW);
+        if (proof == null) return;
+        final AndroidSyncFacade owner = (AndroidSyncFacade) proof.context.facade;
+        final AndroidSyncFacade.Inspection observed = (AndroidSyncFacade.Inspection) proof.context.inspection;
+        operation(DiagnosticAction.MERGE, "正在应用并核验安全合并…", () -> {
+            requireSharedComparisonProof(proof);
+            requireRestoreSupport();
+            requireOfficialSyncAccess((SecureConnectionStore.Connection) proof.context.connection);
+            requireSharedComparisonProof(proof);
+            return owner.mergeConflict(observed);
+        }, "合并版本已写入游戏并发布。");
     }
 
     /* renamed from: lambda$renderComparison$63$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3064,7 +3300,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (owner == null || observed == null || !this.cloudVerified || !observed.getCanCompleteWithoutTransfer()) {
             return;
         }
+        final ComparisonProofState.Ticket proof = captureSharedFinish();
+        if (proof == null) return;
         work(DiagnosticAction.RESOLVE, "正在确认同步基线…", () -> {
+            requireSharedComparisonProof(proof);
             if (owner != this.facade) {
                 throw new IOException("连接已变化，请重新比较后选择。");
             }
@@ -3086,7 +3325,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (owner == null || observed == null || !this.cloudVerified || !observed.getCanKeepLocalProgress()) {
             return;
         }
+        final ComparisonProofState.Ticket proof = captureSharedFinish();
+        if (proof == null) return;
         work(DiagnosticAction.INSPECT, "正在重新核验本机进度与云端基线…", () -> {
+            requireSharedComparisonProof(proof);
             if (owner != this.facade) {
                 throw new IOException("连接已变化，请重新比较后选择。");
             }
@@ -3107,17 +3349,12 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.inspection != null && this.inspection.getNeedsRestoreRecovery(),
                 this.inspection != null && this.inspection.isRetryablePending(),
                 this.page == SyncPage.COMPARISON && this.onboardingActive, this.busy, this.connection != null)) return;
-        work(DiagnosticAction.CONFIGURE, "正在完成配置…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda33
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m29xb53dc5d7();
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda34
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m30x2ab7ec18(obj);
-            }
-        });
+        final ComparisonProofState.Ticket proof = captureSharedFinish();
+        if (proof == null) return;
+        work(DiagnosticAction.CONFIGURE, "正在完成配置…", () -> {
+            requireSharedComparisonProof(proof);
+            return m29xb53dc5d7();
+        }, this::m30x2ab7ec18);
     }
 
     /* renamed from: lambda$completeEmpty$67$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3191,14 +3428,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final AndroidSyncFacade.Inspection inspection = this.inspection;
         if (inspection == null) {
             refreshComparison(SyncPage.COMPARISON);
-        } else {
-            operation(DiagnosticAction.PUSH, "正在上传本机存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda160
-                @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-                public final Object run() throws Exception {
-                    return MainActivity.this.m146lambda$upload$71$iogithubxyz1001pdsyncandroidMainActivity(inspection);
-                }
-            }, "本机存档已上传并核验。");
+            return;
         }
+        final boolean shared = this.page == SyncPage.COMPARISON;
+        final ComparisonProofState.Ticket proof = shared ? captureSharedFinish() : null;
+        if (shared && proof == null) return;
+        operation(DiagnosticAction.PUSH, "正在上传本机存档…", () -> {
+            if (proof != null) requireSharedComparisonProof(proof, true);
+            return m146lambda$upload$71$iogithubxyz1001pdsyncandroidMainActivity(inspection);
+        }, "本机存档已上传并核验。");
     }
 
     /* renamed from: lambda$upload$71$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3208,16 +3446,14 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void adopt() {
-        AndroidSyncFacade.Inspection inspection = this.inspection;
-        if (inspection == null || !inspection.getCanAdoptRemote()) {
-            return;
-        }
-        final AndroidSyncFacade.Inspection inspection2 = this.inspection;
-        operation(DiagnosticAction.RESOLVE, "正在关联相同存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda29
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m15lambda$adopt$72$iogithubxyz1001pdsyncandroidMainActivity(inspection2);
-            }
+        final AndroidSyncFacade.Inspection observed = this.inspection;
+        if (observed == null || !observed.getCanAdoptRemote()) return;
+        final boolean shared = this.page == SyncPage.COMPARISON;
+        final ComparisonProofState.Ticket proof = shared ? captureSharedFinish() : null;
+        if (shared && proof == null) return;
+        operation(DiagnosticAction.RESOLVE, "正在关联相同存档…", () -> {
+            if (proof != null) requireSharedComparisonProof(proof);
+            return m15lambda$adopt$72$iogithubxyz1001pdsyncandroidMainActivity(observed);
         }, "已关联本机与云端相同内容。");
     }
 
@@ -3282,7 +3518,20 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /** Expired official accounts cannot download or restore; renewal re-enables the usual path. */
     private AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection inspection,
                                                                        String snapshotId, boolean replace) throws Exception {
+        return restoreForCurrentAccount(inspection, snapshotId, replace, null);
+    }
+
+    private AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection inspection,
+            String snapshotId, boolean replace, ComparisonProofState.Ticket proof) throws Exception {
         final SecureConnectionStore.Connection account = this.connection;
+        requireOfficialSyncAccess(account);
+        if (proof != null) requireSharedComparisonProof(proof);
+        AndroidSyncFacade owner = proof == null ? sync() : (AndroidSyncFacade) proof.context.facade;
+        return owner.restoreSelected(inspection, snapshotId, replace);
+    }
+
+    private void requireOfficialSyncAccess(SecureConnectionStore.Connection account) throws Exception {
+        if (account == null || this.connection != account) throw new IOException("连接已变化，请重新比较。");
         if (isOfficialAccount(account)) {
             ManagedAccountClient.Entitlement entitlement = new ManagedAccountClient(
                     account.endpoint, account.username, account.password).entitlement();
@@ -3290,7 +3539,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             rememberEntitlement(getApplicationContext(), account, entitlement);
             entitlement.requireSyncAccess();
         }
-        return sync().restoreSelected(inspection, snapshotId, replace);
     }
 
     /* renamed from: lambda$requestRestore$75$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3543,10 +3791,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         if (operationOutcome.result.isConflict() || kind() == OnboardingKind.BRANCHED) {
             this.notice = "发现存档冲突，分支已保留，请选择要继续的进度。";
-            this.page = SyncPage.CONFLICT;
+            this.page = this.onboardingActive ? SyncPage.COMPARISON : SyncPage.CONFLICT;
         } else if (operationOutcome.result.isPending()) {
             this.notice = "操作已保留待上传版本，请重试上传。";
-            this.page = SyncPage.HOME;
+            this.page = this.onboardingActive ? SyncPage.COMPARISON : SyncPage.HOME;
         } else {
             this.notice = str;
             this.page = this.onboardingActive ? SyncPage.COMPARISON : SyncPage.HOME;

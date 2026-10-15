@@ -38,7 +38,7 @@ class MainComparisonContractTest(unittest.TestCase):
         self.assertLess(body.index('"BLOCKED"'), body.index("this.cloudVerified = true"))
 
     def test_render_and_choices_do_not_read_or_write_mirror(self):
-        for name in ("renderComparison", "renderHistory", "renderConfirmation", "versionChoice", "cancelConfirmation"):
+        for name in ("renderSharedComparison", "renderHistory", "renderConfirmation", "versionChoice", "cancelConfirmation"):
             body = method(name)
             for operation in ("sync()", ".inspect()", ".historyPresentation(", ".exportTo(", "readComparison()", "replaceMirror("):
                 self.assertNotIn(operation, body, name)

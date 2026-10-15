@@ -1,6 +1,7 @@
 """Comparison source wiring plus JVM diagnostic tests; not an Android device test."""
 import unittest
 from test_main_comparison_contract import method
+from test_embedded_install_contract import body as block
 
 
 class SyncInspectionDiagnosticsContract(unittest.TestCase):
@@ -14,12 +15,17 @@ class SyncInspectionDiagnosticsContract(unittest.TestCase):
         self.assertEqual(1, body.count("sync()"))
         self.assertEqual(1, body.count(".inspect()"))
         self.assertEqual(1, body.count(".historyPresentation("))
-        catch = body[body.index("catch (Exception error)"):]
+        catch = block(body, "catch (Exception error)")
         for preferred in ("InstallDiagnostics", "PreparationDiagnostics", "BridgeDiagnostics"):
             self.assertIn(preferred + ".find(error) != null", catch)
         self.assertLess(catch.index("throw error;"), catch.index("throw SyncInspectionDiagnostics.at(stage, error);"))
         for changed in ("this.", "setOnboardingProgress", ".upload(", ".restore(", "readComparison()", "return;"):
             self.assertNotIn(changed, catch)
+        # The finally block transfers failure ownership only; it must not replace diagnostic flow.
+        finalizer = block(body, "finally")
+        self.assertIn("finishReinspection(reinspectionOwner,", finalizer)
+        for mutation in ("setOnboardingProgress", ".upload(", ".restore(", "return;"):
+            self.assertNotIn(mutation, finalizer)
 
     def test_onboarding_next_reaches_the_wrapped_read_only_comparison(self):
         self.assertIn("refreshComparison(SyncPage.COMPARISON)", method("drainSharedCommit"))

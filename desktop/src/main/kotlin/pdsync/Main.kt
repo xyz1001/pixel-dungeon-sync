@@ -24,6 +24,7 @@ import io.github.xyz1001.pdsync.android.SharedConnectionHost
 import io.github.xyz1001.pdsync.android.SharedGameIdentity
 import io.github.xyz1001.pdsync.android.SharedConnectionScreen
 import io.github.xyz1001.pdsync.android.SharedSavePathScreen
+import io.github.xyz1001.pdsync.android.*
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import javax.swing.SwingUtilities
@@ -89,9 +90,8 @@ internal fun runSyncApplication(
   var discoveryNotice by remember { mutableStateOf<String?>(null) }
   var comparison by remember { mutableStateOf<OnboardingComparison?>(null) }
   var comparisonNotice by remember { mutableStateOf<String?>(null) }
-  var comparisonSelection by remember { mutableStateOf<String?>(null) }
+  val comparisonAdapter = remember { DesktopSharedComparisonAdapter() }
   var comparisonCheckedAt by remember { mutableStateOf<String?>(null) }
-  var setupConfirm by remember { mutableStateOf<SetupAction?>(null) }
   var remoteInspectionReady by remember { mutableStateOf(false) }
   var settingsMode by remember { mutableStateOf(SettingsMode.FULL) }
   var session by remember { mutableStateOf<AppendProfileSession?>(null) }
@@ -136,7 +136,14 @@ internal fun runSyncApplication(
   val homeScroll = rememberScrollState()
   val historyScroll = rememberLazyListState()
 
+  fun comparisonContext() = DesktopComparisonContext(pageGeneration, session, comparison, config,
+   page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup, connected)
+  fun comparisonState() = comparisonAdapter.state(comparisonContext(),
+   game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let { SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion) },
+   localLabel = "本机 · ${device?.label ?: "设备未知"}", notice = comparisonNotice.orEmpty(),
+   restoreSupported = targetInfo?.trusted == true)
   fun navigate(next: Page) {
+   comparisonAdapter.invalidate()
    if (next == Page.CONNECTION && page != Page.CONNECTION) {
     connectionReturnPage = if (page == Page.SETTINGS) Page.SETTINGS else if (onboardingActive) Page.PATH else Page.HOME
    }
@@ -502,7 +509,7 @@ internal fun runSyncApplication(
   suspend fun finishOnboarding(progress: OnboardingProgress, message: String) {
    val next = requireNotNull(config).copy(onboardingProgress = progress)
    withContext(Dispatchers.IO) { configFile.save(next) }
-   config = next; setupDraft = next; onboardingActive = false; setupConfirm = null
+   config = next; setupDraft = next; onboardingActive = false; comparisonAdapter.invalidate()
    status = message
    automaticStatus = if (progress == OnboardingProgress.COMPLETE) "首次检查已完成，正在观察存档变化。" else "首次存档选择尚未完成，自动上传保持暂停。点击上传或恢复继续检查。"
    navigate(Page.HOME)
@@ -510,8 +517,10 @@ internal fun runSyncApplication(
   fun inspectOnboarding() {
    if (busy || connectingAtStartup || appClosed) return
    if (!connected) { onboardingActive = true; openConnection(SettingsMode.UNLOCK); return }
-   onboardingActive = true; comparison = null; comparisonNotice = null; setupConfirm = null
+   onboardingActive = true; comparison = null; comparisonNotice = null; comparisonAdapter.observed(null)
    navigate(Page.COMPARISON); busy = true
+   val generation = pageGeneration
+   val inspectedConfig = config
    scope.launch {
     try {
      refreshProfile(config)
@@ -522,19 +531,10 @@ internal fun runSyncApplication(
        gameLauncher.status(target) is GameProcessStatus.Stopped
       }
      } }
-     if (appClosed) return@launch
-     comparison = result; comparisonCheckedAt = java.time.Instant.now().toString(); comparisonSelection = result.remoteEntries.singleOrNull()?.entry?.manifest?.id
+     if (appClosed || page != Page.COMPARISON || pageGeneration != generation || config != inspectedConfig || session !== manager) return@launch
+     comparison = result; comparisonCheckedAt = java.time.Instant.now().toString(); comparisonAdapter.observed(result)
      remoteTips = result.remoteEntries.map { it.entry.manifest.id }.toSet()
      history = withContext(Dispatchers.IO) { manager.history() }
-     if (result.kind == OnboardingKind.IDENTICAL && result.baselineLineage == OnboardingLineage.SAME_TIP) {
-      withContext(Dispatchers.IO) {
-       val target = manager.targetInfo()
-       manager.confirmOnboardingReady(result, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
-      }
-      remoteInspectionReady = true
-      selected = OnboardingGate.homeSelection(result.baselineId, result.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
-      finishOnboarding(OnboardingProgress.COMPLETE, "本地与已关联云端分支一致，无需上传或恢复。")
-     }
     } catch (e: CancellationException) { throw e }
     catch (e: Exception) { comparisonNotice = "暂不能比较：${e.message}。未上传或覆盖存档。"; authenticationFailed(e) }
     finally { busy = false }
@@ -588,43 +588,80 @@ internal fun runSyncApplication(
    }
   }
   fun postponeOnboarding(emptyDecision: Boolean = false) {
-   val pageActive = !appClosed && page == Page.COMPARISON && onboardingActive
-   if (!EmptySetupCompletion.canNavigate(pageActive, busy || connectingAtStartup) || config == null) return
-   if (emptyDecision && !EmptySetupCompletion.canFinish(comparison?.kind, comparison?.blocker, pageActive, busy || connectingAtStartup, config != null)) return
-   busy = true
+   val proof = comparisonAdapter.capture(comparisonContext()) ?: return
+   if (!emptyDecision || proof.observed.kind != OnboardingKind.BOTH_EMPTY ||
+    comparisonState().completion != SharedComparisonCompletion.EMPTY) return
+   busy = true; comparisonAdapter.invalidate()
    scope.launch {
     try {
-     if (emptyDecision) {
-      // The explicit empty/empty decision releases observation, never creates a baseline or upload.
-      require(comparison?.kind == OnboardingKind.BOTH_EMPTY)
-      val manager = requireNotNull(session)
-      val fresh = withContext(Dispatchers.IO) {
-       val target = manager.targetInfo()
-       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
+     val manager = proof.session
+     val fresh = withContext(Dispatchers.IO) {
+      val target = manager.targetInfo()
+      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
+      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
+      // Revalidate the user's exact empty observation before accepting a fresh empty result.
+      manager.confirmOnboardingReady(proof.observed, store, stopped)
+      manager.compareOnboarding(store, stopped).also {
+       require(it.kind == OnboardingKind.BOTH_EMPTY) { "存档状态已变化，请重新查看并选择" }
+       manager.confirmOnboardingReady(it, store, stopped)
       }
-      comparison = fresh
-      require(fresh.kind == OnboardingKind.BOTH_EMPTY) { "存档状态已变化，请重新查看并选择" }
-      withContext(Dispatchers.IO) {
-       val target = manager.targetInfo()
-       manager.confirmOnboardingReady(fresh, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) { gameLauncher.status(target) is GameProcessStatus.Stopped }
-      }
-      remoteInspectionReady = true
-      automatic.applied(emptyMap(), monotonicMillis())
-      finishOnboarding(OnboardingProgress.COMPLETE, "双方暂无存档。同步器保持开启时，新建游戏进度并退出后会自动上传；首次上传前重启同步器会重新比较。")
-     } else finishOnboarding(OnboardingProgress.DEFERRED, "已保留双方进度。稍后点击上传或恢复，继续首次存档比较。")
-    } catch (e: Exception) { comparisonNotice = "选择未保存：${e.message}" }
-    finally { busy = false }
+     }
+     if (!comparisonAdapter.matches(comparisonContext(), proof, requireIdle = false)) return@launch
+     comparison = fresh; comparisonAdapter.observed(fresh)
+     remoteInspectionReady = true; automatic.applied(emptyMap(), monotonicMillis())
+     finishOnboarding(OnboardingProgress.COMPLETE, "配置完成。")
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) {
+     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "选择未保存：${e.message}"
+     authenticationFailed(e)
+    } finally { busy = false }
    }
   }
-  fun performOnboarding(action: SetupAction) {
-   if (busy || connectingAtStartup || !connected || appClosed) return
-   val manager = session ?: return
-   val observed = comparison ?: return
-   val chosen = comparisonSelection
-   busy = true; setupConfirm = null; comparisonNotice = "正在重新校验并处理所选进度…"
+  fun completeObservedComparison(mode: SharedComparisonCompletion) {
+   if (mode !in setOf(SharedComparisonCompletion.CONFIRM, SharedComparisonCompletion.KEEP_LOCAL) ||
+    comparisonState().completion != mode) return
+   val proof = comparisonAdapter.capture(comparisonContext()) ?: return
+   busy = true; comparisonAdapter.invalidate()
    scope.launch {
+    var validated = false
     try {
-     withContext(Dispatchers.IO) { diagnosticWork(when (action) {
+     withContext(Dispatchers.IO) {
+      val manager = proof.session
+      val target = manager.targetInfo()
+      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
+      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
+      if (mode == SharedComparisonCompletion.KEEP_LOCAL) manager.confirmLocalProgressReady(proof.observed, store, stopped)
+      else manager.confirmOnboardingReady(proof.observed, store, stopped)
+     }
+     validated = true
+     if (!comparisonAdapter.matches(comparisonContext(), proof, requireIdle = false)) return@launch
+     remoteInspectionReady = true
+     selected = OnboardingGate.homeSelection(proof.baseline, proof.observed.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
+     finishOnboarding(OnboardingProgress.COMPLETE, if (mode == SharedComparisonCompletion.KEEP_LOCAL) "已选择本机进度。" else "两边进度相同，配置完成。")
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) {
+     if (comparisonAdapter.owns(comparisonContext(), proof)) {
+      // A rejected content/graph proof needs a new comparison. A subsequent configuration-save
+      // failure leaves the validated choice available for retry instead of discarding it.
+      if (!validated && comparisonAdapter.invalidateFailedCompletion(comparisonContext(), proof)) comparison = null
+      comparisonNotice = "选择未保存：${e.message}"
+     }
+     authenticationFailed(e)
+    } finally { busy = false }
+   }
+  }
+  fun performOnboarding(action: SetupAction, finishAfterOperation: Boolean = false,
+                        confirmedProof: DesktopComparisonProof? = null) {
+   val proof = confirmedProof ?: comparisonAdapter.capture(comparisonContext()) ?: return
+   if (!comparisonAdapter.matches(comparisonContext(), proof)) return
+   val manager = proof.session
+   val observed = proof.observed
+   val chosen = proof.selectedId
+   busy = true; comparisonAdapter.invalidate(); comparisonNotice = null
+   scope.launch {
+    var succeeded = false
+    try {
+     val result = withContext(Dispatchers.IO) { diagnosticWork(when (action) {
       SetupAction.UPLOAD -> DiagnosticAction.PUSH
       SetupAction.RESTORE -> DiagnosticAction.RESTORE
       SetupAction.ADOPT -> DiagnosticAction.CONFIGURE
@@ -642,19 +679,74 @@ internal fun runSyncApplication(
        SetupAction.UPLOAD -> manager.onboardingUpload(observed, store, stopped)
        SetupAction.RESTORE -> manager.onboardingRestore(observed, requireNotNull(chosen), store, stopped)
        SetupAction.ADOPT -> manager.adoptOnboardingRemote(observed, store, stopped)
-       SetupAction.MERGE -> manager.mergeCurrent(store,stopped)
+       SetupAction.MERGE -> manager.mergeCurrent(observed, store, stopped)
       }
      } }
-     comparisonNotice = "操作已完成，正在重新比较。"
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) { comparisonNotice = "操作未完成：${e.message}。已有快照与备份保留。"; authenticationFailed(e) }
-    finally { busy = false }
-    // Every successful or interrupted action is observed again; pending/forks cannot release autosync.
-    if (page == Page.COMPARISON && connected) {
-     val notice = comparisonNotice
-     inspectOnboarding()
-     comparisonNotice = notice
+     succeeded = desktopOnboardingOperationSucceeded(result)
+     if (!succeeded) comparisonNotice = "云端分支已变化，请重新选择。"
+    } catch (e: CancellationException) { busy = false; throw e }
+    catch (e: Exception) {
+     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "操作未完成：${e.message}。已有快照与备份保留。"
+     authenticationFailed(e)
     }
+    try {
+     // Observe the same session after every outcome. Only an explicitly requested, successful
+     // operation plus a fresh no-action proof can finish; failed/pending/forked work stays here.
+     if (comparisonAdapter.owns(comparisonContext(), proof)) {
+      val fresh = withContext(Dispatchers.IO) {
+       val target = manager.targetInfo()
+       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
+        gameLauncher.status(target) is GameProcessStatus.Stopped
+       }
+      }
+      if (!comparisonAdapter.owns(comparisonContext(), proof)) return@launch
+      comparison = fresh; comparisonAdapter.observed(fresh); comparisonCheckedAt = java.time.Instant.now().toString()
+      remoteTips = fresh.remoteEntries.map { it.entry.manifest.id }.toSet()
+      val refreshed = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), manager.syncHistory()) }
+      if (!comparisonAdapter.owns(comparisonContext(), proof) || comparison !== fresh) return@launch
+      history = refreshed.first; pending = refreshed.second; graphHistory = refreshed.third
+      if (desktopCanFinishAfterOperation(finishAfterOperation, succeeded, fresh)) {
+       withContext(Dispatchers.IO) {
+        val target = manager.targetInfo()
+        manager.confirmOnboardingReady(fresh, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
+         gameLauncher.status(target) is GameProcessStatus.Stopped
+        }
+       }
+       if (!comparisonAdapter.owns(comparisonContext(), proof) || comparison !== fresh) return@launch
+       remoteInspectionReady = true; automatic.applied(fresh.localFiles, monotonicMillis())
+       selected = OnboardingGate.homeSelection(fresh.baselineId, fresh.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
+       finishOnboarding(OnboardingProgress.COMPLETE, "配置完成。")
+      }
+     }
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) {
+     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "尚不能完成：${e.message}"
+     authenticationFailed(e)
+    } finally { busy = false }
+   }
+  }
+  fun previewOnboardingMerge(token: Long) {
+   val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.CONFLICT) ?: return
+   if (comparisonAdapter.dialog?.presentation?.canPreviewMerge != true || !comparisonState().restoreSupported) return
+   busy = true; comparisonNotice = null
+   scope.launch {
+    try {
+     val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.MERGE) {
+      val manager = proof.session
+      val target = manager.targetInfo()
+      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
+      SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
+      manager.previewOnboardingMerge(proof.observed,
+       AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password), stopped)
+     } }
+     comparisonAdapter.acceptMergePreview(comparisonContext(), proof, result)
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) {
+     if (comparisonAdapter.owns(comparisonContext(), proof)) {
+      comparisonAdapter.invalidate(); comparisonNotice = "无法合并：${e.message}"
+     }
+     authenticationFailed(e)
+    } finally { busy = false }
    }
   }
   LaunchedEffect(Unit) {
@@ -872,78 +964,48 @@ internal fun runSyncApplication(
        ), game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
         SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
        })
-       Page.COMPARISON -> GuidedPage(
-        title = if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) "4 / 4  配置完成" else "4 / 4  选择存档", subtitle = "",
-        footer = {
-         comparisonNotice?.let { CompactFeedback(it, "操作未完成，请重试。") }
-         comparison?.blocker?.let { CompactFeedback(it, "暂不能继续，请检查存档或连接后重试。") }
-         if (busy || connectingAtStartup) LinearProgressIndicator(Modifier.fillMaxWidth())
-         if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) {
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-           TextButton(enabled = EmptySetupCompletion.canNavigate(onboardingActive, busy || connectingAtStartup), onClick = {
-            if (EmptySetupCompletion.canNavigate(page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup)) {
-             setupDraft = config ?: setupDraft; settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION)
-            }
-           }) { Text("上一步") }
-           Spacer(Modifier.weight(1f))
-           Button(enabled = EmptySetupCompletion.canFinish(comparison?.kind, comparison?.blocker, onboardingActive, busy || connectingAtStartup, config != null), onClick = { postponeOnboarding(emptyDecision = true) }) { Text("完成") }
-          }
-         } else if (setupConfirm != null) {
-          Text(if (setupConfirm == SetupAction.RESTORE) NoviceCopy.restoreWarning else "使用云端记录，不改动本机存档。", color = Color(0xFF986337))
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-           TextButton(enabled = !busy, onClick = { setupConfirm = null; comparisonNotice = "已取消选择，双方存档未改变。" }) { Text("取消") }
-           Spacer(Modifier.weight(1f))
-           Button(enabled = !busy, onClick = { setupConfirm?.let { performOnboarding(it) } }) { Text(if (setupConfirm == SetupAction.RESTORE) "覆盖本机" else "确认继续") }
-           if(setupConfirm==SetupAction.RESTORE)OutlinedButton(enabled=!busy,onClick={performOnboarding(SetupAction.MERGE)}){Text("合并")}
-          }
-         } else {
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-           TextButton(enabled = !busy, onClick = { onboardingActive = true; setupDraft = config ?: setupDraft; settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION) }) { Text("返回连接") }
-           TextButton(enabled = !busy, onClick = { inspectOnboarding() }) { Text("重新比较") }
-           Spacer(Modifier.weight(1f))
-           TextButton(enabled = !busy, onClick = { postponeOnboarding() }) { Text("稍后处理") }
-          }
-          comparison?.let { value ->
-           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (value.localFiles.isNotEmpty() || value.retryablePending) Button(enabled = !busy && (value.kind != OnboardingKind.BLOCKED || value.retryablePending), onClick = { performOnboarding(SetupAction.UPLOAD) }, modifier = Modifier.weight(1f)) { Text(if (value.retryablePending) "重试上传" else if (value.remoteEntries.isEmpty()) "上传本机存档" else "上传本机，保留两份") }
-            if (value.canAdoptRemote) OutlinedButton(enabled = !busy, onClick = { performOnboarding(SetupAction.ADOPT) }, modifier = Modifier.weight(1f)) { Text("完成") }
-            else if (value.remoteEntries.isNotEmpty()) OutlinedButton(enabled = !busy && comparisonSelection != null && value.kind != OnboardingKind.BLOCKED, onClick = { if(value.localFiles.isEmpty() || graphHistory?.currentProtected==true)performOnboarding(SetupAction.RESTORE) else setupConfirm = SetupAction.RESTORE }, modifier = Modifier.weight(1f)) { Text("恢复所选云端存档") }
-           }
-          }
+       Page.COMPARISON -> SharedComparisonScreen(comparisonState(), object : SharedComparisonActions {
+        override fun back() {
+         if (comparisonState().canInteract && comparisonAdapter.dialog == null) {
+          setupDraft = config ?: setupDraft; settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION)
          }
         }
-       ) {
-        if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) {
-         Text(if (comparisonNotice == null) EmptySetupCompletion.message else "配置尚未完成", fontWeight = FontWeight.Medium)
-        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-         Text(NoviceCopy.comparison(comparison?.kind, busy), fontWeight = FontWeight.Medium)
-         comparison?.let { value ->
-          Surface(color = Color(0xFFE3EFE6)) {
-           Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("本机 · ${device?.label ?: "设备未知"}")
-            value.localLatestModifiedAt?.let { Text("存档修改 ${localTime(it)}", color = muted, style = MaterialTheme.typography.caption) }
-           }
-          }
-          value.remoteEntries.forEach { remote ->
-           val m = remote.entry.manifest
-           Surface(color = if (comparisonSelection == m.id) Color(0xFFE3EFE6) else Color.White) {
-            Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { comparisonSelection = m.id }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-             RadioButton(selected = comparisonSelection == m.id, onClick = { comparisonSelection = m.id }, enabled = !busy)
-             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text("云端 · ${m.metadata?.device?.label ?: "设备未知"}")
-              Text(snapshotBriefTime(m), color = muted, style = MaterialTheme.typography.caption)
-             }
-            }
-           }
-          }
-          Details {
-           Text("本机：${OnboardingGate.localFileCountLabel(value.kind, value.localFiles.size, value.retryablePending)}")
-           saveInfo?.let { Text(it.summary()) }
-           value.remoteEntries.forEach { remote -> Text("${remote.entry.manifest.metadata?.device?.label ?: "云端"}：${remote.entry.manifest.files.size} 个文件 · ${remote.entry.manifest.saveVersions?.summary() ?: remote.entry.manifest.version}") }
-          }
+        override fun refresh() { if (comparisonState().canInteract) inspectOnboarding() }
+        override fun selectProgress(choice: SharedProgressChoice) { comparisonAdapter.selectProgress(comparisonContext(), choice) }
+        override fun selectRemote(snapshotId: String) { comparisonAdapter.selectRemote(comparisonContext(), snapshotId) }
+        override fun finish(mode: SharedComparisonCompletion) {
+         val current = comparisonState()
+         if (!current.primaryEnabled || current.completion != mode) return
+         when (mode) {
+          SharedComparisonCompletion.EMPTY -> postponeOnboarding(true)
+          SharedComparisonCompletion.CONFIRM, SharedComparisonCompletion.KEEP_LOCAL -> completeObservedComparison(mode)
+          SharedComparisonCompletion.ADOPT -> performOnboarding(SetupAction.ADOPT, finishAfterOperation = true)
+          SharedComparisonCompletion.UPLOAD_LOCAL -> performOnboarding(SetupAction.UPLOAD, finishAfterOperation = true)
+          SharedComparisonCompletion.RESTORE_REMOTE -> performOnboarding(SetupAction.RESTORE, finishAfterOperation = true)
+          SharedComparisonCompletion.NONE -> Unit
          }
         }
-       }
+        override fun handleConflict() { comparisonAdapter.openConflict(comparisonContext()) }
+        override fun upload() {
+         if (comparisonState().primary == SharedComparisonPrimary.RETRY_UPLOAD && comparisonState().primaryEnabled)
+          performOnboarding(SetupAction.UPLOAD)
+        }
+        override fun openRecovery() {
+         if (comparisonState().primary == SharedComparisonPrimary.OPEN_RECOVERY && comparisonState().primaryEnabled) navigate(Page.SETTINGS)
+        }
+        override fun confirmConflict(token: Long) {
+         val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.CONFLICT) ?: return
+         if (comparisonState().confirmationPresentation?.confirmEnabled == true)
+          performOnboarding(SetupAction.RESTORE, finishAfterOperation = true, confirmedProof = proof)
+        }
+        override fun previewMerge(token: Long) { previewOnboardingMerge(token) }
+        override fun confirmMerge(token: Long) {
+         val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.MERGE_REVIEW) ?: return
+         if (comparisonState().confirmationPresentation?.confirmEnabled == true)
+          performOnboarding(SetupAction.MERGE, finishAfterOperation = true, confirmedProof = proof)
+        }
+        override fun cancelConflict(token: Long) { comparisonAdapter.cancel(comparisonContext(), token) }
+       })
        Page.HOME -> {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

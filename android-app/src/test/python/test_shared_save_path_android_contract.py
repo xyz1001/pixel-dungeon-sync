@@ -24,7 +24,7 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         self.assertIn("activity.setContent", ADAPTER)
         self.assertIn("SharedSavePathScreen(state, actions, game)", ADAPTER)
         self.assertIn("Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding())", ADAPTER)
-        for native in ("renderDiscovery()", "renderComparison()", "renderHome()"):
+        for native in ("renderDiscovery()", "renderHome()"):
             self.assertIn(native, route)
 
     def test_android_is_read_only_and_uses_resolved_path_and_actual_summary(self):
@@ -37,7 +37,7 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         self.assertIn("showSavePath(this, savePathLabel(), this.localPreview", render)
         self.assertIn("readyForSaves() && this.localPreview != null", render)
         for fabricated in ("new SaveSummary", "SaveSummary(", "Summary(", "File(", "SyncRuntime."):
-            self.assertNotIn(fabricated, ADAPTER)
+            self.assertNotIn(fabricated, body(ADAPTER, "fun showSavePath("))
 
     def test_operation_start_and_system_back_update_shared_busy_state(self):
         work = body(MAIN, "private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)")

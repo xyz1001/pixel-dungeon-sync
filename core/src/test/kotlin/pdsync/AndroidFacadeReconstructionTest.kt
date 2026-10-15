@@ -40,6 +40,7 @@ class AndroidFacadeReconstructionTest {
         var exports = 0; var restores = 0; var targets = 0
         var failRestore = false
         var afterExport: (() -> Unit)? = null
+        var beforeRestore: ((Path, Map<String, String>) -> Unit)? = null
         override fun targetGame(): AndroidGameTarget { targets++; return target }
         override fun exportTo(emptyDestination: Path) {
             exports++
@@ -54,6 +55,7 @@ class AndroidFacadeReconstructionTest {
         override fun restoreFrom(preparedDirectory: Path, expectedCurrentFiles: Map<String, String>) {
             restores++
             require(files.mapValues { hash(it.value) } == expectedCurrentFiles) { "Synthetic bridge CAS mismatch" }
+            beforeRestore?.invoke(preparedDirectory, expectedCurrentFiles)
             if (failRestore) error("Synthetic helper unavailable")
             files = readFiles(preparedDirectory).toMutableMap()
         }
@@ -95,6 +97,45 @@ class AndroidFacadeReconstructionTest {
     private fun journal(root: Path): Path = root.resolve("restore-journals/${identity.originalSourceIdentity}.json")
     private fun publish(bridge: FakeBridge, store: MemoryAppendStore): Rig = rig(bridge, store).also {
         assertEquals("UPLOADED", it.facade.autoUpload().status)
+    }
+    private data class MergeRig(val store: MemoryAppendStore, val local: Rig, val bridge: FakeBridge, val expected: Map<String, String>)
+    private fun mergeRig(): MergeRig {
+        val initial = (1..2).flatMap { slot ->
+            fixture(1).map { (name, bytes) -> name.replaceFirst("game1/", "game$slot/") to bytes }
+        }.toMap()
+        val store = MemoryAppendStore()
+        val remoteBridge = FakeBridge(initial); val remote = publish(remoteBridge, store)
+        val bridge = FakeBridge(emptyMap()); val local = rig(bridge, store)
+        local.facade.restoreSelected(local.facade.inspect(), store.latest().snapshot.id, false)
+        // Only the depth changes. Explicit continuation confirmation preserves the inherited
+        // identity of each whole run; independently imported slots cannot prove a safe merge.
+        remoteBridge.files["game1/depth1.dat"] = gzip("""{"version":896,"depth":1,"turn":2}""")
+        remote.facade.confirmRunIdentity(remote.facade.inspect(), "game1", true)
+        assertEquals("UPLOADED", remote.facade.autoUpload().status)
+        bridge.files["game2/depth1.dat"] = gzip("""{"version":896,"depth":1,"turn":3}""")
+        local.facade.confirmRunIdentity(local.facade.inspect(), "game2", true)
+        val expected = (bridge.files + ("game1/depth1.dat" to remoteBridge.files.getValue("game1/depth1.dat")))
+            .mapValues { hash(it.value) }
+        return MergeRig(store, local, bridge, expected)
+    }
+    private fun assertMergeRejectedWithoutSideEffects(
+        fixture: MergeRig,
+        inspection: AndroidSyncFacade.Inspection,
+        facade: AndroidSyncFacade = fixture.local.facade,
+    ) {
+        val writes = fixture.store.writes; val commits = fixture.store.commits.keys.toSet()
+        val restores = fixture.bridge.restores; val actual = fixture.bridge.files.mapValues { hash(it.value) }
+        val beforeMirror = fingerprint(mirror(fixture.local.root))
+        listOf<() -> Unit>(
+            { facade.previewMerge(inspection); Unit },
+            { facade.mergeConflict(inspection); Unit },
+        ).forEach { action ->
+            assertFailsWith<IllegalArgumentException> { action() }
+            assertEquals(writes, fixture.store.writes); assertEquals(commits, fixture.store.commits.keys)
+            assertEquals(restores, fixture.bridge.restores); assertEquals(actual, fixture.bridge.files.mapValues { hash(it.value) })
+            assertEquals(beforeMirror, fingerprint(mirror(fixture.local.root)))
+            assertFalse(facade.hasUnresolvedRestore()); assertFalse(journal(fixture.local.root).exists())
+        }
     }
 
     @Test fun officialRootTransportRetainsBaselineHistoryAndExactLocalScopes() {
@@ -269,6 +310,101 @@ class AndroidFacadeReconstructionTest {
         val result = a.autoUpload(); assertTrue(result.needsUserChoice); assertNotEquals("UPLOADED", result.status)
         assertEquals(writes, store.writes); assertEquals(0, aBridge.restores)
         assertEquals(hash(fixture(3).getValue("game1/game.dat")), hash(aBridge.files.getValue("game1/game.dat")))
+    }
+    @Test fun mergeRejectsNewCloudTipAfterPreviewBeforeWritesRestoreOrJournal() {
+        val fixture = mergeRig(); val facade = fixture.local.facade
+        val inspection = facade.inspect(); assertEquals("DIFFERENT", inspection.kind)
+        assertTrue(facade.previewMerge(inspection).isAllowed)
+        fixture.store.noopChild(fixture.store.latest())
+        assertMergeRejectedWithoutSideEffects(fixture, inspection)
+    }
+    @Test fun mergeRejectsActualGameProgressAfterPreviewBeforeWritesRestoreOrJournal() {
+        val fixture = mergeRig(); val inspection = fixture.local.facade.inspect()
+        assertTrue(fixture.local.facade.previewMerge(inspection).isAllowed)
+        fixture.bridge.files["game2/depth1.dat"] = gzip("""{"version":896,"depth":1,"turn":99}""")
+        assertMergeRejectedWithoutSideEffects(fixture, inspection)
+    }
+    @Test fun mergeRejectsChangedBaselineAfterPreviewBeforeWritesRestoreOrJournal() {
+        val fixture = mergeRig(); val facade = fixture.local.facade; val inspection = facade.inspect()
+        assertTrue(facade.previewMerge(inspection).isAllowed)
+        val directory = Files.walk(mirror(fixture.local.root).parent.resolve("state")).use { paths ->
+            paths.filter { Files.isDirectory(it) && it.fileName.toString() == "append-v2" }.toList().single()
+        }
+        val repository = AppendRepository(directory, AndroidGameAdapter(identity), connection.profile)
+        val graph = repository.discover(fixture.store); val replacement = graph.tips.single()
+        assertNotEquals(repository.baseline(), replacement)
+        repository.setBaseline(replacement, graph)
+        assertMergeRejectedWithoutSideEffects(fixture, inspection)
+        assertEquals(replacement, repository.baseline())
+    }
+    @Test fun mergeRejectsAnotherAccountObservationBeforeExportWritesRestoreOrJournal() {
+        val fixture = mergeRig(); val inspection = fixture.local.facade.inspect()
+        assertTrue(fixture.local.facade.previewMerge(inspection).isAllowed)
+        val otherConnection = AndroidConnection(connection.endpoint, "other-account", connection.password, connection.profile)
+        val other = AndroidSyncFacade(temp.resolve("other-account-workspace"), otherConnection,
+            fixture.bridge, identity, fixture.store, 0)
+        val exports = fixture.bridge.exports
+        assertMergeRejectedWithoutSideEffects(fixture, inspection, other)
+        assertEquals(exports, fixture.bridge.exports)
+    }
+    @Test fun mergeWithSameObservationRestoresExactPreviewThroughReadyJournalAndCas() {
+        val fixture = mergeRig(); val facade = fixture.local.facade; val bridge = fixture.bridge
+        val inspection = facade.inspect(); assertEquals("DIFFERENT", inspection.kind)
+        val before = bridge.files.mapValues { hash(it.value) }; val beforeMirror = fingerprint(mirror(fixture.local.root))
+        val writes = fixture.store.writes; val restores = bridge.restores
+        val preview = facade.previewMerge(inspection)
+        assertTrue(preview.isAllowed, preview.message); assertEquals(2, preview.slotCount)
+        assertEquals(writes, fixture.store.writes); assertEquals(restores, bridge.restores)
+        assertEquals(beforeMirror, fingerprint(mirror(fixture.local.root)))
+        assertFalse(facade.hasUnresolvedRestore())
+        var checkedJournal = false
+        bridge.beforeRestore = { prepared, expectedCurrent ->
+            val persisted = json.parseToJsonElement(journal(fixture.local.root).readText()).jsonObject
+            assertTrue(persisted.getValue("ready").jsonPrimitive.boolean)
+            assertEquals("merge", persisted.getValue("action").jsonPrimitive.content)
+            assertEquals(before, persisted.getValue("expectedBefore").jsonObject.mapValues { it.value.jsonPrimitive.content })
+            assertEquals(fixture.expected, persisted.getValue("expectedAfter").jsonObject.mapValues { it.value.jsonPrimitive.content })
+            assertEquals(before, expectedCurrent)
+            assertEquals(fixture.expected, readFiles(prepared).mapValues { hash(it.value) })
+            checkedJournal = true
+        }
+        val result = facade.mergeConflict(inspection)
+        assertFalse(result.isConflict); assertFalse(result.isPending)
+        assertEquals(fixture.store.latest().snapshot.id, result.snapshotId)
+        assertEquals("resolution", fixture.store.latest().kind)
+        assertTrue(checkedJournal); assertEquals(restores + 1, bridge.restores)
+        assertTrue(fixture.store.writes > writes)
+        assertEquals(fixture.expected, fixture.store.latest().snapshot.files)
+        assertEquals(fixture.expected, bridge.files.mapValues { hash(it.value) })
+        assertEquals(fixture.expected, readFiles(mirror(fixture.local.root)).mapValues { hash(it.value) })
+        assertFalse(facade.hasUnresolvedRestore()); assertFalse(journal(fixture.local.root).exists())
+    }
+    @Test fun failedMergeHelperRestoreKeepsReadyJournalAndRecoversWithoutRepublishing() {
+        val fixture = mergeRig(); val facade = fixture.local.facade; val bridge = fixture.bridge
+        val inspection = facade.inspect(); assertTrue(facade.previewMerge(inspection).isAllowed)
+        val before = bridge.files.mapValues { hash(it.value) }; val restores = bridge.restores
+        bridge.failRestore = true
+        val failure = assertFailsWith<IllegalStateException> { facade.mergeConflict(inspection) }
+        assertEquals("Synthetic helper unavailable", failure.message)
+        assertEquals(restores + 1, bridge.restores); assertEquals(before, bridge.files.mapValues { hash(it.value) })
+        assertEquals("resolution", fixture.store.latest().kind)
+        assertEquals(fixture.expected, fixture.store.latest().snapshot.files)
+        assertEquals(fixture.expected, readFiles(mirror(fixture.local.root)).mapValues { hash(it.value) })
+        assertTrue(facade.hasUnresolvedRestore())
+        val persisted = json.parseToJsonElement(journal(fixture.local.root).readText()).jsonObject
+        assertTrue(persisted.getValue("ready").jsonPrimitive.boolean)
+        assertEquals("merge", persisted.getValue("action").jsonPrimitive.content)
+        assertEquals(before, persisted.getValue("expectedBefore").jsonObject.mapValues { it.value.jsonPrimitive.content })
+        assertEquals(fixture.expected, persisted.getValue("expectedAfter").jsonObject.mapValues { it.value.jsonPrimitive.content })
+        val writes = fixture.store.writes
+        assertTrue(facade.inspect().needsRestoreRecovery)
+        assertEquals("RESTORE_RECOVERY_REQUIRED", facade.autoUpload().reasonCode)
+        assertEquals(writes, fixture.store.writes)
+        bridge.failRestore = false; facade.recoverRestore()
+        assertEquals(restores + 2, bridge.restores); assertEquals(writes, fixture.store.writes)
+        assertEquals(fixture.expected, bridge.files.mapValues { hash(it.value) })
+        assertFalse(facade.hasUnresolvedRestore()); assertFalse(journal(fixture.local.root).exists())
+        assertFails { facade.recoverRestore() }; assertEquals(restores + 2, bridge.restores)
     }
     @Test fun remoteRestoreAppliesExactBytesAndVerifiesBeforeClearingJournal() {
         val store = MemoryAppendStore(); publish(FakeBridge(), store)

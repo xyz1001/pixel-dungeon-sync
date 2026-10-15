@@ -65,8 +65,19 @@ Unrecognized nonempty directories remain failed. Both hosts render the reference
 shell and the same Next/Waiting/Retry footer. No shared screen performs filesystem
 or network operations. See `UI_REFERENCE_CONTRACT.md` for the visual authority.
 
-This is not completion of the full shared UI. Discovery/game selection, comparison,
-home/history, conflict/confirmation and settings still need to move to common
+The shared comparison slice uses `SharedComparisonScreen` and the same confirmation
+modal on both platforms. Empty and verified-identical states expose one explicit
+Finish; local/cloud-only states require a progress choice; multiple cloud heads
+remain explicitly selectable. Both hosts bind callbacks to the current account,
+page, observation and selection. A failed/expired observation becomes recheckable;
+it cannot strand the user with a repeatedly failing Finish or hide a frozen upload.
+Successful mutations require fresh core confirmation before completing setup.
+Observed merge preview/apply checks remain inside the physical-root lock, and a
+new branch arriving during publication requires a new preview rather than being
+silently included. Android retains its separate game-file restoration journal.
+
+This is not completion of the full shared UI. Discovery/game selection,
+home/history, home conflict/confirmation and settings still need to move to common
 Compose pages and shared presentation state. Android package
 installation, Root/embedded bridge access, SAF and foreground observation remain
 platform capabilities. Desktop JAR selection, native directory chooser and process

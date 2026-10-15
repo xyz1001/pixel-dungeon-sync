@@ -16,16 +16,19 @@ CONNECTION_FILE = (ROOT / "WebDavConnectionFile.java").read_text()
 SHARED = Path(__file__).resolve().parents[4] / "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android"
 PATH_SCREEN = (SHARED / "SharedSavePathScreen.kt").read_text()
 PATH_STATE = (SHARED / "SharedSavePathState.kt").read_text()
+COMPARISON = (SHARED / "SharedComparisonScreen.kt").read_text()
+COMPARISON_STATE = (SHARED / "SharedComparisonState.kt").read_text()
+ADAPTER = (Path(__file__).resolve().parents[4] / "android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidOnboardingComposition.kt").read_text()
 
 
 class AndroidUiFlowContract(unittest.TestCase):
     def test_four_steps_keep_existing_forward_and_back_navigation(self):
         for method, title in (
             ("renderDiscovery", "1 / 4  选择游戏"),
-            ("renderComparison", "4 / 4  选择存档"),
         ):
             self.assertIn(title, body(MAIN, "private void " + method + "()"))
         self.assertIn('title = "设置存档路径", eyebrow = "2 / 4"', PATH_SCREEN)
+        self.assertIn('title = "选择存档", eyebrow = "4 / 4"', COMPARISON)
         self.assertIn("navigate(SyncPage.PATH)", body(MAIN, "void m103x3c55a874("))
         self.assertIn("navigate(SyncPage.DISCOVERY)", body(MAIN, "void m109x58567797("))
         self.assertIn("navigate(SyncPage.CONNECTION)", body(MAIN, "void m110xcdd09dd8("))
@@ -59,18 +62,20 @@ class AndroidUiFlowContract(unittest.TestCase):
     # live with the shared sources; Android route/adapter/lifecycle proof is in
     # test_shared_connection_android_contract.py, rather than asserting deleted native widgets.
 
-    def test_empty_layout_returns_before_all_normal_comparison_and_transfer_controls(self):
-        render = body(MAIN, "private void renderComparison()")
-        empty = body(render, "if (showEmptyCompletion())")
-        self.assertIn('heading(this.feedbackError ? "4 / 4  配置尚未完成" : "4 / 4  配置完成")', empty)
-        self.assertIn('if (!this.feedbackError) text("配置完成")', empty)
-        self.assertEqual(["上一步", "完成"], re.findall(r'foot\("([^"]+)"', empty))
-        self.assertIn("this::completeEmpty", empty)
-        self.assertIn("navigate(SyncPage.CONNECTION)", empty)
-        self.assertRegex(empty, r"return;\s*}$")
-        self.assertLess(render.index(empty), render.index("text(comparisonCopy())"))
-        for operation in ("versionChoice", "getLocalFileCount", "重新比较", "稍后处理", "上传", "恢复", ".upload(", ".restore", "sync()", "readComparison()"):
-            self.assertNotIn(operation, empty)
+    def test_empty_layout_has_one_shared_primary_and_no_native_transfer_controls(self):
+        route = body(MAIN, "public void render()")
+        shared = body(route, "if (this.page == SyncPage.COMPARISON)")
+        self.assertIn("renderSharedComparison()", shared)
+        self.assertIn("return;", shared)
+        self.assertLess(route.index(shared), route.index("ScrollView scrollView"))
+        simple = body(COMPARISON, "if (state.isSimpleCompletion)")
+        self.assertIn("Text(state.headline", simple)
+        for operation in ("ComparisonChoiceCard", "upload", "restore", "稍后处理"):
+            self.assertNotIn(operation, simple)
+        self.assertEqual(1, COMPARISON.count("SharedActionButton(state.primaryLabel"))
+        self.assertIn("SharedComparisonCompletion.EMPTY", COMPARISON_STATE)
+        self.assertIn("case EMPTY: if (kind() == OnboardingKind.BOTH_EMPTY) completeEmpty()",
+                      body(MAIN, "private void finishSharedComparison("))
 
     def test_empty_layout_and_completion_use_current_observation_guard(self):
         empty = body(MAIN, "private boolean showEmptyCompletion()")
@@ -84,65 +89,32 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertLess(complete.index("AndroidUiFlowPolicy.canFinishEmpty("), complete.index("work("))
 
     def test_comparison_completion_is_exclusive_and_preserves_unavailable_actions(self):
-        render = body(MAIN, "private void renderComparison()")
-        empty = body(render, "if (showEmptyCompletion())")
-        identical = body(render, "if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE)")
-        keep_guard = "if (inspection != null && inspection.getCanKeepLocalProgress())"
-        ready_guard = "else if (inspection != null && inspection.getCanCompleteWithoutTransfer())"
-        adopt_guard = "else if (!inspection2.getCanKeepLocalProgress() && !inspection2.getCanCompleteWithoutTransfer())"
-        keep = body(render, keep_guard)
-        ready = body(render, ready_guard)
-        adopt = body(render, adopt_guard)
-
-        # BOTH_EMPTY returns early; local-progress and SAME_TIP completion are
-        # mutually exclusive. Adoption must not add a second completion button
-        # when either earlier branch already supplied one.
-        self.assertRegex(empty, r"return;\s*}$")
-        self.assertIn('foot("完成", this::completeLocalProgress)', keep)
-        self.assertIn('foot("完成", this::completeReadyComparison)', ready)
-        self.assertRegex(render, re.escape(keep) + r"\s*" + re.escape(ready_guard))
-        self.assertIn('foot("完成", new Runnable()', adopt)
-        self.assertIn("MainActivity.this.adopt()", adopt)
-        self.assertEqual(1, adopt.count('foot("完成"'))
-        remainder = render
-        for section in (empty, identical, keep, ready, adopt):
-            remainder = remainder.replace(section, "", 1)
-        self.assertNotIn('foot("完成"', remainder)
-
-        # NONE/ANCESTOR adoption still exists, but null or non-adoptable
-        # inspections take the original restore branch without dereferencing
-        # inspection2. Missing cloud proof still returns before any choices.
-        unavailable = body(render, "if (inspection2 == null || !inspection2.getCanAdoptRemote())")
-        self.assertRegex(render, re.escape(unavailable) + r"\s*" + re.escape(adopt_guard))
-        restore = body(unavailable, "if (inspection3 != null && !inspection3.getRemoteVersions().isEmpty())")
-        self.assertIn('foot("恢复所选云端存档", this::requestRestore).setEnabled(restoreSupported() && this.selected != null && kind() != OnboardingKind.BLOCKED)', restore)
-        unverified = body(render, "if (!this.cloudVerified && kind() != OnboardingKind.BLOCKED)")
-        self.assertEqual(["上一步", "重新比较"], re.findall(r'foot\("([^"]+)"', unverified))
-        self.assertRegex(unverified, r"return;\s*}$")
-        self.assertLess(render.index(unverified), render.index(keep_guard))
-        self.assertIn('foot("完成", this::completeEmpty).setEnabled(!this.busy && this.onboardingActive && this.connection != null)', empty)
-        self.assertIn("this::upload).setEnabled(kind() != OnboardingKind.BLOCKED || this.inspection.isRetryablePending())", render)
+        dispatch = body(MAIN, "private void finishSharedComparison(")
+        for mode in ("EMPTY", "CONFIRM", "ADOPT", "KEEP_LOCAL", "UPLOAD_LOCAL", "RESTORE_REMOTE"):
+            self.assertIn("case " + mode + ":", dispatch)
+        self.assertIn("if (!usableSharedComparison()", dispatch)
+        for actual in ("observed?.needsRestoreRecovery == true", "observed?.isRetryablePending == true",
+                       "observed?.canCompleteWithoutTransfer == true", "observed?.canAdoptRemote == true",
+                       "observed?.canKeepLocalProgress == true"):
+            self.assertIn(actual, ADAPTER)
+        self.assertIn("needsRestoreRecovery -> SharedComparisonPrimary.OPEN_RECOVERY", COMPARISON_STATE)
+        self.assertIn("retryablePending -> SharedComparisonPrimary.RETRY_UPLOAD", COMPARISON_STATE)
+        self.assertIn("!hasObservation -> SharedComparisonPrimary.REFRESH", COMPARISON_STATE)
+        self.assertIn("readiness", body(MAIN, "void m55x8211a061("))
+        self.assertNotIn("foot(", body(MAIN, "private void renderSharedComparison()"))
 
     def test_exact_identical_state_renders_only_one_completion_before_any_choice(self):
-        render = body(MAIN, "private void renderComparison()")
-        identical = body(render, "if (identical != AndroidUiFlowPolicy.IdenticalCompletion.NONE)")
-        self.assertEqual(["完成"], re.findall(r'foot\("([^\"]+)"', identical))
-        self.assertIn("identical == AndroidUiFlowPolicy.IdenticalCompletion.CONFIRM", identical)
-        self.assertIn("? this::completeReadyComparison : this::adopt", identical)
-        self.assertRegex(identical, r"return;\s*}$")
-        before = render[:render.index(identical)]
-        for evidence in ("AndroidUiFlowPolicy.identicalCompletion(",
-                         "kind() == null ? null : kind().name(), this.cloudVerified",
-                         "observed.getNeedsRestoreRecovery()", "observed.isRetryablePending()",
-                         "observed.getCanCompleteWithoutTransfer()", "observed.getCanAdoptRemote()"):
-            self.assertIn(evidence, before)
-        for remaining in ('text("本机 · "', "versionChoice(", "LinearLayout linearLayoutRow = row()",
-                          '"上传本机，保留两份"', 'foot("恢复所选云端存档"', 'foot("稍后处理"'):
-            self.assertLess(render.index(identical), render.index(remaining))
-        self.assertNotIn("getLocalFileCount()", before[before.index("AndroidSyncFacade.Inspection observed"):])
-        # Completion callbacks keep their original locked core revalidation;
-        # rendering a single button cannot fabricate or advance a baseline.
+        self.assertIn("kind == OnboardingKind.IDENTICAL && canCompleteWithoutTransfer", COMPARISON_STATE)
+        self.assertIn("kind == OnboardingKind.IDENTICAL && canAdoptRemote", COMPARISON_STATE)
+        self.assertIn("!(isSimpleCompletion && kind == OnboardingKind.IDENTICAL)", COMPARISON_STATE)
+        simple = body(COMPARISON, "if (state.isSimpleCompletion)")
+        self.assertNotIn("ComparisonChoiceCard", simple)
+        self.assertNotIn("SharedActionButton", simple)
+        dispatch = body(MAIN, "private void finishSharedComparison(")
+        self.assertIn("kind() == OnboardingKind.IDENTICAL && this.inspection.getCanCompleteWithoutTransfer()", dispatch)
+        self.assertIn("kind() == OnboardingKind.IDENTICAL && this.inspection.getCanAdoptRemote()", dispatch)
         confirm = body(MAIN, "private void completeReadyComparison()")
+        self.assertIn("requireSharedComparisonProof(proof)", confirm)
         self.assertIn("owner.completeOnboarding(observed)", confirm)
         self.assertLess(confirm.index("owner.completeOnboarding(observed)"),
                         confirm.index("SyncRuntime.setOnboardingProgress"))

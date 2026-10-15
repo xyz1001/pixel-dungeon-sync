@@ -28,10 +28,10 @@ class SharedConnectionAndroidContract(unittest.TestCase):
 
     def test_unmigrated_native_pages_are_explicit_and_unchanged_routes(self):
         route = body(MAIN, "public void render()")
-        for page in ("Home", "Settings", "Discovery", "Comparison", "Conflict", "Confirmation"):
+        for page in ("Home", "Settings", "Discovery", "Conflict", "Confirmation"):
             self.assertIn("render" + page + "()", route)
         self.assertIn("renderSharedSavePath()", route)
-        self.assertIn("discovery and comparison remain native", MAIN)
+        self.assertIn("renderSharedComparison()", route)
 
     def test_platform_adapter_is_typed_and_keeps_only_application_context(self):
         ports = ADAPTER[ADAPTER.index("internal class AndroidConnectionPorts"):]

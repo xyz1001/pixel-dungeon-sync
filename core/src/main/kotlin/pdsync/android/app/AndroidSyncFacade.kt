@@ -211,13 +211,13 @@ class AndroidSyncFacade internal constructor(
  }
  fun previewMerge(inspection:Inspection)=locked {
   val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles)
-  try {versions.requireMerge();val result=session.previewMerge(mergeObservation(comparison),store,mirrorStopped);MergePreview(true,"Safe merge is available. Review the decisions before applying.",result.slots,result.decisions)}
+  try {versions.requireMerge();val result=session.previewOnboardingMerge(comparison,store,mirrorStopped);MergePreview(true,"Safe merge is available. Review the decisions before applying.",result.slots,result.decisions)}
   catch(e:RunMergeException){MergePreview(false,e.message ?: "This conflict cannot be safely merged.",0,emptyList())}
  }
  fun mergeConflict(inspection:Inspection)=locked {
-  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);versions.requireMerge();val conflict=mergeObservation(comparison)
-  val preview=session.previewMerge(conflict,store,mirrorStopped);var result:AppendPushResult?=null
-  prepareGameRestore(comparison.localFiles,preview.snapshot.manifest.files,"merge") {result=if(comparison.observedTips.size>=2)session.merge(conflict,store,mirrorStopped) else session.mergeCurrent(store,mirrorStopped)}
+  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);versions.requireMerge()
+  val preview=session.previewOnboardingMerge(comparison,store,mirrorStopped);var result:AppendPushResult?=null
+  prepareGameRestore(comparison.localFiles,preview.snapshot.manifest.files,"merge") {result=session.mergeCurrent(comparison,store,mirrorStopped)}
   pushResult(requireNotNull(result),"Merged game saves applied, verified and published.")
  }
  fun adoptIdentical(inspection:Inspection)=locked {val c=checked(inspection);checkActualUnchanged(c.localFiles);OperationResult("Identical local and cloud saves linked. No game files were replaced.",false,false,session.adoptOnboardingRemote(c,store,mirrorStopped).snapshot.id)}
@@ -250,7 +250,6 @@ class AndroidSyncFacade internal constructor(
   val conflict=session.inspectConflict(store,mirrorStopped) ?: error("There is no current cloud conflict. Compare again.")
   require(conflict.observedTips==c.observedTips && conflict.observedLocalFiles==c.localFiles){"Cloud branches or current game files changed. Compare again before selecting a branch."};return conflict
  }
- private fun mergeObservation(c:OnboardingComparison)=if(c.observedTips.size>=2)currentConflict(c) else AppendConflict(c.observedTips,emptyList(),c.localFiles)
  private fun pushResult(result:AppendPushResult,success:String="Snapshot uploaded and verified.")=when(result) {
   is AppendPushResult.Diverged -> OperationResult("Both branches are preserved. Compare again and explicitly choose a branch or preview a safe merge.",true,session.hasPending(),null)
   is AppendPushResult.Success -> OperationResult(when {result.remoteAhead->"Snapshot is preserved, but another cloud branch advanced. Compare again.";result.localDirty->"Snapshot uploaded; newer local changes remain. Compare again.";else->success},false,session.hasPending(),result.commit.snapshot.id)
