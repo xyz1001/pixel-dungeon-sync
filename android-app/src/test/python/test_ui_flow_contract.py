@@ -13,16 +13,19 @@ ROOT = Path(__file__).resolve().parents[2] / "main/java/io/github/xyz1001/pdsync
 MAIN = (ROOT / "MainActivity.java").read_text()
 STORE = (ROOT / "SecureConnectionStore.java").read_text()
 CONNECTION_FILE = (ROOT / "WebDavConnectionFile.java").read_text()
+SHARED = Path(__file__).resolve().parents[4] / "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android"
+PATH_SCREEN = (SHARED / "SharedSavePathScreen.kt").read_text()
+PATH_STATE = (SHARED / "SharedSavePathState.kt").read_text()
 
 
 class AndroidUiFlowContract(unittest.TestCase):
     def test_four_steps_keep_existing_forward_and_back_navigation(self):
         for method, title in (
             ("renderDiscovery", "1 / 4  选择游戏"),
-            ("renderPath", "2 / 4  设置存档路径"),
             ("renderComparison", "4 / 4  选择存档"),
         ):
             self.assertIn(title, body(MAIN, "private void " + method + "()"))
+        self.assertIn('title = "设置存档路径", eyebrow = "2 / 4"', PATH_SCREEN)
         self.assertIn("navigate(SyncPage.PATH)", body(MAIN, "void m103x3c55a874("))
         self.assertIn("navigate(SyncPage.DISCOVERY)", body(MAIN, "void m109x58567797("))
         self.assertIn("navigate(SyncPage.CONNECTION)", body(MAIN, "void m110xcdd09dd8("))
@@ -41,12 +44,11 @@ class AndroidUiFlowContract(unittest.TestCase):
         self.assertIn("PICK_APK", MAIN)
 
     def test_path_preview_uses_resolved_path_and_actual_slot_play_summary(self):
-        path = body(MAIN, "private void renderPath()")
-        self.assertIn("text(savePathLabel())", path)
-        self.assertIn("this.localPreview.getSlots().size()", path)
-        self.assertIn("this.localPreview.getSlots().entrySet()", path)
-        self.assertIn("this.localPreview.getPlays()", path)
-        self.assertIn("this.localPreview.getFiles()", path)
+        path = body(MAIN, "private void renderSharedSavePath()")
+        self.assertIn("showSavePath(this, savePathLabel(), this.localPreview", path)
+        for actual_summary in ("it.slots.size", "it.slots.map", "it.plays", "it.files"):
+            self.assertIn(actual_summary, PATH_STATE)
+        self.assertIn("savePathSummary(state.summary)", PATH_SCREEN)
         self.assertIn("readyForSaves() && this.localPreview != null", path)
         label = body(MAIN, "private String savePathLabel()")
         self.assertIn("this.rootGame.dataDir", label)

@@ -52,9 +52,22 @@ explicit build inputs. Signing remains outside source control.
 
 ## Remaining migration boundaries
 
-The first slice is not completion of the full shared UI. Discovery/game selection,
-save-path, comparison, home/history, conflict/confirmation and settings still need
-to move to common Compose pages and shared presentation state. Android package
+The shared save-path slice uses `SharedSavePathScreen` and its capability-gated
+state/actions on both platforms. Android supplies its PackageManager/Root path
+and an existing guarded export preview; desktop supplies its editable path and
+native folder chooser. Missing statistics remain nullable internally, while the
+shared wording displays “已进行0场游戏”. A preview from an older draft or page
+cannot replace the current preview. Ordinary reads permit Back and register at most
+one queued Next; only current foreground/page/selection results may advance.
+Failed reads stay failed until an explicit retry. A safely absent desktop directory
+is a typed preparation state, not an empty preview, and is created only after Next.
+Unrecognized nonempty directories remain failed. Both hosts render the reference
+shell and the same Next/Waiting/Retry footer. No shared screen performs filesystem
+or network operations. See `UI_REFERENCE_CONTRACT.md` for the visual authority.
+
+This is not completion of the full shared UI. Discovery/game selection, comparison,
+home/history, conflict/confirmation and settings still need to move to common
+Compose pages and shared presentation state. Android package
 installation, Root/embedded bridge access, SAF and foreground observation remain
 platform capabilities. Desktop JAR selection, native directory chooser and process
 launch/observation remain desktop capabilities.

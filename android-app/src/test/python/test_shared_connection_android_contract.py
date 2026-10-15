@@ -18,7 +18,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_component_activity_mounts_the_actual_shared_composable(self):
         self.assertIn("extends ComponentActivity implements SharedConnectionHost", MAIN)
         self.assertIn("activity.setContent", ADAPTER)
-        self.assertIn("SharedConnectionScreen(session.controller)", ADAPTER)
+        self.assertIn("SharedConnectionScreen(session.controller, game)", ADAPTER)
         route = body(MAIN, "public void render()")
         self.assertLess(route.index("renderSharedConnection()"), route.index("ScrollView scrollView"))
         self.assertIn("this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly", route)
@@ -28,9 +28,10 @@ class SharedConnectionAndroidContract(unittest.TestCase):
 
     def test_unmigrated_native_pages_are_explicit_and_unchanged_routes(self):
         route = body(MAIN, "public void render()")
-        for page in ("Home", "Settings", "Discovery", "Path", "Comparison", "Conflict", "Confirmation"):
+        for page in ("Home", "Settings", "Discovery", "Comparison", "Conflict", "Confirmation"):
             self.assertIn("render" + page + "()", route)
-        self.assertIn("Other pages remain native until stage 2", MAIN)
+        self.assertIn("renderSharedSavePath()", route)
+        self.assertIn("discovery and comparison remain native", MAIN)
 
     def test_platform_adapter_is_typed_and_keeps_only_application_context(self):
         ports = ADAPTER[ADAPTER.index("internal class AndroidConnectionPorts"):]
@@ -174,7 +175,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(render.index("visibleSession.getController().foreground(this.resumed)"),
                         render.index("this.sharedConnectionSession != visibleSession"))
         self.assertLess(render.index("this.sharedConnectionSession != visibleSession"),
-                        render.index("AndroidConnectionComposition.show(this, visibleSession)"))
+                        render.index("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())"))
 
     def test_commit_preserves_runtime_connection_identity_for_history_guards(self):
         commit = body(MAIN, "private boolean drainSharedCommit()")

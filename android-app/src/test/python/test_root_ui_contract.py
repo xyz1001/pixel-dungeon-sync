@@ -48,8 +48,8 @@ class RootUiContract(unittest.TestCase):
         startup = body(MAIN, 'void m69xebc6eee5(')
         self.assertIn('if (!canRequestSaveAccess())', startup)
         self.assertNotIn('checkRootAccess()', startup)
-        preview = body(MAIN, 'SaveSummary m64x685e4018()')
-        self.assertLess(preview.index('checkRootAccess()'), preview.index('exportTo('))
+        preview = body(MAIN, 'private SaveSummary readPathPreview(')
+        self.assertLess(preview.index('checkRootAccess(request, backend)'), preview.index('exportTo('))
         explicit_compare = body(MAIN, 'Boolean m66x99ceaa21(')
         self.assertIn('if (this.rootGame != null) checkRootAccess()', explicit_compare)
 
@@ -58,7 +58,7 @@ class RootUiContract(unittest.TestCase):
             rendering = body(MAIN, signature)
             for operation in ('.inspectReady(', '.exportTo(', '.observeLifecycle(', 'probeRootAuthorization('):
                 self.assertNotIn(operation, rendering)
-        path = body(MAIN, 'private void renderPath()')
+        path = body(MAIN, 'private void schedulePathPreviewEntry()')
         self.assertIn('if (this.rootGame != null || this.localPreview != null', path)
         callback = body(MAIN, 'void m111x434ac419()')
         self.assertIn('this.rootGame != null ||', callback)

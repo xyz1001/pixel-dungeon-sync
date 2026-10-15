@@ -19,9 +19,9 @@ class ManualPaymentUiContract(unittest.TestCase):
         for forbidden in ("sandboxPaymentSession", "showSandboxPaymentPreview", "ManualPaymentPanel",
                           "new ManualPaymentSession(", "ManualPaymentSession.AuthenticatedIdentity"):
             self.assertNotIn(forbidden, MAIN)
-        for page in ("renderDiscovery", "renderPath", "renderComparison", "renderHome"):
+        for page in ("renderDiscovery", "renderSharedSavePath", "renderComparison", "renderHome"):
             self.assertNotIn("ManualPayment", body(MAIN, "private void " + page + "()"))
-        self.assertIn("AndroidConnectionComposition.show(this, visibleSession)", MAIN)
+        self.assertIn("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())", MAIN)
 
     def test_minimal_read_only_appreciation_page(self):
         self.assertIn('"沙箱"', PANEL)

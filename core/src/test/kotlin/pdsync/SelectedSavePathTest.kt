@@ -29,4 +29,41 @@ class SelectedSavePathTest {
   val actual=SaveSummary.read(root);assertEquals(23,actual.plays);assertEquals(setOf("game1"),actual.slots.keys);assertNotNull(actual.slots["game1"])
   root.resolve("rankings.dat").writeText("{\"total\":1,\"total\":999}");assertNull(SaveSummary.read(root).plays)
  }
+ @Test fun safelyAbsentNestedDirectoryHasTypedProofAndIsNeverCreatedByInspection() {
+  val location=DefaultProfileLocation(SavePathContext("Linux",temp.toString(),emptyMap()))
+  val missing=temp.resolve("safe/nested")
+  val failure=assertFailsWith<SelectedSaveDirectoryMissing> { location.requireSelected(missing.toString(),false) }
+  assertEquals(missing,failure.directory)
+  assertFalse(missing.parent.exists())
+  assertEquals(missing,location.requireSelected(missing.toString(),true))
+  assertTrue(missing.isDirectory())
+ }
+ @Test fun regularFileAncestorAndDotSegmentsNeverReturnSafeMissingProof() {
+  val location=DefaultProfileLocation(SavePathContext("Linux",temp.toString(),emptyMap()))
+  val file=temp.resolve("file").apply { writeText("keep") }
+  for (path in listOf(file,file.resolve("child"),temp.resolve("a/../b"),temp)) {
+   val failure=assertFails { location.requireSelected(path.toString(),false) }
+   assertFalse(failure is SelectedSaveDirectoryMissing,"unsafe target: $path")
+  }
+  assertEquals("keep",file.readText())
+ }
+ @Test
+ @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+ fun symlinkAndDanglingSymlinkAncestorsNeverPermitPreparation() {
+  val location=DefaultProfileLocation(SavePathContext("Linux",temp.toString(),emptyMap()))
+  val target=temp.resolve("actual").createDirectory()
+  val linked=temp.resolve("link")
+  val dangling=temp.resolve("dangling")
+  java.nio.file.Files.createSymbolicLink(linked,target)
+  java.nio.file.Files.createSymbolicLink(dangling,temp.resolve("missing-target"))
+  for (path in listOf(linked,linked.resolve("child"),dangling,dangling.resolve("child"))) {
+   for (create in listOf(false,true)) {
+    val failure=assertFails { location.requireSelected(path.toString(),create) }
+    assertFalse(failure is SelectedSaveDirectoryMissing,"symlinks are never safe absent targets")
+   }
+  }
+  assertFalse(target.resolve("child").exists())
+  assertFalse(temp.resolve("missing-target").exists())
+ }
+
 }

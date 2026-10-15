@@ -2,8 +2,17 @@ package pdsync
 
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Path
 import java.nio.file.Paths
+
+/** Read-only inspection proved the target absent and its nearest existing parent usable.
+ * Only an explicit Next may create it; other errors must never be converted to an empty preview.
+ */
+class SelectedSaveDirectoryMissing(val directory: Path) : IllegalArgumentException(
+ "目录尚不存在；点击下一步可创建空目录"
+)
 
 /** Old saveRoot is not silently reused; the new explicit selection is persisted independently. */
 class DefaultProfileLocation(
@@ -41,8 +50,34 @@ class DefaultProfileLocation(
   require(value.isNotBlank() && raw.isAbsolute && raw.none { it.toString() in setOf(".","..") }) { "请输入完整的存档目录路径" }
   val root=SafePaths.checked(raw)
   require(root.parent!=null && root!=Paths.get(context.userHome.orEmpty()).toAbsolutePath().normalize()) { "请选择专用存档目录" }
-  if(create)Files.createDirectories(root)
-  require(Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS)) { "目录尚不存在；点击下一步可创建空目录" }
-  return root
+  val exists = selectedDirectoryExists(root)
+  if (!exists) {
+   if (!create) throw SelectedSaveDirectoryMissing(root)
+   // Recheck after creation: a preview is never permission to trust a changed filesystem.
+   Files.createDirectories(SafePaths.checked(root))
+  }
+  val checked = SafePaths.checked(root)
+  require(selectedDirectoryExists(checked)) { "无法创建存档目录" }
+  return checked
+ }
+
+ /** NoSuchFileException is the sole absent-path proof. Denied/unknown status stays an error. */
+ private fun selectedDirectoryExists(root: Path): Boolean {
+  var cursor = root
+  var missing = false
+  while (true) {
+   val attributes = try {
+    Files.readAttributes(cursor, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+   } catch (_: NoSuchFileException) {
+    missing = true
+    cursor = cursor.parent ?: throw IllegalArgumentException("请选择专用存档目录")
+    continue
+   }
+   require(!attributes.isSymbolicLink && attributes.isDirectory) { "请选择有效的存档目录" }
+   require(Files.isReadable(cursor) && Files.isWritable(cursor) && Files.isExecutable(cursor)) {
+    "无法确认存档目录的读写权限"
+   }
+   return !missing
+  }
  }
 }

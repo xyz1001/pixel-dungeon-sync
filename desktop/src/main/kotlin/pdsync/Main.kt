@@ -17,13 +17,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
 import java.nio.file.Path
-import pdsync.presentation.HistoryPresentation
 import io.github.xyz1001.pdsync.android.ConnectionEntryModel
 import io.github.xyz1001.pdsync.android.SharedConnectionConfig
 import io.github.xyz1001.pdsync.android.SharedConnectionController
 import io.github.xyz1001.pdsync.android.SharedConnectionHost
 import io.github.xyz1001.pdsync.android.SharedGameIdentity
 import io.github.xyz1001.pdsync.android.SharedConnectionScreen
+import io.github.xyz1001.pdsync.android.SharedSavePathScreen
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import javax.swing.SwingUtilities
@@ -73,9 +73,9 @@ internal fun runSyncApplication(
   var config by remember { mutableStateOf(initialResult.getOrNull()) }
   val location = remember { DefaultProfileLocation() }
   val pathResult = remember { runCatching { location.resolve() } }
-  var pathText by remember { mutableStateOf(config?.selectedSaveRoot ?: pathResult.getOrNull()?.toString().orEmpty()) }
-  var pathPreview by remember { mutableStateOf<SaveSummary?>(null) }
-  var pathNotice by remember { mutableStateOf<String?>(null) }
+  val pathAdapter = remember {
+   DesktopSavePathAdapter(config?.selectedSaveRoot ?: pathResult.getOrNull()?.toString().orEmpty(), pathResult.getOrNull()?.toString(), location)
+  }
   var password by remember { mutableStateOf("") }
   var connected by remember { mutableStateOf(false) }
   var connectionNotice by remember { mutableStateOf<String?>(null) }
@@ -140,6 +140,7 @@ internal fun runSyncApplication(
    if (next == Page.CONNECTION && page != Page.CONNECTION) {
     connectionReturnPage = if (page == Page.SETTINGS) Page.SETTINGS else if (onboardingActive) Page.PATH else Page.HOME
    }
+   pathAdapter.pageChanged(next == Page.PATH)
    pageGeneration++; page = next; closeBlocked = false
   }
   suspend fun reconnectSaved(saved: AppConfig) {
@@ -561,23 +562,29 @@ internal fun runSyncApplication(
    }
   }
   fun continuePath() {
-   if(busy || connectingAtStartup || appClosed)return
+   if(busy || connectingAtStartup || appClosed || page != Page.PATH)return
+   val selectedPath = pathAdapter.state.path
+   val selectedRevision = pathAdapter.revision
+   val generation = pageGeneration
+   fun current() = !appClosed && page == Page.PATH && pageGeneration == generation &&
+    pathAdapter.revision == selectedRevision && pathAdapter.state.path == selectedPath
+   if (selectedPath.isBlank() || !pathAdapter.state.canContinue) return
    busy=true
    scope.launch {
     var proceed=false
     try {
-     val root=withContext(Dispatchers.IO) { location.requireSelected(pathText,true) }
+     val root=withContext(Dispatchers.IO) { location.requireSelected(selectedPath,true) }
      val next=setupDraft.copy(selectedSaveRoot=root.toString(),onboardingProgress=OnboardingProgress.PENDING)
      withContext(Dispatchers.IO) {
       // Validate the selected directory before persisting it or advancing.
-      val preview=SaveSummary.read(root)
-      require(preview.files>0 || java.nio.file.Files.list(root).use { it.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { "此目录没有可识别存档，请选择档案根目录或空目录" }
+      inspectSelectedSaveDirectory(root)
       if(config!=null)configFile.save(next)
      }
-     setupDraft=next;if(config!=null)config=next;proceed=true
-    } catch(e:Exception) { pathNotice=e.message }
+     if (current()) { setupDraft=next;if(config!=null)config=next;proceed=true }
+    } catch(e:CancellationException) { throw e }
+    catch(e:Exception) { if (current()) pathAdapter.showError(e.message) }
     finally { busy=false }
-    if(proceed){settingsMode=SettingsMode.FULL;navigate(Page.CONNECTION)}
+    if(proceed && current()){settingsMode=SettingsMode.FULL;navigate(Page.CONNECTION)}
    }
   }
   fun postponeOnboarding(emptyDecision: Boolean = false) {
@@ -684,14 +691,19 @@ internal fun runSyncApplication(
    } finally { connectingAtStartup = false }
    if (connected && onboardingActive && page != Page.DISCOVERY) inspectOnboarding()
   }
-  LaunchedEffect(page,pathText) {
-   if(page==Page.PATH) {
-    pathPreview=null;pathNotice="正在读取存档…";delay(350)
-    try {
-     val result=withContext(Dispatchers.IO){diagnosticWork(DiagnosticAction.INSPECT) { SaveSummary.read(location.requireSelected(pathText,false)) }}
-     pathPreview=result;pathNotice=if(result.files==0)"目录存在，尚无游戏存档或记录。" else null
-    } catch(e:CancellationException){throw e}
-    catch(e:Exception){pathNotice=e.message}
+  LaunchedEffect(page, pathAdapter.revision, busy, connectingAtStartup) {
+   if (page == Page.PATH && !busy && !connectingAtStartup && !appClosed) {
+    val generation = pageGeneration
+    val preview = pathAdapter.beginPreview() ?: return@LaunchedEffect
+    delay(350)
+    val result = try {
+     Result.success(withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT) { pathAdapter.inspect(preview) } })
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { Result.failure(e) }
+    val continueRequested = pathAdapter.completePreview(preview, result)
+    if (continueRequested && !appClosed && page == Page.PATH && pageGeneration == generation &&
+     pathAdapter.state.path == preview.path && pathAdapter.revision == preview.revision &&
+     !busy && !connectingAtStartup) continuePath()
    }
   }
   // Keep launch availability fresh even when disconnected or automatic upload is paused.
@@ -835,35 +847,31 @@ internal fun runSyncApplication(
          }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { chooseSetupGame() }) { Text(if (discoveredTarget == null) "选择游戏…" else "更换游戏…") }
          Details {
-          Text("存档位置：$pathText")
+          Text("存档位置：${pathAdapter.state.path}")
           discoveredTarget?.let { Text("游戏文件：${it.path}") }
           discovery?.defaultSave?.reason?.let { Text(it) }
           discovery?.diagnostics?.forEach { Text(it) }
          }
         }
        }
-       Page.PATH -> GuidedPage(title="2 / 4  设置存档路径",subtitle="",footer={
-        if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-        Row(Modifier.fillMaxWidth()) {
-         TextButton(enabled=!busy,onClick={navigate(Page.DISCOVERY)}){Text("上一步")}
-         Spacer(Modifier.weight(1f))
-         Button(enabled=!busy&&pathText.isNotBlank(),onClick={continuePath()}){Text("下一步")}
-        }
-       }) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-         OutlinedTextField(pathText,{pathText=it},Modifier.fillMaxWidth(),enabled=!busy,label={Text("存档目录")},singleLine=true)
-         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-          OutlinedButton(enabled=!busy,onClick={busy=true;scope.launch {try{NativeFolderChooser.choose(pathText)?.let{pathText=it}}catch(e:Exception){pathNotice=e.message}finally{busy=false}}}){Text("选择目录…")}
-          TextButton(enabled=!busy&&pathResult.isSuccess,onClick={pathText=pathResult.getOrThrow().toString()}){Text("使用默认路径")}
+       Page.PATH -> SharedSavePathScreen(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
+        adapter = pathAdapter,
+        canAct = { !busy && !connectingAtStartup && !appClosed && page == Page.PATH },
+        choose = {
+         busy = true
+         scope.launch {
+          pathAdapter.chooseDirectoryUsing(
+           choose = { NativeFolderChooser.choose(it) },
+           canPublish = { !appClosed && page == Page.PATH },
+           onBusyChanged = { busy = it }
+          )
          }
-         pathPreview?.let { summary ->
-          Text("游戏槽位 ${summary.slots.size} 个 · ${HistoryPresentation.plays(summary.plays)}")
-          summary.slots.forEach { (slot,time) -> Text("$slot · ${time?.let(::localTime) ?: "时间未知"}",color=muted) }
-         }
-         pathNotice?.let { Text(it,color=muted) }
-         Text("目录不存在时，下一步会创建空目录用于恢复。不会运行游戏。",style=MaterialTheme.typography.caption,color=muted)
-        }
-       }
+        },
+        goBack = { navigate(Page.DISCOVERY) },
+        continuePath = { continuePath() }
+       ), game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
+        SharedGameIdentity("Shattered Pixel Dungeon", it.displayVersion)
+       })
        Page.COMPARISON -> GuidedPage(
         title = if (EmptySetupCompletion.isEmpty(comparison?.kind, comparison?.blocker)) "4 / 4  配置完成" else "4 / 4  选择存档", subtitle = "",
         footer = {
@@ -1001,7 +1009,7 @@ internal fun runSyncApplication(
          Text(targetInfo?.let { "Shattered ${it.displayVersion}" } ?: "尚未选择游戏")
          targetError?.let { CompactFeedback(it, "游戏文件不可用，请重新选择。") }
          OutlinedButton(enabled = config != null && !busy, onClick = { selectTargetGame() }) { Text("更换游戏…") }
-         Details { Text("存档位置：$pathText"); Text(processMessage(gameStatus)) }
+         Details { Text("存档位置：${pathAdapter.state.path}"); Text(processMessage(gameStatus)) }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { loadProfile(config) }) { Text("重新检查存档") }
          OutlinedButton(enabled = !busy && !connectingAtStartup, onClick = { openConnection(SettingsMode.FULL) }) { Text("云端连接设置") }
          TextButton(enabled = !busy && !connectingAtStartup, onClick = { onboardingActive = true; setupDraft = config ?: newConnectionConfig(); navigate(Page.PATH) }) { Text("修改存档路径") }

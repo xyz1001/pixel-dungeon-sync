@@ -1,10 +1,11 @@
-# Shared Compose UI (stage 1)
+# Shared Compose UI
 
 `src/main/kotlin` is a **single physical source tree** compiled by both
 `:desktop:compileKotlin` and `:android-app:compileReleaseKotlin`. The desktop
 source set also runs `src/test/kotlin` as ordinary JVM tests. This deliberately
 uses the existing JVM core and independent JVM/Android compilations, not KMP.
-Do not copy UI source into either platform directory or include Android/desktop
+Connection/appreciation and save-path pages are shared; later pages are being
+migrated incrementally. Do not copy UI source into either platform directory or include Android/desktop
 APIs in this directory; platform hosts provide callbacks and persisted settings.
 
 Pinned toolchain: Gradle 8.14.3, Kotlin and Compose compiler plugin 2.2.20,

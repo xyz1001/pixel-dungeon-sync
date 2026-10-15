@@ -11,8 +11,9 @@ CP="$CORE:$(find -L "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-main-runtime.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$CP" -d "$OUT" \
-  "$SRC"/{AndroidDiagnosticLogging,BridgeTransport,BridgeDiagnostics,BridgeSaveLayout,BridgeReadiness,InstallationReadiness,HelperActivationPolicy,PackageTrust,ApkSetIdentity,WebDavConnectionFile,LegacyWebDavConnectionFile,ConnectionEndpointPolicy,ConnectionUpdatePolicy,AutoSyncPolicy,AutoSyncMessages,AutoSyncStatusPolicy,AutoSyncHistoryRefresh,AndroidCompat,RuntimePlatformCompat,InstallProgressPolicy,InstallDiagnostics,InstallSessionWriter,SyncInspectionDiagnostics,SystemConfirmationToken,InstallResultReceiver,HistoryArrowGeometry}.java \
+  "$SRC"/{AndroidDiagnosticLogging,BridgeTransport,BridgeDiagnostics,BridgeSaveLayout,BridgeReadiness,InstallationReadiness,PathPreviewState,HelperActivationPolicy,PackageTrust,ApkSetIdentity,WebDavConnectionFile,LegacyWebDavConnectionFile,ConnectionEndpointPolicy,ConnectionUpdatePolicy,AutoSyncPolicy,AutoSyncMessages,AutoSyncStatusPolicy,AutoSyncHistoryRefresh,AndroidCompat,RuntimePlatformCompat,InstallProgressPolicy,InstallDiagnostics,InstallSessionWriter,SyncInspectionDiagnostics,SystemConfirmationToken,InstallResultReceiver,HistoryArrowGeometry}.java \
   $(find "$HERE/fixtures/runtime-stubs" -name '*.java' | sort) \
+  "$HERE/java/io/github/xyz1001/pdsync/android/PathPreviewStateChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/AndroidDiagnosticLoggingChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/AutoSyncStatusChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/AutoSyncHistoryRefreshChecks.java" \
@@ -40,3 +41,5 @@ trap 'rm -rf "$OUT"' EXIT
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.AutoSyncHistoryRefreshChecks
 
 "$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.AndroidDiagnosticLoggingChecks
+
+"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.PathPreviewStateChecks

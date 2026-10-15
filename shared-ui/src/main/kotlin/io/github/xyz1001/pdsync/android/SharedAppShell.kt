@@ -180,6 +180,8 @@ fun SharedTextField(
     enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    readOnly: Boolean = false,
+    singleLine: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -196,7 +198,8 @@ fun SharedTextField(
                 .background(MaterialTheme.colors.surface, RoundedCornerShape(9.dp))
                 .padding(13.dp).semantics { contentDescription = label },
             enabled = enabled,
-            singleLine = true,
+            readOnly = readOnly,
+            singleLine = singleLine,
             textStyle = MaterialTheme.typography.body2.copy(
                 color = MaterialTheme.colors.onSurface.copy(alpha = if (enabled) 1f else .42f),
                 fontSize = 14.sp, lineHeight = 20.sp),

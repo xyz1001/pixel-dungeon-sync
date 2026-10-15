@@ -21,6 +21,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PersistableBundle;
 import android.os.Process;
 import android.system.ErrnoException;
@@ -121,7 +123,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private GamePreparationService.PreparedPair prepared;
     private SelectedRootGame rootGame;
     private GameAccessBackend.Capabilities accessCapabilities;
-    private boolean previewAttempted;
+    private final PathPreviewState pathPreviewState = new PathPreviewState();
+    private boolean pathPreviewPosted;
+    private int sharedPathRenderToken;
+    private final Handler pathPreviewHandler = new Handler(Looper.getMainLooper());
+    private final Runnable pathPreviewEntry = this::m111x434ac419;
     private boolean readinessRefreshPending;
     private boolean receiverRegistered;
     private AutomaticHistoryState automaticHistoryState = new AutomaticHistoryState();
@@ -293,6 +299,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     @Override // android.app.Activity
     protected void onPause() {
         this.resumed = false;
+        invalidatePathPreview();
         if (this.sharedConnectionSession != null) this.sharedConnectionSession.getController().foreground(false);
         if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this);
         super.onPause();
@@ -300,6 +307,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        invalidatePathPreview();
         diagnosticExport.detach(this);
         if (this.sharedConnectionSession != null) {
             this.sharedConnectionSession.getController().detach();
@@ -320,7 +328,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         if (this.busy) {
             this.notice = "操作进行中，请等待完成。";
-            this.status.setText("操作进行中，请等待完成。");
+            if (this.page == SyncPage.PATH && !this.sharedAppreciationOnly) renderSharedSavePath();
+            else if (this.status != null) this.status.setText("操作进行中，请等待完成。");
+            else render();
             return;
         }
         if (this.page == SyncPage.CONFIRM) {
@@ -364,15 +374,24 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy || isDestroyed()) {
             return;
         }
+        invalidatePathPreview();
         if (!preserveAutomaticHistory) this.automaticHistoryState.outcome = null;
         this.diagnosticReport = "";
         this.details = "";
         this.feedbackError = false;
         this.busy = true;
         this.notice = str;
-        this.status.setText(str);
-        this.status.setVisibility(View.VISIBLE);
-        disable(this.root);
+        if (this.page == SyncPage.PATH && !this.sharedAppreciationOnly) {
+            // PATH has no native status/root views. Publish busy state before starting I/O.
+            renderSharedSavePath();
+        } else if (this.status == null || this.root == null || this.renderedPage != this.page) {
+            // A callback can change pages before the replacement native hierarchy exists.
+            render();
+        } else {
+            this.status.setText(str);
+            this.status.setVisibility(View.VISIBLE);
+            disable(this.root);
+        }
         final DiagnosticTrace trace = DiagnosticLog.begin(action, false);
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
@@ -538,7 +557,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.bridgeAccessCode = strCode;
             this.readinessState = this.readinessState.withAccessCode(strCode);
             this.localPreview = null;
-            this.previewAttempted = false;
+            resetPathPreview();
             this.cloudVerified = false;
             this.notice = NoviceCopy.feedback(safeText(BridgeDiagnostics.find(exc).getMessage()), "无法读取存档，请重试。");
             return;
@@ -802,7 +821,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.history = null;
         this.inspection = null;
         this.localPreview = null;
-        this.previewAttempted = false;
+        resetPathPreview();
         this.cloudVerified = false;
         this.selected = null;
         this.confirmedAction = null;
@@ -840,7 +859,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final boolean z = this.initialLoad;
         this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
         this.localPreview = null;
-        this.previewAttempted = false;
+        resetPathPreview();
         this.cloudVerified = false;
         this.inspection = null;
         this.history = null;
@@ -1004,6 +1023,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy) {
             return;
         }
+        if (this.page != syncPage) invalidatePathPreview();
         if (syncPage != SyncPage.CONNECTION) closeSharedConnection();
         if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
         this.detailsExpanded = false;
@@ -1017,12 +1037,18 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void render() {
+        if (isDestroyed()) return;
+        if (this.page != SyncPage.PATH || this.sharedAppreciationOnly) invalidatePathPreview();
         if (drainSharedCommit()) return;
         if (this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly) {
             renderSharedConnection();
             return;
         }
         closeSharedConnection();
+        if (this.page == SyncPage.PATH) {
+            renderSharedSavePath();
+            return;
+        }
         ScrollView scrollView;
         final int scrollY = (this.renderedPage != this.page || (scrollView = this.scroll) == null) ? 0 : scrollView.getScrollY();
         LinearLayout linearLayoutColumn = column();
@@ -1080,8 +1106,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 renderDiscovery();
                 break;
             case 4:
-                renderPath();
-                break;
+                throw new IllegalStateException("Save path is hosted by the shared Compose screen");
             case 5:
                 throw new IllegalStateException("Connection is hosted by the shared Compose screen");
             case 6:
@@ -1109,9 +1134,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         setContentView(this.root);
         this.renderedPage = this.page;
         if (scrollY > 0) {
-            this.scroll.post(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda52
+            final ScrollView renderedScroll = this.scroll;
+            renderedScroll.post(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda52
                 @Override // java.lang.Runnable
                 public final void run() {
+                    if (MainActivity.this.scroll != renderedScroll || MainActivity.this.isDestroyed()) return;
                     MainActivity.this.m78lambda$render$8$iogithubxyz1001pdsyncandroidMainActivity(scrollY);
                 }
             });
@@ -2167,137 +2194,232 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return this.notice;
     }
 
-    private void renderPath() {
-        heading("2 / 4  设置存档路径");
-        text("存档目录");
-        text(savePathLabel());
-        if (this.localPreview == null) {
-            text("请检查存档。");
-        } else {
-            StringBuilder sb = new StringBuilder("游戏槽位 ");
-            sb.append(this.localPreview.getSlots().size());
-            sb.append(" 个 · ");
-            sb.append(HistoryPresentation.plays(this.localPreview.getPlays()));
-            text(sb.toString());
-            if (this.localPreview.getSlots().isEmpty()) {
-                text(this.localPreview.getFiles() > 0 || (this.localPreview.getPlays() != null && this.localPreview.getPlays() > 0)
-                        ? "有记录，暂无可继续的存档。" : "暂无存档。");
-            }
-            for (Map.Entry<String, String> entry : this.localPreview.getSlots().entrySet()) {
-                text(entry.getKey() + " · " + HistoryPresentation.time(entry.getValue()));
-            }
-        }
-        if (!readyForSaves()) {
-            text("暂时无法读取存档，请重新检查。");
-        }
-        if (this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame()) {
-            button("启动游戏一次", this::launchGameForInitialization);
-        }
-        button(readyForSaves() ? "重新检查存档" : "重新检查状态", new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda87
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m108xe2dc5156();
-            }
-        });
-        steps(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda88
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m109x58567797();
-            }
-        }, new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda89
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m110xcdd09dd8();
-            }
-        }, readyForSaves() && this.localPreview != null);
-        if (this.rootGame != null || this.localPreview != null || this.previewAttempted || this.busy || !readyForSaves()) {
-            return;
-        }
-        this.body.post(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda90
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m111x434ac419();
-            }
-        });
+    /** Android resolves and reads the real game path; shared Compose owns only presentation. */
+    private void renderSharedSavePath() {
+        bindPathPreviewContext();
+        final int renderToken = ++this.sharedPathRenderToken;
+        String pathNotice = visibleNotice();
+        if (pathNotice.isEmpty() && !readyForSaves() && !this.pathPreviewState.inFlight())
+            pathNotice = "暂时无法读取存档，请重新检查。";
+        SharedSavePathReadStatus readStatus = this.pathPreviewState.inFlight() ? SharedSavePathReadStatus.READING
+                : this.pathPreviewState.failed() ? SharedSavePathReadStatus.FAILED
+                : readyForSaves() && this.localPreview != null ? SharedSavePathReadStatus.READY
+                : canRequestSaveAccess() ? SharedSavePathReadStatus.UNREAD : SharedSavePathReadStatus.FAILED;
+        this.root = null;
+        this.status = null;
+        this.body = null;
+        this.footer = null;
+        this.scroll = null;
+        this.renderedPage = this.page;
+        AndroidOnboardingComposition.showSavePath(this, savePathLabel(), this.localPreview,
+                this.busy, pathNotice, this.details, readyForSaves() && this.localPreview != null,
+                readStatus, this.pathPreviewState.continueAfterRead(),
+                canRequestSaveAccess() || readStatus == SharedSavePathReadStatus.FAILED, selectedGameIdentity(),
+                this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame(),
+                readyForSaves() ? "重新检查存档" : "重新检查状态", !this.diagnosticReport.isEmpty(),
+                () -> { if (isCurrentPathAction(renderToken)) m108xe2dc5156(); },
+                () -> {
+                    if (isCurrentPathAction(renderToken) && !this.pathPreviewState.inFlight()
+                            && this.readinessState.withSystemRequest(this.installer.hasActiveRequest()).canInitializeGame())
+                        launchGameForInitialization();
+                },
+                () -> { if (isCurrentPathAction(renderToken)) m109x58567797(); },
+                () -> { if (isCurrentPathAction(renderToken)) requestPathNext(); },
+                () -> {
+                    if (isCurrentPathAction(renderToken) && !this.diagnosticReport.isEmpty()) copyDiagnostic();
+                });
+        schedulePathPreviewEntry();
     }
 
-    /* renamed from: lambda$renderPath$45$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
+    /** UI render tokens protect actions only, never a legitimate in-flight read. */
+    private boolean isCurrentPathAction(int renderToken) {
+        return renderToken == this.sharedPathRenderToken && this.page == SyncPage.PATH
+                && !this.sharedAppreciationOnly && this.resumed && !this.busy && !isDestroyed();
+    }
+
+    private boolean isForegroundPath() {
+        return this.resumed && !isDestroyed() && this.page == SyncPage.PATH && !this.sharedAppreciationOnly;
+    }
+
+    /** All components describe the actual selected backend; render count is not read identity. */
+    private PathPreviewState.Context currentPathPreviewContext() {
+        try {
+            return new PathPreviewState.Context(SyncRuntime.currentSelectionToken(this),
+                    SyncRuntime.currentNamespace(this), savePathLabel());
+        } catch (Exception unavailable) {
+            return null;
+        }
+    }
+
+    private void bindPathPreviewContext() {
+        if (this.pathPreviewState.bind(currentPathPreviewContext())) this.localPreview = null;
+    }
+
+    private void invalidatePathPreview() {
+        cancelPathPreviewEntry();
+        this.pathPreviewState.invalidate();
+    }
+
+    private void resetPathPreview() {
+        cancelPathPreviewEntry();
+        this.pathPreviewState.reset();
+    }
+
+    /** One Activity entry event per readiness observation, never a Compose/recomposition effect. */
+    private void schedulePathPreviewEntry() {
+        if (this.rootGame != null || this.localPreview != null || this.pathPreviewState.attempted() || this.busy
+                || this.pathPreviewState.inFlight() || this.page != SyncPage.PATH || !this.resumed
+                || !readyForSaves() || isDestroyed() || this.pathPreviewPosted) return;
+        this.pathPreviewPosted = true;
+        this.pathPreviewHandler.post(this.pathPreviewEntry);
+    }
+
+    private void cancelPathPreviewEntry() {
+        this.pathPreviewHandler.removeCallbacks(this.pathPreviewEntry);
+        this.pathPreviewPosted = false;
+    }
+
+    /* Existing readiness action remains separate from a read proof or continuation. */
     /* synthetic */ void m108xe2dc5156() {
-        if (canRequestSaveAccess()) {
-            previewPath();
-        } else {
-            if (this.rootGame != null) requestRootAuthorization(); else refreshReadiness();
-        }
+        if (!isForegroundPath() || this.busy || this.pathPreviewState.inFlight()) return;
+        if (readyForSaves()) previewPath(false);
+        else if (this.rootGame != null) requestRootAuthorization();
+        else refreshReadiness();
     }
 
-    /* renamed from: lambda$renderPath$46$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m109x58567797() {
         navigate(SyncPage.DISCOVERY);
     }
 
-    /* renamed from: lambda$renderPath$47$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m110xcdd09dd8() {
+        if (!isForegroundPath() || this.busy || !readyForSaves() || this.localPreview == null) return;
         this.onboardingActive = true;
         navigate(SyncPage.CONNECTION);
     }
 
-    /* renamed from: lambda$renderPath$48$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m111x434ac419() {
-        if (this.rootGame != null || this.page != SyncPage.PATH || this.previewAttempted || this.busy || !this.resumed) {
+    private void requestPathNext() {
+        if (!isForegroundPath() || this.busy) return;
+        bindPathPreviewContext();
+        if (this.pathPreviewState.inFlight()) {
+            if (this.pathPreviewState.queueNext(currentPathPreviewContext(), isForegroundPath(), this.busy))
+                renderSharedSavePath();
             return;
         }
-        previewPath();
+        if (readyForSaves() && this.localPreview != null && !this.pathPreviewState.failed()) {
+            m110xcdd09dd8();
+        } else if (this.pathPreviewState.failed() && !readyForSaves()) {
+            m108xe2dc5156();
+        } else {
+            previewPath(true);
+        }
     }
 
-    private void previewPath() {
+    /* synthetic */ void m111x434ac419() {
+        this.pathPreviewPosted = false;
+        if (this.rootGame != null || this.page != SyncPage.PATH || this.localPreview != null
+                || this.pathPreviewState.attempted() || this.pathPreviewState.inFlight() || this.busy
+                || !this.resumed || !readyForSaves() || isDestroyed()) return;
+        previewPath(false);
+    }
+
+    private void previewPath() { previewPath(false); }
+
+    /** Ordinary read has its own ownership; it never sets or clears hard-operation busy. */
+    private void previewPath(boolean continueWhenReady) {
+        if (this.busy || !this.resumed || isDestroyed() || this.page != SyncPage.PATH
+                || this.sharedAppreciationOnly || this.pathPreviewState.inFlight()) return;
+        cancelPathPreviewEntry();
         if (!canRequestSaveAccess()) {
             if (this.rootGame != null) requestRootAuthorization(); else refreshReadiness();
             return;
         }
-        this.previewAttempted = true;
+        bindPathPreviewContext();
+        final PathPreviewState.Request request = this.pathPreviewState.begin(currentPathPreviewContext(),
+                isForegroundPath(), this.busy, canRequestSaveAccess(), continueWhenReady);
+        if (request == null) return;
         this.localPreview = null;
-        work(DiagnosticAction.INSPECT, "正在读取存档…", new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda44
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m64x685e4018();
-            }
-        }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda45
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-            public final void accept(Object obj) throws Exception {
-                MainActivity.this.m65xddd86659((SaveSummary) obj);
+        this.diagnosticReport = "";
+        this.details = "";
+        this.feedbackError = false;
+        this.notice = "正在读取存档…";
+        renderSharedSavePath();
+        final PathPreviewOutcome outcome = new PathPreviewOutcome(this.readinessState);
+        final DiagnosticTrace trace = DiagnosticLog.begin(DiagnosticAction.INSPECT, false);
+        this.f9io.execute(() -> {
+            try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
+                trace.record(DiagnosticStage.READINESS, DiagnosticResult.STARTED);
+                synchronized (SyncRuntime.OPERATION_LOCK) {
+                    if (!isCurrentPathRead(request)) {
+                        trace.record(DiagnosticStage.FINISHED, DiagnosticResult.CANCELED);
+                        return;
+                    }
+                    outcome.summary = readPathPreview(request, outcome);
+                }
+                trace.record(DiagnosticStage.WORK, DiagnosticResult.SUCCEEDED);
+                runOnUiThread(() -> finishPathPreview(request, outcome));
+                trace.record(DiagnosticStage.FINISHED, DiagnosticResult.SUCCEEDED);
+            } catch (Exception failure) {
+                outcome.failure = failure;
+                AndroidDiagnosticLogging.failure(trace, DiagnosticStage.WORK, failure);
+                AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, failure);
+                runOnUiThread(() -> finishPathPreview(request, outcome));
             }
         });
     }
 
-    /* renamed from: lambda$previewPath$50$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ SaveSummary m64x685e4018() throws Exception {
-        if (this.rootGame != null) {
-            checkRootAccess();
-            if (!readyForSaves()) throw new IOException(this.readinessState.accessDescription());
+    /** Worker-local evidence. Root inspection cannot publish Activity readiness after Back/pause. */
+    private static final class PathPreviewOutcome {
+        final InstallationReadiness expectedReadiness;
+        InstallationReadiness rootReadiness;
+        SaveSummary summary;
+        Exception failure;
+        PathPreviewOutcome(InstallationReadiness expectedReadiness) {
+            this.expectedReadiness = expectedReadiness;
         }
-        TrustedPrivateDirectory.TemporaryDirectory temporaryDirectoryCreateTemporaryDirectory = TrustedPrivateDirectory.resolve(getDataDir().toPath(), getCacheDir().toPath(), Process.myUid(), new TrustedPrivateDirectory.StatReader() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda125
-            @Override // io.github.xyz1001.pdsync.android.TrustedPrivateDirectory.StatReader
-            public final TrustedPrivateDirectory.State lstat(Path path) throws IOException {
-                return MainActivity.lambda$previewPath$49(path);
-            }
-        }).createTemporaryDirectory("save-preview-");
-        try {
-            SyncRuntime.backend(this).exportTo(temporaryDirectoryCreateTemporaryDirectory.path());
-            SaveSummary saveSummary = SaveSummary.Companion.read(temporaryDirectoryCreateTemporaryDirectory.path());
-            temporaryDirectoryCreateTemporaryDirectory.path();
-            if (temporaryDirectoryCreateTemporaryDirectory != null) {
-                temporaryDirectoryCreateTemporaryDirectory.close();
-            }
-            return saveSummary;
-        } catch (Throwable th) {
-            if (temporaryDirectoryCreateTemporaryDirectory != null) {
-                try {
-                    temporaryDirectoryCreateTemporaryDirectory.close();
-                } catch (Throwable th2) {
-                    th.addSuppressed(th2);
-                }
-            }
-            throw th;
+    }
+
+    private boolean isCurrentPathRead(PathPreviewState.Request request) {
+        return this.pathPreviewState.isCurrent(request, currentPathPreviewContext(), isForegroundPath(), this.busy);
+    }
+
+    /** Same Root proof as the hard operation, with all readiness kept local to this read. */
+    private InstallationReadiness checkRootAccess(PathPreviewState.Request request, GameAccessBackend backend) throws Exception {
+        if (!isCurrentPathRead(request)) throw new IOException("存档检查已取消。");
+        this.installer.reconcile();
+        SelectedRootGame chosen = SyncRuntime.rootGame(this);
+        if (chosen == null || !chosen.selectionToken().equals(request.context.selectionToken))
+            throw new IOException("所选访问方式已变化，请重新检查。");
+        backend.targetGame();
+        if (!backend.capabilities().exportSupported) throw new IOException("当前存档后端不支持读取存档。");
+        if (this.installer.hasActiveRequest()) throw new IOException("请先处理当前系统安装请求。");
+        if (hasAnyRestoreJournal()) {
+            // Reading never performs recovery. The original explicit recovery flow remains available.
+            return InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
+                    true, false, true, InstallationReadiness.AccessStatus.RECOVERY_NEEDED);
+        }
+        if (!isCurrentPathRead(request)) throw new IOException("存档检查已取消。");
+        backend.inspectReady();
+        return InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
+                true, false, false, InstallationReadiness.AccessStatus.READY);
+    }
+
+    private SaveSummary readPathPreview(PathPreviewState.Request request, PathPreviewOutcome outcome) throws Exception {
+        GameAccessBackend backend = SyncRuntime.backend(this);
+        if (backend.mode() == GameAccessBackend.Mode.ROOT_DIRECT) {
+            outcome.rootReadiness = checkRootAccess(request, backend);
+            if (!outcome.rootReadiness.canContinue()) throw new IOException(outcome.rootReadiness.accessDescription());
+        } else if (!readyForSaves()) {
+            throw new IOException("请先完成存档访问检查。");
+        }
+        if (!isCurrentPathRead(request)) throw new IOException("存档检查已取消。");
+        if (this.installer.hasActiveRequest() || hasAnyRestoreJournal())
+            throw new IOException("请先完成存档访问检查或处理未完成恢复。");
+        try (TrustedPrivateDirectory.TemporaryDirectory temporaryDirectory = TrustedPrivateDirectory.resolve(
+                getDataDir().toPath(), getCacheDir().toPath(), Process.myUid(), MainActivity::lambda$previewPath$49)
+                .createTemporaryDirectory("save-preview-")) {
+            if (!isCurrentPathRead(request)) throw new IOException("存档检查已取消。");
+            backend.exportTo(temporaryDirectory.path());
+            return SaveSummary.Companion.read(temporaryDirectory.path());
         }
     }
 
@@ -2310,10 +2432,47 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
     }
 
-    /* renamed from: lambda$previewPath$51$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m65xddd86659(SaveSummary saveSummary) throws Exception {
-        this.localPreview = saveSummary;
-        this.notice = "";
+    private void finishPathPreview(PathPreviewState.Request request, PathPreviewOutcome outcome) {
+        // A readiness refresh is a new observation even if it happens to have the same values.
+        if (this.readinessState != outcome.expectedReadiness) return;
+        boolean accessReady = outcome.rootReadiness == null ? readyForSaves()
+                : outcome.rootReadiness.withSystemRequest(this.installer.hasActiveRequest()).canContinue()
+                    && SyncRuntime.rootAuthorized(this);
+        PathPreviewState.Completion completion = this.pathPreviewState.finish(request,
+                currentPathPreviewContext(), isForegroundPath(), this.busy, accessReady,
+                outcome.summary != null, outcome.failure == null);
+        if (completion == PathPreviewState.Completion.STALE) return;
+        if (outcome.rootReadiness != null) {
+            this.readinessState = outcome.rootReadiness;
+            this.bridgeAccessCode = outcome.rootReadiness.restorePending ? "ROOT_RECOVERY_REQUIRED" : "READY";
+        }
+        if (outcome.failure != null || !readyForSaves() || outcome.summary == null) {
+            reportPathPreviewError(outcome.failure != null ? outcome.failure
+                    : new IOException("存档访问状态已变化，请重试。"));
+        } else {
+            this.localPreview = outcome.summary;
+            this.notice = "";
+            this.feedbackError = false;
+            if (completion == PathPreviewState.Completion.ADVANCE) {
+                m110xcdd09dd8();
+                return;
+            }
+        }
+        renderSharedSavePath();
+    }
+
+    /** A failed read stays attempted/FAILED; generic reportError would reset and auto-retry it. */
+    private void reportPathPreviewError(Exception failure) {
+        captureDiagnostic(failure);
+        this.localPreview = null;
+        this.feedbackError = true;
+        String code = BridgeDiagnostics.code(failure);
+        if (code != null) {
+            this.bridgeAccessCode = code;
+            this.readinessState = this.readinessState.withAccessCode(code);
+            this.cloudVerified = false;
+            this.notice = NoviceCopy.feedback(safeText(BridgeDiagnostics.find(failure).getMessage()), "无法读取存档，请重试。");
+        } else this.notice = safeError(failure);
     }
 
     private void loadDraft() {
@@ -2321,7 +2480,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.draftLoaded = true;
     }
 
-    /** Stage 1 replaces only connection/account UI. Other pages remain native until stage 2. */
+    /** Connection/account and save-path UI are shared; discovery and comparison remain native. */
     private void renderSharedConnection() {
         if (!this.draftLoaded) loadDraft();
         if (this.sharedConnectionSession == null) {
@@ -2695,7 +2854,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (z) {
             this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
             this.localPreview = null;
-            this.previewAttempted = false;
+            resetPathPreview();
             this.cloudVerified = false;
             this.inspection = null;
             this.history = null;
@@ -3943,7 +4102,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.progress = OnboardingProgress.PENDING;
         this.onboardingActive = true;
         this.localPreview = null;
-        this.previewAttempted = false;
+        resetPathPreview();
         this.draftLoaded = false;
         this.page = syncPage;
         this.notice = "请检查所选游戏。";
@@ -4172,7 +4331,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.readinessState = InstallationReadiness.checking(true, this.installer.hasActiveRequest());
         this.bridgeAccessCode = "NOT_CHECKED";
         this.localPreview = null;
-        this.previewAttempted = false;
+        resetPathPreview();
         this.inspection = null;
         this.history = null;
         this.cloudVerified = false;
@@ -4252,7 +4411,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* synthetic */ void m51x1d3cbe21(Intent intent) throws Exception {
         this.readinessState = this.readinessState.withAccessCode("NOT_CHECKED");
         this.localPreview = null;
-        this.previewAttempted = false;
+        resetPathPreview();
         this.inspection = null;
         this.history = null;
         this.cloudVerified = false;
@@ -4389,7 +4548,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.readinessState = InstallationReadiness.checking(this.prepared != null, this.installer.hasActiveRequest());
             this.bridgeAccessCode = "NOT_CHECKED";
             this.localPreview = null;
-            this.previewAttempted = false;
+            resetPathPreview();
             this.cloudVerified = false;
             this.notice = i2 == -1 ? "游戏内置存档桥页面已返回，正在重新核验连接与存档访问。" : "游戏内置存档桥页面已关闭，正在重新检查；尚不能确认存档访问就绪。";
             requestReadinessRefresh();
