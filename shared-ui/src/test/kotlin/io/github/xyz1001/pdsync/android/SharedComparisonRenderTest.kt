@@ -3,7 +3,10 @@
 package io.github.xyz1001.pdsync.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,6 +47,64 @@ class SharedComparisonRenderTest {
         localLabel = "本机 · Desktop", localDetails = "已进行0场游戏",
         remoteChoices = listOf(SharedComparisonRemoteChoice("remote-a", "云端 · Android", "已进行3场游戏")),
         selectedId = "remote-a")
+
+    @Test fun progressSelectionShowsOnlyChoiceCardsAndExistingNavigation() {
+        val states = listOf(
+            state(OnboardingKind.LOCAL_ONLY).copy(selectedProgress = SharedProgressChoice.LOCAL),
+            state(OnboardingKind.REMOTE_ONLY).copy(selectedProgress = SharedProgressChoice.CLOUD),
+            state(OnboardingKind.DIFFERENT).copy(canKeepLocalProgress = true,
+                selectedProgress = SharedProgressChoice.LOCAL),
+        )
+        for (width in listOf(500, 320)) for (current in states) {
+            val name = "choices-only-${current.kind}-$width"
+            val actual = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+                SharedComparisonScreen(current.copy(notice = "本机有进度，请选择要继续的进度。"), actions)
+            }
+            val expected = ImageComposeScene(width = width, height = 757, density = Density(1f)) {
+                SharedConnectionTheme {
+                    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", game = current.game,
+                        footer = {
+                            SharedActionButton("上一步", {}, style = SharedButtonStyle.TEXT)
+                            Spacer(Modifier.weight(1f))
+                            SharedActionButton("完成", {})
+                        }) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (current.kind != OnboardingKind.REMOTE_ONLY) ComparisonChoiceCard(
+                                "使用本机进度", "本机 · Desktop · 已进行0场游戏",
+                                current.selectedProgress == SharedProgressChoice.LOCAL, true, {})
+                            if (current.kind != OnboardingKind.LOCAL_ONLY) ComparisonChoiceCard(
+                                "使用云端进度", "云端 · Android · 已进行3场游戏",
+                                current.selectedProgress == SharedProgressChoice.CLOUD, true, {})
+                        }
+                    }
+                }
+            }
+            try {
+                val actualImage = render(actual, name)
+                val expectedImage = render(expected, "$name-expected")
+                assertTrue(actualImage.getRGB(0, 0, width, 757, null, 0, width).contentEquals(
+                    expectedImage.getRGB(0, 0, width, 757, null, 0, width)),
+                    "choice cards retain identity and navigation without extra status copy: $name")
+            } finally { actual.close(); expected.close() }
+        }
+    }
+
+    @Test fun actualFailureNoticeRemainsVisibleOnChoiceScreen() {
+        for (error in listOf(false, true)) {
+            val current = state(OnboardingKind.LOCAL_ONLY).copy(selectedProgress = SharedProgressChoice.LOCAL,
+                notice = "上传未完成，请重试。", feedbackError = error)
+            val scene = ImageComposeScene(width = 500, height = 757, density = Density(1f)) {
+                SharedComparisonScreen(current, actions)
+            }
+            try {
+                val image = render(scene, "choice-feedback-$error")
+                val errorPixels = image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
+                    .count { (it and 0xffffff) == 0x924832 }
+                if (error) assertTrue(errorPixels > 0, "actual failure must remain visible")
+                else assertEquals(0, errorPixels, "ordinary status must not add a notice")
+            } finally { scene.close() }
+        }
+    }
 
     @Test fun everyComparisonStateFitsReferenceShellAtDesktopAndNarrowWidths() {
         val states = linkedMapOf(

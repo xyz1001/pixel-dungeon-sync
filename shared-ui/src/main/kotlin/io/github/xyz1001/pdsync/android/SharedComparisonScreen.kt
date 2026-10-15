@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,10 +57,8 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
                 if (state.kind == OnboardingKind.IDENTICAL) ComparisonDetails(state, interactions)
             }
         } else {
-            Text(state.headline, color = if (state.primary == SharedComparisonPrimary.REFRESH) SharedUiColors.muted
-                else MaterialTheme.colors.onSurface, fontSize = 16.sp, lineHeight = 25.6.sp)
-            if (state.offers(SharedProgressChoice.LOCAL) || state.offers(SharedProgressChoice.CLOUD)) {
-                Spacer(Modifier.height(16.dp))
+            val hasChoices = state.offers(SharedProgressChoice.LOCAL) || state.offers(SharedProgressChoice.CLOUD)
+            if (hasChoices) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.offers(SharedProgressChoice.LOCAL)) ComparisonChoiceCard(
                         title = "使用本机进度", summary = listOf(state.localLabel, state.localDetails)
@@ -79,8 +76,11 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
                         onClick = { interactions.selectProgress(SharedProgressChoice.CLOUD) },
                     )
                 }
+            } else {
+                Text(state.headline, color = if (state.primary == SharedComparisonPrimary.REFRESH) SharedUiColors.muted
+                    else MaterialTheme.colors.onSurface, fontSize = 16.sp, lineHeight = 25.6.sp)
             }
-            ComparisonNotice(state)
+            if (!hasChoices || state.feedbackError) ComparisonNotice(state)
             if (state.primary in setOf(SharedComparisonPrimary.REFRESH, SharedComparisonPrimary.RETRY_UPLOAD,
                     SharedComparisonPrimary.OPEN_RECOVERY)) ComparisonDetails(state, interactions)
         }
