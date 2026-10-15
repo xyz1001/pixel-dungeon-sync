@@ -22,7 +22,7 @@ class SyncInspectionDiagnosticsContract(unittest.TestCase):
             self.assertNotIn(changed, catch)
 
     def test_onboarding_next_reaches_the_wrapped_read_only_comparison(self):
-        self.assertIn("refreshComparison(SyncPage.COMPARISON)", method("m18x35802ca1"))
+        self.assertIn("refreshComparison(SyncPage.COMPARISON)", method("drainSharedCommit"))
         next_step = method("m66x99ceaa21")
         self.assertLess(next_step.index("readInstallationReadiness()"), next_step.index("readComparison()"))
         self.assertLess(next_step.index("if (!readyForSaves())"), next_step.index("readComparison()"))

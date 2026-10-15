@@ -92,8 +92,11 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this)', pause)
 
     def test_manual_and_auto_diagnostics_are_closed_and_thread_scoped(self):
-        for action in ('CONNECT','PREPARE','INSTALL','INSPECT','PUSH','RESTORE','RECOVERY'):
+        for action in ('PREPARE','INSTALL','INSPECT','PUSH','RESTORE','RECOVERY'):
             self.assertIn('DiagnosticAction.' + action, MAIN)
+        controller = (Path(__file__).resolve().parents[4] / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedConnectionController.kt').read_text()
+        self.assertIn('DiagnosticAction.CONNECT', controller)
+        self.assertIn('DiagnosticLog.bind(pending.trace)', controller)
         worker = body(MAIN, 'void m150lambda$work$2')
         self.assertIn('AndroidDiagnosticLogging.bind(trace)', worker)
         self.assertIn('AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e)', worker)

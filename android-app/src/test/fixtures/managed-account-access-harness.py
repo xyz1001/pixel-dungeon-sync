@@ -1,4 +1,4 @@
-"""Extract current production access methods into a host harness with counted fake DAV I/O."""
+"""Extract production restore access gates; shared controller tests cover connection verification. Counted fake I/O only."""
 from pathlib import Path
 import sys
 
@@ -24,7 +24,6 @@ def method(source, signature):
 
 production = "\n".join(method(main, name) for name in (
     "private static boolean isOfficialAccount(",
-    "private static ManagedAccountClient.Entitlement verifyOfficialConnection(",
     "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(",
 ))
 gate = method(client, "void requireSyncAccess()")
@@ -98,24 +97,18 @@ public final class ManagedAccountAccessHarness {
         ManagedAccountAccessHarness h = new ManagedAccountAccessHarness();
         h.connection = new SecureConnectionStore.Connection();
         account(false, 100L, 100L);
-        rejected(() -> verifyOfficialConnection(h.connection, h.facade, APP), ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED);
         rejected(() -> h.restoreForCurrentAccount(new AndroidSyncFacade.Inspection(), "snapshot", false), ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED);
         rejected(() -> h.restoreForCurrentAccount(new AndroidSyncFacade.Inspection(), "snapshot", true), ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED);
         check(h.facade.connections == 0 && h.facade.readOnlyProbes == 0 && h.facade.restores == 0 && h.facade.readOnlyRestores == 0,
-                "Known expired official stops every probe/download/restore before fake DAV");
+                "Known expired official stops download/restore before fake DAV");
         for (Long[] dates : new Long[][] {{100L, null}, {null, 100L}, {200L, 100L}}) {
             account(false, dates[0], dates[1]);
-            rejected(() -> verifyOfficialConnection(h.connection, h.facade, APP), ManagedAccountClient.FailureKind.ACCOUNT_INACTIVE);
             rejected(() -> h.restoreForCurrentAccount(new AndroidSyncFacade.Inspection(), "snapshot", true), ManagedAccountClient.FailureKind.ACCOUNT_INACTIVE);
         }
-        check(h.facade.connections == 0 && h.facade.restores == 0, "Unknown inactive accounts also do no DAV without claiming expiry");
+        check(h.facade.connections == 0 && h.facade.restores == 0, "Unknown inactive accounts do no DAV without claiming expiry");
         account(true, 300L, 101L);
-        verifyOfficialConnection(h.connection, h.facade, APP);
         h.restoreForCurrentAccount(new AndroidSyncFacade.Inspection(), "snapshot", true);
-        check(h.facade.connections == 1 && h.facade.restores == 1, "Authenticated renewal restores ordinary active path");
-        h.facade.passes = false;
-        try { verifyOfficialConnection(h.connection, h.facade, APP); throw new AssertionError("False DAV proof"); }
-        catch (IOException expected) { check(!(expected instanceof ManagedAccountClient.ManagedAccountException), "Active metadata alone cannot grant Next"); }
+        check(h.facade.connections == 0 && h.facade.restores == 1, "Authenticated renewal keeps ordinary active restore path");
         ManagedAccountClient.next = null;
         int before = h.facade.restores;
         try { h.restoreForCurrentAccount(new AndroidSyncFacade.Inspection(), "snapshot", true); throw new AssertionError("Unknown authority"); }

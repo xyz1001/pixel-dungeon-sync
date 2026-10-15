@@ -14,37 +14,14 @@ CLIENT = (ROOT / "ManualOrderClient.java").read_text()
 
 
 class ManualPaymentUiContract(unittest.TestCase):
-    def test_default_disabled_and_no_intent_or_credential_adapter(self):
-        self.assertIn("private ManualPaymentSession sandboxPaymentSession;", MAIN)
-        self.assertNotIn("new ManualPaymentSession(", MAIN)
-        self.assertEqual(MAIN.count("showSandboxPaymentPreview("), 1)
-        hook = body(MAIN, "void showSandboxPaymentPreview(")
-        for guard in ("this.page != SyncPage.CONNECTION", "ConnectionEntryModel.Mode.OFFICIAL", "!session.view().sandbox"):
-            self.assertIn(guard, hook)
-        for forbidden in ("draftUser", "officialUser", "draftPassword", "officialPassword", "verifiedOfficial", "getIntent", "testedDraft = draftFingerprint", "authenticateOfficial"):
-            self.assertNotIn(forbidden, hook)
-        self.assertIn("captureDraft()", hook)
-        self.assertIn("ManualPaymentSession.AuthenticatedIdentity identity", MAIN)
-        self.assertIn("session.enter(identity)", hook)
-
-    def test_only_official_child_changes(self):
-        render = body(MAIN, "private void renderOfficialConnection()")
-        self.assertLess(render.index("ManualPaymentPanel.render"), render.index('field("用户名"'))
-        self.assertIn("return;", render[:render.index('field("用户名"')])
-        for page in ("renderDiscovery", "renderPath", "renderComparison", "renderHome", "renderCustomConnection"):
+    def test_sandbox_native_panel_has_no_production_route_after_compose_migration(self):
+        # This legacy sandbox remains a host fixture only. Production is the shared screen.
+        for forbidden in ("sandboxPaymentSession", "showSandboxPaymentPreview", "ManualPaymentPanel",
+                          "new ManualPaymentSession(", "ManualPaymentSession.AuthenticatedIdentity"):
+            self.assertNotIn(forbidden, MAIN)
+        for page in ("renderDiscovery", "renderPath", "renderComparison", "renderHome"):
             self.assertNotIn("ManualPayment", body(MAIN, "private void " + page + "()"))
-        self.assertNotIn("showSandboxPaymentPreview", body(MAIN, "private void authenticateOfficial("))
-
-    def test_exit_background_destroy_stop_and_do_not_grant_production_test_proof(self):
-        self.assertIn("sandboxPaymentSession.foreground(false)", body(MAIN, "protected void onPause()"))
-        self.assertIn("sandboxPaymentSession.foreground(true)", body(MAIN, "protected void onResume()"))
-        self.assertIn("closeSandboxPayment()", body(MAIN, "protected void onDestroy()"))
-        self.assertIn("closeSandboxPayment()", body(MAIN, "private void navigate("))
-        self.assertIn("returnFromSandboxPayment()", body(MAIN, "private void backFromConnection()"))
-        ret = body(MAIN, "private void returnFromSandboxPayment()")
-        self.assertIn("this.testedDraft = null", ret)
-        for forbidden in ("save(", "applyConnection", "refreshComparison", "authenticateOfficial", "verifiedOfficial ="):
-            self.assertNotIn(forbidden, ret)
+        self.assertIn("AndroidConnectionComposition.show(this, visibleSession)", MAIN)
 
     def test_minimal_read_only_appreciation_page(self):
         self.assertIn('"沙箱"', PANEL)

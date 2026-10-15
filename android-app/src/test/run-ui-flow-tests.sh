@@ -21,3 +21,5 @@ CP="$CORE:$(find "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
 "$HERE/run-connection-entry-tests.sh"
 "$HERE/run-connection-auth-attempt-tests.sh"
 python3 -m unittest discover -s "$HERE/python" -p 'test_ui_flow_contract.py'
+
+python3 -m unittest discover -s "$HERE/python" -p 'test_shared_connection_android_contract.py'

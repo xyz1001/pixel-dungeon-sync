@@ -141,87 +141,69 @@ public final class ManagedAccountFlowChecks {
     private static void activityIntegrationGuards(Path sourceRoot) throws Exception {
         Path base = sourceRoot.resolve("android-app/src/main/java/io/github/xyz1001/pdsync/android");
         String main = Files.readString(base.resolve("MainActivity.java"));
-        String panel = Files.readString(base.resolve("ManagedAccountPanel.java"));
-        Path shared = sourceRoot.resolve("core/src/main/java/io/github/xyz1001/pdsync/android");
-        String login = Files.readString(shared.resolve("OfficialServiceRegistrationClient.java"));
-        String official = method(main, "private void renderOfficialConnection()");
+        Path common = sourceRoot.resolve("shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android");
+        String controller = Files.readString(common.resolve("SharedConnectionController.kt"));
+        String screen = Files.readString(common.resolve("SharedConnectionScreen.kt"));
+        String login = Files.readString(sourceRoot.resolve("core/src/main/java/io/github/xyz1001/pdsync/android/OfficialServiceRegistrationClient.java"));
         String settings = method(main, "private void renderSettings()");
-        check(official.contains("button(officialAppreciationLabel()") && official.contains("appreciationAccountForDraft()"), "Official page has an explicitly selected appreciation identity");
         check(settings.contains("isOfficialAccount(this.connection)") && settings.contains("showManagedAccount(this.connection)"),
-                "The existing saved official account is reachable directly from Settings");
+                "Saved official account remains directly reachable from Settings");
+        check(method(main, "private void showManagedAccount(").contains("getController().openAppreciationOnly()"),
+                "Settings appreciation mounts the same shared controller");
+        check(!main.contains("ManagedAccountPanel.render") && !main.contains("renderOfficialConnection()"),
+                "No native production connection/account renderer remains");
         String allowed = method(main, "private static boolean isOfficialAccount(");
         check(allowed.contains("PROVIDER_OFFICIAL.equals(account.provider)")
                 && allowed.contains("OfficialServiceRegistrationClient.DAV_URL.equals(account.endpoint)"),
                 "Saved credentials require both official provider and exact official endpoint");
-        String selection = method(main, "private SecureConnectionStore.Connection officialAccountForDraft()");
-        check(selection.contains("this.verifiedOfficial") && selection.contains("this.connection")
-                && selection.contains("candidate.username.equals(this.officialUser)")
-                && selection.contains("candidate.password.equals(this.officialPassword)"),
-                "Edit-box values can only select matching verified or saved credentials");
-        String auth = method(main, "private void authenticateOfficial(");
-        check(auth.contains("client.register(username, password) : client.login(username, password)"), "Real explicit official auth is preserved");
-        check(auth.contains("new OfficialAuthResult(candidate, false"), "Failed DAV or entitlement retains authenticated account access");
-        String resume = method(main, "private void resumeOfficialAttempt()");
-        check(resume.contains("result.davVerified ? attempt.proof : null") && !resume.contains(".active"),
-                "Only a successful real DAV check grants Next; expiry display alone never grants proof");
-        String verify = method(main, "private static ManagedAccountClient.Entitlement verifyOfficialConnection(");
-        check(verify.contains("entitlement.requireSyncAccess()") && verify.contains("facade.connect()")
-                && verify.indexOf("entitlement.requireSyncAccess()") < verify.indexOf("facade.connect()")
-                && !verify.contains("testConnection") && verify.contains("if (!result.isSuccess())"),
-                "Inactive account stops before DAV and active accounts still require a real successful probe");
-        String apply = method(main, "Object m17xc0060660(");
-        check(apply.contains("if (isOfficialAccount(connection)) verifyOfficialConnection(connection, androidSyncFacadeFacade, getApplicationContext())")
-                && apply.contains("else MainActivity.lambda$applyConnection$55(androidSyncFacadeFacade)"),
-                "Save rechecks official entitlement while custom DAV behavior stays unchanged");
-        String reads = method(main, "private void refreshManagedAccount()");
-        check(reads.contains("client.entitlement()") && reads.contains("client.appreciation()") && reads.contains("client.paymentImage(appreciation)"),
-                "Panel reads current entitlement and official metadata/image");
-        check(!reads.contains(".register(") && !reads.contains(".save(") && !reads.contains(".connect(") && !reads.contains(".login("),
-                "Refreshing appreciation cannot authenticate, register, save, or test DAV as a side effect");
-        check(method(main, "protected void onPause()").contains("this.managedAccountFlow.foreground(false)")
-                && method(main, "protected void onPause()").contains("cancelManagedAccountRequest()"), "Background invalidates and cancels reads");
-        check(method(main, "private void navigate(").contains("closeManagedAccount()")
-                && method(main, "protected void onDestroy()").contains("closeManagedAccount()"), "Leaving and destruction close the account display");
-        check(method(main, "private void cancelManagedAccountRequest()").contains("client.cancelPending()")
-                && method(main, "private void cancelManagedAccountRequest()").contains("cancel(true)"), "Cancellation reaches transport and executor");
-        String current = method(main, "private boolean currentManagedRequest(");
-        check(current.contains("this.resumed") && current.contains("this.managedAccountFlow == flow")
-                && current.contains("this.managedAccountClient == client") && current.contains("flow.accepts(ticket)"), "Posted callbacks require the current visible source generation");
-        check(main.contains("ConnectionAuthAttempt<OfficialAuthResult>") && main.contains("attempt = activity.officialAttempt")
-                && main.contains("this.officialAttempt = retained.attempt"), "Rotation retains the same at-most-once authentication operation");
+        String verify = method(controller, "private fun verify(");
+        check(verify.contains("entitlement.requireSyncAccess()") && verify.contains("if (!ports.testConnection(candidate)) throw ProbeRejected()")
+                && verify.indexOf("entitlement.requireSyncAccess()") < verify.indexOf("ports.testConnection(candidate)"),
+                "Inactive account stops before DAV and active metadata alone cannot grant proof");
+        String commit = method(controller, "fun continueConnection()");
+        check(commit.indexOf("if (!hasProof())") < commit.indexOf("ports.saveAndActivate(candidate)")
+                && commit.indexOf("verify(candidate, pending)") < commit.indexOf("ports.saveAndActivate(candidate)"),
+                "Explicit commit still requires current proof and a fresh test");
+        String reads = method(controller, "fun refreshAppreciation()");
+        check(reads.contains("client.entitlement()") && reads.contains("client.appreciation()") && reads.contains("client.paymentImage(metadata)"),
+                "Shared account page reads current official metadata and image");
+        for (String forbidden : new String[] {".register(", ".login(", ".save(", "ports.testConnection(", "ports.saveAndActivate("})
+            check(!reads.contains(forbidden), "Appreciation refresh has no mutation/auth/DAV side effect: " + forbidden);
+        check(reads.indexOf("client.paymentImage(metadata)") < reads.indexOf("client.entitlement()")
+                && reads.contains("client.canReadEntitlement()"), "Public QR loads before optional private metadata");
+        check(reads.contains("appreciationFlow !== flow") && reads.contains("appreciationClient !== client")
+                && reads.contains("flow.accepts(ticket)") && reads.contains("foreground.get()"),
+                "Delayed account callbacks require current visible source generation");
+        String selection = method(controller, "private fun officialAccountForDraft()");
+        check(selection.contains("verifiedOfficial?.takeIf") && selection.contains("saved?.takeIf") && selection.contains("it == current"),
+                "Only exact matching saved/authenticated credentials select private account access");
+        String publicChoice = method(controller, "fun openAppreciation()");
+        check(publicChoice.contains("officialAccountForDraft()") && publicChoice.contains("copy(password = \"\")"),
+                "Unverified username can load public QR without forwarding typed password");
+        check(method(controller, "fun foreground(").contains("cancelAppreciationRequest()")
+                && method(controller, "private fun cancelAppreciationRequest()").contains("cancelPending()"),
+                "Background invalidates and cancels account transport");
+        check(main.contains("session = activity.sharedConnectionSession") && main.contains("this.sharedConnectionSession = retained.session"),
+                "Rotation retains the same controller and in-flight authentication");
         String saved = method(main, "protected void onSaveInstanceState(");
-        check(!saved.contains("password") && !saved.contains("official") && !saved.contains("managed"), "Credentials and account state are never persisted in Bundle");
-        check(panel.contains("赞赏时请备注用户名") && panel.contains("flow.copyUsername(view.generation"), "Minimal panel copies the displayed identity with its current generation");
+        check(!saved.contains("password") && !saved.contains("official") && !saved.contains("session"),
+                "Account credentials and controller never enter saved-state Bundle");
+        check(screen.contains("赞赏时请备注用户名") && screen.contains("controller::copyUsername") && screen.contains("用户名（未验证）"),
+                "Shared page has explicit identity copy and labels unverified usernames");
         String restore = method(main, "private AndroidSyncFacade.OperationResult restoreForCurrentAccount(");
-        check(restore.contains("isOfficialAccount(account)") && restore.contains(".entitlement()"), "Restore requires current official account authority");
+        check(restore.contains("isOfficialAccount(account)") && restore.contains(".entitlement()"), "Restore requires current official authority");
         check(restore.contains("this.connection != account") && restore.contains("entitlement.requireSyncAccess()"),
                 "Only a stable active official account may begin restore");
         check(!restore.contains("restoreSelectedReadOnly") && restore.contains("sync().restoreSelected(inspection, snapshotId, replace)")
                 && restore.indexOf("entitlement.requireSyncAccess()") < restore.indexOf("sync().restoreSelected"),
-                "Inactive official stops before download; active and custom restore use the existing path");
-        check(!main.contains("restoreSelectedReadOnly") && !main.contains("facade.testConnection()"), "Deprecated expired-read-only UI paths are removed");
-        String publicChoice = method(main, "private SecureConnectionStore.Connection appreciationAccountForDraft()");
-        check(publicChoice.contains("officialAccountForDraft()") && publicChoice.contains("this.officialUser, \"\"")
-                && !publicChoice.contains("this.verifiedOfficial =") && !publicChoice.contains("this.testedDraft ="),
-                "Unverified username opens public QR without forwarding the typed password or creating login proof");
-        check(reads.indexOf("client.paymentImage(appreciation)") < reads.indexOf("client.entitlement()")
-                && reads.contains("if (client.canReadEntitlement())") && reads.contains("flow.complete(ticket)"),
-                "Public QR loads independently before optional private metadata");
-        check(panel.contains("用户名（未验证）") && panel.contains("ManagedAccountFlow.accessStatus(view)"),
-                "Panel labels local identity and shows only proven expiry");
-        String cache = method(main, "private static void rememberEntitlement(");
-        check(cache.contains("source.username.equals(entitlement.username)") && cache.contains("entitlement.serverTimeMs")
-                && !cache.contains("source.password") && !cache.contains("token"), "Display cache contains authenticated metadata only");
-        check(verify.indexOf(".entitlement()") < verify.indexOf("rememberEntitlement(app, account, entitlement)"),
-                "Connection cache writes require successful authenticated metadata");
-        check(main.contains("赞赏续期") && main.contains("无法登录，请检查账号或续期状态。"), "Known expiry and ambiguous official authentication have distinct copy");
+                "Inactive official stops before download; active and custom keep existing restore path");
+        String cache = method(controller, "private fun remember(");
+        check(cache.contains("source.username == entitlement.username") && cache.contains("entitlement.serverTimeMs")
+                && !cache.contains("source.password"), "Cache accepts authenticated matching metadata, never credentials");
         check(login.contains("case INVALID_CREDENTIALS: message = \"无法登录，请检查账号或续期状态。\""),
-                "Registration/login 401 does not claim wrong password or confirmed expiry");
-        check(reads.contains("selectedClient = ManagedAccountClient.publicAppreciation()")
-                && reads.contains("final String initialMessage = configurationMessage"),
-                "Invalid saved credentials cannot prevent fetching the independent public QR");
-        for (String forbidden : new String[] {"沙箱", "我已赞赏", "订单", "待审核", "下一步"})
-            check(!panel.contains(forbidden), "Production appreciation panel omits " + forbidden);
+                "Authentication 401 does not claim wrong password or confirmed expiry");
+        for (String forbidden : new String[] {"沙箱", "我已赞赏", "订单", "待审核"})
+            check(!screen.contains(forbidden), "Production shared page omits " + forbidden);
     }
 
     public static void main(String[] args) throws Exception {
