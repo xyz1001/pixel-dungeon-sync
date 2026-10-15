@@ -564,6 +564,7 @@ class AppendProfileSession(
   val before = comparison.localFiles
   val baselineFiles = comparison.baselineId?.let { graph.commits.getValue(it).snapshot.files }
   val preserveLocal = before.isNotEmpty() && (comparison.baselineId == null || before != baselineFiles)
+  var preservedLocalCommit: AppendCommit? = null
   if (preserveLocal) {
    val captured = local.capture(stopped, null)
    require(captured.manifest.files == before) { "比较后本地存档发生变化，未恢复" }
@@ -571,6 +572,7 @@ class AppendProfileSession(
    val plan = repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
    val expectedTips = (graph.tips - plan.commit.parents.toSet()) + plan.commit.id
    publish(plan, store, stopped)
+   preservedLocalCommit = plan.commit
    graph = discover(store)
    if (graph.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(graph, store, stopped)))
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
@@ -578,6 +580,34 @@ class AppendProfileSession(
   if (graph.tips.size > 1) {
    val conflict = preserveConflict(graph, store, stopped)
    require(conflict.observedLocalFiles == before) { "选择期间本地存档发生变化，未恢复" }
+   if (selected.id !in graph.tips) {
+    // Only this call's verified local preservation may replace the originally selected baseline
+    // tip. Ordinary conflict resolution must still reject historical, non-tip selections.
+    val preserved = requireNotNull(preservedLocalCommit) { "所选分支已变化，请重新比较" }
+    require(selected.id == comparison.baselineId && selected.id in comparison.observedTips &&
+     comparison.graph?.commits?.get(selected.id) == selected && preserved.parents == listOf(selected.id) &&
+     preserved.snapshot.files == before && repository.baseline() == preserved.id) { "所选分支不属于本次保留操作" }
+    val expectedTips = (comparison.observedTips - selected.id) + preserved.id
+    require(graph.tips == expectedTips && graph.commits[selected.id] == selected && graph.commits[preserved.id] == preserved) {
+     "所选历史或本次保留分支已变化，未恢复"
+    }
+    val verified = repository.download(store, selected)
+    require(verified.manifest == chosen.manifest && verified.zip.contentEquals(chosen.zip)) { "所选快照内容已变化，未恢复" }
+    local.checkRestore(chosen)
+    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+    val fingerprint = requireNotNull(comparison.fingerprint)
+    stability.requireUnchanged(fingerprint)
+    // Downloads and validation can take time. A late branch requires a new explicit choice;
+    // it must never become an extra resolution parent or cause a local overwrite here.
+    val latest = discover(store)
+    if (latest.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(latest, store, stopped)))
+    require(latest.commits[selected.id] == selected && latest.commits[preserved.id] == preserved) { "所选历史或本次保留分支已变化，未恢复" }
+    val plan = prepareAndApply(chosen, latest.tips.sorted(), "resolution", "首次恢复 · 保留本地后明确选择原基线") { plan ->
+     stability.requireUnchanged(fingerprint)
+     local.restore(snapshot(plan), stopped, before)
+    }
+    return@locked OnboardingRestoreResult.Published(publish(plan, store, stopped))
+   }
    return@locked OnboardingRestoreResult.Published(resolveLocked(conflict, snapshotId, store, stopped))
   }
   if (!preserveLocal && (comparison.baselineId == null || before == baselineFiles)) {

@@ -415,6 +415,48 @@ class AndroidFacadeReconstructionTest {
         assertEquals(store.latest().snapshot.files, bridge.files.mapValues { hash(it.value) })
         assertFalse(rig.facade.hasUnresolvedRestore()); assertFalse(journal(rig.root).exists()); assertEquals(writes, store.writes)
     }
+    @Test fun restoringBaselineTipPreservesDirtyProgressAndResolvesOnlySurvivingTips() {
+        val store = MemoryAppendStore(); val bridgeA = FakeBridge(fixture(1))
+        val rigA = publish(bridgeA, store); val a = store.latest()
+        val expectedFiles = bridgeA.files.mapValues { it.value.copyOf() }
+        val facadeB = rig(FakeBridge(fixture(2)), store).facade
+        val inspectionB = facadeB.inspect()
+        assertFalse(inspectionB.canAutoUpload)
+        // The independent source is published only through the explicit manual upload path.
+        assertTrue(facadeB.upload(inspectionB).isConflict)
+        val b = store.latest(); assertTrue(b.parents.isEmpty())
+        val oldCommits = store.commits.mapValues { it.value.copyOf() }
+        val oldObjects = store.objects.mapValues { it.value.copyOf() }
+
+        bridgeA.files = fixture(3)
+        val dirtyFiles = bridgeA.files.mapValues { hash(it.value) }
+        val inspection = rigA.facade.inspect()
+        assertEquals("BRANCHED", inspection.kind)
+        assertEquals(a.id, rigA.facade.historyPresentation(inspection).baseline)
+        assertEquals(setOf(a.id, b.id), inspection.remoteVersions.filter { it.isTip }.map { it.commitId }.toSet())
+        val result = rigA.facade.restoreSelected(inspection, a.snapshot.id, true)
+
+        assertFalse(result.isConflict); assertFalse(result.isPending)
+        assertEquals(1, bridgeA.restores)
+        assertEquals(expectedFiles.keys, bridgeA.files.keys)
+        expectedFiles.forEach { (name, bytes) -> assertContentEquals(bytes, bridgeA.files.getValue(name), name) }
+        val added = store.decoded().filter { it.id !in oldCommits }
+        assertEquals(2, added.size)
+        val preserved = added.single { it.kind == "snapshot" }
+        assertEquals(listOf(a.id), preserved.parents)
+        assertEquals(dirtyFiles, preserved.snapshot.files)
+        assertTrue(preserved.snapshot.id in store.objects)
+        val resolution = added.single { it.kind == "resolution" }
+        assertEquals(setOf(preserved.id, b.id), resolution.parents.toSet())
+        assertEquals(2, resolution.parents.size)
+        assertEquals(a.snapshot.files, resolution.snapshot.files)
+        oldCommits.forEach { (id, bytes) -> assertContentEquals(bytes, store.commits.getValue(id), id) }
+        oldObjects.forEach { (id, bytes) -> assertContentEquals(bytes, store.objects.getValue(id), id) }
+        val restoredHistory = rigA.facade.historyPresentation(rigA.facade.inspect())
+        assertEquals(setOf(resolution.id), restoredHistory.graph.tips)
+        assertEquals(resolution.id, restoredHistory.baseline)
+        assertFalse(rigA.facade.hasUnresolvedRestore()); assertFalse(journal(rigA.root).exists())
+    }
     @Test fun failedRestoreRemainsBlockedAndRecoveryIsIdempotent() {
         val store = MemoryAppendStore(); publish(FakeBridge(), store)
         val bridge = FakeBridge(emptyMap()); val rig = rig(bridge, store); val inspection = rig.facade.inspect()
