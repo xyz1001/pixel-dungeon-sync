@@ -46,7 +46,7 @@ class SharedGameSelectionRenderTest {
     }
     private fun ready() = SharedGameSelectionState(
         game = SharedGameIdentity("Shattered Pixel Dungeon", "4.0.2"), selectionId = "/games/selected.jar",
-        selectionStatus = "已找到", location = "/games/selected.jar", pageActive = true, canContinue = true,
+        location = "/games/selected.jar", pageActive = true, canContinue = true,
         rows = listOf(SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, "重新选择")),
     )
     private fun scene(width: Int, height: Int, host: Host, observed: Observation) =
@@ -70,6 +70,9 @@ class SharedGameSelectionRenderTest {
                 assertTrue(next.height >= 46f && next.bottom < 742f)
                 assertTrue(card.bottom < next.top)
                 assertTrue(observed.overflow.isEmpty())
+                assertTrue(host.state.selectionStatus.isEmpty(), "selected desktop game needs no found-status label")
+                assertEquals("Shattered Pixel Dungeon", host.state.game?.name)
+                assertEquals("4.0.2", host.state.game?.version)
                 click(scene, observed.bounds.getValue("action:CHOOSE_FILE").center)
                 render(scene, "game-selection-cancel-$width")
                 assertEquals(listOf("CHOOSE_FILE"), host.calls)

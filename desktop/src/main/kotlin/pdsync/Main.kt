@@ -974,7 +974,6 @@ internal fun runSyncApplication(
         val discoveryState = SharedGameSelectionState(
          game = selectedGame?.let { gameIdentity(it) },
          selectionId = selectedGame?.path,
-         selectionStatus = if (selectedGame != null) "已找到" else "",
          location = selectedGame?.path.orEmpty(),
          rows = listOf(
           SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) "选择游戏 JAR…" else "重新选择"),
