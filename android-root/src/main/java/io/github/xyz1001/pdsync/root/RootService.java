@@ -34,8 +34,8 @@ public final class RootService {
             stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
             RootSaveTree tree=new RootSaveTree(runtime.fileSystem(),request.binding);
             if(request.command==RootProtocol.Command.PROBE) {
-                // Authorization and identity remain testable while a pending transaction needs recovery.
-                stage=RootProtocol.DiagnosticStage.ROOT_OPEN;tree.probe();
+                // Setup proves root and package identity only. Save directories and lifecycle
+                // belong to the later read operation, including when files does not exist yet.
                 stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
                 return readReply(request,"",0,0,"","UNKNOWN",false,null);
             }

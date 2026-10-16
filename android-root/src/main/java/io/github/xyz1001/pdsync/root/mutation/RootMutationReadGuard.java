@@ -49,9 +49,12 @@ public final class RootMutationReadGuard implements AutoCloseable {
         if (!canonicalParent.equals("/data/user/" + binding.userId)
                 && !(binding.userId == 0 && canonicalParent.equals("/data/data"))) fail(Code.UNSAFE);
         data = openData(); originalData = os.stat(data);
-        Stat filesBefore = lookup(data, "files", MutationOs.Operation.LSTAT_SAVE_FILES); liveDirectory(filesBefore);
-        files = os.openDirectory(data, "files"); originalFiles = os.stat(files);
-        sameDirectory(filesBefore, originalFiles); liveDirectory(originalFiles);
+        Stat filesBefore = optionalFiles(data);
+        if (filesBefore != null) {
+            liveDirectory(filesBefore);
+            files = os.openDirectory(data, "files"); originalFiles = os.stat(files);
+            sameDirectory(filesBefore, originalFiles); liveDirectory(originalFiles);
+        }
         Stat found = optional(data, WORKSPACE);
         if (found == null) { revalidate(); return; }
         privateDirectory(found); workspace = os.openDirectory(data, WORKSPACE); originalWorkspace = os.stat(workspace);
@@ -137,7 +140,13 @@ public final class RootMutationReadGuard implements AutoCloseable {
         if (!canonicalParent.equals(os.canonicalSystemParent(fixedParent()))) fail(Code.CHANGED);
         try (MutationOs.Handle reopened = openData()) {
             sameDirectory(originalData, os.stat(reopened)); sameDirectory(originalData, os.stat(data));
-            sameDirectory(originalFiles, lookup(reopened, "files", MutationOs.Operation.LSTAT_SAVE_FILES)); sameDirectory(originalFiles, os.stat(files));
+            Stat currentFiles = optionalFiles(reopened);
+            if (originalFiles == null) {
+                if (currentFiles != null) fail(Code.CHANGED);
+            } else {
+                if (currentFiles == null) fail(Code.CHANGED);
+                sameDirectory(originalFiles, currentFiles); sameDirectory(originalFiles, os.stat(files));
+            }
             Stat now = optional(reopened, WORKSPACE);
             if (workspace == null) { if (now != null) fail(Code.CHANGED); return; }
             if (now == null) fail(Code.CHANGED);
@@ -162,6 +171,14 @@ public final class RootMutationReadGuard implements AutoCloseable {
         } finally { current.close(); }
     }
     private String fixedParent() { return binding.dataDir.substring(0, binding.dataDir.lastIndexOf('/')); }
+    private Stat optionalFiles(MutationOs.Handle parent) throws IOException {
+        try { return lookup(parent, "files", MutationOs.Operation.LSTAT_SAVE_FILES); }
+        catch (MutationOs.Failure e) {
+            if (e.error == MutationOs.Error.MISSING && e.errno == 2
+                    && e.operation == MutationOs.Operation.LSTAT_SAVE_FILES) return null;
+            throw e;
+        }
+    }
     private Stat optional(MutationOs.Handle parent, String name) throws IOException {
         try { return lookup(parent, name, name.equals(WORKSPACE) ? MutationOs.Operation.LSTAT_WORKSPACE : MutationOs.Operation.LSTAT); }
         catch (MutationOs.Failure e) { if (e.error == MutationOs.Error.MISSING) return null; throw e; }

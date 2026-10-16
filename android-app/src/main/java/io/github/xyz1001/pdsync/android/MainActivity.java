@@ -663,6 +663,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 && !this.installer.hasActiveRequest() && this.accessCapabilities != null && this.accessCapabilities.exportSupported);
     }
 
+    private boolean canAdvanceGameSelection() {
+        return this.rootGame == null ? canRequestSaveAccess() : readyForSaves() && !restoreNeedsAttention();
+    }
+
     private boolean restoreNeedsAttention() {
         return this.readinessState.restorePending || this.readinessState.access == InstallationReadiness.AccessStatus.RECOVERY_NEEDED
                 || (this.inspection != null && this.inspection.getNeedsRestoreRecovery());
@@ -726,6 +730,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void checkRootAccess() throws Exception {
+        checkRootAccess(false);
+    }
+
+    private void checkRootAccess(boolean setupOnly) throws Exception {
         if (!this.resumed) throw new IOException("请返回应用前台，再检查 Root 存档访问。");
         readInstallationReadiness();
         if (this.rootGame == null) throw new IOException("所选访问方式已变化，请重新检查。");
@@ -738,7 +746,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                     true, false, true, InstallationReadiness.AccessStatus.RECOVERY_NEEDED);
             return;
         }
-        SyncRuntime.backend(this).inspectReady();
+        if (setupOnly) SyncRuntime.probeRootAuthorization(this);
+        else SyncRuntime.backend(this).inspectReady();
         this.bridgeAccessCode = "READY";
         this.readinessState = InstallationReadiness.rootDirect(InstallationReadiness.PackageStatus.VERIFIED,
                 true, false, false, InstallationReadiness.AccessStatus.READY);
@@ -747,10 +756,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void requestRootAuthorization() {
         if (this.rootGame == null || !this.resumed || this.busy) return;
         final SelectedRootGame chosen = this.rootGame;
-        work(DiagnosticAction.ACCESS_CHECK, "正在通过 Root 检查所选游戏存档…", () -> {
+        work(DiagnosticAction.ACCESS_CHECK, "正在请求 Root 权限…", () -> {
             if (!this.resumed || !chosen.matches(SyncRuntime.rootGame(this)))
                 throw new IOException("请在应用前台重新确认所选游戏。");
-            checkRootAccess();
+            checkRootAccess(true);
             return null;
         }, ignored -> {
             if (!this.resumed) {
@@ -758,7 +767,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.notice = "请返回前台后继续检查存档。";
             } else {
                 this.readinessRefreshPending = false;
-                this.notice = this.readinessState.accessDescription();
+                this.notice = "Root 授权成功，点击下一步读取存档。";
                 if (this.readinessState.restorePending) this.page = SyncPage.SETTINGS;
             }
         });
@@ -1518,7 +1527,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         SharedGameIdentity game = selectedGameIdentity();
         return new SharedGameSelectionState(game, location, game == null ? "" : this.rootGame != null ? "Root" : ready.canContinue() ? "已就绪" : "已选择",
                 location == null ? "" : location, rows, Collections.emptyList(), this.resumed && this.page == SyncPage.DISCOVERY && !this.sharedAppreciationOnly,
-                this.busy || this.gameFilePickerOpen, canRequestSaveAccess(), message, this.feedbackError, warning, extra, !this.diagnosticReport.isEmpty());
+                this.busy || this.gameFilePickerOpen, canAdvanceGameSelection(), message, this.feedbackError, warning, extra, !this.diagnosticReport.isEmpty());
     }
 
     /* renamed from: lambda$renderDiscovery$14$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -1629,7 +1638,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* renamed from: lambda$renderDiscovery$26$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m103x3c55a874() {
         if (this.busy || this.gameFilePickerOpen || !this.resumed || isDestroyed() || this.page != SyncPage.DISCOVERY) return;
-        if (canRequestSaveAccess()) {
+        if (canAdvanceGameSelection()) {
             this.onboardingActive = true;
             navigate(SyncPage.PATH);
             previewPath();

@@ -9,6 +9,15 @@ SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 
 
 class RootUiContract(unittest.TestCase):
+    def test_setup_next_requires_proven_root_access(self):
+        advance = body(MAIN, 'private boolean canAdvanceGameSelection()')
+        self.assertIn('readyForSaves() && !restoreNeedsAttention()', advance)
+        self.assertIn('canAdvanceGameSelection()', body(MAIN, 'private SharedGameSelectionState gameSelectionState()'))
+        self.assertIn('canAdvanceGameSelection()', body(MAIN, 'void m103x3c55a874()'))
+        request = body(MAIN, 'private void requestRootAuthorization()')
+        self.assertNotIn('SyncPage.PATH', request)
+        self.assertNotIn('previewPath()', request)
+
     def test_automatic_refresh_only_verifies_root_metadata(self):
         readiness = body(MAIN, 'private void readInstallationReadiness()')
         self.assertLess(readiness.index('readRootReadiness()'), readiness.index('this.preparation.reloadPrepared()'))
@@ -25,13 +34,13 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('this.rootGame == null && this.page == SyncPage.HOME', resumed)
 
     def test_explicit_check_has_no_repeated_custom_authorization_gate(self):
-        self.assertEqual(MAIN.count('SyncRuntime.probeRootAuthorization(this)'), 1)
+        self.assertEqual(MAIN.count('SyncRuntime.probeRootAuthorization(this)'), 2)
         request = body(MAIN, 'private void requestRootAuthorization()')
         self.assertNotIn('confirm(', request)
         self.assertIn('!this.resumed', request)
         self.assertIn('chosen.matches(SyncRuntime.rootGame(this))', request)
-        self.assertIn('checkRootAccess()', request)
-        check = body(MAIN, 'private void checkRootAccess()')
+        self.assertIn('checkRootAccess(true)', request)
+        check = body(MAIN, 'private void checkRootAccess(boolean setupOnly)')
         self.assertIn('!this.resumed', check)
         self.assertIn('if (hasAnyRestoreJournal()) {', check)
         self.assertIn('SyncRuntime.probeRootAuthorization(this)', check)

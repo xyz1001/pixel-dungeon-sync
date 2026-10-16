@@ -267,7 +267,8 @@ public final class RootHostTests {
         }
         FakeFs group = new FakeFs(); Node node=group.file("rankings.dat","x"); node.mode=0100770; node.gid=9999;
         bad(() -> tree(group).scan(false), "foreign group write");
-        FakeFs missing = new FakeFs(); missing.data.children.clear(); bad(() -> tree(missing).scan(false), "missing files");
+        FakeFs missing = new FakeFs(); missing.data.children.clear(); check(tree(missing).scan(true).inventory.hashes.isEmpty(), "missing files is an empty read");
+        check(tree(missing).archive(tree(missing).scan(true)).length == 22, "missing files exports empty ZIP without creating files");
     }
     private static void limitsAndRaces() throws Exception {
         FakeFs bytes = new FakeFs(); bytes.file("rankings.dat","12");
@@ -388,20 +389,31 @@ public final class RootHostTests {
                     check(zip.getNextEntry()==null,"absent workspace export has no workspace entries");
                 }
             }
-            // The same errno at a required path must still fail closed, before any save scan.
-            for(String missing:new String[]{"package","files"}) {
-                FakeRuntime required=guardedRuntime();
-                if(missing.equals("files"))required.readOs.data.children.remove("files");
-                else required.readOs.root.children.get("data").children.get("user").children.get("0").children.remove("com.example.game");
-                RootProtocol.Response rejected=new RootService(required).execute(query);
-                check(rejected.status==RootProtocol.Status.IO_ERROR&&rejected.diagnosticStage==(missing.equals("package")?RootProtocol.DiagnosticStage.KERNEL_LSTAT_DATA_PACKAGE:RootProtocol.DiagnosticStage.KERNEL_LSTAT_SAVE_FILES)
-                        &&rejected.diagnosticCategory==RootProtocol.DiagnosticCategory.MISSING&&rejected.errno==2,"required "+missing+" ENOENT remains a failure "+command);
-                check(required.fs.operations==0&&required.readOs.mutations==0&&required.readOs.workspace()==null,
-                        "missing required "+missing+" stops before save reads and writes "+command);
-            }
+            FakeRuntime absentFiles=guardedRuntime();
+            absentFiles.readOs.data.children.remove("files");
+            absentFiles.fs.data.children.clear();
+            RootProtocol.Response empty=new RootService(absentFiles).execute(query);
+            check(empty.status==RootProtocol.Status.OK && empty.fileCount==0 && empty.contentBytes==0,
+                    "missing files accepted through real read guard " + command);
+            check(absentFiles.readOs.mutations==0 && absentFiles.readOs.workspace()==null,
+                    "missing files read performs zero mutations " + command);
+            FakeRuntime required=guardedRuntime();
+            required.readOs.root.children.get("data").children.get("user").children.get("0").children.remove("com.example.game");
+            RootProtocol.Response rejected=new RootService(required).execute(query);
+            check(rejected.status==RootProtocol.Status.IO_ERROR && rejected.errno==2,
+                    "missing package root remains a failure " + command);
+            check(required.fs.operations==0 && required.readOs.mutations==0,
+                    "missing root stops before reads or writes " + command);
         }
     }
     private static void service() throws Exception {
+        FakeRuntime setup = new FakeRuntime();
+        setup.foreground = true;
+        setup.fs.data.children.clear();
+        check(new RootService(setup).execute(request(RootProtocol.Command.PROBE)).status == RootProtocol.Status.OK,
+                "setup succeeds while game runs and files directory is absent");
+        check(setup.fs.operations == 0 && setup.observeCalls == 0 && setup.guardOpens == 0,
+                "setup does not open, scan, hash saves, observe lifecycle or create a workspace");
         FakeRuntime nonRoot=new FakeRuntime(); nonRoot.euid=UID;
         check(new RootService(nonRoot).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.NOT_ROOT,"actual euid gate");
         check(nonRoot.pmCalls==0 && nonRoot.fs.operations==0 && nonRoot.observeCalls==0,"no target touches before root gate");

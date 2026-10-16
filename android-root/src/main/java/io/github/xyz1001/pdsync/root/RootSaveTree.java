@@ -66,6 +66,12 @@ public final class RootSaveTree {
     public void requireRootIdentity(Snapshot expected) throws IOException {
         try (RootFileSystem.Directory data = fs.openData(binding)) {
             requireDirectory(data.stat());
+            if ("<missing>".equals(expected.metadata.get(""))) {
+                if (!data.stat().identity().equals(expected.metadata.get("<data>")))
+                    throw failure(RootProtocol.Status.CHANGED);
+                requireFilesAbsent(data);
+                return;
+            }
             try (RootFileSystem.Directory files = fs.openDirectory(data, "files")) {
                 requireDirectory(files.stat());
                 if (!data.stat().identity().equals(expected.metadata.get("<data>"))
@@ -81,7 +87,18 @@ public final class RootSaveTree {
         Map<String, Long> modified = new TreeMap<>();
         try (RootFileSystem.Directory data = fs.openData(binding)) {
             RootFileSystem.Stat dataBefore = data.stat(); requireDirectory(dataBefore);
-            RootFileSystem.Stat filesBefore = fs.childStat(data, "files"); requireDirectory(filesBefore);
+            RootFileSystem.Stat filesBefore;
+            try { filesBefore = fs.childStat(data, "files"); }
+            catch (RootFailure missing) {
+                if (missing.status != RootProtocol.Status.MISSING_DIRECTORY) throw missing;
+                metadata.put("<data>", dataBefore.identity()); metadata.put("", "<missing>");
+                Snapshot empty = new Snapshot(hashes, 0, "EMPTY_DIRECTORY", metadata, bytes, modified);
+                requireFilesAbsent(data);
+                same(dataBefore, data.stat());
+                requireRootIdentity(empty);
+                return empty;
+            }
+            requireDirectory(filesBefore);
             try (RootFileSystem.Directory files = fs.openDirectory(data, "files")) {
                 same(filesBefore, files.stat());
                 SaveDirectoryPolicy.Content content = fs.content(files);
@@ -100,6 +117,14 @@ public final class RootSaveTree {
                 return new Snapshot(hashes, total[0], content.state.name(), metadata, bytes, modified);
             }
         }
+    }
+    private void requireFilesAbsent(RootFileSystem.Directory data) throws IOException {
+        try { fs.childStat(data, "files"); }
+        catch (RootFailure missing) {
+            if (missing.status == RootProtocol.Status.MISSING_DIRECTORY) return;
+            throw missing;
+        }
+        throw failure(RootProtocol.Status.CHANGED);
     }
     private void walk(RootFileSystem.Directory parent, String prefix, int depth,
             Map<String, String> hashes, Map<String, String> metadata, Map<String, byte[]> bytes,

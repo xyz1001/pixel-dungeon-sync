@@ -36,12 +36,33 @@ public final class ReadGuardHostTests {
     }
     public static void main(String[] args) throws Exception {
         rootBeforeTouch(); absentDoesNotCreate(); existingInterlock(); nativeLockBusy(); initialCreationRace();
-        cleanWorkspace(); pendingStates(); unsafeWorkspace(); identityReplacement(); readRace(); closedGuard();
+        cleanWorkspace(); pendingStates(); unsafeWorkspace(); identityReplacement(); readRace(); closedGuard(); missingFiles();
         System.out.println("ReadGuardHostTests: " + assertions + " assertions passed (in-memory fake OS only; no filesystem writes)");
     }
     private static void rootBeforeTouch() throws Exception {
         FakeMutationOs os = new FakeMutationOs(); os.uid = 10001;
         code(RootMutationReadGuard.Code.NOT_ROOT, () -> open(os)); check(os.touches == 0 && os.mutations == 0);
+    }
+    private static void missingFiles() throws Exception {
+        FakeMutationOs os = new FakeMutationOs(); os.data.children.remove("files");
+        try (RootMutationReadGuard guard = open(os)) {
+            guard.requireClear(); guard.revalidate(); check(os.mutations == 0);
+            os.dir(os.data, "files", 0700, 10001, 10001);
+            code(RootMutationReadGuard.Code.CHANGED, guard::revalidate);
+        }
+        for (int errno : new int[] {1, 5, 13}) {
+            FakeMutationOs denied = new FakeMutationOs();
+            MutationOs boundary = (MutationOs) java.lang.reflect.Proxy.newProxyInstance(
+                    MutationOs.class.getClassLoader(), new Class<?>[]{MutationOs.class}, (proxy, method, args) -> {
+                if (method.getName().equals("childStat") && "files".equals(args[1]))
+                    throw new MutationOs.Failure(MutationOs.Error.IO, MutationOs.Operation.LSTAT, errno, null);
+                try { return method.invoke(denied, args); }
+                catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
+            });
+            try { RootMutationReadGuard.open(boundary, binding()); throw new AssertionError("Accepted errno " + errno); }
+            catch (MutationOs.Failure failure) { check(failure.errno == errno); }
+            check(denied.mutations == 0);
+        }
     }
     private static void absentDoesNotCreate() throws Exception {
         FakeMutationOs os = new FakeMutationOs();
