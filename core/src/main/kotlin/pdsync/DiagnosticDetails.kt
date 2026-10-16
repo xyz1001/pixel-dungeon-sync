@@ -12,7 +12,8 @@ import java.util.Collections
 
 /**
  * Small, closed diagnostic evidence shared by Java Android adapters and Kotlin desktop/core code.
- * Every value is a fixed token, boolean or bounded integer. There is deliberately no arbitrary
+ * Most values are fixed tokens, booleans or bounded integers. Preparation evidence has its own
+ * bounded, typed allowlist for APK hashes/package metadata, verifier issues and code locations. No arbitrary
  * text, exception, URL, account, package name, path, filename, version label or identifier field.
  * Missing evidence stays absent. Unknown tokens become UNKNOWN; invalid numbers are omitted.
  * Deserialization rejects invalid on-disk values instead of sanitizing them into exportable data.
@@ -55,14 +56,18 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("localFileCount") LOCAL_FILE_COUNT,
   @SerialName("remoteFileCount") REMOTE_FILE_COUNT,
   @SerialName("gameVersionCode") GAME_VERSION_CODE,
-  @SerialName("saveVersion") SAVE_VERSION
+  @SerialName("saveVersion") SAVE_VERSION,
+  @SerialName("preparation") PREPARATION,
+  @SerialName("installationPhase") INSTALLATION_PHASE,
+  @SerialName("installationCache") INSTALLATION_CACHE,
+  @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS
  }
  enum class Mode { ROOT_DIRECT, EMBEDDED_BRIDGE, LEGACY_HELPER_BRIDGE, DESKTOP, UNKNOWN }
  enum class NetworkTarget { DAV, OFFICIAL_AUTH, ENTITLEMENT, ASSET, UNKNOWN }
  enum class FailureSource {
   PACKAGE_TRUST, PROVIDER_ACQUIRE, HELPER_ACTIVATION, IPC_CALL, IPC_CLOSE, PROTOCOL_REPLY,
   SAVE_READINESS, TARGET_IDENTITY, EXPORT, RESTORE, RECOVERY, ROOT, LOCAL_SAVE,
-  REMOTE_HISTORY, SYNC_COMPARE, NETWORK, INSTALLATION, UNKNOWN
+  REMOTE_HISTORY, SYNC_COMPARE, NETWORK, INSTALLATION, PREPARATION, UNKNOWN
  }
 
  fun isEmpty(): Boolean = values.isEmpty()
@@ -78,6 +83,12 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    else values[field] = if (value in tokens(field)) value else "UNKNOWN"
   }
   /** No arbitrary string setter is exposed. Every token method selects its own allowlist. */
+  fun preparationEvidence(evidence: Map<String, String>?): Builder = apply {
+   PreparationDiagnosticEvidence.encode(evidence)?.let { values[Field.PREPARATION] = it } ?: values.remove(Field.PREPARATION)
+  }
+  fun installationPhase(value: String?): Builder = token(Field.INSTALLATION_PHASE, value)
+  fun installationCache(value: String?): Builder = token(Field.INSTALLATION_CACHE, value)
+  fun installationElapsedMs(value: Long): Builder = number(Field.INSTALLATION_ELAPSED_MS, value)
   fun mode(value: Mode): Builder = token(Field.MODE, value.name)
   fun mode(value: String?): Builder = token(Field.MODE, when (value) {
    "ROOT" -> "ROOT_DIRECT"; "EMBEDDED" -> "EMBEDDED_BRIDGE"
@@ -167,6 +178,8 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   // A parity test requires changes to the protocol allowlist to be reviewed here too.
   private val readinessCodes = setOf(
    "READY", "NOT_CHECKED",
+   "PURE_HANDSHAKE_REQUIRED", "ACCESS_HANDSHAKE_TIMEOUT", "ACCESS_HANDSHAKE_CANCELED",
+   "ACCESS_WORKERS_BUSY", "ACCESS_AUTHENTICATION_FAILED", "UNKNOWN_METHOD", "UNSUPPORTED_METHOD",
    "ROOT_RUNNER_TIMEOUT", "ROOT_REPLY_MISMATCH", "ROOT_RECOVERY_REQUIRED", "ROOT_RESTORE_CONFLICT",
    "ROOT_RECOVERY_CONFLICT", "ROOT_ATTRIBUTES_UNSUPPORTED", "ROOT_MUTATION_UNAVAILABLE", "ROOT_RESTORE_FAILED",
    "ROOT_RECOVERY_FAILED", "ROOT_NO_PENDING_RECOVERY", "ROOT_RESTORE_COMMITTED_CLEANUP_PENDING", "ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING",
@@ -207,6 +220,8 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   private val compareStates = OnboardingKind.entries.map { it.name }.toSet() + "UNKNOWN"
   private val blockReasons = SyncBlockReason.entries.map { it.name }.toSet() + "UNKNOWN"
   private fun tokens(field: Field): Set<String> = when (field) {
+   Field.INSTALLATION_PHASE -> setOf("PREPARE_VALIDATION", "UNINSTALL_REQUEST", "INSTALL_SESSION", "SESSION_WRITE", "INSTALL_COMMIT", "INSTALL_RESULT", "UNKNOWN")
+   Field.INSTALLATION_CACHE -> setOf("CACHE_HIT", "SESSION_MISSING", "FILE_CHANGED", "REVALIDATED", "NOT_APPLICABLE", "UNKNOWN")
    Field.MODE -> Mode.entries.map { it.name }.toSet()
    Field.READINESS_CODE -> readinessCodes
    Field.ACCESS -> accessStates
@@ -229,12 +244,13 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.SAVE_LAYOUT_INCLUDED, Field.SAVE_LAYOUT_EXCLUDED, Field.SAVE_LAYOUT_UNRECOGNIZED,
    Field.FILE_COUNT, Field.LOCAL_FILE_COUNT, Field.REMOTE_FILE_COUNT -> 0L..MAX_FILE_COUNT
    Field.CONTENT_BYTES -> 0L..MAX_CONTENT_BYTES
-   Field.REQUEST_DURATION_MS -> 0L..MAX_REQUEST_DURATION_MS
+   Field.REQUEST_DURATION_MS, Field.INSTALLATION_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
    Field.GAME_VERSION_CODE -> 0L..Long.MAX_VALUE
    Field.SAVE_VERSION -> 0L..Int.MAX_VALUE.toLong()
    else -> null
   }
   private fun valid(field: Field, value: String): Boolean {
+   if (field == Field.PREPARATION) return PreparationDiagnosticEvidence.isValid(value)
    if (field in booleanFields) return value == "true" || value == "false"
    numberRange(field)?.let { range ->
     val number = value.toLongOrNull() ?: return false

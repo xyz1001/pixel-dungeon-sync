@@ -67,7 +67,7 @@ object DiagnosticLog {
  internal const val MAX_FILE_BYTES = 128 * 1024
  internal const val RETENTION_DAYS = 7L
  internal const val MAX_TOTAL_BYTES = MAX_FILE_BYTES * 7
- private const val MAX_LINE_BYTES = 2048
+ private const val MAX_LINE_BYTES = 32 * 1024
  private val lock = Any()
  private val current = ThreadLocal<DiagnosticTrace?>()
  private var configuration: Configuration? = null
@@ -240,7 +240,11 @@ object DiagnosticLog {
    record.httpMethod?.let { append(" method=$it") }
    record.httpStatus?.let { append(" status=$it") }
    if (record.failure != DiagnosticFailure.NONE) append(" error=${record.failure} (${failureText(record.failure)})")
-   record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) -> append(" ${field.name}=$value") }
+   record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) ->
+    if (field == DiagnosticDetails.Field.PREPARATION) {
+     PreparationDiagnosticEvidence.decode(value)?.forEach { (key, fact) -> append(" prep.$key=$fact") }
+    } else append(" ${field.name}=$value")
+   }
    appendLine(" version=${record.appVersion} platform=${record.platform} zone=${record.zone} offsetMinutes=${record.offsetMinutes}")
   }
  }
