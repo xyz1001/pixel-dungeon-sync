@@ -2921,8 +2921,8 @@
       "sha256": "1f3539a46223ba8dbdb8b05ddf82e78f670f65cfdd4ae11fcf29f5b47f32b5af"
     },
     "desktop/src/test/kotlin/pdsync/DesktopArchiveReadsTest.kt": {
-      "size": 6028,
-      "sha256": "0469a42e6c4727c51bff549c77e17bc5a98273118da6fda685916f4da84df5ad"
+      "size": 6048,
+      "sha256": "11c1b6a1683dbd3e8b8795c74f950a5959a722717d85f4ae7c13ebc9334fdf50"
     },
     "desktop/src/test/kotlin/pdsync/DesktopConflictDialogTest.kt": {
       "size": 8983,
@@ -6272,6 +6272,10 @@
       "size": 70436,
       "sha256": "f8fddab245a5f6b2eaf0c67db1dbe04600331dfb9ba760372dc248fbedf39514"
     },
+    "docs/onboarding-v5-evidence/dav-requests.log": {
+      "size": 1235,
+      "sha256": "768fb2e2f470305f6554cc407dd390ba4fc9d4d9b73b215d5e8a589ea5adfab7"
+    },
     "docs/onboarding-v5-evidence/evidence-sha256.txt": {
       "size": 820,
       "sha256": "be25f122cb8a487268fe67dc141eadd893fa6167efa8848902d366a286c8e47f"
@@ -6396,9 +6400,29 @@
       "size": 35303,
       "sha256": "b321bdd0b5d3d131241925cbc0bac9caf428599f7a58eadf97800664162a3da7"
     },
+    "docs/real-game-validation/append-only-recheck/controller-push-b.log": {
+      "size": 104,
+      "sha256": "380e7044b791513ef2521135b1e888093b52609578e155882e0dad53a9033412"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-resolve-a-choose-b.log": {
+      "size": 312,
+      "sha256": "95a90db10abae90036af4646a1ee593fe3fdedee535a1e0d793fb7eed2c32462"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-restore-history.log": {
+      "size": 181,
+      "sha256": "c25540f8d7163ec94867e0e1e29e7727ce78aa1c980a66a139f8c04e37ca95fd"
+    },
+    "docs/real-game-validation/append-only-recheck/controller-transfer.log": {
+      "size": 253,
+      "sha256": "c391b65454bf110093c2871a2643fd99e05345f1c44a67ffbfc6b9226b8f24ed"
+    },
     "docs/real-game-validation/append-only-recheck/evidence-sha256.txt": {
       "size": 1904,
       "sha256": "b8dddbde80c2aeb7eecc1238903a9b4d9fb41249dd77b4649954a6c155b73d94"
+    },
+    "docs/real-game-validation/append-only-recheck/ui-smoke-verification.log": {
+      "size": 473,
+      "sha256": "2b6f138ff72ed3460fc2c8ca5e7c462f1708dbf2700c8cfe66cf328468eb6f16"
     },
     "docs/real-game-validation/auto-version-recheck/AUTO_VERSION_RECHECK.json": {
       "size": 2156,
@@ -6535,6 +6559,10 @@
     "docs/single-window-v6-evidence/connection-minimum-single-window.jpg": {
       "size": 35553,
       "sha256": "b12d0635aaa4c0286626eff063daf2a254b7011110f8b3a86c368dda059d6b24"
+    },
+    "docs/single-window-v6-evidence/dav-requests.log": {
+      "size": 2051,
+      "sha256": "bfe1c1c01b84c2c6da3e898a89197b86334dc18ee34c05c4318a4903c79a92f2"
     },
     "docs/single-window-v6-evidence/evidence-sha256.txt": {
       "size": 1110,
