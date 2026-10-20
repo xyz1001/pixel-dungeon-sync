@@ -220,10 +220,9 @@ class AutomaticPushSafetyTest {
   assertNull(local.baseline()); assertFalse(local.hasPending())
  }
 
- @Test fun stoppedGuardStillRejectsUnknownOrRunningGameWithoutUploads() {
+ @Test fun aRunningBooleanDoesNotBlockAnOtherwiseEligibleAutomaticUpload() {
   val local = session(); val store = Memory()
-  val result = assertIs<AutomaticPushResult.Skipped>(local.automaticPush(store) { false })
-  assertEquals(OnboardingKind.BLOCKED, result.comparison.kind)
-  assertEquals(0, store.writes); assertFalse(local.hasPending()); assertNull(local.baseline())
+  assertIs<AutomaticPushResult.Published>(local.automaticPush(store) { false })
+  assertTrue(store.writes > 0); assertFalse(local.hasPending()); assertNotNull(local.baseline())
  }
 }

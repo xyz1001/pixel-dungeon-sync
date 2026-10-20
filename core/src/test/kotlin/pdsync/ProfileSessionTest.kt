@@ -109,12 +109,17 @@ class ProfileSessionTest {
   assertTrue(session(root("other"), state).history().isEmpty())
   assertEquals(1, session(root, state).history().size)
  }
- @Test fun falseGuardNeverMutatesOrPublishes() {
+ @Test fun runningBooleanDoesNotBlockSnapshotUploadOrRestore() {
   val manager = session(); val store = Memory()
-  assertFails { manager.createSnapshot { false } }; assertFails { manager.push(store) { false } }
-  val snapshot = manager.createSnapshot { true }
-  assertFails { manager.restoreHistory(snapshot.manifest.id) { false } }
-  assertEquals("alive", manager.root.resolve("game1/game.dat").readText()); assertNull(store.current)
+  val snapshot = manager.createSnapshot { false }
+  assertNotNull(manager.push(store) { false })
+  assertNotNull(manager.restoreHistory(snapshot.manifest.id) { false })
+  assertEquals("alive", manager.root.resolve("game1/game.dat").readText()); assertNotNull(store.current)
+ }
+ @Test fun contextAuthorizationFailureStillRejectsBeforePublication() {
+  val manager = session(); val store = Memory()
+  assertFailsWith<SecurityException> { manager.push(store) { throw SecurityException("identity changed") } }
+  assertNull(store.current); assertFalse(manager.hasPending())
  }
  @Test fun mutationAfterBackupCancelsWithoutStaleRollback() {
   val source = root("old"); val target = root("before"); var calls = 0

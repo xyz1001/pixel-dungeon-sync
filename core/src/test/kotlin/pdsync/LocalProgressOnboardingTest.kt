@@ -60,9 +60,9 @@ class LocalProgressOnboardingTest {
   assertFails { other.confirmLocalProgressReady(comparison, store) { true } }
   assertFails { other.confirmLocalProgressReady(compare(other, store), store) { true } }; assertNull(other.baseline()); assertEquals(2, store.writes)
  }
- @Test fun runningGameAndPendingOperationsRejectDecision() {
+ @Test fun runningStatusAllowsDecisionButPendingOperationsStillRejectIt() {
   val (local, store, _) = setup(); val comparison = compare(local, store)
-  assertFails { local.confirmLocalProgressReady(comparison, store) { false } }
+  local.confirmLocalProgressReady(comparison, store) { false }
   val repository = AppendRepository(local.directory.resolve("append-v2"), local.adapter, local.config.profile)
   val snapshot = local.loadSnapshot(local.history().first().manifest.id)
   repository.prepare(snapshot, listOf(local.baseline()!!))

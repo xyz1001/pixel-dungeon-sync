@@ -40,9 +40,9 @@ class AutomaticUploadPersistenceTest {
   assertEquals(frozen.commit,result.commit); assertContentEquals(frozen.zip,store.objects[frozen.commit.snapshot.id]); assertContentEquals(frozen.manifestBytes,store.commits[frozen.commit.id]); assertTrue(result.localDirty)
   assertEquals(frozen.commit.snapshot.files,restarted.baselineFiles()); assertFalse(restarted.retryablePending())
  }
- @Test fun `unknown or running process creates neither snapshot nor pending plan`() {
-  val a=session(); val store=Memory(); assertFails { a.push(store) { false } }
-  assertFalse(a.hasPending()); assertTrue(a.history().isEmpty()); assertTrue(store.commits.isEmpty())
+ @Test fun `running status does not suppress an offline frozen upload`() {
+  val a=session(); val store=Memory(); assertFailsWith<SocketException> { a.push(store) { false } }
+  assertTrue(a.hasPending()); assertTrue(a.history().isNotEmpty()); assertTrue(store.commits.isEmpty())
  }
  @Test fun `interrupted restore marker excludes background retry`() {
   val a=session(); assertFails { a.push(Memory()) { true } }; assertTrue(a.retryablePending())

@@ -199,12 +199,12 @@ class OnboardingComparisonTest {
   assertEquals(OnboardingKind.BLOCKED, compare(session(null), store).kind)
  }
 
- @Test fun errorAndUnknownProcessNeverBecomeEmptyOrLeakCredentials() {
+ @Test fun errorsRemainBlockedButRunningStatusDoesNotGateAnEmptyComparison() {
   val store = Memory(); store.failListing = true; val local = session(null)
   val error = compare(local, store)
   assertEquals(OnboardingKind.BLOCKED, error.kind); assertFalse(error.blocker!!.contains("secret")); assertFalse(error.blocker.contains("password"))
   val running = local.compareOnboarding(Memory()) { false }
-  assertEquals(OnboardingKind.BLOCKED, running.kind); assertEquals(0, store.writes)
+  assertEquals(OnboardingKind.BOTH_EMPTY, running.kind); assertEquals(0, store.writes)
  }
 
  @Test fun comparisonUsesSamePhysicalRootLock() {

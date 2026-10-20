@@ -144,7 +144,7 @@ class ProductionWebDavFlowTest {
   assertFails{b.push(dav.store()){true}};assertTrue(b.history().any{it.reason.contains("备份")})
   meta.resolve("blocked").deleteExisting();meta.deleteExisting();b.archivePending();restore(b,dav)
   val files=b.observedFiles();restore(b,dav);assertEquals(files,b.observedFiles());assertFalse(b.hasPending())
-  assertFails{b.restoreRemote(chosen,dav.store()){false}};assertEquals(files,b.observedFiles())
+  b.restoreRemote(chosen,dav.store()){false};assertEquals(files,b.observedFiles())
  }
  private fun rankingRecord(id:String,score:Int,win:Boolean=false):kotlinx.serialization.json.JsonObject = json.parseToJsonElement("""{
   "__className":"com.shatteredpixel.shatteredpixeldungeon.Rankings${'$'}Record",
