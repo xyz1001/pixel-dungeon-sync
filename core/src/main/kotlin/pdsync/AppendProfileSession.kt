@@ -26,6 +26,12 @@ sealed interface AutomaticPushResult {
  data class Skipped(val comparison: OnboardingComparison): AutomaticPushResult
 }
 
+/** Reconstructed code91 HOME same-content result; no implicit baseline update. */
+sealed interface HomePushResult {
+ data class Unchanged(val history:SyncHistory):HomePushResult
+ data class Published(val result:AppendPushResult):HomePushResult
+}
+
 /**
  * Desktop-only v2 facade. ProfileSession supplies filesystem safeguards and the same root OS lock,
  * but none of its Store/CAS methods are called. Old history remains readable; old retry work is
@@ -44,6 +50,7 @@ class AppendProfileSession(
  private val repository = AppendRepository(directory.resolve("append-v2"), adapter, config.profile)
  private val applyMarker = directory.resolve("append-v2/apply-required.txt")
  private val comparisonOwner = Any()
+ private fun <T> readLocked(store:AppendStore, block:()->T):T = local.locked { store.withReadScope(directory.resolve("read-cache"),block) }
 
  fun history() = local.history()
  private val aliasesPath get()=directory.resolve("display-names.json")
@@ -56,15 +63,35 @@ class AppendProfileSession(
   require(repository.cachedGraph().commits.values.any { it.snapshot.id==snapshotId }) { CoreSessionMessages.HISTORY_ENTRY_NOT_FOUND.text() }
   SafePaths.atomicWrite(aliasesPath,json.encodeToString(aliases()+(snapshotId to sanitizeSnapshotName(name))).encodeToByteArray())
  }
- fun syncHistory(): SyncHistory = local.locked {
-  val graph=repository.cachedGraph();val files=currentFiles()
-  val baseline=repository.baseline()
+ fun renameHistory(snapshotId:String,name:String,observedHistory:SyncHistory) = local.locked {
+  require(observedHistory.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  require(observedHistory.graph.commits.values.any {it.snapshot.id==snapshotId}) { CoreSessionMessages.HISTORY_ENTRY_NOT_FOUND.text() }
+  SafePaths.atomicWrite(aliasesPath,json.encodeToString(aliases()+(snapshotId to sanitizeSnapshotName(name))).encodeToByteArray())
+ }
+ fun syncHistory(): SyncHistory = local.locked { historyView(repository.cachedGraph()) }
+ fun syncHistory(observed:SyncHistory):SyncHistory = local.locked {
+  require(observed.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  historyView(observed.graph)
+ }
+ fun syncHistory(comparison:OnboardingComparison):SyncHistory = comparisonHistory(comparison)
+ internal fun syncHistory(comparison:OnboardingComparison,summaryFiles:Map<String,String>,summary:SaveSummary?):SyncHistory = comparisonHistory(comparison,summaryFiles to summary)
+ private fun comparisonHistory(comparison:OnboardingComparison,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory = local.locked {
+  require(comparison.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  require(comparison.kind != OnboardingKind.BLOCKED) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
+  require(repository.baseline()==comparison.baselineId && currentFiles()==comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  historyView(requireNotNull(comparison.graph),summary)
+ }
+ fun readHomeHistory(store:AppendStore):SyncHistory = readLocked(store) { historyView(discoverMetadata(store).displayGraph) }
+ private fun historyView(graph:CommitGraph,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory {
+  val files=currentFiles();val baseline=repository.baseline()
+  require(summary==null || summary.first==files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val transfer=directory.resolve("baseline-transfer.txt")
   val direction=if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString().split(' ').takeIf { it.size==2&&it[0]==baseline&&it[1] in setOf("upload","restore") }?.get(1) else null
-  SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),runCatching { SaveSummary.read(root) }.getOrNull(),aliases(),direction)
+  val verifiedIds=if(graph.verification==RemoteVerification.OBJECTS_VERIFIED)graph.commits.keys.toSet() else repository.cachedGraph().commits.filter { (id,value)-> graph.commits[id]==value }.keys.toSet()
+  return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner)
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
- fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult = local.locked {
+ fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult = readLocked(store) {
   local.guard(stopped);noLegacyPending();appliedOnly();require(repository.pending()==null){CoreSessionMessages.RESOLVE_THE_PENDING_UPLOAD_FIRST.text()}
   val graph=discover(store);val chosen=requireNotNull(graph.snapshotCommit(snapshotId)) { CoreSessionMessages.THE_SELECTED_CLOUD_SNAPSHOT_NO_LONGER_EXISTS_RELOAD_HISTORY.text() }
   val before=currentFiles()
@@ -80,7 +107,7 @@ class AppendProfileSession(
  /** Explicit download-only restore. It never publishes, resolves branches or creates an upload
   * plan. An observed tip can become the exact verified baseline; older/local history remains new
   * local work relative to the existing baseline, so a later upload still detects remote siblings. */
- fun restoreSelectedReadOnly(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,stopped:()->Boolean):RestoreResult = local.locked {
+ fun restoreSelectedReadOnly(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,stopped:()->Boolean):RestoreResult = readLocked(store) {
   var graph=revalidateComparison(comparison,store,stopped)
   val selected=graph.snapshotCommit(snapshotId)
   val chosen=if(selected!=null)repository.download(store,selected) else local.loadSnapshot(snapshotId)
@@ -176,7 +203,11 @@ class AppendProfileSession(
   it.commits.values.snapshotRepresentatives(it.tips)
   repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
  }
- private fun currentFiles(): Map<String, String> = Snapshots.capture(root, adapter, config.profile, "自动识别", null).manifest.files
+ private fun discoverMetadata(store:AppendStore):CommitMetadataGraph = repository.discoverMetadata(store).also {
+  it.requireSettled();it.commits.values.snapshotRepresentatives(it.tips)
+  repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
+ }
+ private fun currentFiles():Map<String,String> = Snapshots.fileHashes(root,adapter)
  private fun snapshot(plan: UploadPlan) = Snapshot(plan.commit.snapshot, plan.zip)
  private fun preserve(plan: UploadPlan, reason: String) = local.remember(snapshot(plan), reason)
  private fun preserveConflict(graph: CommitGraph, store: AppendStore, stopped: () -> Boolean): AppendConflict {
@@ -228,6 +259,25 @@ class AppendProfileSession(
 
  /** Verify every observed tip, presenting exact duplicate snapshots once. The graph retains all
   * commit IDs and tips; a listing is never a promise of a global latest save. */
+ fun pushFromHome(observedHistory:SyncHistory?,store:AppendStore,stopped:()->Boolean):HomePushResult {
+  val unchanged=local.locked {
+   local.guard(stopped);noLegacyPending();appliedOnly()
+   if(observedHistory==null || repository.pending()!=null)return@locked null
+   require(observedHistory.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+   if(observedHistory.graph.verification!=RemoteVerification.METADATA_ONLY || observedHistory.graph.pending.isNotEmpty())return@locked null
+   val candidate=observedHistory.graph.tips.singleOrNull()?.let(observedHistory.graph.commits::get) ?: return@locked null
+   if(candidate.snapshot.files.isEmpty() || candidate.snapshot.files!=currentFiles())return@locked null
+   val stability=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis);val fingerprint=stability.awaitStable()
+   if(candidate.snapshot.files!=fingerprint.files)return@locked null
+   val fresh=discover(store);stability.requireUnchanged(fingerprint);noLegacyPending();appliedOnly()
+   if(repository.pending()!=null)return@locked null
+   val tip=fresh.tips.singleOrNull()?.let(fresh.commits::get) ?: return@locked null
+   if(tip.snapshot.files!=fingerprint.files)return@locked null
+   val history=historyView(fresh);stability.requireUnchanged(fingerprint);history
+  }
+  return unchanged?.let(HomePushResult::Unchanged) ?: HomePushResult.Published(push(store,stopped))
+ }
+
  fun readRemote(store: AppendStore): List<AppendRemoteEntry> = local.locked {
   val graph = discover(store)
   graph.tips.sorted().map { id ->
@@ -237,7 +287,7 @@ class AppendProfileSession(
  }
 
  /** Ordinary fast-forward is allowed only for a clean baseline or a genuinely empty new target. */
- fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult = local.locked {
+ fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult = readLocked(store) {
   restoreRemoteLocked(snapshotId, store, stopped)
  }
  private fun restoreRemoteLocked(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
@@ -299,7 +349,7 @@ class AppendProfileSession(
  }
 
  /** Explicit whole-snapshot choice; every observed tip is retained as a resolution parent. */
- fun resolve(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
+ fun resolve(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult = readLocked(store) {
   resolveLocked(conflict, chosenSnapshotId, store, stopped)
  }
  /** Preview and apply both repeat validation. Preview never changes game bytes or publishes data. */
@@ -410,18 +460,22 @@ class AppendProfileSession(
 
  /** Read-only save comparison. Remote verification/history caches may be populated; saves and
   * baseline never change, and no remote object/commit is published by this operation. */
- fun compareOnboarding(store: AppendStore, stopped: () -> Boolean): OnboardingComparison = try {
-  local.locked {
+ fun compareOnboarding(store:AppendStore,stopped:()->Boolean):OnboardingComparison = compareObservation(store,stopped,false)
+ fun compareHomeMetadata(store:AppendStore,stopped:()->Boolean):OnboardingComparison = compareObservation(store,stopped,true)
+ private fun compareObservation(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean):OnboardingComparison = try {
+  readLocked(store) { compareLocked(store,stopped,metadataOnly) }
+ } catch(failure:Exception) { comparisonFailure(failure) }
+ private fun compareLocked(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean):OnboardingComparison {
    local.guard(stopped); local.validateRoot()
    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
-   val fingerprint = stability.awaitStable()
+   val fingerprint = if(metadataOnly) stability.fingerprint() else stability.awaitStable()
    val baseline = repository.baseline()
-   if (needsApply()) return@locked blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_EXPLICITLY_ARCHIVE_IT.text(), fingerprint, baseline)
-   if (local.legacyPending() != null) return@locked blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_FIRST.text(), fingerprint, baseline)
+   if (needsApply()) return blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_EXPLICITLY_ARCHIVE_IT.text(), fingerprint, baseline)
+   if (local.legacyPending() != null) return blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_FIRST.text(), fingerprint, baseline)
    val pending = repository.pending()
    // A failed/missing page or object must not become an apparently empty cloud.
-   val graph = discover(store)
-   val entries = graph.tips.sorted().map { id ->
+   val graph = if(metadataOnly) DiagnosticTiming.measure(DiagnosticPhase.REMOTE_METADATA) { discoverMetadata(store).displayGraph } else discover(store)
+   val entries = if(metadataOnly) emptyList() else graph.tips.sorted().map { id ->
     val commit = graph.commits.getValue(id)
     AppendRemoteEntry(commit, local.remember(repository.download(store, commit), CoreSessionMessages.INITIAL_COMPARISON_CLOUD_BRANCH_VERIFIED.text(id.take(8)), repository.observedAt(id)))
    }.distinctBy { it.entry.manifest.id }
@@ -442,14 +496,15 @@ class AppendProfileSession(
     fingerprint.files == graph.commits.getValue(graph.tips.single()).snapshot.files -> OnboardingKind.IDENTICAL
     else -> OnboardingKind.DIFFERENT
    }
-   OnboardingComparison(kind, fingerprint.files, baseline, lineage, entries, graph.tips,
+   return OnboardingComparison(kind, fingerprint.files, baseline, lineage, entries, graph.tips,
     blocker = if (pending == null) null else CoreSessionMessages.A_FROZEN_UPLOAD_IS_PENDING_RETRYING_USES_ITS_ORIGINAL_SNAPSHOT.text(),
     blockReason = if (pending == null) null else SyncBlockReason.PENDING_UPLOAD,
-    canAdoptRemote = kind == OnboardingKind.IDENTICAL && lineage in setOf(OnboardingLineage.NONE, OnboardingLineage.SAME_TIP, OnboardingLineage.ANCESTOR_OF_TIP),
+    canAdoptRemote = !metadataOnly && kind == OnboardingKind.IDENTICAL && lineage in setOf(OnboardingLineage.NONE, OnboardingLineage.SAME_TIP, OnboardingLineage.ANCESTOR_OF_TIP),
     retryablePending = pending != null, pendingCommitId = pending?.commit?.id,
     owner = comparisonOwner, fingerprint = fingerprint, graph = graph, pendingCommit = pending?.commit)
-  }
- } catch (failure: Exception) {
+   }
+ private fun comparisonFailure(failure:Exception):OnboardingComparison {
+
   if (failure is io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) throw failure
   if (failure is InterruptedException) Thread.currentThread().interrupt()
   val reason = SyncBlockReason.fromFailure(failure)
@@ -463,17 +518,32 @@ class AppendProfileSession(
    SyncBlockReason.INTERRUPTED -> CoreSessionMessages.COMPARISON_WAS_INTERRUPTED_UPLOAD_SUCCESS_IS_UNCONFIRMED_CHECK_AGAIN.text()
    else -> CoreSessionMessages.UNABLE_TO_SAFELY_COMPARE_LOCAL_SAVES_WITH_COMPLETE_CLOUD_HISTORY.text()
   }
-  blockedComparison(reason, message)
+  return blockedComparison(reason, message)
  }
 
  private fun blockedComparison(reason: SyncBlockReason, message: String, fingerprint: SaveFingerprint? = null, baseline: String? = null) =
   OnboardingComparison(OnboardingKind.BLOCKED, fingerprint?.files.orEmpty(), baseline, OnboardingLineage.BLOCKED,
-   emptyList(), emptySet(), blocker = message, blockReason = reason, owner = comparisonOwner)
+   emptyList(), emptySet(), blocker = message, blockReason = reason, owner = comparisonOwner, verification = RemoteVerification.METADATA_ONLY)
+
+ fun verifyComparison(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
+  require(comparison.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  if(comparison.verification==RemoteVerification.OBJECTS_VERIFIED)return@readLocked comparison
+  require(comparison.kind!=OnboardingKind.BLOCKED || comparison.retryablePending) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
+  val before=requireNotNull(comparison.graph)
+  val fresh=compareLocked(store,stopped,false);val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified()
+  require(graph.commits==before.commits && graph.pending==before.pending && fresh.observedTips==comparison.observedTips) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
+  require(fresh.localFiles==comparison.localFiles && fresh.fingerprint==comparison.fingerprint) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  require(fresh.baselineId==comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  require(fresh.pendingCommit==comparison.pendingCommit) { CoreSessionMessages.THE_PENDING_UPLOAD_CHANGED_COMPARE_AGAIN.text() }
+  fresh
+ }
 
  /** Never trust UI-visible collections or an old comparison without repeating every safety gate. */
  private fun revalidateComparison(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean,
   allowPending: Boolean = false): CommitGraph {
   require(comparison.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  require(comparison.verification == RemoteVerification.OBJECTS_VERIFIED) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
+  comparison.graph?.requireObjectsVerified()
   require(comparison.kind != OnboardingKind.BLOCKED || (allowPending && comparison.retryablePending)) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
   local.guard(stopped); noLegacyPending(); appliedOnly(); local.validateRoot()
   val expected = requireNotNull(comparison.fingerprint) { CoreSessionMessages.COMPARISON_IS_INCOMPLETE_TRY_AGAIN.text() }
@@ -562,7 +632,7 @@ class AppendProfileSession(
   * bytes as their own branch first; then resolve only the exact branch set the user observed plus
   * that new local commit. Late siblings are returned as a fresh conflict, never silently absorbed.
   */
- fun onboardingRestore(comparison: OnboardingComparison, snapshotId: String, store: AppendStore, stopped: () -> Boolean): OnboardingRestoreResult = local.locked {
+ fun onboardingRestore(comparison: OnboardingComparison, snapshotId: String, store: AppendStore, stopped: () -> Boolean): OnboardingRestoreResult = readLocked(store) {
   var graph = revalidateComparison(comparison, store, stopped)
   val selected = graph.snapshotCommit(snapshotId)?.takeIf { it.id in graph.tips }
    ?: throw IllegalArgumentException(CoreSessionMessages.THE_SELECTED_SNAPSHOT_IS_NOT_IN_A_COMPARED_CLOUD_BRANCH.text())
@@ -583,7 +653,7 @@ class AppendProfileSession(
    publish(plan, store, stopped)
    preservedLocalCommit = plan.commit
    graph = discover(store)
-   if (graph.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(graph, store, stopped)))
+   if (graph.tips != expectedTips) return@readLocked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(graph, store, stopped)))
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
   }
   if (graph.tips.size > 1) {
@@ -609,18 +679,18 @@ class AppendProfileSession(
     // Downloads and validation can take time. A late branch requires a new explicit choice;
     // it must never become an extra resolution parent or cause a local overwrite here.
     val latest = discover(store)
-    if (latest.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(latest, store, stopped)))
+    if (latest.tips != expectedTips) return@readLocked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(latest, store, stopped)))
     require(latest.commits[selected.id] == selected && latest.commits[preserved.id] == preserved) { CoreSessionMessages.THE_SELECTED_HISTORY_OR_PRESERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED.text() }
     val plan = prepareAndApply(chosen, latest.tips.sorted(), "resolution", CoreSessionMessages.INITIAL_RESTORE_PRESERVED_LOCAL_SAVES_AND_SELECTED_THE_ORIGINAL_BASELINE.text()) { plan ->
      stability.requireUnchanged(fingerprint)
      local.restore(snapshot(plan), stopped, before)
     }
-    return@locked OnboardingRestoreResult.Published(publish(plan, store, stopped))
+    return@readLocked OnboardingRestoreResult.Published(publish(plan, store, stopped))
    }
-   return@locked OnboardingRestoreResult.Published(resolveLocked(conflict, snapshotId, store, stopped))
+   return@readLocked OnboardingRestoreResult.Published(resolveLocked(conflict, snapshotId, store, stopped))
   }
   if (!preserveLocal && (comparison.baselineId == null || before == baselineFiles)) {
-   return@locked OnboardingRestoreResult.Restored(restoreRemoteLocked(snapshotId, store, stopped))
+   return@readLocked OnboardingRestoreResult.Restored(restoreRemoteLocked(snapshotId, store, stopped))
   }
   // Local publication may have advanced the selected former tip. Retain that progress and record
   // the explicit older-snapshot choice as a new restore commit, never rewind the baseline. An

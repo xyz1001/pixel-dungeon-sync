@@ -1,3 +1,5 @@
+> RECONSTRUCTED code92 source recovery candidate. Not byte-for-byte original source recovery; not a released APK. See [recovery status](RECONSTRUCTION_STATUS.md).
+
 > code89 / 0.5.68-test：按历史记录生成时间显示和排列存档脉络，最新记录在上，保留88原页冲突弹窗；详见 [CODE89_HISTORY_RECORD_TIME](docs/CODE89_HISTORY_RECORD_TIME.md)。
 
 > code88 / 0.5.67-test：冲突分支选择在主页弹窗显示，普通上传保持原有路径；详见 [CODE88_CONFLICT_DIALOG](docs/CODE88_CONFLICT_DIALOG.md)。

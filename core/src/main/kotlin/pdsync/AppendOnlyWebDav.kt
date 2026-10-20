@@ -14,6 +14,7 @@ import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.IOException
 import java.net.URI
+import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import javax.xml.XMLConstants
@@ -63,6 +64,8 @@ class AppendOnlyWebDav(
  private val gameCollection: HttpUrl
  private val collection: HttpUrl
  private val auth: String
+ private val readScopes = ThreadLocal<OperationObjectReadCache>()
+ private val freshReadDepth = ThreadLocal<Int>()
 
  init {
   require(game.matches(SEGMENT) && profile.matches(SEGMENT)) { CoreValidationMessages.INVALID_GAME_OR_PROFILE.text() }
@@ -79,6 +82,24 @@ class AppendOnlyWebDav(
   // Named-account registration and the DAV gate both use UTF-8 credentials.
   // OkHttp's default ISO-8859-1 encoding silently replaces many valid passwords.
   auth = Credentials.basic(username, password, StandardCharsets.UTF_8)
+ }
+
+ override fun <T> withReadScope(cacheDirectory: Path?, block: () -> T): T {
+  if (readScopes.get() != null) return block()
+  val cache = OperationObjectReadCache.open(cacheDirectory)
+  readScopes.set(cache)
+  return try { block() } finally {
+   readScopes.remove()
+   cache.close()
+  }
+ }
+
+ override fun <T> withFreshReads(block: () -> T): T {
+  val previous = freshReadDepth.get() ?: 0
+  freshReadDepth.set(previous + 1)
+  return try { block() } finally {
+   if (previous == 0) freshReadDepth.remove() else freshReadDepth.set(previous)
+  }
  }
 
  /**
@@ -196,7 +217,9 @@ class AppendOnlyWebDav(
  }
 
  override fun readCommit(id: String): ByteArray? = get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES)
- override fun readObject(id: String): ByteArray? = get(fileUrl(objectName(id)), MAX_SNAPSHOT_BYTES)
+ override fun readCommit(id: String, cancellation: MetadataReadCancellation): ByteArray? =
+  get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES, cancellation)
+ override fun readObject(id: String): ByteArray? = getObject(fileUrl(objectName(id)))
  override fun legacyPresent(): Boolean = get(fileUrl("head.json"), MAX_MANIFEST_BYTES) != null
  override fun writeCommit(id: String, bytes: ByteArray) = put(fileUrl(commitName(id)), bytes, MAX_MANIFEST_BYTES, "application/json")
  override fun writeObject(id: String, bytes: ByteArray) = put(fileUrl(objectName(id)), bytes, MAX_SNAPSHOT_BYTES, "application/zip")
@@ -214,7 +237,8 @@ class AppendOnlyWebDav(
   }
  }
 
- private fun get(url: HttpUrl, limit: Int): ByteArray? = execute(request(url).get().build()) { response ->
+ private fun get(url: HttpUrl, limit: Int, cancellation: MetadataReadCancellation? = null): ByteArray? =
+  execute(request(url).get().build(), cancellation = cancellation) { response ->
   when (response.code) {
    404 -> null
    200 -> readBounded(response, limit)
@@ -222,23 +246,48 @@ class AppendOnlyWebDav(
   }
  }
 
+ private fun getObject(url: HttpUrl): ByteArray? {
+  val cache = readScopes.get()
+  val key = url.toString()
+  val reuse = cache != null && (freshReadDepth.get() ?: 0) == 0
+  if (reuse && cache!!.contains(key)) {
+   // A frozen byte hit must never bypass the current access/permission check.
+   beforeRequest.check()
+   cache.read(key)?.let { return it }
+  }
+  val bytes = get(url, MAX_SNAPSHOT_BYTES)
+  if (bytes == null) cache?.remove(key)
+  else if (reuse) cache!!.remember(key, bytes)
+  return bytes
+ }
+
  private fun put(url: HttpUrl, bytes: ByteArray, limit: Int, mediaType: String) {
-  require(bytes.size <= limit) { CoreValidationMessages.UPLOAD_EXCEEDS_SIZE_LIMIT.text() }
-  execute(request(url).put(bytes.toRequestBody(mediaType.toMediaType())).build()) { response ->
-   if (response.code !in setOf(200, 201, 204)) throw WebDavException(response.code)
-   readBounded(response, MAX_MANIFEST_BYTES)
+  readScopes.get()?.remove(url.toString())
+  try {
+   require(bytes.size <= limit) { CoreValidationMessages.UPLOAD_EXCEEDS_SIZE_LIMIT.text() }
+   execute(request(url).put(bytes.toRequestBody(mediaType.toMediaType())).build()) { response ->
+    if (response.code !in setOf(200, 201, 204)) throw WebDavException(response.code)
+    readBounded(response, MAX_MANIFEST_BYTES)
+   }
+  } finally {
+   readScopes.get()?.remove(url.toString())
   }
  }
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
- private fun <T> execute(request: Request, requestClient: OkHttpClient = client, block: (Response) -> T): T {
+ private fun <T> execute(request: Request, requestClient: OkHttpClient = client,
+  cancellation: MetadataReadCancellation? = null, block: (Response) -> T): T {
+  cancellation?.checkActive()
   beforeRequest.check()
   val requestStarted = System.nanoTime()
   // Elapsed until response headers (or the observed transport failure), never request data.
   fun context() = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
    .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0)).build()
+  val call = requestClient.newCall(request)
+  val registration = cancellation?.register { call.cancel() }
   return try {
-  requestClient.newCall(request).execute().use { response ->
+  cancellation?.checkActive()
+  call.execute().use { response ->
    // The recorder accepts only a closed method enum and status, never URL, headers or payload.
    DiagnosticLog.http(diagnosticMethod(request.method), response.code, context())
    block(response)
@@ -266,7 +315,7 @@ class AppendOnlyWebDav(
    else -> "IO"
   }
   throw IOException("WebDAV network request failed [$category]")
- }
+ } finally { registration?.close() }
  }
 
  private fun diagnosticMethod(method: String): DiagnosticHttpMethod = when (method) {

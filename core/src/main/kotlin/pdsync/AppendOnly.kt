@@ -9,14 +9,27 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.nio.file.Path
 import java.time.Clock
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.*
 
 /** A transport page is only an observation, never a globally authoritative head. */
 data class CommitPage(val ids: List<String>, val next: String? = null)
 interface AppendStore {
+ fun <T> withReadScope(cacheDirectory: Path? = null, block: () -> T): T = block()
+ fun <T> withFreshReads(block: () -> T): T = block()
  fun listCommits(cursor: String? = null): CommitPage
  fun readCommit(id: String): ByteArray?
+ fun readCommit(id: String, cancellation: MetadataReadCancellation): ByteArray? {
+  cancellation.checkActive()
+  return readCommit(id)
+ }
  fun readObject(id: String): ByteArray?
  fun writeCommit(id: String, bytes: ByteArray)
  fun writeObject(id: String, bytes: ByteArray)
@@ -44,7 +57,16 @@ class RemoteIntegrityException(message: String): IllegalStateException(message)
 class UnsettledRemoteException(message: String): IllegalStateException(message)
 class LegacyProtocolException: IllegalStateException(CoreSessionMessages.A_LEGACY_HEAD_JSON_WAS_FOUND_NOTHING_WAS_MIGRATED_OR.text())
 
-data class CommitGraph(val commits: Map<String, AppendCommit>, val pending: Map<String, String>) {
+enum class RemoteVerification { METADATA_ONLY, OBJECTS_VERIFIED }
+
+data class CommitGraph(
+ val commits: Map<String, AppendCommit>,
+ val pending: Map<String, String>,
+ val verification: RemoteVerification = RemoteVerification.OBJECTS_VERIFIED
+) {
+ fun requireObjectsVerified() {
+  require(verification == RemoteVerification.OBJECTS_VERIFIED) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
+ }
  val tips: Set<String> get() = commits.keys - commits.values.flatMap { it.parents }.toSet()
  fun requireSettled() { if (pending.isNotEmpty()) throw UnsettledRemoteException(CoreSessionMessages.THE_CLOUD_HAS_MISSING_INCOMPLETE_OR_UNVERIFIABLE_COMMITS_LOCAL_SAVES.text(pending.size)) }
  fun descendsFrom(child: String, ancestor: String): Boolean {
@@ -52,6 +74,16 @@ data class CommitGraph(val commits: Map<String, AppendCommit>, val pending: Map<
   while (remaining.isNotEmpty()) { val id = remaining.removeFirst(); if (id == ancestor) return true; if (seen.add(id)) commits[id]?.parents?.forEach { remaining.add(it) } }
   return false
  }
+}
+
+/** Display-only manifests carry no proof that any remote object has been read or verified. */
+@ConsistentCopyVisibility
+data class CommitMetadataGraph internal constructor(val displayGraph: CommitGraph) {
+ init { require(displayGraph.verification == RemoteVerification.METADATA_ONLY) }
+ val commits: Map<String, AppendCommit> get() = displayGraph.commits
+ val pending: Map<String, String> get() = displayGraph.pending
+ val tips: Set<String> get() = displayGraph.tips
+ fun requireSettled() = displayGraph.requireSettled()
 }
 
 /** Caller serializes all access using the profile's OS FileChannel lock. */
@@ -74,10 +106,27 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(commit.kind != "legacy-import" || commit.parents.isEmpty())
   val snapshot = commit.snapshot
   require(snapshot.schema == 1 && adapter.acceptsManifest(snapshot) && snapshot.profile == profile && snapshot.parent == null)
+  snapshot.gameSource?.validated()
+  snapshot.gamePackage?.let(::requireGamePackage)
   snapshot.metadata?.validated(snapshot.files.keys)
   snapshot.directoryMetadata?.validated(snapshot.files)
   require(validCommitId(snapshot.id) && snapshot.id != commit.id && snapshot.sha256.matches(Regex("[0-9a-f]{64}")))
   require(snapshot.files.isNotEmpty() && snapshot.files.size <= MAX_SNAPSHOT_FILES && snapshot.files.values.all { it.matches(Regex("[0-9a-f]{64}")) })
+  val portableNames = hashSetOf<String>()
+  snapshot.files.keys.forEach { name ->
+   require(safePath(name) && adapter.includes(name) && !isDirectoryMetadata(name) && portableNames.add(name.lowercase(Locale.ROOT))) { CoreValidationMessages.UNSAFE_OR_ALIASED_SAVE_PATH.text() }
+  }
+  snapshot.files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach {
+   require("$it/game.dat" in snapshot.files) { CoreValidationMessages.INCOMPLETE_RUN.text(it) }
+  }
+  snapshot.saveVersions?.let { versions ->
+   val slots = snapshot.files.keys.mapNotNull { Regex("(game[0-9]+)/game\\.dat").matchEntire(it)?.groupValues?.get(1) }.toSet()
+   require(versions.runs.size <= MAX_SNAPSHOT_FILES && versions.inactiveSlots.size <= MAX_SNAPSHOT_FILES)
+   require(versions.runs.keys.all { it in slots } && versions.runs.values.all { it > 0 })
+   require(versions.inactiveSlots.distinct() == versions.inactiveSlots && versions.inactiveSlots.all { it in slots && it !in versions.runs })
+   require(versions.unknownReason == null || versions.runs.isEmpty())
+   require(versions.unknownReason != null || versions.runs.keys + versions.inactiveSlots == slots)
+  }
   require(commit.objectBytes in 1..MAX_SNAPSHOT_BYTES)
  }
  private fun decode(bytes: ByteArray, id: String): AppendCommit {
@@ -133,6 +182,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   return CommitGraph(complete,emptyMap())
  }
  fun setBaseline(id: String, graph: CommitGraph) {
+  graph.requireObjectsVerified()
   graph.requireSettled(); val verified = requireNotNull(graph.commits[id]) { CoreValidationMessages.CANNOT_BASELINE_AN_INCOMPLETE_COMMIT.text() }
   val bytes = requireNotNull(known(id)); require(decode(bytes, id) == verified)
   SafePaths.atomicWrite(baselineMarker, "established".encodeToByteArray())
@@ -140,7 +190,14 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  }
 
  /** Missing later listings never erase remembered IDs. Parents are fetched even when omitted. */
- fun discover(store: AppendStore): CommitGraph {
+ fun discover(store: AppendStore): CommitGraph = discoverGraph(store, verifyObjects = true)
+
+ fun discoverMetadata(store: AppendStore, parallelism: Int = 4): CommitMetadataGraph {
+  require(parallelism in 1..4)
+  return CommitMetadataGraph(discoverGraph(store, verifyObjects = false, metadataParallelism = parallelism))
+ }
+
+ private fun discoverGraph(store: AppendStore, verifyObjects: Boolean, metadataParallelism: Int = 1): CommitGraph {
   if (store.legacyPresent()) throw LegacyProtocolException()
   val ids = (idsIn(knownRoot) + idsIn(observedRoot)).toMutableSet(); baseline()?.let { ids.add(it) }; require(ids.size <= MAX_COMMITS)
   val cursors = mutableSetOf<String>(); var cursor: String? = null; var pages = 0; var listed = 0L
@@ -156,27 +213,69 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   } while (cursor != null)
   val pending = mutableMapOf<String, String>(); val candidates = linkedMapOf<String, AppendCommit>()
   val queue = ArrayDeque(ids); val seen = mutableSetOf<String>(); var scanBytes = 0L
-  while (queue.isNotEmpty()) {
-   val id = queue.removeFirst(); if (!seen.add(id)) continue
-   require(seen.size <= MAX_COMMITS) { CoreValidationMessages.HISTORY_TOO_LARGE_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   observe(id)
-   val bytes = store.readCommit(id)
-   if (bytes == null) { pending[id] = "missing manifest"; continue }
-   scanBytes += bytes.size; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   val old = known(id)
-   if (old != null && !old.contentEquals(bytes)) throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
-   val commit = try { decode(bytes, id) } catch (_: Exception) { pending[id] = "invalid manifest"; continue }
-   remember(id, bytes)
-   commit.parents.forEach { queue.add(it) }
-   scanBytes += commit.objectBytes; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   val zip = store.readObject(commit.snapshot.id)
-   if (zip == null) { pending[id] = "missing object"; continue }
-   scanBytes += maxOf(0, zip.size - commit.objectBytes)
-   require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   try { require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter) }
-   catch (_: Exception) { pending[id] = "invalid object"; continue }
-   observeVerified(id)
-   candidates[id] = commit
+  val executor = if (verifyObjects) null else Executors.newFixedThreadPool(metadataParallelism) { runnable ->
+   Thread(runnable, "pdsync-metadata-read").apply { isDaemon = true }
+  }
+  val trace = DiagnosticLog.currentTrace()
+  val futures = mutableListOf<Future<Pair<String, ByteArray?>>>()
+  val cancellation = if (verifyObjects) null else MetadataReadCancellation()
+  try {
+   while (queue.isNotEmpty()) {
+    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+    val batch = mutableListOf<String>()
+    while (queue.isNotEmpty() && batch.size < if (verifyObjects) 1 else metadataParallelism) {
+     val id = queue.removeFirst()
+     if (seen.add(id)) {
+      require(seen.size <= MAX_COMMITS) { CoreValidationMessages.HISTORY_TOO_LARGE_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+      observe(id)
+      batch += id
+     }
+    }
+    futures.clear()
+    val fetched = linkedMapOf<String, ByteArray?>()
+    if (executor != null) {
+     val completed = ExecutorCompletionService<Pair<String, ByteArray?>>(executor)
+     batch.forEach { id ->
+      futures += completed.submit(Callable {
+       val binding = trace?.let(DiagnosticLog::bind)
+       try { id to store.readCommit(id, requireNotNull(cancellation)) }
+       finally { binding?.close() }
+      })
+     }
+     repeat(batch.size) {
+      val result = try { completed.take().get() } catch (error: ExecutionException) { throw (error.cause ?: error) }
+      fetched[result.first] = result.second
+     }
+    }
+    // Completion order detects failures promptly; decoding still follows discovery order.
+    for (id in batch) {
+     val bytes = if (executor != null) fetched[id] else if (cancellation != null) store.readCommit(id, cancellation) else store.readCommit(id)
+     if (bytes == null) { pending[id] = "missing manifest"; continue }
+     scanBytes += bytes.size; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+     val old = known(id)
+     if (old != null && !old.contentEquals(bytes)) throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
+     val commit = try { decode(bytes, id) } catch (_: Exception) { pending[id] = "invalid manifest"; continue }
+     remember(id, bytes)
+     commit.parents.forEach { queue.add(it) }
+     if (verifyObjects) {
+      scanBytes += commit.objectBytes; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+      val zip = store.readObject(commit.snapshot.id)
+      if (zip == null) { pending[id] = "missing object"; continue }
+      scanBytes += maxOf(0, zip.size - commit.objectBytes)
+      require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+      try { require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter) }
+      catch (_: Exception) { pending[id] = "invalid object"; continue }
+      observeVerified(id)
+     }
+     candidates[id] = commit
+    }
+   }
+  } finally {
+   cancellation?.cancel()
+   futures.forEach { it.cancel(true) }
+   executor?.shutdownNow()
+   try { executor?.awaitTermination(100, TimeUnit.MILLISECONDS) }
+   catch (_: InterruptedException) { Thread.currentThread().interrupt() }
   }
   // Iterative closure avoids recursive-stack attacks. Cycles and incomplete ancestors stay pending.
   val complete = linkedMapOf<String, AppendCommit>()
@@ -185,7 +284,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
    complete.putAll(additions)
   } while (additions.isNotEmpty())
   candidates.keys.filter { it !in complete }.forEach { pending[it] = "incomplete ancestry or cycle" }
-  return CommitGraph(complete, pending)
+  return CommitGraph(complete, pending, if (verifyObjects) RemoteVerification.OBJECTS_VERIFIED else RemoteVerification.METADATA_ONLY)
  }
 
  fun download(store: AppendStore, commit: AppendCommit): Snapshot {
@@ -249,8 +348,10 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(frozen.commit == plan.commit && frozen.manifestBytes.contentEquals(plan.manifestBytes) && frozen.zip.contentEquals(plan.zip))
   val graph = discover(store); graph.requireSettled()
   require(plan.commit.parents.all { it in graph.commits }) { CoreSessionMessages.PARENT_COMMITS_HAVE_NOT_BEEN_FULLY_VERIFIED_NOTHING_WAS_PUBLISHED.text() }
-  putVerified({ store.readObject(plan.commit.snapshot.id) }, { store.writeObject(plan.commit.snapshot.id, plan.zip) }, plan.zip)
-  putVerified({ store.readCommit(plan.commit.id) }, { store.writeCommit(plan.commit.id, plan.manifestBytes) }, plan.manifestBytes)
+  store.withFreshReads {
+   putVerified({ store.readObject(plan.commit.snapshot.id) }, { store.writeObject(plan.commit.snapshot.id, plan.zip) }, plan.zip)
+   putVerified({ store.readCommit(plan.commit.id) }, { store.writeCommit(plan.commit.id, plan.manifestBytes) }, plan.manifestBytes)
+  }
   remember(plan.commit.id, plan.manifestBytes)
   observeVerified(plan.commit.id)
   return plan.commit

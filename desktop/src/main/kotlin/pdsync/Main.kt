@@ -33,7 +33,7 @@ private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
 private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, CONFLICT, CONFIRM }
-private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null, val automaticSkipped: Boolean = false)
+private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null, val automaticSkipped: Boolean = false, val verifiedHistory: SyncHistory? = null)
 private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?, val pendingSourceAvailable: Boolean)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
@@ -438,6 +438,7 @@ internal fun runSyncApplication(
    }
    val manager = requireNotNull(session)
    val operationConfig = config
+   val operationHistory = graphHistory
    val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val secret = password
    val allowUniqueReplacement=confirm===trace
    val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
@@ -482,7 +483,10 @@ internal fun runSyncApplication(
       }
       val completed = when (action) {
        Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult(DesktopMessages.LOCAL_SNAPSHOT_SAVED_YOU_CAN_RESTORE_IT_FROM_HISTORY_AT_ANY_TIME.text()) }
-       Action.PUSH -> if (!isAutomatic) pushed(manager.push(store(), stopped)) else when (val automaticResult = manager.automaticPush(store(), stopped)) {
+       Action.PUSH -> if (!isAutomatic) when (val upload = manager.pushFromHome(operationHistory, store(), stopped)) {
+        is HomePushResult.Published -> pushed(upload.result)
+        is HomePushResult.Unchanged -> OperationResult(DesktopMessages.PROGRESS_SYNCED_LOCAL_AND_CLOUD_PROFILES_ARE_IDENTICAL.text(), verifiedHistory = upload.history)
+       } else when (val automaticResult = manager.automaticPush(store(), stopped)) {
         is AutomaticPushResult.Published -> pushed(automaticResult.result)
         is AutomaticPushResult.Skipped -> OperationResult(
          if (automaticResult.comparison.kind in setOf(OnboardingKind.BOTH_EMPTY, OnboardingKind.IDENTICAL)) DesktopMessages.THERE_ARE_NO_CHANGES_TO_UPLOAD_AUTOMATICALLY_THIS_TIME.text()
@@ -504,11 +508,19 @@ internal fun runSyncApplication(
       completed
      } }
      status = result.message; conflict = result.conflict
+     result.verifiedHistory?.let { verified ->
+      graphHistory = verified
+      remoteTips = verified.graph.tips.map { verified.graph.commits.getValue(it).snapshot.id }.toSet()
+      remoteInspectionReady = true
+     }
      conflictSelection=if(action==Action.PUSH)result.conflict?.let {value->value.branches.firstOrNull {it.snapshot.manifest.files==value.observedLocalFiles}?.snapshot?.manifest?.id} else null
      remoteReadAt = 0L
      if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE,Action.MERGE,Action.MERGE_CURRENT)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
-     if (result.automaticSkipped) {
+     if (result.verifiedHistory != null) {
+      // Verification of identical content does not silently establish an automatic baseline.
+      automatic.skipped()
+     } else if (result.automaticSkipped) {
       automatic.skipped(); automaticStatus = result.message
      } else if (action == Action.PUSH) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
@@ -541,13 +553,20 @@ internal fun runSyncApplication(
       val generation = pageGeneration
       val (data, loadedGraph, pendingSource) = archiveReads.reading {
        withContext(Dispatchers.IO) {
+        val refreshedHistory = if (operationHistory != null && action in setOf(Action.CAPTURE, Action.ARCHIVE))
+         manager.syncHistory(operationHistory) else manager.syncHistory()
         Triple(trace.withDiagnostics { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) },
-         manager.syncHistory(), manager.retryablePendingSourceAvailable())
+         refreshedHistory, manager.retryablePendingSourceAvailable())
        }
       }
       if (!appClosed && page == Page.HOME && pageGeneration == generation && config == operationConfig && session === manager) {
        history = data.first; pending = data.second; saveInfo = data.third; graphHistory = loadedGraph
        localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource
+       if (terminalFailure == null && action in setOf(Action.PUSH, Action.CLOUD_HISTORY, Action.REMOTE_TIP, Action.RESOLVE, Action.MERGE, Action.MERGE_CURRENT)
+           && loadedGraph.graph.verification == RemoteVerification.OBJECTS_VERIFIED) {
+        remoteTips = loadedGraph.graph.tips.map { loadedGraph.graph.commits.getValue(it).snapshot.id }.toSet()
+        remoteInspectionReady = true; remoteReadAt = monotonicMillis()
+       }
        reconcileHomeSelection()
       }
       trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
@@ -569,6 +588,7 @@ internal fun runSyncApplication(
   fun editDirectory(inline: Boolean = false, change: ((AppendProfileSession, () -> Boolean) -> DirectorySnapshotMetadata)? = null) {
    if(busy || connectingAtStartup || appClosed) return
    val manager=session ?: return
+   val observedHistory=graphHistory
    busy=true;directoryNotice=null
    if (change == null) directoryInline = inline
    scope.launch {
@@ -579,7 +599,7 @@ internal fun runSyncApplication(
       if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
      }
      directoryEditor=metadata;directoryName=metadata.displayName
-     graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
+     graphHistory=withContext(Dispatchers.IO){if(observedHistory==null)manager.syncHistory() else manager.syncHistory(observedHistory)}
      directoryNotice=if(change==null)null else DesktopMessages.SAVED_CLICK_UPLOAD_TO_SYNC_THE_NAME_AND_CONFIRMED_IDENTITIES.text()
      if (change != null && directoryInline) directoryEditor = null
     } catch(e:Exception) { directoryNotice=e.message;status=DesktopMessages.CANNOT_UPDATE_SAVE_INFORMATION_1_S.text(e.message) }
@@ -625,17 +645,17 @@ internal fun runSyncApplication(
      readManager = manager
      fun current() = currentPage() && config == readConfig && session === manager
      if (!current() || serviceExpired) return@launch
-     val entries = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { manager.readRemote(syncAccess.store(manager.config, manager.adapter.id, secret)) } }
+     val observed = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT) { manager.readHomeHistory(syncAccess.store(manager.config, manager.adapter.id, secret)) } }
      val loadedHistory = withContext(Dispatchers.IO) { manager.history() }
-     val loadedGraph = withContext(Dispatchers.IO) { manager.syncHistory() }
+     val loadedGraph = withContext(Dispatchers.IO) { manager.syncHistory(observed) }
      val pendingSource = withContext(Dispatchers.IO) { manager.retryablePendingSourceAvailable() }
      if (!current()) return@launch
-     remoteTips = entries.map { it.entry.manifest.id }.toSet(); remoteInspectionReady = true
-     remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
+     remoteTips = loadedGraph.graph.tips.map { loadedGraph.graph.commits.getValue(it).snapshot.id }.toSet(); remoteInspectionReady = true
+     remoteObserved = loadedGraph.graph.tips.mapNotNull { id -> manager.observedAt(id)?.let { loadedGraph.graph.commits.getValue(id).snapshot.id to it } }.toMap()
      history = loadedHistory; graphHistory = loadedGraph
      localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource
      reconcileHomeSelection()
-     status = if (entries.isEmpty()) DesktopMessages.NO_CLOUD_RECORDS_FOUND_THIS_TIME.text() else ""
+     status = if (loadedGraph.graph.tips.isEmpty()) DesktopMessages.NO_CLOUD_RECORDS_FOUND_THIS_TIME.text() else ""
     } catch (e: CancellationException) { throw e }
     catch (e: Exception) { if (currentPage() && session === readManager) { status = DesktopMessages.FAILED_TO_READ_CLOUD_1_S.text(e.message); authenticationFailed(e) } }
     finally { archiveReads.end(read); busy = false }
@@ -907,7 +927,8 @@ internal fun runSyncApplication(
      val state = observation.first; val files = observation.second; val now = monotonicMillis()
      if (graphHistory?.currentFiles != files) {
       val generation = pageGeneration; val readConfig = config
-      val loadedGraph = archiveReads.reading { withContext(Dispatchers.IO) { manager.syncHistory() } }
+      val observedHistory = graphHistory
+      val loadedGraph = archiveReads.reading { withContext(Dispatchers.IO) { if (observedHistory == null) manager.syncHistory() else manager.syncHistory(observedHistory) } }
       if (busy || appClosed || page != Page.HOME || pageGeneration != generation || config != readConfig || session !== manager) continue
       graphHistory = loadedGraph
      }
@@ -1129,6 +1150,7 @@ internal fun runSyncApplication(
        }, naming = renameSnapshot?.let { id ->
         val manager = session
         val ownerConfig = config
+        val observedHistory = graphHistory
         SharedHistoryNaming(id, SharedNamingState(id.hashCode().toLong(), historyName,
          busy = busy || connectingAtStartup || appClosed, notice = directoryNotice.orEmpty()),
          onNameChange = { if (!busy && renameSnapshot == id) historyName = it },
@@ -1136,9 +1158,9 @@ internal fun runSyncApplication(
           if (manager != null && !busy && !appClosed && page == Page.HOME && renameSnapshot == id && session === manager && config == ownerConfig) {
            busy = true; directoryNotice = null
            scope.launch { try {
-            withContext(Dispatchers.IO) { manager.renameHistory(id, name) }
+            withContext(Dispatchers.IO) { manager.renameHistory(id, name, requireNotNull(observedHistory)) }
             if (session === manager && config == ownerConfig) {
-             graphHistory = withContext(Dispatchers.IO) { manager.syncHistory() }; renameSnapshot = null
+             graphHistory = withContext(Dispatchers.IO) { manager.syncHistory(requireNotNull(observedHistory)) }; renameSnapshot = null
             }
            } catch (e: Exception) { directoryNotice = NoviceCopy.feedback(e.message.orEmpty(), DesktopMessages.NAME_NOT_SAVED_PLEASE_TRY_AGAIN.text()) }
            finally { busy = false } }

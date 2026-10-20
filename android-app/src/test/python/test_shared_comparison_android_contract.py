@@ -109,7 +109,7 @@ class TwoStepConfigurationAndroidContract(unittest.TestCase):
         for guard in ('this.resumed', '!isDestroyed()', 'this.facade == owner', 'this.connection == account',
                       'SyncRuntime.currentConnection() == account', 'selection.equals(', 'namespace.equals('):
             self.assertIn(guard, check)
-        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertLess(read.index('prepareOfficialHomeNamespace(activeFacade)'), read.index('activeFacade.inspect()'))
         self.assertNotIn('.connect()', body(MAIN, 'private void drainAutomaticHistoryRefresh()'))
 

@@ -22,6 +22,7 @@ public final class MainActivity {
         static final class Inspection {
             boolean pending;
             boolean isRetryablePending() { return pending; }
+            boolean isObjectVerified() { return true; }
         }
         static final class OperationResult { }
         int uploads;
@@ -33,8 +34,12 @@ public final class MainActivity {
         boolean uploadUnnecessary, restoreUnnecessary, protectedLocal = true;
         SyncHistory(boolean upload, boolean restore) { uploadSource = upload; restoreSource = restore; }
         boolean getCurrentProtected() { return protectedLocal; }
+        java.util.List<AppendCommit> getCloud() { return java.util.List.of(); }
+        java.util.Map<String,String> getCurrentFiles() { return java.util.Map.of(); }
         int getLocalNodeCount() { return uploadSource ? 1 : 0; }
     }
+    static final class AppendCommit { Snapshot getSnapshot() { return new Snapshot(); } }
+    static final class Snapshot { java.util.Map<String,String> getFiles() { return java.util.Map.of(); } }
     static final class SharedHomeArchiveAvailability {
         final boolean upload, restore;
         SharedHomeArchiveAvailability(boolean up, boolean down) { upload = up; restore = down; }

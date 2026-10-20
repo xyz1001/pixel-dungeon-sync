@@ -90,8 +90,8 @@ data class HistoryPresentation(
    val baseline = state.baselineCommit
    // Content equality proves cloud protection even when this installation has no baseline.
    val matchingCurrent = if (state.currentFiles.isEmpty()) null else
-    baseline?.takeIf { it.snapshot.files == state.currentFiles }
-     ?: allCloud.firstOrNull { it.snapshot.files == state.currentFiles }
+    baseline?.takeIf { it.id in state.verifiedCommitIds && it.snapshot.files == state.currentFiles }
+     ?: allCloud.firstOrNull { it.id in state.verifiedCommitIds && it.snapshot.files == state.currentFiles }
    val all = mutableListOf<TimedNode>()
    allCloud.forEach { commit ->
     val snapshot = commit.snapshot

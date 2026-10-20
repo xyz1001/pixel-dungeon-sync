@@ -70,6 +70,8 @@ import pdsync.DiagnosticDetails;
 import pdsync.DiagnosticResult;
 import pdsync.DiagnosticStage;
 import pdsync.DiagnosticTrace;
+import pdsync.DiagnosticTiming;
+import pdsync.DiagnosticPhase;
 import pdsync.AppendCommit;
 import pdsync.DirectorySnapshotMetadata;
 import pdsync.NoviceCopy;
@@ -594,9 +596,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             disable(this.root);
         }
         final DiagnosticTrace trace = DiagnosticLog.begin(action, false);
+        final DiagnosticTiming.Scope queueWait = DiagnosticTiming.start(trace, DiagnosticPhase.QUEUE_WAIT);
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
             public final void run() {
+                queueWait.close();
                 MainActivity.this.m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(task, done, trace);
             }
         });
@@ -607,55 +611,82 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final Object objRun;
         try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
             trace.record(AndroidDiagnosticLogging.stage(trace.getAction()), DiagnosticResult.STARTED);
-            synchronized (SyncRuntime.OPERATION_LOCK) {
-                objRun = task.run();
+            try (DiagnosticTiming.Scope lockWait = DiagnosticTiming.start(trace, DiagnosticPhase.OPERATION_LOCK_WAIT)) {
+                synchronized (SyncRuntime.OPERATION_LOCK) {
+                    lockWait.close();
+                    objRun = task.run();
+                }
             }
             final DiagnosticResult result = diagnosticWorkResult(trace.getAction(), objRun);
             final DiagnosticFailure failure = diagnosticWorkFailure(trace.getAction(), objRun, result);
             final DiagnosticDetails details = diagnosticWorkDetails();
             trace.record(DiagnosticStage.WORK, result, failure, details);
+            final DiagnosticTiming.Scope uiCompletion = DiagnosticTiming.start(trace, DiagnosticPhase.UI_COMPLETION);
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda105
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result, failure, details);
+                    MainActivity.this.m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(done, objRun, trace, result, failure, details, uiCompletion);
                 }
             });
         } catch (Exception e) {
             AndroidDiagnosticLogging.failure(trace, AndroidDiagnosticLogging.stage(trace.getAction()), e);
-            AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
+            final DiagnosticTiming.Scope uiCompletion = DiagnosticTiming.start(trace, DiagnosticPhase.UI_COMPLETION);
             runOnUiThread(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda106
                 @Override // java.lang.Runnable
                 public final void run() {
-                    MainActivity.this.m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(e);
+                    try {
+                        if (MainActivity.this.isDestroyed()) uiCompletion.canceled();
+                        MainActivity.this.m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(e);
+                    } catch (RuntimeException | Error failure) {
+                        uiCompletion.failed(failure);
+                        throw failure;
+                    } finally {
+                        uiCompletion.close();
+                        AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
+                    }
                 }
             });
         }
     }
 
     /* renamed from: lambda$work$0$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result, DiagnosticFailure failure, DiagnosticDetails details) {
+    /* synthetic */ void m148lambda$work$0$iogithubxyz1001pdsyncandroidMainActivity(Done done, Object obj, DiagnosticTrace trace, DiagnosticResult result, DiagnosticFailure failure, DiagnosticDetails details, DiagnosticTiming.Scope uiCompletion) {
         if (isDestroyed()) {
+            uiCompletion.canceled();
             trace.record(DiagnosticStage.FINISHED, result, failure, details);
             return;
         }
         this.busy = false;
-        try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
-            done.accept(obj);
-            if (trace.getAction() == DiagnosticAction.LAUNCH)
-                trace.record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
-            rememberCurrentAutomaticHistory();
-            trace.record(DiagnosticStage.FINISHED, result, failure, details);
-        } catch (Exception e) {
-            AndroidDiagnosticLogging.failure(trace, trace.getAction() == DiagnosticAction.LAUNCH
-                    ? DiagnosticStage.GAME_LAUNCH : DiagnosticStage.REFRESH, e);
-            AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, e);
-            reportError(e);
+        Throwable completionFailure = null;
+        try {
+            try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
+                done.accept(obj);
+                if (trace.getAction() == DiagnosticAction.LAUNCH)
+                    trace.record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
+                rememberCurrentAutomaticHistory();
+            } catch (Exception e) {
+                completionFailure = e;
+                AndroidDiagnosticLogging.failure(trace, trace.getAction() == DiagnosticAction.LAUNCH
+                        ? DiagnosticStage.GAME_LAUNCH : DiagnosticStage.REFRESH, e);
+                reportError(e);
+            }
+            render();
+            drainReadinessRefresh();
+            drainRenewalArchiveRead();
+            drainAutomaticHistoryRefresh();
+            drainExternalInstallation();
+        } catch (RuntimeException | Error error) {
+            completionFailure = error;
+            throw error;
+        } finally {
+            if (completionFailure != null) {
+                uiCompletion.failed(completionFailure);
+                AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, completionFailure);
+            } else {
+                uiCompletion.close();
+                trace.record(DiagnosticStage.FINISHED, result, failure, details);
+            }
         }
-        render();
-        drainReadinessRefresh();
-        drainRenewalArchiveRead();
-        drainAutomaticHistoryRefresh();
-        drainExternalInstallation();
     }
 
     /* renamed from: lambda$work$1$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -3296,6 +3327,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         this.cloudVerified = false;
                         this.inspection = null;
                         this.history = null;
+                        this.homeObservationOwner = null;
                         reportError(completed.error);
                     } else {
                         this.facade = completed.facade;
@@ -3352,13 +3384,18 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 AutomaticHistoryOutcome result = new AutomaticHistoryOutcome(ticket, captured);
                 try {
                     result.facade = SyncRuntime.facade(this, captured);
-                    result.inspection = result.facade.inspect();
-                    DiagnosticLog.record(DiagnosticStage.VERIFY,
-                            AndroidDiagnosticLogging.inspectionResult(result.inspection.getKind(), false),
-                            result.inspection.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
-                            diagnosticInspectionDetails(result.inspection));
-                    if (!"BLOCKED".equals(result.inspection.getKind()))
-                        result.history = result.facade.historyPresentation(result.inspection);
+                    final AndroidSyncFacade.Inspection observed;
+                    final SyncHistory observedHistory;
+                    try (AutoCloseable identity = result.facade.beginHomeReadIdentityScope()) {
+                        observed = result.facade.inspectHome();
+                        DiagnosticLog.record(DiagnosticStage.VERIFY,
+                                AndroidDiagnosticLogging.inspectionResult(observed.getKind(), false),
+                                observed.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
+                                diagnosticInspectionDetails(observed));
+                        observedHistory = "BLOCKED".equals(observed.getKind()) ? null : result.facade.historyPresentation(observed);
+                    }
+                    result.inspection = observed;
+                    result.history = observedHistory;
                 } catch (Exception error) {
                     DiagnosticLog.failure(DiagnosticStage.REFRESH, error);
                     result.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error);
@@ -3423,11 +3460,14 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private void readComparison() throws Exception { readComparison(true); }
 
-    private void readComparison(boolean prepareNamespace) throws Exception {
+    private void readComparison(boolean prepareNamespace) throws Exception { readComparison(prepareNamespace, true); }
+
+    private void readComparison(boolean prepareNamespace, boolean allowHomePreview) throws Exception {
         final SecureConnectionStore.Connection archiveAccount = this.connection;
         final String archiveSelection = SyncRuntime.currentSelectionToken(this);
         final String archiveNamespace = SyncRuntime.currentNamespace(this);
         final SyncPage archivePage = this.page;
+        final boolean homePreview = allowHomePreview && isForegroundHome() && this.progress == OnboardingProgress.COMPLETE;
         final long archiveRead = this.archiveReads.begin();
         publishArchiveReadState();
         try {
@@ -3435,6 +3475,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.cloudVerified = false;
             this.history = null;
             this.inspection = null;
+            this.homeObservationOwner = null;
             // One facade and one observation own both the action proof and its timeline.
             // Drawing, paging, selecting, or dismissing the timeline must never re-export saves.
             SyncInspectionDiagnostics.Stage stage = SyncInspectionDiagnostics.Stage.RUNTIME;
@@ -3443,26 +3484,35 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 AndroidSyncFacade activeFacade = sync();
                 stage = SyncInspectionDiagnostics.Stage.INSPECT;
                 if (prepareNamespace) prepareOfficialHomeNamespace(activeFacade);
-                AndroidSyncFacade.Inspection inspectionInspect = activeFacade.inspect();
-                DiagnosticLog.record(DiagnosticStage.VERIFY,
-                        AndroidDiagnosticLogging.inspectionResult(inspectionInspect.getKind(), false),
-                        inspectionInspect.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
-                        diagnosticInspectionDetails(inspectionInspect));
+                final AndroidSyncFacade.Inspection inspectionInspect;
+                final SyncHistory observedHistory;
+                // The final installed-package check is part of the read. Do not publish even a
+                // BLOCKED observation until close succeeds; a failed close leaves HOME unknown.
+                try (AutoCloseable identity = homePreview ? activeFacade.beginHomeReadIdentityScope() : () -> {}) {
+                    inspectionInspect = homePreview ? activeFacade.inspectHome() : activeFacade.inspect();
+                    DiagnosticLog.record(DiagnosticStage.VERIFY,
+                            AndroidDiagnosticLogging.inspectionResult(inspectionInspect.getKind(), false),
+                            inspectionInspect.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
+                            diagnosticInspectionDetails(inspectionInspect));
+                    if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
+                    if ("BLOCKED".equals(inspectionInspect.getKind())) observedHistory = null;
+                    else {
+                        stage = SyncInspectionDiagnostics.Stage.HISTORY;
+                        observedHistory = activeFacade.historyPresentation(inspectionInspect);
+                    }
+                }
                 if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
+                requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                 if ("BLOCKED".equals(inspectionInspect.getKind())) {
-                    requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                     this.inspection = inspectionInspect;
                     return;
                 }
-                stage = SyncInspectionDiagnostics.Stage.HISTORY;
-                SyncHistory observedHistory = activeFacade.historyPresentation(inspectionInspect);
-                if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
-                requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                 this.inspection = inspectionInspect;
                 this.history = observedHistory;
                 this.cloudVerified = true;
                 this.homeObservationOwner = currentHomeContext(0);
-                AutoSyncService.verifiedManualInspection(this, oldIdleFailure, inspectionInspect);
+                if (inspectionInspect.isObjectVerified())
+                    AutoSyncService.verifiedManualInspection(this, oldIdleFailure, inspectionInspect);
                 HashSet hashSet = new HashSet();
                 Iterator<AppendCommit> it = this.history.getCloud().iterator();
                 while (it.hasNext()) {
@@ -3565,6 +3615,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private String comparisonCopy() {
+        if (this.cloudVerified && this.inspection != null && !this.inspection.isObjectVerified()
+                && kind() == OnboardingKind.IDENTICAL) return CLOUD_CONNECTED_33.text();
         if (this.cloudVerified && this.inspection != null && this.inspection.getCanKeepLocalProgress()) {
             return THIS_DEVICE_HAS_NEW_GAME_PROGRESS_146.text();
         }
@@ -3620,6 +3672,18 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         return sync().adoptIdentical(inspection);
     }
 
+    private boolean mayRestoreWithoutReplacementConfirmation(SyncHistory observed) {
+        if (observed == null) return false;
+        if (observed.getCurrentProtected()) return true;
+        // This only preserves the existing action route. restoreSelected still upgrades the
+        // metadata observation and checks complete object bytes before allowing replacement.
+        if (this.inspection != null && !this.inspection.isObjectVerified()) {
+            for (AppendCommit commit : observed.getCloud())
+                if (commit.getSnapshot().getFiles().equals(observed.getCurrentFiles())) return true;
+        }
+        return false;
+    }
+
     /* JADX INFO: Access modifiers changed from: private */
     public void requestRestore() {
         if (!canHomeRestore()) return;
@@ -3649,7 +3713,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         final AndroidSyncFacade.Inspection inspection = this.inspection;
         SyncHistory syncHistory = this.history;
-        if (syncHistory != null && syncHistory.getCurrentProtected()) {
+        if (mayRestoreWithoutReplacementConfirmation(syncHistory)) {
             operation(DiagnosticAction.RESTORE, VALIDATING_BACKING_UP_AND_RESTORING_THE_152.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda13
                 @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
                 public final Object run() throws Exception {
@@ -3879,6 +3943,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         work(action, str, new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda36
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
+                AndroidSyncFacade owner = MainActivity.this.facade;
+                if ((action == DiagnosticAction.RESTORE || action == DiagnosticAction.RESOLVE) && owner != null)
+                    return owner.withRestoreReadScope(() -> MainActivity.this.m54xc977a20(task));
                 return MainActivity.this.m54xc977a20(task);
             }
         }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda37
@@ -3923,7 +3990,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return operationOutcome;
         }
         try {
-            readComparison();
+            readComparison(true, false);
             if (this.cloudVerified && kind() == OnboardingKind.IDENTICAL && (syncHistory = this.history) != null && syncHistory.getBaselineCommit() != null && !operationOutcome.result.isPending() && !operationOutcome.result.isConflict()) {
                 sync().completeOnboarding(this.inspection);
                 SyncRuntime.setOnboardingProgress(this, this.connection, OnboardingProgress.COMPLETE);
@@ -4554,6 +4621,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
+        final AndroidSyncFacade.Inspection observed = this.inspection;
         SyncHistory observedHistory = this.history;
         String alias = observedHistory == null ? null : observedHistory.getAliases().get(snapshotId);
         this.homeNaming.open(snapshotId, alias == null ? "" : alias,
@@ -4564,7 +4632,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         return;
                     }
                     work(DiagnosticAction.CONFIGURE, SAVING_NAME_268.text(), () -> {
-                        localSync().renameHistory(snapshotId, name);
+                        localSync().renameHistory(observed, snapshotId, name);
                         // An explicit update refreshes the full observation, never only its mirror.
                         readComparison();
                         return null;
@@ -4766,7 +4834,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* JADX INFO: Access modifiers changed from: private */
     public void launchGame() {
-        final boolean zAllowsAutomatic = OnboardingGate.allowsAutomatic(this.progress, this.onboardingActive, this.cloudVerified);
+        final boolean zAllowsAutomatic = OnboardingGate.allowsAutomatic(this.progress, this.onboardingActive,
+                this.cloudVerified && this.inspection != null && this.inspection.isObjectVerified());
         work(DiagnosticAction.LAUNCH, CHECKING_THE_SELECTED_GAME_288.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda132
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
@@ -4799,6 +4868,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                     try {
                         // Startup does not access Root saves; this deliberate launch can refresh them.
                         if (this.rootGame != null && !this.cloudVerified) readComparison();
+                        verifyLaunchInspection();
                         if (this.rootGame == null || this.cloudVerified) {
                             this.controlledLaunchFacade = SyncRuntime.facade(this, this.connection);
                             this.controlledLaunchToken = this.controlledLaunchFacade.beginControlledSession();
@@ -4814,10 +4884,25 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         throw new IOException(THE_GAME_LAUNCH_ACTIVITY_IS_UNAVAILABLE_290.text());
     }
 
+    private void verifyLaunchInspection() throws Exception {
+        if (!this.cloudVerified || this.inspection == null || this.inspection.isObjectVerified()) return;
+        final AndroidSyncFacade.Inspection observed = this.inspection;
+        final SecureConnectionStore.Connection account = this.connection;
+        final HomeActionContext context = currentHomeContext(this.sharedHomeRenderToken);
+        final AndroidSyncFacade owner = sync();
+        AndroidSyncFacade.Inspection verified = owner.verifyHomeInspection(observed);
+        SyncHistory verifiedHistory = owner.historyPresentation(verified);
+        if (context == null || !context.accepts(currentHomeContext(this.sharedHomeRenderToken), isForegroundHome(), false)
+                || this.facade != owner || account != SyncRuntime.currentConnection()) throw new StaleArchiveReadException();
+        this.inspection = verified;
+        this.history = verifiedHistory;
+        this.homeObservationOwner = currentHomeContext(0);
+    }
+
     /* renamed from: lambda$launchGame$139$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m49x6e86027e(boolean z, Intent intent) throws Exception {
-        boolean allowsAutomatic = this.rootGame == null ? z
-                : OnboardingGate.allowsAutomatic(this.progress, this.onboardingActive, this.cloudVerified);
+        boolean allowsAutomatic = OnboardingGate.allowsAutomatic(this.progress, this.onboardingActive,
+                this.cloudVerified && this.inspection != null && this.inspection.isObjectVerified());
         this.inspection = null;
         this.cloudVerified = false;
         if (!automaticObservationSupported() || this.connection == null || !allowsAutomatic || SyncRuntime.isAutoUploadPaused(this)) {

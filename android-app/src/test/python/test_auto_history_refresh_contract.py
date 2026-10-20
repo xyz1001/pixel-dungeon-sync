@@ -33,8 +33,8 @@ class AutoHistoryRefreshContract(unittest.TestCase):
         for gate in ('!this.resumed', 'this.busy', 'isDestroyed()', 'this.page != SyncPage.HOME',
                      'this.readinessState.restorePending', 'this.installer.hasActiveRequest()'):
             self.assertIn(gate, refresh)
-        self.assertEqual(refresh.count('.inspect()'), 1)
-        self.assertEqual(refresh.count('.historyPresentation(result.inspection)'), 1)
+        self.assertEqual(refresh.count('.inspectHome()'), 1)
+        self.assertEqual(refresh.count('.historyPresentation(observed)'), 1)
         self.assertLess(refresh.index('!this.resumed || !currentAutomaticHistory(ticket, captured)'),
                         refresh.index('result.facade = SyncRuntime.facade'))
         self.assertIn('state.outcome = result', refresh)

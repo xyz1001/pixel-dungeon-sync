@@ -3,6 +3,7 @@ package pdsync
 /** A fresh verified comparison, never setup completion or equal bytes, permits automatic writes. */
 object AutomaticUploadEligibility {
  @JvmStatic fun allows(c: OnboardingComparison): Boolean {
+  if (c.verification != RemoteVerification.OBJECTS_VERIFIED) return false
   if (c.observedTips.size > 1) return false
   if (c.retryablePending) {
    val pending = c.pendingCommit ?: return false

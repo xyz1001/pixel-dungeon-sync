@@ -38,7 +38,7 @@ class BuiltinSetupNamespaceWiringTest {
         assertTrue(prepare.contains("currentOfficialHomeNamespace(owner, account, selection, namespace)"))
         assertTrue(prepare.contains("owner.connect()"))
         assertTrue(prepare.contains("if (!preparedNamespace.isSuccess()) throw"))
-        val comparison = source.substringAfter("private void readComparison(boolean prepareNamespace)").substringBefore("private ")
+        val comparison = source.substringAfter("private void readComparison(boolean prepareNamespace, boolean allowHomePreview)").substringBefore("private ")
         assertTrue(comparison.indexOf("prepareOfficialHomeNamespace(activeFacade)") < comparison.indexOf("activeFacade.inspect()"))
         val commit = source.substringAfter("private boolean drainSharedCommit()").substringBefore("private ")
         assertTrue(commit.indexOf("this.page = SyncPage.HOME") < commit.indexOf("refreshComparison(SyncPage.HOME)"))

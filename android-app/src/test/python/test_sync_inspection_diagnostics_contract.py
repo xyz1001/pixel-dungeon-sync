@@ -6,9 +6,9 @@ from test_embedded_install_contract import body as block
 
 class SyncInspectionDiagnosticsContract(unittest.TestCase):
     def test_comparison_phase_matches_failing_call_and_preserves_flow(self):
-        body = method("readComparison", "boolean prepareNamespace")
+        body = method("readComparison", "boolean prepareNamespace, boolean allowHomePreview")
         calls = ("Stage.RUNTIME", "AndroidSyncFacade activeFacade = sync();", "Stage.INSPECT",
-                 "inspectionInspect = activeFacade.inspect();", '"BLOCKED"', "Stage.HISTORY",
+                 "inspectionInspect = homePreview ? activeFacade.inspectHome() : activeFacade.inspect();", '"BLOCKED"', "Stage.HISTORY",
                  "activeFacade.historyPresentation(inspectionInspect)", "this.cloudVerified = true")
         for earlier, later in zip(calls, calls[1:]):
             self.assertLess(body.index(earlier), body.index(later))

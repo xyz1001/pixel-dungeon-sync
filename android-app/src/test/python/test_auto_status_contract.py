@@ -9,14 +9,15 @@ SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 
 class AutoStatusContract(unittest.TestCase):
     def test_evidence_is_captured_before_actual_export_and_acknowledged_after_full_comparison(self):
-        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertLess(read.index('AutoSyncService.beginManualInspection(this)'), read.index('activeFacade.inspect()'))
-        blocked = body(read, 'if ("BLOCKED".equals(inspectionInspect.getKind()))')
+        blocked = body(read[read.index('requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);', read.index('final SyncHistory observedHistory;')):], 'if ("BLOCKED".equals(inspectionInspect.getKind()))')
         self.assertIn('return;', blocked)
         self.assertLess(read.index(blocked), read.index('AutoSyncService.verifiedManualInspection('))
         self.assertLess(read.index('activeFacade.historyPresentation(inspectionInspect)'), read.index('AutoSyncService.verifiedManualInspection('))
         self.assertLess(read.index('this.cloudVerified = true'), read.index('AutoSyncService.verifiedManualInspection('))
         self.assertEqual(MAIN.count('AutoSyncService.verifiedManualInspection('), 1)
+        self.assertIn('if (inspectionInspect.isObjectVerified())', read)
 
     def test_acknowledgment_never_changes_listener_or_upload_state(self):
         mark = body(SERVICE, 'static void verifiedManualInspection(')

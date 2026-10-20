@@ -2,6 +2,7 @@ package pdsync
 
 /** Accept only a verified linear series of semantic no-op snapshots/restores above a real baseline. */
 internal fun unchangedDescendantTip(graph: CommitGraph, baselineId: String?, hasPending: Boolean): AppendCommit? {
+ if (graph.verification != RemoteVerification.OBJECTS_VERIFIED) return null
  if (hasPending || baselineId == null || graph.pending.isNotEmpty() || graph.commits.size > MAX_COMMITS) return null
  if (graph.commits.any { (id, commit) -> id != commit.id || commit.parents.any { it !in graph.commits } }) return null
  val base = graph.commits[baselineId] ?: return null
@@ -17,6 +18,7 @@ internal fun unchangedDescendantTip(graph: CommitGraph, baselineId: String?, has
  return tip
 }
 internal fun unchangedDescendantTip(comparison: OnboardingComparison): AppendCommit? {
+ if (comparison.verification != RemoteVerification.OBJECTS_VERIFIED) return null
  if (comparison.kind !in setOf(OnboardingKind.IDENTICAL, OnboardingKind.DIFFERENT)) return null
  val graph = comparison.graph ?: return null
  return unchangedDescendantTip(graph, comparison.baselineId, comparison.retryablePending)

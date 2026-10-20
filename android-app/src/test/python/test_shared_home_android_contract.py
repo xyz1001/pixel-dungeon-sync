@@ -181,7 +181,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
                       '!this.archiveReads.loading()', '!isHomeArchiveLoading()',
                       'kind() != OnboardingKind.BLOCKED'):
             self.assertIn(guard, source)
-        self.assertIn('this.homeObservationOwner = currentHomeContext(0)', body(MAIN, 'private void readComparison(boolean prepareNamespace)'))
+        self.assertIn('this.homeObservationOwner = currentHomeContext(0)', body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)'))
         self.assertIn('this.homeObservationOwner = this.cloudVerified ? currentHomeContext(0) : null',
                       body(MAIN, 'private void drainAutomaticHistoryRefresh()'))
         confirmation = body(MAIN, 'void m143x7dd3dfcf(')
@@ -202,12 +202,12 @@ class SharedHomeAndroidContract(unittest.TestCase):
             self.assertIn(guard, state)
         for forbidden in ('refreshComparison(', 'readComparison(', 'this.busy', 'activeWorkAction'):
             self.assertNotIn(forbidden, state)
-        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertLess(read.index('this.archiveReads.begin()'), read.index('activeFacade.inspect()'))
         self.assertIn('finally {', read)
         self.assertIn('this.archiveReads.finish(archiveRead)', read)
         self.assertIn('publishArchiveReadState()', read)
-        self.assertLess(read.index('SyncHistory observedHistory ='), read.index('this.history = observedHistory'))
+        self.assertLess(read.index('final SyncHistory observedHistory;'), read.index('this.history = observedHistory'))
         self.assertIn('requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage)', read)
         scope = body(MAIN, 'private void requireCurrentArchiveRead(')
         for guard in ('this.archiveReads.accepts(ticket)', '!isDestroyed()', 'this.connection == account',
@@ -251,7 +251,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('this.confirmationDestructive', body(MAIN, 'private void renderConfirmation()'))
         self.assertIn('navigate(SyncPage.CONFLICT)', restore)
         # Protected local bytes still restore directly; UI migration adds no universal prompt.
-        protected = body(restore, 'if (syncHistory != null && syncHistory.getCurrentProtected())')
+        protected = body(restore, 'if (mayRestoreWithoutReplacementConfirmation(syncHistory))')
         self.assertIn('operation(DiagnosticAction.RESTORE', protected)
         self.assertIn('return;', protected)
         self.assertNotIn('showConfirmation(', protected)
@@ -273,7 +273,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         for signature in ('protected void onPause()', 'protected void onDestroy()', 'private void navigate(', 'private void renderHome()'):
             self.assertIn('this.homeNaming.close()', body(MAIN, signature))
         self.assertIn('chooseRunIdentity()', current)
-        self.assertIn('localSync().renameHistory(snapshotId, name)', rename)
+        self.assertIn('localSync().renameHistory(observed, snapshotId, name)', rename)
         self.assertIn('localSync().renameCurrent(observed, name)', current)
         self.assertIn('readComparison()', rename)
         self.assertIn('readComparison()', current)

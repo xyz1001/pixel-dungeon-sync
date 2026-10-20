@@ -29,8 +29,8 @@ data class SharedHomeContent(
             val targetId = selectedId ?: history.defaultSnapshot
             val target = history.graph.commits.values.singleOrNull { it.snapshot.id == targetId }
             return SharedHomeContent(
-                uploadUnnecessary = tip?.snapshot?.files == history.currentFiles,
-                restoreUnnecessary = target?.snapshot?.files == history.currentFiles,
+                uploadUnnecessary = tip != null && tip.id in history.verifiedCommitIds && tip.snapshot.files == history.currentFiles,
+                restoreUnnecessary = target != null && target.id in history.verifiedCommitIds && target.snapshot.files == history.currentFiles,
             )
         }
     }

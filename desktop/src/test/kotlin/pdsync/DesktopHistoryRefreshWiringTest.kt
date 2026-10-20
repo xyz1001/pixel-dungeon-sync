@@ -51,10 +51,10 @@ class DesktopHistoryRefreshWiringTest {
   assertContains(remote, "homeSelectionGeneration == selectionGeneration")
   assertContains(remote, "renewalReads.isManualCurrent(manualRefresh, config)")
   assertContains(remote, "refreshProfile(readConfig, canPublish = ::currentPage)")
-  assertContains(remote, "manager.readRemote(syncAccess.store(manager.config, manager.adapter.id, secret))")
+  assertContains(remote, "manager.readHomeHistory(syncAccess.store(manager.config, manager.adapter.id, secret))")
   assertContains(remote, "if (!localHistoryVerified) return@launch")
   assertTrue(remote.indexOf("busy = true") < remote.indexOf("scope.launch"))
-  assertTrue(remote.indexOf("refreshProfile(readConfig,") < remote.indexOf("manager.readRemote("))
+  assertTrue(remote.indexOf("refreshProfile(readConfig,") < remote.indexOf("manager.readHomeHistory("))
   assertEquals(2, Regex("automatic\\.skipped\\(\\)").findAll(remote).count(),
    "both the retained and reopened automatic policies must suppress old upload work")
   assertContains(remote, "catch (e: CancellationException) { throw e }")
@@ -92,13 +92,17 @@ class DesktopHistoryRefreshWiringTest {
     manager.history(); manager.currentVersions(); manager.syncHistory()
     assertNull(manager.baseline())
     assertFalse(manager.hasPending())
-    assertEquals(1, manager.readRemote(store).size)
-    assertEquals(1, manager.syncHistory().graph.commits.size)
+    val preview = manager.readHomeHistory(store)
+    assertEquals(1, preview.graph.commits.size)
+    assertEquals(RemoteVerification.METADATA_ONLY, preview.graph.verification)
+    assertTrue(preview.verifiedCommitIds.isEmpty())
+    assertEquals(1, manager.syncHistory(preview).graph.commits.size)
+    assertTrue(manager.history().isEmpty(), "metadata read must not remember a ZIP")
     assertEquals(before, bytes(root), "reading must not restore or create any local save")
     assertNull(manager.baseline(), "reading never establishes sync ancestry")
     assertFalse(manager.hasPending(), "reading never creates an upload plan")
     store.failReads = true
-    assertFailsWith<IllegalStateException> { manager.readRemote(store) }
+    assertFailsWith<IllegalStateException> { manager.readHomeHistory(store) }
     store.failReads = false
     assertEquals(before, bytes(root))
    }

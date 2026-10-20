@@ -31,6 +31,19 @@ class SharedHomeContentTest {
         assertEquals(SharedHomeContent(true, true), content(history.copy(baseline = "tip")))
     }
 
+    @Test fun metadataMatchesNeverSuppressTransferWithoutVerifiedObjectIds() {
+        val metadata = history().copy(verifiedCommitIds = emptySet())
+        assertEquals(SharedHomeContent(), content(metadata))
+        assertFalse(metadata.currentProtected)
+        assertEquals(SharedHomeContent(), content(metadata.copy(verifiedCommitIds = setOf("another-account-tip"))))
+        assertEquals(SharedHomeContent(true, true), content(metadata.copy(verifiedCommitIds = setOf("tip"))))
+        val old = commit("old")
+        val tip = commit("tip", parents = listOf("old"))
+        val partlyVerified = history(listOf(old, tip)).copy(verifiedCommitIds = setOf("old"))
+        assertEquals(SharedHomeContent(false, true), content(partlyVerified, "snapshot-old"))
+        assertEquals(SharedHomeContent(), content(partlyVerified, "snapshot-tip"))
+    }
+
     @Test fun everyPathAndEveryFileHashMattersEvenWithTheSameCounts() {
         for (changed in listOf(files + ("game1/level1.dat" to "e".repeat(64)),
             files + ("badges.dat" to "f".repeat(64)),

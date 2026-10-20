@@ -25,7 +25,8 @@ class OnboardingComparison internal constructor(
  internal val owner: Any,
  fingerprint: SaveFingerprint? = null,
  graph: CommitGraph? = null,
- pendingCommit: AppendCommit? = null
+ pendingCommit: AppendCommit? = null,
+ val verification: RemoteVerification = graph?.verification ?: RemoteVerification.OBJECTS_VERIFIED
 ) {
  val localFiles: Map<String, String> = immutableMap(localFiles)
  /** Actual file mtime from this guarded observation; not a capture/upload/server receipt time. */
@@ -36,8 +37,10 @@ class OnboardingComparison internal constructor(
  })
  val observedTips: Set<String> = Collections.unmodifiableSet(LinkedHashSet(observedTips))
  internal val fingerprint: SaveFingerprint? = fingerprint?.let { SaveFingerprint(immutableMap(it.files), immutableMap(it.metadata)) }
- internal val graph: CommitGraph? = graph?.let { CommitGraph(immutableMap(it.commits.mapValues { (_, value) -> immutableCommit(value) }), immutableMap(it.pending)) }
+ internal val graph: CommitGraph? = graph?.let { CommitGraph(immutableMap(it.commits.mapValues { (_, value) -> immutableCommit(value) }), immutableMap(it.pending), it.verification) }
+ val remoteCommits:List<AppendCommit> = immutableList(this.graph?.let { graph -> graph.tips.sorted().map {graph.commits.getValue(it)}.snapshotRepresentatives(graph.tips) } ?: this.remoteEntries.map {it.commit})
  internal val pendingCommit: AppendCommit? = pendingCommit?.let(::immutableCommit)
+ init { require(this.graph == null || verification == this.graph.verification) }
 }
 
 sealed interface OnboardingRestoreResult {

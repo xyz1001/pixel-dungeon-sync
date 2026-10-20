@@ -19,6 +19,8 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Map;
 import pdsync.DirectoryMetadataKt;
+import pdsync.DiagnosticPhase;
+import pdsync.DiagnosticTiming;
 import pdsync.ReasonedSyncFailure;
 import pdsync.SyncBlockReason;
 import pdsync.android.app.AndroidGameIdentity;
@@ -31,6 +33,7 @@ public final class BridgeClient implements GameAccessBackend {
     private static final int MAX_FILES = 4096;
     private final Context context;
     private final AndroidGameIdentity identity;
+    private final InstalledApkIdentityScope homeIdentity;
     private final InstalledBridgeBinding installedSelection;
     private final GamePreparationService.PreparedPair selected;
 
@@ -42,6 +45,7 @@ public final class BridgeClient implements GameAccessBackend {
         Context applicationContext = context.getApplicationContext();
         this.context = applicationContext;
         this.installedSelection = null;
+        this.homeIdentity = null;
         this.selected = preparedPair;
         this.identity = androidGameIdentity == null ? SyncRuntime.gameIdentity(context, preparedPair) : androidGameIdentity;
     }
@@ -50,6 +54,7 @@ public final class BridgeClient implements GameAccessBackend {
         this.context = context.getApplicationContext();
         this.selected = null;
         this.installedSelection = java.util.Objects.requireNonNull(binding);
+        this.homeIdentity = new InstalledApkIdentityScope(this.context, binding);
         this.identity = identity == null ? SyncRuntime.gameIdentity(context, binding) : identity;
     }
 
@@ -144,6 +149,8 @@ public final class BridgeClient implements GameAccessBackend {
 
     
     private Bundle exchange(final String operation, final Bundle extras) throws Exception {
+        if (homeIdentity != null && ("restore".equals(operation) || "recover".equals(operation)))
+            homeIdentity.requireNoReadScope();
         final boolean legacy;
         try { legacy = requireTrust("authenticate".equals(operation)); }
         catch (Failure error) { throw error; }
@@ -372,7 +379,9 @@ public final class BridgeClient implements GameAccessBackend {
         try {
             boolean zRequireBridgeForExchange = requireTrust(false);
             PackageInfo packageInfoInstalled = PackageTrust.installed(this.context, gamePackage());
-            String strApkSetSha256 = PackageTrust.apkSetSha256(PackageTrust.installedApks(packageInfoInstalled));
+            String strApkSetSha256 = homeIdentity == null
+                    ? PackageTrust.apkSetSha256(PackageTrust.installedApks(packageInfoInstalled))
+                    : homeIdentity.apkSetSha256(packageInfoInstalled);
             if (installedSelection == null && !strApkSetSha256.equals(PackageTrust.apkSetSha256(this.selected.gameApks))) {
                 throw new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "INSTALLED_APK_SET_MISMATCH", AndroidMessages.BRIDGE_CLIENT_28.text(), null);
             }
@@ -383,22 +392,33 @@ public final class BridgeClient implements GameAccessBackend {
             }
             return new AndroidGameTarget(this.identity, string, PackageTrust.versionCode(packageInfoInstalled), strApkSetSha256, sourceHash());
         } catch (Failure e) {
+            if (homeIdentity != null) homeIdentity.invalidate();
             throw e;
         } catch (Exception e2) {
+            if (homeIdentity != null) homeIdentity.invalidate();
             throw new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "TARGET_IDENTITY_FAILED", AndroidMessages.BRIDGE_CLIENT_30.text(), e2);
         }
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
+    @Override
+    public AutoCloseable beginHomeReadIdentityScope() {
+        if (homeIdentity == null) return () -> {};
+        try {
+            AutoCloseable scope = DiagnosticTiming.measure(DiagnosticPhase.IDENTITY_VERIFICATION, homeIdentity::begin);
+            return () -> {
+                try {
+                    DiagnosticTiming.measure(DiagnosticPhase.IDENTITY_VERIFICATION, () -> { scope.close(); return null; });
+                } catch (Exception error) { throw homeIdentityFailure(error); }
+            };
+        } catch (Exception error) { throw homeIdentityFailure(error); }
+    }
+
+    private static Failure homeIdentityFailure(Exception error) {
+        return new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "TARGET_IDENTITY_FAILED",
+                AndroidMessages.BRIDGE_CLIENT_30.text(), error);
+    }
+
     @Override // pdsync.android.app.AndroidGameBridge
-    
     public void exportTo(Path path) {
         try {
             targetGame();
@@ -420,6 +440,7 @@ public final class BridgeClient implements GameAccessBackend {
     public void restoreFrom(Path path, Map<String,String> expectedHashes) {
         File archive=null;
         try {
+            if (homeIdentity != null) homeIdentity.requireNoReadScope();
             targetGame();
             String expected=DirectoryMetadataKt.contentSha256(expectedHashes);
             archive=File.createTempFile("restore-",".zip",context.getNoBackupFilesDir());

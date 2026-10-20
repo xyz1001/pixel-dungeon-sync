@@ -3,6 +3,7 @@ import java.util.*;
 
 class MainActivity {
     enum SyncPage { HOME, SETTINGS }
+    enum OnboardingProgress { COMPLETE, INCOMPLETE }
     static class SecureConnectionStore { static class Connection {} }
     static class SyncRuntime {
         static SecureConnectionStore.Connection account; static String selection = "game-a", namespace = "scope-a";
@@ -24,9 +25,12 @@ class MainActivity {
     }
     interface Hook { void run() throws Exception; }
     static class AndroidSyncFacade {
-        static class Inspection { String kind = "BOTH_EMPTY"; String getKind() { return kind; } boolean getNeedsRestoreRecovery() { return false; } }
+        static class Inspection { String kind = "BOTH_EMPTY"; String getKind() { return kind; } boolean getNeedsRestoreRecovery() { return false; } boolean objectVerified = true; boolean isObjectVerified() { return objectVerified; } }
         Inspection observed = new Inspection(); SyncHistory history = new SyncHistory(); Hook hook = () -> {}, historyHook = () -> {}; int reads;
         Inspection inspect() throws Exception { reads++; hook.run(); return observed; }
+        Inspection inspectHome() throws Exception { return inspect(); }
+        Hook closeHook = () -> {};
+        AutoCloseable beginHomeReadIdentityScope() { return () -> closeHook.run(); }
         SyncHistory historyPresentation(Inspection inspection) throws Exception { historyHook.run(); return history; }
     }
     static class SyncInspectionDiagnostics {
@@ -43,6 +47,7 @@ class MainActivity {
     static class StaleArchiveReadException extends Exception { }
     final HomeArchiveReadState archiveReads = new HomeArchiveReadState();
     SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
+    OnboardingProgress progress = OnboardingProgress.COMPLETE;
     SyncPage page = SyncPage.HOME; boolean destroyed, cloudVerified, resumed = true, sharedAppreciationOnly; int published, verified, namespacePreparations;
     AndroidSyncFacade facade = new AndroidSyncFacade(); AndroidSyncFacade.Inspection inspection;
     SyncHistory history; Object homeObservationOwner; String selected, explicitHomeSelection;
@@ -101,6 +106,28 @@ class MainActivity {
         stale(a -> { a.destroyed = true; a.archiveReads.close(); });
         stale(a -> a.archiveReads.invalidate());
         stale(a -> a.archiveReads.begin());
+        // Reconstructed code92: close is an authentication fence, including blocked observations.
+        for (String kind : List.of("BOTH_EMPTY", "BLOCKED")) {
+            MainActivity a = new MainActivity(); a.facade.observed.kind = kind;
+            java.io.IOException closeFailure = new java.io.IOException("installed identity changed");
+            a.facade.closeHook = () -> {
+                check(a.history == null && a.inspection == null && !a.cloudVerified && a.homeObservationOwner == null,
+                        "observation was published before identity close");
+                throw closeFailure;
+            };
+            try { a.readComparison(); throw new AssertionError("identity close failure swallowed"); }
+            catch (java.io.IOException actual) { check(actual == closeFailure, "close failure identity"); }
+            terminal(a);
+            check(a.history == null && a.inspection == null && !a.cloudVerified && a.homeObservationOwner == null && a.verified == 0,
+                    "failed identity close authorized HOME");
+        }
+        MainActivity preview = new MainActivity(); preview.facade.observed.objectVerified = false;
+        preview.readComparison(); terminal(preview);
+        check(preview.history != null && preview.cloudVerified && preview.verified == 0,
+                "metadata observation acknowledged a fully verified automatic failure");
+        MainActivity action = new MainActivity(); action.facade.closeHook = () -> { throw new AssertionError("full action used HOME scope"); };
+        action.readComparison(true, false); terminal(action);
+        check(action.verified == 1, "post-action full read lost verification");
         System.out.println("History read terminal and stale-scope checks passed");
     }
 }

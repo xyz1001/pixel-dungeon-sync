@@ -22,9 +22,9 @@ def method(name, parameters=None):
 
 class MainComparisonContractTest(unittest.TestCase):
     def test_timeline_uses_exact_same_facade_and_inspection(self):
-        body = method("readComparison", "boolean prepareNamespace")
+        body = method("readComparison", "boolean prepareNamespace, boolean allowHomePreview")
         self.assertIn("AndroidSyncFacade activeFacade = sync();", body)
-        self.assertIn("inspectionInspect = activeFacade.inspect();", body)
+        self.assertIn("inspectionInspect = homePreview ? activeFacade.inspectHome() : activeFacade.inspect();", body)
         self.assertIn("activeFacade.historyPresentation(inspectionInspect)", body)
         self.assertEqual(1, body.count("sync()"))
         self.assertEqual(1, body.count(".inspect()"))
@@ -33,7 +33,7 @@ class MainComparisonContractTest(unittest.TestCase):
         self.assertNotRegex(SOURCE, r"\.historyPresentation\(\)")
 
     def test_failed_or_blocked_compare_cannot_keep_previous_cloud_proof(self):
-        body = method("readComparison", "boolean prepareNamespace")
+        body = method("readComparison", "boolean prepareNamespace, boolean allowHomePreview")
         self.assertLess(body.index("this.cloudVerified = false"), body.index("activeFacade.inspect()"))
         self.assertLess(body.index("this.inspection = null"), body.index("activeFacade.inspect()"))
         self.assertLess(body.index('"BLOCKED"'), body.index("this.cloudVerified = true"))

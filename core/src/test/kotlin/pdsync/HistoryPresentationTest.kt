@@ -28,6 +28,16 @@ class HistoryPresentationTest {
   assertEquals(1,view.rows); assertEquals(1,view.pages)
  }
 
+ @Test fun metadataHashesDoNotPairCurrentWithCloudOrClaimProtection() {
+  val history = state(listOf(commit("tip")), current=oldFiles).copy(verifiedCommitIds=emptySet())
+  val metadata = HistoryPresentation.from(history,0)
+  assertTrue(metadata.nodes.single {it.id=="local-current"}.dirty)
+  assertFalse(metadata.edges.any {it.sameContent})
+  val verified = HistoryPresentation.from(history.copy(verifiedCommitIds=setOf("tip")),0)
+  assertFalse(verified.nodes.single {it.id=="local-current"}.dirty)
+  assertEquals(listOf(HistoryEdge("local-current","tip",sameContent=true)),verified.edges)
+ }
+
  @Test fun cleanLocalShowsOneSyncedNode() {
   val view=HistoryPresentation.from(state(listOf(commit("base")),"base",oldFiles,"upload"),0)
   val local=view.nodes.single { it.column==1 }
@@ -401,7 +411,8 @@ class HistoryPresentationTest {
   val first = HistoryPresentation.from(before, 0)
   val published = recorded("published", "2026-10-20T00:00:00Z", listOf(initial.id),
    capturedAt = "2026-10-01T00:00:00Z", modifiedAt = "2026-09-01T00:00:00Z")
-  val refreshed = before.copy(graph = CommitGraph(linkedMapOf(initial.id to initial, published.id to published), emptyMap()))
+  val refreshed = before.copy(graph = CommitGraph(linkedMapOf(initial.id to initial, published.id to published), emptyMap()),
+   verifiedCommitIds = setOf(initial.id, published.id))
   val immutable = refreshed.copy(graph = refreshed.graph.copy(commits = refreshed.graph.commits.toMap()),
    currentFiles = refreshed.currentFiles.toMap())
   val view = HistoryPresentation.from(refreshed, 99)

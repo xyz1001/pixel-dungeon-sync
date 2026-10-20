@@ -106,7 +106,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
         self.assertEqual(1, read_home.count('readComparison(false)'))
         self.assertLess(read_home.index('if (!readyForSaves())'), read_home.index('readComparison(false)'))
         self.assertIn('readComparison(true)', body(MAIN, 'private void readComparison()'))
-        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertIn('if (prepareNamespace) prepareOfficialHomeNamespace(activeFacade)', read)
         self.assertLess(read.index('if (prepareNamespace)'), read.index('activeFacade.inspect()'))
 

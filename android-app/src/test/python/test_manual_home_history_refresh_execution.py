@@ -23,7 +23,7 @@ METHODS = (
     'private boolean isCurrentHomeRead(',
     'private void readHomeArchives(',
     'private void requireCurrentArchiveRead(',
-    'private void readComparison(boolean prepareNamespace)',
+    'private void readComparison(boolean prepareNamespace)', 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)',
 )
 
 

@@ -20,7 +20,9 @@ class AndroidProfileVersions(
   return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected, gameSource = source,
    gamePackage = snapshot.manifest.gamePackage ?: identity.packageName))
  }
- fun detect(snapshot: Snapshot): SaveVersions = try { ShatteredVersions.detect(Snapshots.verify(snapshot, adapter)) }
+ fun detect(snapshot: Snapshot): SaveVersions = detectFiles { Snapshots.verify(snapshot, adapter) }
+ internal fun detectVerifiedEntries(files: Map<String, ByteArray>): SaveVersions = detectFiles { files }
+ private fun detectFiles(files: () -> Map<String, ByteArray>): SaveVersions = try { ShatteredVersions.detect(files()) }
  catch (failure: IllegalArgumentException) { throw UnsupportedAndroidSaveFormatException(CoreMessages.ANDROID_UNSUPPORTED_OR_UNREADABLE_SAVE_FORMAT_FOR_1_S_2_S_FILES_WERE_NOT_TREATED_AS_AN_EMPTY_SAVE.text(identity.displayName, failure.message), failure) }
  override fun target(path: String): TargetGame {
   val installed = installedTarget(); val capability = capabilities(installed)

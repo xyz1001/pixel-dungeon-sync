@@ -27,17 +27,18 @@ class SaveStabilityGuard(
  private val stopped: () -> Boolean,
  private val quietMillis: Long = 2_000,
  private val pause: (Long) -> Unit = { Thread.sleep(it) },
- private val captureSnapshot: (Path, GameAdapter, String, String, String?, SnapshotCaptureContext?) -> Snapshot = Snapshots::capture
+ private val captureSnapshot: (Path, GameAdapter, String, String, String?, SnapshotCaptureContext?) -> Snapshot = Snapshots::capture,
+ private val captureFileHashes: (Path, GameAdapter) -> Map<String, String> = Snapshots::fileHashes
 ) {
  init { require(quietMillis >= 0) }
 
  /** Uses the existing bounded capture/path checks; does not inspect excluded device files. */
  fun fingerprint(): SaveFingerprint {
   val before = metadata()
-  val captured = captureSnapshot(root, adapter, "stability", "自动识别", null, null)
+  val files = captureFileHashes(root, adapter)
   val after = metadata()
   stableCheck(before == after, CoreMessages.SAVES_CHANGED_WHILE_READING_WAIT_FOR_THE_GAME_TO_EXIT_AND_RETRY.text())
-  return SaveFingerprint(captured.manifest.files.toSortedMap(), after)
+  return SaveFingerprint(files.toSortedMap(), after)
  }
 
  fun awaitStable(): SaveFingerprint {

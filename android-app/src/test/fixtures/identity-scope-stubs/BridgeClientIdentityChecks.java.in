@@ -1,0 +1,174 @@
+package io.github.xyz1001.pdsync.android;
+
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import io.github.xyz1001.pdsync.android.prepare.GamePreparationService;
+import java.io.*;
+import java.nio.file.Files;
+import java.util.*;
+import pdsync.i18n.AndroidMessages;
+
+/**
+ * New code92 method-extraction harness. The runner inserts the actual production constructors,
+ * targetGame, scope begin/close and exchange method. Only Android/transport/timing edges are doubles.
+ * This is not a complete BridgeClient, Android IPC, or real diagnostic timing integration test.
+ */
+public final class BridgeClientIdentityChecks {
+    private final Context context;
+    private final AndroidGameIdentity identity;
+    private final InstalledBridgeBinding installedSelection;
+    private final GamePreparationService.PreparedPair selected;
+    private final InstalledApkIdentityScope homeIdentity;
+    private int trustChecks;
+    private Exception trustFailure;
+
+    // PRODUCTION_METHODS
+
+    static int checks;
+    static void check(boolean value, String reason) { checks++; if (!value) throw new AssertionError(reason); }
+    interface Action { void run() throws Exception; }
+    static Failure failed(Action action, String reason) throws Exception {
+        checks++;
+        try { action.run(); }
+        catch (Failure expected) { return expected; }
+        throw new AssertionError(reason);
+    }
+    static void mutationRejected(Action action, String reason) throws Exception {
+        checks++;
+        try { action.run(); }
+        catch (IOException expected) { return; }
+        throw new AssertionError(reason);
+    }
+    public static void main(String[] args) throws Exception {
+        try (InstalledApkIdentityScopeChecks.Fixture f = new InstalledApkIdentityScopeChecks.Fixture()) {
+            InstalledBridgeBinding binding = InstalledBridgeResolver.resolve(f.context, InstalledApkIdentityScopeChecks.Fixture.GAME);
+            BridgeClientIdentityChecks client = new BridgeClientIdentityChecks(f.context, binding, null);
+            check(client.homeIdentity != null && client.selected == null, "only installed backend owns identity scope");
+            String initial = client.targetGame().installedHash;
+            int measurements = DiagnosticTiming.calls;
+            AutoCloseable read = client.beginHomeReadIdentityScope();
+            check(DiagnosticTiming.calls == measurements + 1, "scope entry measured");
+            check(client.targetGame().installedHash.equals(initial), "scoped target retains initial full identity");
+            int before = client.trustChecks;
+            mutationRejected(() -> client.exchange("restore", null), "restore exchange blocked within read");
+            mutationRejected(() -> client.exchange("recover", null), "recover exchange blocked within read");
+            check(client.trustChecks == before && BridgeTransport.calls == 0, "mutation blocks before trust/transport");
+            client.exchange("inspect", null);
+            check(BridgeTransport.calls == 1, "nonmutation inspect exchange permitted");
+            read.close();
+            check(DiagnosticTiming.calls == measurements + 2, "scope close measured");
+            client.homeIdentity.requireNoReadScope();
+            client.exchange("recover", null);
+            check(BridgeTransport.calls == 2, "mutation proceeds after scope close");
+
+            AutoCloseable invalidated = client.beginHomeReadIdentityScope();
+            client.trustFailure = new IOException("Synthetic PM trust failure");
+            Failure targetFailure = failed(client::targetGame, "target exception maps to existing failure");
+            check("TARGET_IDENTITY_FAILED".equals(targetFailure.code), "target failure code preserved");
+            client.trustFailure = null;
+            failed(client::targetGame, "restoring trust does not revive scope");
+            Failure closeFailure = failed(invalidated::close, "invalidated scope close mapped");
+            check(closeFailure.stage == BridgeDiagnostics.Stage.TARGET_IDENTITY
+                    && "TARGET_IDENTITY_FAILED".equals(closeFailure.code), "close failure keeps existing diagnostics");
+            client.homeIdentity.requireNoReadScope();
+
+            AutoCloseable readFailure = client.beginHomeReadIdentityScope();
+            client.trustFailure = new Failure(BridgeDiagnostics.Stage.PACKAGE_TRUST, "EXISTING_FAILURE", "fixture", null);
+            Failure same = failed(client::targetGame, "existing failure invalidates");
+            check(same == client.trustFailure, "existing target Failure preserved rather than rewrapped");
+            client.trustFailure = null;
+            failed(readFailure::close, "existing failure scope cannot close successfully");
+
+            AutoCloseable contents = client.beginHomeReadIdentityScope();
+            Files.writeString(f.base, "new");
+            check(client.targetGame().installedHash.equals(initial), "metadata-equal intermediate target returns scoped identity");
+            Failure mismatch = failed(contents::close, "full exit hash mismatch blocks result");
+            check(mismatch.getCause() instanceof IOException, "exit mismatch propagated as identity cause");
+            check(!client.targetGame().installedHash.equals(initial), "ordinary action target full-checks new bytes");
+
+            android.system.Os.values.get(f.base.toString()).st_size = -1;
+            failed(client::beginHomeReadIdentityScope, "begin failure uses identity failure boundary");
+            client.homeIdentity.requireNoReadScope();
+            android.system.Os.values.get(f.base.toString()).st_size = 3;
+
+            GamePreparationService.PreparedPair prepared = new GamePreparationService.PreparedPair();
+            prepared.gamePackage = binding.gamePackage; prepared.sourceApkSetSha256 = binding.sourceApkSetSha256;
+            prepared.gameApks = List.of(f.base.toFile(), f.split.toFile());
+            BridgeClientIdentityChecks preparedClient = new BridgeClientIdentityChecks(f.context, prepared, new AndroidGameIdentity());
+            check(preparedClient.homeIdentity == null, "PreparedPair never receives installed identity scope");
+            int timingBefore = DiagnosticTiming.calls;
+            try (AutoCloseable noop = preparedClient.beginHomeReadIdentityScope()) {
+                preparedClient.targetGame();
+                Files.writeString(f.split, "zip");
+                String changed = preparedClient.targetGame().installedHash;
+                check(changed.equals(PackageTrust.apkSetSha256(prepared.gameApks)), "PreparedPair remains full-check on each target");
+            }
+            check(timingBefore == DiagnosticTiming.calls, "PreparedPair scope is pure no-op");
+            prepared.gameApks = List.of(f.base.toFile());
+            check("INSTALLED_APK_SET_MISMATCH".equals(failed(preparedClient::targetGame, "prepared mismatch still rejected").code), "PreparedPair original mismatch protection retained");
+
+            android.os.Build.VERSION.SDK_INT = 26;
+            int before26 = DiagnosticTiming.calls;
+            try (AutoCloseable noop = client.beginHomeReadIdentityScope()) {
+                client.homeIdentity.requireNoReadScope();
+                String old = client.targetGame().installedHash;
+                Files.writeString(f.base, "api");
+                check(!old.equals(client.targetGame().installedHash), "API26 installed client still full-checks each request");
+            }
+            check(DiagnosticTiming.calls == before26 + 2, "API26 keeps timing wrapper with no-op identity scope");
+        }
+        System.out.println("Reconstructed BridgeClient identity wiring: " + checks + " assertions passed. Extracted production methods, host-only edges.");
+    }
+
+    private boolean requireTrust(boolean accessOnly) throws Exception {
+        trustChecks++;
+        if (trustFailure != null) throw trustFailure;
+        return false;
+    }
+    private BridgeDiagnostics.ProviderSnapshot snapshotProvider() { return null; }
+    private Object m2lambda$exchange$0$iogithubxyz1001pdsyncandroidBridgeClient(String operation, Bundle extras) { return new Object(); }
+    private static void closeReply(Bundle reply) {}
+    private static void closeRejectedReply(Bundle reply, Throwable failure) {}
+    private static boolean replyIdentityMatches(Bundle reply, String key, String expected, boolean legacy) { return true; }
+    private static Failure lambda$exchange$1(BridgeDiagnostics.Stage stage, String code, Throwable cause, BridgeDiagnostics.TransportInfo info) {
+        return new Failure(stage, code, "fixture", cause, info);
+    }
+    static final class AndroidGameIdentity {}
+    static final class AndroidGameTarget {
+        final String installedHash;
+        AndroidGameTarget(AndroidGameIdentity identity, String name, long version, String hash, String source) { installedHash = hash; }
+    }
+    static final class SyncRuntime {
+        static AndroidGameIdentity gameIdentity(Context context, Object selected) { return new AndroidGameIdentity(); }
+    }
+    static final class Failure extends BridgeDiagnostics.Failure {
+        Failure(BridgeDiagnostics.Stage stage, String code, String message, Throwable cause) { super(stage, code, message, cause); }
+        Failure(BridgeDiagnostics.Stage stage, String code, String message, Throwable cause, BridgeDiagnostics.TransportInfo transport) { super(stage, code, message, cause, transport); }
+        Failure(BridgeDiagnostics.Stage stage, String code, String message, Throwable cause, BridgeDiagnostics.TransportInfo transport, BridgeSaveLayout layout) { super(stage, code, message, cause, transport, layout); }
+    }
+    static final class Bundle {
+        int getInt(String key, int fallback) { return "apiVersion".equals(key) ? 1 : fallback; }
+        boolean getBoolean(String key, boolean fallback) { return fallback; }
+        String getString(String key) { return null; }
+        long getLong(String key, long fallback) { return fallback; }
+    }
+    enum DiagnosticPhase { IDENTITY_VERIFICATION }
+    static final class DiagnosticTiming {
+        static int calls;
+        interface Task<T> { T run() throws Exception; }
+        static <T> T measure(DiagnosticPhase phase, Task<T> task) throws Exception {
+            check(phase == DiagnosticPhase.IDENTITY_VERIFICATION, "correct identity timing phase");
+            calls++;
+            return task.run();
+        }
+    }
+    static final class BridgeTransport {
+        static int calls;
+        interface Acquirer { Object acquire() throws Exception; }
+        interface Disposer { void close(Bundle reply); }
+        interface Factory { Failure create(BridgeDiagnostics.Stage stage, String code, Throwable cause, BridgeDiagnostics.TransportInfo info); }
+        static final class Result<T> { final T reply; final BridgeDiagnostics.TransportInfo transport = null; Result(T value) { reply = value; } }
+        static Result<Bundle> exchange(Acquirer acquirer, Disposer disposer, Factory factory) throws Exception { calls++; acquirer.acquire(); return new Result<>(new Bundle()); }
+        static Result<Bundle> exchangeBounded(Acquirer acquirer, Disposer disposer, Factory factory, int millis) throws Exception { return exchange(acquirer, disposer, factory); }
+    }
+}

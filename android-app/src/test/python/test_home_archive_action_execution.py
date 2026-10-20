@@ -33,6 +33,7 @@ METHODS = (
     'public void requestUpload()',
     'public void upload()',
     'AndroidSyncFacade.OperationResult m146lambda$upload$71$iogithubxyz1001pdsyncandroidMainActivity(',
+    'private boolean mayRestoreWithoutReplacementConfirmation(',
     'public void requestRestore()',
     'AndroidSyncFacade.OperationResult m141x92df934d(',
     'AndroidSyncFacade.OperationResult m142x859b98e(',

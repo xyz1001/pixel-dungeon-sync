@@ -96,8 +96,9 @@ class SaveStabilityGuardTest {
  @Test fun mutationDuringFingerprintReadIsRejected() {
   val root = root()
   val guard = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0,
-   captureSnapshot = { path, adapter, profile, version, parent, context ->
-    Snapshots.capture(path, adapter, profile, version, parent, context).also { path.resolve("rankings.dat").writeText("new rank bytes") }
+   // Reconstructed adaptation: fingerprint no longer calls the ZIP-producing capture hook.
+   captureFileHashes = { path, adapter ->
+    Snapshots.fileHashes(path, adapter).also { path.resolve("rankings.dat").writeText("new rank bytes") }
    })
   assertFails { guard.fingerprint() }
  }

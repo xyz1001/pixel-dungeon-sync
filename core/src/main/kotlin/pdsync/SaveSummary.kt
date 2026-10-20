@@ -7,8 +7,9 @@ import kotlinx.serialization.json.*
 
 data class SaveSummary(val slots: Map<String,String?>, val plays: Int?, val files: Int) {
  companion object {
-  fun from(snapshot: Snapshot): SaveSummary {
-   val bytes=Snapshots.verify(snapshot,Shattered)
+  fun from(snapshot: Snapshot): SaveSummary = fromVerifiedEntries(Snapshots.verify(snapshot,Shattered)) { name -> snapshot.manifest.metadata?.fileModifiedAt?.get(name) }
+  internal fun readVerified(root: Path, bytes: Map<String,ByteArray>): SaveSummary = fromVerifiedEntries(bytes) { name -> Files.getLastModifiedTime(SafePaths.checked(root.resolve(name))).toInstant().toString() }
+  private fun fromVerifiedEntries(bytes: Map<String,ByteArray>, modifiedAt: (String)->String?): SaveSummary {
    val versions=ShatteredVersions.detect(bytes)
    val plays=bytes["rankings.dat"]?.let { source -> runCatching {
     require(source.size<=8*1024*1024)
@@ -18,7 +19,7 @@ data class SaveSummary(val slots: Map<String,String?>, val plays: Int?, val file
     val text=expanded.decodeToString(throwOnInvalidSequence=true);requireUniqueJsonKeys(text)
     (json.parseToJsonElement(text).jsonObject["total"] as? JsonPrimitive)?.intOrNull?.takeIf { it>=0 }
    }.getOrNull() }
-   return SaveSummary(versions.runs.keys.associateWith { slot -> snapshot.manifest.metadata?.fileModifiedAt?.filterKeys { it.startsWith("$slot/") }?.values?.maxOrNull() },plays,bytes.size)
+   return SaveSummary(versions.runs.keys.associateWith { slot -> bytes.keys.filter { it.startsWith("$slot/") }.mapNotNull(modifiedAt).maxOrNull() },plays,bytes.size)
   }
   fun read(root: Path): SaveSummary {
    val snapshot=Snapshots.capture(root,Shattered,"preview","preview",null)

@@ -43,6 +43,7 @@ import javax.net.ssl.SSLException
 @Serializable enum class DiagnosticHttpMethod { GET, PUT, PROPFIND, MKCOL, HEAD, POST, OTHER }
 
 class DiagnosticTrace internal constructor(val id: String, val action: DiagnosticAction, val automatic: Boolean) {
+ internal val timings = DiagnosticPhaseCollector()
  internal val startedNanos = System.nanoTime()
  fun record(stage: DiagnosticStage, result: DiagnosticResult): Boolean = record(stage, result, DiagnosticFailure.NONE)
  fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure): Boolean =
@@ -71,6 +72,7 @@ object DiagnosticLog {
  private const val MAX_LINE_BYTES = 32 * 1024
  private val lock = Any()
  private val current = ThreadLocal<DiagnosticTrace?>()
+ internal fun currentTrace():DiagnosticTrace? = current.get()
  private var configuration: Configuration? = null
  private val codec = Json { encodeDefaults = true }
  private val dateName = Regex("events-(\\d{4}-\\d{2}-\\d{2})\\.jsonl")
@@ -151,11 +153,13 @@ object DiagnosticLog {
    val config = configuration ?: return@synchronized false
    prepare(config); prune(config)
    val now = config.clock.instant(); val zone = safeZone(config.clock.zone)
+   val phaseTotals = if (stage == DiagnosticStage.FINISHED) trace.timings.snapshot() else emptyMap()
    val record = Record(timestampUtc = now.toString(), zone = zone.id,
     offsetMinutes = zone.rules.getOffset(now).totalSeconds / 60, appVersion = config.version, platform = config.platform,
     operationId = trace.id, action = trace.action, automatic = trace.automatic, stage = stage, result = result, failure = failure,
     elapsedMs = ((System.nanoTime() - trace.startedNanos) / 1_000_000).coerceIn(0, 7 * 24 * 60 * 60 * 1000L),
-    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 }, details = details)
+    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 }, details = if(phaseTotals.isNotEmpty())
+     (details ?: DiagnosticDetails.builder().build()).withPhaseTimings(phaseTotals) else details)
    var line = (codec.encodeToString(record) + "\n").toByteArray(Charsets.UTF_8)
    require(line.size <= MAX_LINE_BYTES)
    val file = SafePaths.checked(config.directory.resolve("events-${utcDate(now)}.jsonl"))
@@ -244,6 +248,11 @@ object DiagnosticLog {
    record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) ->
     if (field == DiagnosticDetails.Field.PREPARATION) {
      PreparationDiagnosticEvidence.decode(value)?.forEach { (key, fact) -> append(" prep.$key=$fact") }
+    } else if(field == DiagnosticDetails.Field.PHASE_TIMINGS) {
+     DiagnosticTimingEvidence.decode(value)?.forEach { (key,fact)->
+      append(" phase.$key.inclusiveMs=${fact.durationMs} phase.$key.count=${fact.count}")
+      append(" phase.$key.failed=${fact.failed} phase.$key.canceled=${fact.canceled} phase.$key.skipped=${fact.skipped}")
+     }
     } else append(" ${field.name}=$value")
    }
    appendLine(" version=${record.appVersion} platform=${record.platform} zone=${record.zone} offsetMinutes=${record.offsetMinutes}")

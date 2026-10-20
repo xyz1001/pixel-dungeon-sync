@@ -60,7 +60,7 @@ class Check {
     String safeText(String s){return s;} String safeError(Exception e){return e.getMessage();}
     Object diagnosticWorkDetails(){return null;} OnboardingKind kind(){return OnboardingKind.UNKNOWN;}
     AndroidSyncFacade sync(){return facade;}
-    void readComparison() throws IOException {reads++;if(failure!=null)throw new IOException(failure);}
+    void readComparison(boolean prepare, boolean preview) throws IOException {check(prepare && !preview); reads++;if(failure!=null)throw new IOException(failure);}
     /* METHODS */
     static void check(boolean b){if(!b)throw new AssertionError();}
     public static void main(String[] args) throws Exception {

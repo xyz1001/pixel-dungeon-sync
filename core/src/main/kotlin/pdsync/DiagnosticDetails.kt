@@ -61,7 +61,8 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("preparation") PREPARATION,
   @SerialName("installationPhase") INSTALLATION_PHASE,
   @SerialName("installationCache") INSTALLATION_CACHE,
-  @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS
+  @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS,
+  @SerialName("phaseTimings") PHASE_TIMINGS
  }
  enum class Mode { ROOT_DIRECT, EMBEDDED_BRIDGE, LEGACY_HELPER_BRIDGE, DESKTOP, UNKNOWN }
  enum class NetworkTarget { DAV, OFFICIAL_AUTH, ENTITLEMENT, ASSET, UNKNOWN }
@@ -71,6 +72,10 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   REMOTE_HISTORY, SYNC_COMPARE, NETWORK, INSTALLATION, PREPARATION, UNKNOWN
  }
 
+ internal fun withPhaseTimings(timings:Map<DiagnosticPhase,DiagnosticPhaseMeasurement>):DiagnosticDetails {
+  val encoded=DiagnosticTimingEvidence.encode(timings) ?: return this
+  return DiagnosticDetails(values+(Field.PHASE_TIMINGS to encoded))
+ }
  fun isEmpty(): Boolean = values.isEmpty()
  fun isValid(): Boolean = values.all { (field, value) -> valid(field, value) } && validLayoutTotal(values)
  override fun equals(other: Any?): Boolean = other is DiagnosticDetails && values == other.values
@@ -251,6 +256,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    else -> null
   }
   private fun valid(field: Field, value: String): Boolean {
+   if (field == Field.PHASE_TIMINGS) return DiagnosticTimingEvidence.isValid(value)
    if (field == Field.PREPARATION) return PreparationDiagnosticEvidence.isValid(value)
    if (field in booleanFields) return value == "true" || value == "false"
    numberRange(field)?.let { range ->

@@ -7,6 +7,7 @@ interface AndroidGameBridge {
  fun exportTo(emptyDestination: Path)
  fun restoreFrom(preparedDirectory: Path, expectedCurrentFiles: Map<String, String>)
  fun targetGame(): AndroidGameTarget
+ fun beginHomeReadIdentityScope(): AutoCloseable = AutoCloseable {}
 }
 
 data class AndroidGameTarget @JvmOverloads constructor(

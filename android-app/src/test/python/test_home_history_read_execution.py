@@ -13,7 +13,7 @@ MAIN = (SRC / 'MainActivity.java').read_text()
 class HomeHistoryReadExecution(unittest.TestCase):
     def test_read_terminal_and_stale_scopes(self):
         methods = []
-        for signature in ('private void readComparison()', 'private void readComparison(boolean prepareNamespace)', 'private void requireCurrentArchiveRead('):
+        for signature in ('private void readComparison()', 'private void readComparison(boolean prepareNamespace)', 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)', 'private void requireCurrentArchiveRead('):
             start = MAIN.index(signature)
             methods.append(MAIN[start:MAIN.index('{', start)] + body(MAIN, signature))
         with tempfile.TemporaryDirectory(prefix='pdsync-history-read-') as tmp:

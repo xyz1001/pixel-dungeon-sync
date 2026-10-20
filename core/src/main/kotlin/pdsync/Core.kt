@@ -76,11 +76,26 @@ object Snapshots {
  }
  fun capture(root: Path, adapter: GameAdapter, profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null): Snapshot {
   require(profile.matches(Regex("[a-zA-Z0-9_-]+")))
+  val modifiedAt = sortedMapOf<String, String>()
+  val files = readCaptureFiles(root, adapter, captureContext) { name, path, bytes ->
+   if (captureContext != null) modifiedAt[name] = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant().toString()
+   bytes
+  }
+  val zip = archive(files); require(zip.size <= MAX_SNAPSHOT_BYTES)
+  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) },
+   metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(files.keys) }), zip)
+ }
+
+ /** The same bounded allowed-file read as capture, without allocating or compressing a ZIP. */
+ fun fileHashes(root: Path, adapter: GameAdapter): Map<String, String> =
+  readCaptureFiles(root, adapter) { _, _, bytes -> hash(bytes) }
+
+ private fun <T> readCaptureFiles(root: Path, adapter: GameAdapter, captureContext: SnapshotCaptureContext? = null,
+  read: (String, Path, ByteArray) -> T): Map<String, T> {
   SafePaths.checked(root)
   require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { CoreValidationMessages.SAVE_ROOT_MUST_BE_A_REAL_DIRECTORY_NOT_A_SYMBOLIC_LINK_OR_FILE.text() }
   captureContext?.let { it.device.validated(); requireUtcTimestamp(it.capturedAt) }
-  val modifiedAt = sortedMapOf<String, String>()
-  val files = sortedMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
+  val files = sortedMapOf<String, T>(); var total = 0L; val portableNames = mutableSetOf<String>()
   Files.walk(root).use { stream -> stream.forEach { p ->
    val name = root.relativize(p).toString().replace('\\','/')
    if (adapter.includes(name) && !isDirectoryMetadata(name)) {
@@ -91,17 +106,14 @@ object Snapshots {
      val remaining = MAX_SNAPSHOT_BYTES - total.toInt()
      val bytes = Files.newInputStream(p).use { it.readUpTo(remaining + 1) }
      total += bytes.size; require(total <= MAX_SNAPSHOT_BYTES)
-     files[name] = bytes
-     if (captureContext != null) modifiedAt[name] = Files.getLastModifiedTime(p, LinkOption.NOFOLLOW_LINKS).toInstant().toString()
+     files[name] = read(name, p, bytes)
     } else {
      require(Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) { CoreValidationMessages.SAVE_ENTRY_DISAPPEARED_OR_IS_NOT_A_REGULAR_FILE_DIRECTORY.text() }
     }
    }
   } }
   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { require("$it/game.dat" in files) { CoreValidationMessages.INCOMPLETE_RUN.text(it) } }
-  val zip = archive(files); require(zip.size <= MAX_SNAPSHOT_BYTES)
-  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) },
-   metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(files.keys) }), zip)
+  return files
  }
  fun verify(snapshot: Snapshot, adapter: GameAdapter): Map<String, ByteArray> {
   require(snapshot.zip.size <= MAX_SNAPSHOT_BYTES && snapshot.manifest.files.size <= MAX_SNAPSHOT_FILES)
