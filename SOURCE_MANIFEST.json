@@ -445,8 +445,8 @@
       "sha256": "dd4e50f93690053f5a9fb46ce83b59fc9b5158f6b7b43c27a38252301dbb7c51"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/SyncRuntime.java": {
-      "size": 22475,
-      "sha256": "60b310b4a76fb43a180663b6ca2f5ef99a6872d0df072f33850e1e5b0920c407"
+      "size": 23422,
+      "sha256": "585fff43d24435f347b71a9bc7016ce707bea11014179d16c2ac8695ba863940"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/SystemConfirmationToken.java": {
       "size": 4443,
@@ -1653,8 +1653,8 @@
       "sha256": "375ead1d6936b727658d0c6c40c3583c97bbdfbed7d2b043a15ac94da8775400"
     },
     "android-app/src/test/python/test_official_sync_access_execution.py": {
-      "size": 10793,
-      "sha256": "09f84b480d58a1bd4d6b8d9467d84569def3b80c4a4b9cb74f2e991e2e68912f"
+      "size": 11228,
+      "sha256": "1486af31f7974a68e79b3145961077ff21d2023da52991fe3f1f1907ed78471d"
     },
     "android-app/src/test/python/test_onboarding_marker_failure_contract.py": {
       "size": 5561,

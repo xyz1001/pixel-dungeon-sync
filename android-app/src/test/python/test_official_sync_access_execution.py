@@ -88,10 +88,11 @@ class Check {
   }}
   static class OfficialServiceRegistrationClient { static final String DAV_URL="official-url"; }
   static class AndroidMessages { static final AndroidMessages SYNC_RUNTIME_09=new AndroidMessages(); String text(){return "blocked";} }
-  static long now=10, deadline=20; static int requests, cacheWrites; static boolean fail;
+  static long now=10, deadline=20, generation=1; static int requests, cacheWrites; static boolean fail, changeDuringRequest;
+  static long connectionGeneration(){return generation;}
   static class ManagedAccountClient {
     ManagedAccountClient(String a,String b,String c){}
-    Entitlement entitlement() throws IOException { requests++; if(fail)throw new IOException("offline"); return new Entitlement(); }
+    Entitlement entitlement() throws IOException { requests++; if(fail)throw new IOException("offline"); if(changeDuringRequest)generation++; return new Entitlement(); }
     static class Entitlement { final Long expiresMs=deadline, serverTimeMs=now; final String username="u"; void requireSyncAccess() throws IOException { if(now>=expiresMs)throw new IOException("expired"); } }
   }
   static class OfficialSyncAccess {
@@ -119,6 +120,11 @@ class Check {
     // A recreated process/facade cannot reuse an earlier active authorization.
     OfficialOperationGate restart=new OfficialOperationGate(a); blocked(()->restart.refresh(c)); blocked(restart::check);
     deadline=30; requireOfficialSyncAccess(c,a,f); g.check();
+    generation++; blocked(g::check); check(g.lease==null);
+    requireOfficialSyncAccess(c,a,f); g.check();
+    changeDuringRequest=true; blocked(()->requireOfficialSyncAccess(c,a,f)); blocked(g::check);
+    check(g.lease==null); changeDuringRequest=false;
+    requireOfficialSyncAccess(c,a,f); g.check();
     fail=true; blocked(()->requireOfficialSyncAccess(c,a,f)); blocked(g::check); fail=false;
     int before=requests; a.provider="custom"; requireOfficialSyncAccess(c,a,f); check(requests==before+1); before=requests;
     a.provider="official"; a.endpoint="https://custom.example/"; requireOfficialSyncAccess(c,a,f); check(requests==before);

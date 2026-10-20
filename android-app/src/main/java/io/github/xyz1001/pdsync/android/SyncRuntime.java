@@ -39,7 +39,7 @@ final class SyncRuntime {
         connection = connection2;
     }
 
-    /** Changes even when an account is reloaded with identical credential text. */
+    /** Includes target changes; an old response must not authorize a replacement configuration. */
     static long connectionGeneration() { return connectionGeneration.get(); }
 
     static SecureConnectionStore.Connection connection(Context context) throws Exception {
@@ -54,6 +54,10 @@ final class SyncRuntime {
 
     static synchronized void setPreparedGame(Context context, GamePreparationService.PreparedPair preparedPair) {
         GamePreparationService.PreparedPair preparedPair2 = selected;
+        if (preparedPair2 != preparedPair && (preparedPair2 == null || preparedPair == null
+                || !preparedPair2.gamePackage.equals(preparedPair.gamePackage)
+                || !selectionToken(preparedPair2).equals(selectionToken(preparedPair))))
+            connectionGeneration.incrementAndGet();
         if (preparedPair2 != null && (preparedPair == null || !selectionToken(preparedPair2).equals(selectionToken(preparedPair)))) {
             AutoSyncService.cancelForConnectionChange(context);
         }
@@ -79,6 +83,7 @@ final class SyncRuntime {
             if (binding.matches(previous) && rootGame(context) == null) return;
             requireBackendSwitchAllowed(context);
             requireFreshBackendComparison(context);
+            connectionGeneration.incrementAndGet();
             AutoSyncService.cancelForConnectionChange(context);
             closeRootBackend();
             new InstalledBridgeSelectionStore(context.getFilesDir()).save(binding);
@@ -113,6 +118,7 @@ final class SyncRuntime {
             requireBackendSwitchAllowed(context);
             requireFreshBackendComparison(context);
             new RootTargetResolver(context).requireUnchanged(game);
+            connectionGeneration.incrementAndGet();
             AutoSyncService.cancelForConnectionChange(context);
             closeRootBackend();
             new RootSelectionStore(context.getFilesDir()).save(game);
@@ -125,6 +131,7 @@ final class SyncRuntime {
         synchronized (OPERATION_LOCK) {
             requireBackendSwitchAllowed(context);
             requireFreshBackendComparison(context);
+            connectionGeneration.incrementAndGet();
             AutoSyncService.cancelForConnectionChange(context);
             closeRootBackend();
             new RootSelectionStore(context.getFilesDir()).clear();
@@ -255,21 +262,29 @@ final class SyncRuntime {
     private static final class OfficialOperationGate implements pdsync.WebDavRequestCheck {
         final SecureConnectionStore.Connection account;
         volatile OfficialSyncAccess.Lease lease;
+        private long authorizedGeneration = -1;
         OfficialOperationGate(SecureConnectionStore.Connection account) { this.account = account; }
         void refresh(Context context) throws Exception {
             lease = null; // Failed refresh must never retain a previously active authorization.
+            final long generation = connectionGeneration();
             long requestStartedNanos = android.os.SystemClock.elapsedRealtimeNanos();
             ManagedAccountClient.Entitlement entitlement = new ManagedAccountClient(
                     OfficialServiceRegistrationClient.DAV_URL, account.username, account.password).entitlement();
+            if (generation != connectionGeneration()) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
             rememberEntitlement(context, account, entitlement);
             entitlement.requireSyncAccess();
+            authorizedGeneration = generation;
             lease = OfficialSyncAccess.fromEntitlement(entitlement, requestStartedNanos,
                     android.os.SystemClock::elapsedRealtimeNanos);
-            check();
+            try { check(); }
+            catch (Exception failure) { lease = null; throw failure; }
         }
         @Override public void check() throws IOException {
             OfficialSyncAccess.Lease current = lease;
-            if (current == null) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
+            if (current == null || authorizedGeneration != connectionGeneration()) {
+                lease = null;
+                throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
+            }
             current.check();
         }
     }
