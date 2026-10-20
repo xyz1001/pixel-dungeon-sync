@@ -76,11 +76,11 @@ data class HistoryPresentation(
   /**
    * Assign global newest-first history-record rows before paging. Equal-time children precede
    * parents with stable IDs for unrelated branches. Opposite lanes can share a row, while two
-   * nodes in one lane cannot. A local copy with identical verified cloud content is paired with
+   * nodes in one lane cannot. A local copy with identical cloud manifest file hashes is paired with
    * its established baseline, or otherwise the newest matching record, and displays that record's
    * time. Only unmatched local progress uses its own save-file time. Unknown times sort last.
    *
-   * The verified history supplied by the facade is the sole source of nodes and true graph edges.
+   * The history supplied by the facade is the sole source of nodes and true graph edges.
    * An edge whose other endpoint is on another page is omitted, never redirected to a visible node.
    */
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
@@ -88,10 +88,11 @@ data class HistoryPresentation(
    val allCloud = orderedRecords(state.graph.commits.values)
    val cloudOrder = allCloud.mapIndexed { index, commit -> commit.id to index }.toMap()
    val baseline = state.baselineCommit
-   // Content equality proves cloud protection even when this installation has no baseline.
+   // File-map equality permits display association even after reinstall loses verification caches.
+   // It does not prove cloud protection, establish a baseline, or authorize any operation.
    val matchingCurrent = if (state.currentFiles.isEmpty()) null else
-    baseline?.takeIf { it.id in state.verifiedCommitIds && it.snapshot.files == state.currentFiles }
-     ?: allCloud.firstOrNull { it.id in state.verifiedCommitIds && it.snapshot.files == state.currentFiles }
+    baseline?.takeIf { it.snapshot.files == state.currentFiles }
+     ?: allCloud.firstOrNull { it.snapshot.files == state.currentFiles }
    val all = mutableListOf<TimedNode>()
    allCloud.forEach { commit ->
     val snapshot = commit.snapshot

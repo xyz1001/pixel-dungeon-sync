@@ -28,14 +28,72 @@ class HistoryPresentationTest {
   assertEquals(1,view.rows); assertEquals(1,view.pages)
  }
 
- @Test fun metadataHashesDoNotPairCurrentWithCloudOrClaimProtection() {
-  val history = state(listOf(commit("tip")), current=oldFiles).copy(verifiedCommitIds=emptySet())
-  val metadata = HistoryPresentation.from(history,0)
-  assertTrue(metadata.nodes.single {it.id=="local-current"}.dirty)
-  assertFalse(metadata.edges.any {it.sameContent})
-  val verified = HistoryPresentation.from(history.copy(verifiedCommitIds=setOf("tip")),0)
+ @Test fun reinstalledEmptyStatePairsMetadataHashesWithoutInventingVerificationOrBaseline() {
+  val remote = recorded("tip", "2026-10-01T00:00:00Z")
+  val history = state(listOf(remote), current=oldFiles).let { it.copy(
+   graph=it.graph.copy(verification=RemoteVerification.METADATA_ONLY), verifiedCommitIds=emptySet()) }
+  val view = HistoryPresentation.from(history,0)
+  val local = view.nodes.single {it.id=="local-current"}
+  val cloud = view.nodes.single {it.id=="tip"}
+  assertEquals(cloud.row,local.row)
+  assertEquals(cloud.time,local.time)
+  assertEquals(listOf(HistoryEdge("local-current","tip",sameContent=true)),view.edges)
+  assertTrue(local.dirty)
+  assertEquals("未同步云端",local.status)
+  assertFalse(history.currentProtected)
+  assertFalse(history.clean)
+  assertNull(history.baseline)
+  assertNull(history.baselineCommit)
+  assertNull(history.baselineDirection)
+  assertTrue(history.verifiedCommitIds.isEmpty())
+  assertEquals(RemoteVerification.METADATA_ONLY,history.graph.verification)
+  assertTrue(remote.parents.isEmpty())
+
+  val verifiedHistory = history.copy(verifiedCommitIds=setOf("tip"))
+  val verified = HistoryPresentation.from(verifiedHistory,0)
   assertFalse(verified.nodes.single {it.id=="local-current"}.dirty)
-  assertEquals(listOf(HistoryEdge("local-current","tip",sameContent=true)),verified.edges)
+  assertTrue(verifiedHistory.currentProtected)
+  assertEquals(view.edges,verified.edges)
+  assertNull(verifiedHistory.baseline)
+ }
+
+ @Test fun reinstalledStateRequiresTheCompletePathToHashMapForAssociation() {
+  val files = oldFiles + ("badges.dat" to "c".repeat(64))
+  val remote = recorded("tip", "2026-10-01T00:00:00Z", files=files)
+  val differentMaps = listOf(
+   files + ("game1/game.dat" to "b".repeat(64)),
+   files - "badges.dat",
+   files + ("journal.dat" to "d".repeat(64)),
+   mapOf("game2/game.dat" to files.getValue("game1/game.dat"), "badges.dat" to files.getValue("badges.dat")),
+   mapOf("game1/game.dat" to files.getValue("badges.dat"), "badges.dat" to files.getValue("game1/game.dat"))
+  )
+  for (current in differentMaps) {
+   val history = state(listOf(remote),current=current).let { it.copy(
+    graph=it.graph.copy(verification=RemoteVerification.METADATA_ONLY),verifiedCommitIds=emptySet()) }
+   val view = HistoryPresentation.from(history,0)
+   assertTrue(view.edges.none {it.sameContent},"Different paths or bytes must not associate: $current")
+   assertTrue(view.nodes.single {it.id=="local-current"}.dirty)
+   assertFalse(history.currentProtected)
+   assertNull(history.baseline)
+  }
+ }
+
+ @Test fun reinstalledSameContentAssociationIgnoresFileMtimeAndMapIterationOrder() {
+  val files = linkedMapOf("game1/game.dat" to "a".repeat(64),"badges.dat" to "c".repeat(64))
+  val remote = recorded("tip", "2026-10-01T00:00:00Z", files=files,
+   modifiedAt="2026-09-01T00:00:00.123Z")
+  val history = state(listOf(remote),current=files.entries.reversed().associate {it.toPair()}).let { it.copy(
+   graph=it.graph.copy(verification=RemoteVerification.METADATA_ONLY),verifiedCommitIds=emptySet()) }
+  val before = HistoryPresentation.from(history,0)
+  val changedMtime = remote.copy(snapshot=remote.snapshot.copy(metadata=remote.snapshot.metadata!!.copy(
+   fileModifiedAt=files.mapValues {"2026-10-20T12:00:00Z"})))
+  val after = HistoryPresentation.from(history.copy(
+   graph=history.graph.copy(commits=mapOf(changedMtime.id to changedMtime)),
+   summary=history.summary!!.copy(slots=mapOf("game1" to "2026-10-20T12:00:00Z"))),0)
+  assertEquals(before,after)
+  assertEquals(listOf(HistoryEdge("local-current","tip",sameContent=true)),after.edges)
+  assertFalse(history.currentProtected)
+  assertNull(history.baseline)
  }
 
  @Test fun cleanLocalShowsOneSyncedNode() {
