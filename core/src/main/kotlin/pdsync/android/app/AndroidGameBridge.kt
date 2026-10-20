@@ -2,12 +2,36 @@ package pdsync.android.app
 
 import pdsync.i18n.CoreMessages
 import java.nio.file.Path
+import java.util.Collections
+import pdsync.Snapshot
 
 interface AndroidGameBridge {
  fun exportTo(emptyDestination: Path)
  fun restoreFrom(preparedDirectory: Path, expectedCurrentFiles: Map<String, String>)
  fun targetGame(): AndroidGameTarget
  fun beginHomeReadIdentityScope(): AutoCloseable = AutoCloseable {}
+ /** Null is an unsupported capability, with no save mutation or transfer having occurred. */
+ fun restoreVerified(snapshot: Snapshot, expectedCurrentFiles: Map<String, String>): AndroidRestoreReceipt? = null
+}
+
+/**
+ * Successful whole-request verification by the selected backend after its actual readback.
+ * The receipt is operation-local evidence; it is never stored as a reusable live-save cache.
+ */
+class AndroidRestoreReceipt(
+ val target: AndroidGameTarget,
+ files: Map<String, String>,
+ val byteCount: Long
+) {
+ val files: Map<String, String> = Collections.unmodifiableMap(LinkedHashMap(files))
+ init {
+  require(byteCount in 0..pdsync.MAX_SNAPSHOT_BYTES.toLong())
+  require(this.files.size <= pdsync.MAX_SNAPSHOT_FILES)
+  this.files.forEach { (name, digest) ->
+   require(pdsync.safePath(name) && pdsync.Shattered.includes(name) && !pdsync.isDirectoryMetadata(name))
+   require(Regex("[0-9a-f]{64}").matches(digest))
+  }
+ }
 }
 
 data class AndroidGameTarget @JvmOverloads constructor(

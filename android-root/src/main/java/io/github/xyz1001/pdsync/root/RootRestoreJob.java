@@ -33,7 +33,9 @@ public final class RootRestoreJob {
                 if(adapter.pending())throw new RootFailure(Status.RECOVERY_REQUIRED);
                 Incoming incoming=adapter.receive(frame); // Exact archive + outer EOF verified before any live operation.
                 LocalSnapshot before=adapter.capture(adapter.target());
-                if(!SaveArchive.fingerprint(before.tree.hashes()).equals(request.expectedCurrentFingerprint))throw new RootFailure(Status.RESTORE_CONFLICT);
+                String currentFingerprint=SaveArchive.fingerprint(before.tree.hashes());
+                if(!currentFingerprint.equals(request.expectedCurrentFingerprint)
+                        && !currentFingerprint.equals(request.desiredFingerprint))throw new RootFailure(Status.RESTORE_CONFLICT);
                 RootRestoreTransaction.Outcome result=engine.restore(adapter,adapter.target(),incoming,before.tree.hashes());
                 outcome=result==RootRestoreTransaction.Outcome.UNCHANGED?RootProtocol.Outcome.UNCHANGED:
                     result==RootRestoreTransaction.Outcome.RESTORED_CLEANUP_PENDING?RootProtocol.Outcome.RESTORED_CLEANUP_PENDING:RootProtocol.Outcome.RESTORED;

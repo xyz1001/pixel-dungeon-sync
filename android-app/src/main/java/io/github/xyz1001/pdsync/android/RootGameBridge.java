@@ -13,6 +13,8 @@ import java.util.function.BooleanSupplier;
 import pdsync.DirectoryMetadataKt;
 import pdsync.android.app.AndroidGameIdentity;
 import pdsync.android.app.AndroidGameTarget;
+import pdsync.android.app.AndroidRestoreReceipt;
+import pdsync.Snapshot;
 
 /** Short-lived root access adapter. Core comparison, DAV and UUID logic remain unchanged. */
 public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
@@ -52,7 +54,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     public RootGameBridge(SelectedRootGame selected, AndroidGameIdentity identity, TargetVerifier verifier,
             RootProcessTransport.Exchange exchange, BooleanSupplier authorized, File stagingDirectory, boolean mutationSupported) {
         if(selected==null||verifier==null||exchange==null||authorized==null||stagingDirectory==null)throw new IllegalArgumentException(AndroidMessages.ROOT_GAME_BRIDGE_01.text());
-        this.supported=new Capabilities(true,mutationSupported,true,mutationSupported);
+        this.supported=new Capabilities(true,mutationSupported,false,mutationSupported);
         this.selected=selected;this.identity=identity;this.verifier=verifier;this.exchange=exchange;
         this.authorized=authorized;this.stagingDirectory=stagingDirectory;
     }
@@ -88,13 +90,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
         return AndroidMessages.ROOT_GAME_BRIDGE_03.text();
     }
     @Override public Observation observeLifecycle() {
-        try {
-            RootProtocol.Response reply=call(RootProtocol.Command.OBSERVE,null,false);
-            boolean foreground="FOREGROUND".equals(reply.observationState);
-            boolean present=!("ABSENT".equals(reply.observationState)||"UNKNOWN".equals(reply.observationState));
-            boolean quiet="CACHED".equals(reply.observationState)||"ABSENT".equals(reply.observationState);
-            return new Observation(foreground,present,reply.reliable&&quiet,reply.reliable);
-        }catch(Exception unavailable){return Observation.unknown();}
+        return Observation.unknown();
     }
     @Override public void exportTo(Path destination) {
         Path archive=null;
@@ -117,6 +113,52 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
         }catch(BridgeDiagnostics.Failure failure){throw atStage(BridgeDiagnostics.Stage.EXPORT,failure);}
         catch(Exception failure){throw failure("ROOT_EXPORT_FAILED",failure);}
         finally {if(archive!=null)try{Files.deleteIfExists(archive);}catch(IOException ignored){}}
+    }
+    /** Sends the already verified snapshot archive unchanged; the runner owns its sole extraction. */
+    @Override public AndroidRestoreReceipt restoreVerified(Snapshot snapshot, Map<String,String> expectedCurrentFiles) {
+        if (!supported.restoreSupported) throw failure("ROOT_RESTORE_UNSUPPORTED", null);
+        try {
+            AndroidGameTarget target = targetGame();
+            if (expectedCurrentFiles == null || expectedCurrentFiles.size() > 4096)
+                throw failure("ROOT_INVALID_REQUEST", null);
+            for (Map.Entry<String,String> entry : expectedCurrentFiles.entrySet()) {
+                SaveArchiveCodec.validateName(entry.getKey());
+                if (!RootBinding.isHash(entry.getValue())) throw failure("ROOT_INVALID_REQUEST", null);
+            }
+            Map<String,String> desired = new java.util.TreeMap<>(snapshot.getManifest().getFiles());
+            if (desired.size() > 4096) throw failure("ROOT_INVALID_REQUEST", null);
+            for (Map.Entry<String,String> entry : desired.entrySet()) {
+                SaveArchiveCodec.validateName(entry.getKey());
+                if (!RootBinding.isHash(entry.getValue())) throw failure("ROOT_INVALID_REQUEST", null);
+            }
+            byte[] archive = snapshot.getZip();
+            if (archive.length < 22 || archive.length > SaveArchiveCodec.MAX_BYTES)
+                throw failure("ROOT_INVALID_REQUEST", null);
+            String expected = DirectoryMetadataKt.contentSha256(expectedCurrentFiles);
+            String desiredFingerprint = DirectoryMetadataKt.contentSha256(desired);
+            RootProtocol.Request request = new RootProtocol.Request(RootProtocol.Command.RESTORE,
+                    selected.binding(), expected, desiredFingerprint, archive.length);
+            RootProtocol.Response reply;
+            try (InputStream upload = new ByteArrayInputStream(archive)) {
+                reply = call(request, upload, null, false);
+            }
+            if (reply.outcome != RootProtocol.Outcome.RESTORED
+                    && reply.outcome != RootProtocol.Outcome.RESTORED_CLEANUP_PENDING
+                    && reply.outcome != RootProtocol.Outcome.UNCHANGED)
+                throw failure("ROOT_RESTORE_RECEIPT_INVALID", null);
+            if (!desiredFingerprint.equals(reply.contentFingerprint) || desired.size() != reply.fileCount
+                    || reply.contentBytes < 0 || reply.contentBytes > SaveArchiveCodec.MAX_BYTES)
+                throw failure("ROOT_RESTORE_VERIFY_FAILED", null);
+            AndroidGameTarget after = targetGame();
+            if (!target.equals(after)) throw failure("ROOT_TARGET_CHANGED", null);
+            if (reply.outcome == RootProtocol.Outcome.RESTORED_CLEANUP_PENDING)
+                throw failure("ROOT_RESTORE_COMMITTED_CLEANUP_PENDING", BridgeDiagnostics.rootDetail(
+                        reply.diagnosticStage.name(), reply.diagnosticCategory.name(), reply.errno));
+            return new AndroidRestoreReceipt(after, desired, reply.contentBytes);
+        } catch (BridgeDiagnostics.Failure failure) { throw atStage(BridgeDiagnostics.Stage.RESTORE, failure); }
+        catch (Exception failure) {
+            throw atStage(BridgeDiagnostics.Stage.RESTORE, failure("ROOT_RESTORE_FAILED", failure));
+        }
     }
     @Override public void restoreFrom(Path source, Map<String,String> expectedCurrentFiles) {
         if(!supported.restoreSupported)throw failure("ROOT_RESTORE_UNSUPPORTED",null);
@@ -145,8 +187,6 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
             }
             if(reply.outcome!=RootProtocol.Outcome.RESTORED&&reply.outcome!=RootProtocol.Outcome.RESTORED_CLEANUP_PENDING
                     &&reply.outcome!=RootProtocol.Outcome.UNCHANGED)throw failure("ROOT_RESTORE_RECEIPT_INVALID",null);
-            if(reply.outcome==RootProtocol.Outcome.UNCHANGED&&!expected.equals(desiredFingerprint))
-                throw failure("ROOT_RESTORE_RECEIPT_INVALID",null);
             requireInventory(reply,desiredFingerprint,desired.hashes.size(),desired.bytes,"ROOT_RESTORE_VERIFY_FAILED");
             targetGame();
             if(reply.outcome==RootProtocol.Outcome.RESTORED_CLEANUP_PENDING)
@@ -212,8 +252,6 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
                 if(!RootBinding.isHash(reply.contentFingerprint)
                         || !("EMPTY_DIRECTORY".equals(reply.contentState) || "NO_TRANSFERABLE_FILES".equals(reply.contentState)
                         || "ALLOWLISTED_FILES_PRESENT".equals(reply.contentState)))throw failure("ROOT_INVALID_REPLY",null);
-                if(!reply.reliable)throw failure("ROOT_UNRELIABLE",null);
-                if(!("CACHED".equals(reply.observationState)||"ABSENT".equals(reply.observationState)))throw failure("ROOT_BUSY",null);
             }
             return reply;
         }catch(BridgeDiagnostics.Failure failure){diagnostics.failure(command,failure);throw failure;}

@@ -165,8 +165,8 @@
       "sha256": "7befd0892b6a9c28c80652962adb800cb3cccd0631c426e0a7b2b20fd4831a44"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeClient.java": {
-      "size": 27944,
-      "sha256": "32853dc4f67fe566cb4b59db4974e5ba7fb5b71db4e6269f82103486696111c0"
+      "size": 31399,
+      "sha256": "0c90dd69d836caccbdcbaf8a142904537163ca9f2ccbc708ace74044673ed1b3"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeDiagnostics.java": {
       "size": 28655,
@@ -389,8 +389,8 @@
       "sha256": "c1b4d7fead926893696501c1820f072870e3759db0271a71a9eae1b794028468"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/RootGameBridge.java": {
-      "size": 17166,
-      "sha256": "62dcfe2a1c6296aced53c09ef17666b1fcb52207d4d887e605589a10b105e87b"
+      "size": 19636,
+      "sha256": "a92fdd7cab32972a5f11d06fde9603afdf838604e23ecb8920802ab4157214ac"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/RootProcessTransport.java": {
       "size": 7718,
@@ -1950,7 +1950,7 @@
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveBridgeProvider.java": {
       "size": 53041,
-      "sha256": "a658012401b7b63ed46c419ac4241b7b80123016d12820ed2458d4b3d555b13f"
+      "sha256": "cf1611655ad7ae93070a55da7bfa2a2230003e6fea3e6cfac76d3b3ecbc7e216"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveDirectoryPolicy.java": {
       "size": 8704,
@@ -2033,8 +2033,8 @@
       "sha256": "f717849834a6d777dca61b616e41930cbc5dec3347ca6404697998d022b0b41c"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootRestoreJob.java": {
-      "size": 8220,
-      "sha256": "761189e90255317f2b8ea417b256c9b52eb9c213580932608743dbaa5e566407"
+      "size": 8364,
+      "sha256": "37778582d29c7e6f9b5ac3a9e1b5c680c850930953b0f95fbc0935cb65efb759"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootRunner.java": {
       "size": 3327,
@@ -2469,8 +2469,8 @@
       "sha256": "f53aad90df159a1361740e6a212d9fc43efb79e4b51cdbf04aa7cb8ed0b757e3"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidGameBridge.kt": {
-      "size": 1720,
-      "sha256": "f3a24206e2e2383e9a274fc88feebcda04aa84e8aa1ff8df7938706e513d2a32"
+      "size": 2707,
+      "sha256": "e3503536585d0d871f350c45cfdaa9f65ab8b58758e6e8392e96357babbf3ac3"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidGameIdentity.kt": {
       "size": 2791,

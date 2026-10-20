@@ -400,11 +400,11 @@ public final class SaveBridgeProvider extends ContentProvider {
                 File original = mkdir(new File(session.handle.file(), "original"));
                 tree = new SafeSaveTree(transferRoot(), this.guard);
                 SafeSaveTree.State captured = tree.scan(original, true);
-                if (!expected.equals(captured.inventory.fingerprint()))
-                    throw new BridgeFailure("STALE_EXPORT", "Game save no longer matches the exported copy; refresh before restoring");
                 if (captured.inventory.hashes.equals(requested.hashes)) {
                     Bundle result = describe(captured.inventory); result.putBoolean("unchanged", true); result.putInt("restoreResultVersion", 1); return result;
                 }
+                if (!expected.equals(captured.inventory.fingerprint()))
+                    throw new BridgeFailure("STALE_EXPORT", "Game save no longer matches the exported copy; refresh before restoring");
                 backupId = UUID.randomUUID().toString();
                 this.stage = FileFailureDetails.Stage.WRITE_BACKUP; session.handle.validate();
                 writeArchive(original, captured.inventory, new File(this.backups, backupId + ".zip"));

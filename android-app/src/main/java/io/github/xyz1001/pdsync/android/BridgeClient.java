@@ -25,10 +25,12 @@ import pdsync.ReasonedSyncFailure;
 import pdsync.SyncBlockReason;
 import pdsync.android.app.AndroidGameIdentity;
 import pdsync.android.app.AndroidGameTarget;
+import pdsync.android.app.AndroidRestoreReceipt;
+import pdsync.Snapshot;
 
 
 public final class BridgeClient implements GameAccessBackend {
-    private static final Capabilities CAPABILITIES = new Capabilities(true, true, true, true);
+    private static final Capabilities CAPABILITIES = new Capabilities(true, true, false, true);
     private static final long MAX_BYTES = 67108864;
     private static final int MAX_FILES = 4096;
     private final Context context;
@@ -327,15 +329,7 @@ public final class BridgeClient implements GameAccessBackend {
 
     @Override
     public Observation observeLifecycle() {
-        try {
-            Bundle reply = exchange("inspect", null);
-            return new Observation(reply.getBoolean("gameForeground", false),
-                    reply.getBoolean("gameProcessPresent", false),
-                    reply.getBoolean("ready", false),
-                    reply.getBoolean("observationReliable", false));
-        } catch (Exception unused) {
-            return Observation.unknown();
-        }
+        return Observation.unknown();
     }
 
     @Override
@@ -434,6 +428,66 @@ public final class BridgeClient implements GameAccessBackend {
                 throw new Failure(AndroidMessages.BRIDGE_CLIENT_32.text());
         } catch(Failure error) { throw error; }
         catch(Exception error) { throw new Failure(BridgeDiagnostics.Stage.EXPORT,"EXPORT_FAILED",AndroidMessages.BRIDGE_CLIENT_33.text(),error); }
+    }
+
+    @Override
+    public AndroidRestoreReceipt restoreVerified(Snapshot snapshot, Map<String,String> expectedCurrentFiles) {
+        File archive = null;
+        try {
+            if (homeIdentity != null) homeIdentity.requireNoReadScope();
+            if (!supportsRestoreReceipt()) return null;
+            AndroidGameTarget target = targetGame();
+            Map<String,String> desired = new java.util.TreeMap<>(snapshot.getManifest().getFiles());
+            if (desired.size() > MAX_FILES) throw new IOException("Restore inventory exceeds the file limit");
+            for (String name : desired.keySet()) SaveArchiveCodec.validateName(name);
+            String desiredFingerprint = DirectoryMetadataKt.contentSha256(desired);
+            String expected = DirectoryMetadataKt.contentSha256(expectedCurrentFiles);
+            byte[] bytes = snapshot.getZip();
+            if (bytes.length < 22 || bytes.length > MAX_BYTES)
+                throw new IOException("Restore archive exceeds the transfer limit");
+            archive = File.createTempFile("restore-", ".zip", context.getNoBackupFilesDir());
+            java.nio.file.Files.write(archive.toPath(), bytes);
+            try (ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(archive, ParcelFileDescriptor.MODE_READ_ONLY)) {
+                Bundle extras = new Bundle();
+                extras.putParcelable("archive", descriptor);
+                extras.putString("expectedFingerprint", expected);
+                Bundle reply = call("restore", extras);
+                try {
+                    long actualBytes = reply.getLong("byteCount", -1L);
+                    if (reply.getInt("restoreResultVersion", 0) != 1 || reply.containsKey("archive")
+                            || !desiredFingerprint.equals(reply.getString("fingerprint"))
+                            || desired.size() != reply.getInt("fileCount", -1)
+                            || actualBytes < 0 || actualBytes > MAX_BYTES)
+                        throw helperFailure("RESTORE_VERIFY_FAILED", BridgeDiagnostics.Stage.RESTORE, null);
+                    AndroidGameTarget after = targetGame();
+                    if (!target.equals(after))
+                        throw new Failure(BridgeDiagnostics.Stage.TARGET_IDENTITY, "TARGET_IDENTITY_FAILED",
+                                AndroidMessages.BRIDGE_CLIENT_30.text(), null);
+                    return new AndroidRestoreReceipt(after, desired, actualBytes);
+                } finally { closeReply(reply); }
+            }
+        } catch (Failure error) { throw error; }
+        catch (Exception error) {
+            throw new Failure(BridgeDiagnostics.Stage.RESTORE, "RESTORE_FAILED", AndroidMessages.BRIDGE_CLIENT_34.text(), error);
+        } finally { if (archive != null) archive.delete(); }
+    }
+
+    /** The installed runtime, rather than the bundled DEX or a version label, grants this capability. */
+    private boolean supportsRestoreReceipt() throws Exception {
+        if (!embedded()) return false;
+        Bundle reply;
+        try { reply = call("authenticate", null); }
+        catch (Failure unsupported) {
+            if (unsupported.getCause() instanceof IllegalArgumentException
+                    || "UNKNOWN_METHOD".equals(unsupported.code) || "UNSUPPORTED_METHOD".equals(unsupported.code))
+                return false;
+            throw unsupported;
+        }
+        try {
+            return reply.getInt("accessProtocolVersion", 0) == 1 && reply.getBoolean("metadataOnly", false)
+                    && (reply.getBoolean("accessAuthenticated", false) || reply.getBoolean("authenticated", false))
+                    && !reply.containsKey("archive") && reply.getInt("restoreResultVersion", 0) == 1;
+        } finally { closeReply(reply); }
     }
 
     @Override
