@@ -118,47 +118,10 @@ final class AndroidRootRuntime implements RootRuntime {
             throw new MutationOs.Failure(MutationOs.Error.UNSUPPORTED,unavailable);
         }
     }
-    @Override public RootUidState.Observation observe(int boundUid) throws IOException {
-        ProcessBuilder builder = new ProcessBuilder(RootUidState.command(boundUid));
-        builder.redirectErrorStream(true);
-        builder.environment().clear();
-        builder.environment().put("PATH", "/system/bin");
-        builder.environment().put("ANDROID_ROOT", "/system");
-        final java.lang.Process process;
-        try { process = builder.start(); } catch (IOException unavailable) { return RootUidState.Observation.unknown(); }
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        AtomicBoolean invalid = new AtomicBoolean();
-        Thread reader = new Thread(() -> {
-            try (InputStream input = process.getInputStream()) {
-                byte[] buffer = new byte[512]; int n;
-                while ((n = input.read(buffer)) != -1) {
-                    if (n == 0 || bytes.size() + n > RootUidState.MAX_OUTPUT) {
-                        invalid.set(true); process.destroyForcibly(); return;
-                    }
-                    bytes.write(buffer, 0, n);
-                }
-            } catch (IOException failure) { invalid.set(true); }
-        }, "pdsync-root-state-output");
-        reader.setDaemon(true); reader.start();
-        try {
-            process.getOutputStream().close();
-            if (!process.waitFor(RootUidState.TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) return RootUidState.Observation.unknown();
-            reader.join(500);
-            if (reader.isAlive() || invalid.get()) return RootUidState.Observation.unknown();
-            return RootUidState.parse(Build.VERSION.SDK_INT, process.exitValue(), false, bytes.toByteArray());
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt(); return RootUidState.Observation.unknown();
-        } finally {
-            process.destroyForcibly();
-            try { process.getInputStream().close(); } catch (IOException ignored) { }
-            try { process.getErrorStream().close(); } catch (IOException ignored) { }
-            try { process.getOutputStream().close(); } catch (IOException ignored) { }
-        }
+    /** Lifecycle observation is no longer part of transfer authorization. */
+    @Override public RootUidState.Observation observe(int boundUid) {
+        return RootUidState.Observation.unknown();
     }
-    @Override public void quietWait() throws IOException {
-        try { Thread.sleep(2000); }
-        catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt(); throw new RootFailure(RootProtocol.Status.CHANGED, interrupted);
-        }
-    }
+    /** Kept for source compatibility; transfers no longer wait for a quiet period. */
+    @Override public void quietWait() { }
 }

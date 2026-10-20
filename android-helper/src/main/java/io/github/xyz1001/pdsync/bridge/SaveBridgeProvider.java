@@ -7,6 +7,7 @@ import android.content.OperationApplicationException;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
@@ -146,6 +147,8 @@ public final class SaveBridgeProvider extends ContentProvider {
         reply.putBoolean("authenticated", true);
         reply.putBoolean("metadataOnly", true);
         reply.putInt("accessProtocolVersion", 1);
+        reply.putInt("singlePassReadVersion", 1);
+        reply.putInt("restoreResultVersion", 1);
         return reply;
     }
 
@@ -196,27 +199,21 @@ public final class SaveBridgeProvider extends ContentProvider {
     }
 
     private Bundle inspect() throws IOException {
-        GameGuard.Observation observationObserve = this.guard.observe();
+        PackageInfo game = this.guard.installedGame();
         Bundle bundleOk = ok();
-        bundleOk.putBoolean("ready", (observationObserve.gameForeground || pendingPresent()) ? false : true);
+        bundleOk.putBoolean("ready", !pendingPresent());
         describeBinding(bundleOk);
-        bundleOk.putString("gameVersion", observationObserve.game.versionName);
-        bundleOk.putLong("gameVersionCode", AndroidApiCompat.versionCode(observationObserve.game));
-        bundleOk.putBoolean("gameForeground", observationObserve.gameForeground);
-        bundleOk.putBoolean("gameProcessPresent", observationObserve.gameProcessPresent);
-        bundleOk.putBoolean("observationReliable", true);
+        bundleOk.putString("gameVersion", game.versionName);
+        bundleOk.putLong("gameVersionCode", AndroidApiCompat.versionCode(game));
+        bundleOk.putBoolean("gameForeground", false);
+        bundleOk.putBoolean("gameProcessPresent", false);
+        bundleOk.putBoolean("observationReliable", false);
         bundleOk.putBoolean("launchExclusionGuaranteed", false);
         if (pendingPresent()) {
             bundleOk.putBoolean("ok", false);
             bundleOk.putString("code", "RECOVERY_REQUIRED");
             bundleOk.putBoolean("recoveryRequired", true);
             bundleOk.putString("message", "A previous restore was interrupted. Return from the game and recover the original backup before continuing");
-            return bundleOk;
-        }
-        if (observationObserve.gameForeground) {
-            bundleOk.putBoolean("ok", false);
-            bundleOk.putString("code", "GAME_FOREGROUND");
-            bundleOk.putString("message", "Return from the game before syncing its saves");
             return bundleOk;
         }
         File fileRoot = this.guard.root();
@@ -284,7 +281,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         SaveArchive.Inventory empty = new SaveArchive.Inventory(Collections.emptyMap(), 0);
         File archive = new File(workspace, "export.zip");
         writeArchive(emptyTree, empty, archive);
-        guard.requireQuiescent();
+
         if (!parentIdentity.equals(verifySaveParent(saveRoot)) || SaveDirectoryPolicy.present(saveRoot))
             throw new BridgeFailure("SAVE_CHANGED", "Game save directory appeared during empty capture");
         ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(archive, ParcelFileDescriptor.MODE_READ_ONLY);
@@ -312,11 +309,10 @@ public final class SaveBridgeProvider extends ContentProvider {
                 if (current.state == SaveDirectoryPolicy.ContentState.MISSING_DIRECTORY)
                     return exportAbsentSave(fileWorkspace, fileMkdir, saveRoot, parentIdentity, current);
                 SafeSaveTree safeSaveTree = new SafeSaveTree(transferRoot(), this.guard);
-                SafeSaveTree.State stateStable = safeSaveTree.stable(fileMkdir, true);
+                SafeSaveTree.State stateStable = safeSaveTree.scan(fileMkdir, true);
                 this.stage = FileFailureDetails.Stage.WRITE_BACKUP;
                 File file = new File(fileWorkspace, "export.zip");
                 writeArchive(fileMkdir, stateStable.inventory, file);
-                safeSaveTree.unchanged(stateStable, true);
                 ParcelFileDescriptor parcelFileDescriptorOpen = ParcelFileDescriptor.open(file, 268435456);
                 if (!file.delete()) {
                     parcelFileDescriptorOpen.close();
@@ -378,7 +374,7 @@ public final class SaveBridgeProvider extends ContentProvider {
             Map<String,String> currentHashes = null;
             try {
                 this.stage = FileFailureDetails.Stage.READ_ARCHIVE;
-                session.handle.validate(); this.guard.requireQuiescent();
+                session.handle.validate();
                 File incoming = mkdir(new File(session.handle.file(), "incoming"));
                 this.stage = FileFailureDetails.Stage.ARCHIVE_DESCRIPTOR_STAT;
                 StructStat descriptorBefore = Os.fstat(descriptor.getFileDescriptor());
@@ -403,16 +399,16 @@ public final class SaveBridgeProvider extends ContentProvider {
                 session.handle.validate(); this.stage = FileFailureDetails.Stage.CAPTURE;
                 File original = mkdir(new File(session.handle.file(), "original"));
                 tree = new SafeSaveTree(transferRoot(), this.guard);
-                SafeSaveTree.State captured = tree.stable(original, true);
+                SafeSaveTree.State captured = tree.scan(original, true);
                 if (!expected.equals(captured.inventory.fingerprint()))
                     throw new BridgeFailure("STALE_EXPORT", "Game save no longer matches the exported copy; refresh before restoring");
                 if (captured.inventory.hashes.equals(requested.hashes)) {
-                    Bundle result = describe(requested); result.putBoolean("unchanged", true); return result;
+                    Bundle result = describe(captured.inventory); result.putBoolean("unchanged", true); result.putInt("restoreResultVersion", 1); return result;
                 }
                 backupId = UUID.randomUUID().toString();
                 this.stage = FileFailureDetails.Stage.WRITE_BACKUP; session.handle.validate();
                 writeArchive(original, captured.inventory, new File(this.backups, backupId + ".zip"));
-                syncDirectory(this.backups); tree.unchanged(captured, true);
+                syncDirectory(this.backups);
                 this.stage = FileFailureDetails.Stage.WRITE_JOURNAL;
                 writePending(backupId, captured.inventory.fingerprint());
                 journalWritten = true;
@@ -420,7 +416,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                 replace(tree, incoming, requested, session.handle, "removed", true, currentHashes, mutated);
                 this.stage = FileFailureDetails.Stage.FINALIZE;
                 finalizeBackup(backupId); session.committed = true;
-                Bundle result = describe(requested); describeFinalizedBackup(result, backupId); return result;
+                Bundle result = describe(requested); result.putInt("restoreResultVersion", 1); describeFinalizedBackup(result, backupId); return result;
             } catch (IOException | ErrnoException error) {
                 rememberFailure(error);
                 if (session.committed || (backupId != null && !pendingPresent() && finalizedMarkerValid(backupId))) {
@@ -435,7 +431,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                 }
                 if (pendingPresent()) {
                     try {
-                        this.guard.requireQuiescent();
+
                         if (tree == null || currentHashes == null || !currentHashes.equals(tree.scan(null, false).inventory.hashes))
                             throw new BridgeFailure("GAME_SAVE_RACE", "A background writer changed the save; automatic rollback would overwrite it");
                         restorePending(session.handle, "rollback"); session.committed = true;
@@ -487,7 +483,7 @@ public final class SaveBridgeProvider extends ContentProvider {
     }
 
     private Bundle restorePending(RestoreWorkspace.Handle handle, String str) throws IOException, ErrnoException {
-        this.guard.requireQuiescent();
+
         handle.validate();
         this.stage = FileFailureDetails.Stage.READ_ARCHIVE;
         Properties pending = readPending();
@@ -510,8 +506,7 @@ public final class SaveBridgeProvider extends ContentProvider {
             this.stage = FileFailureDetails.Stage.CAPTURE;
             handle.validate();
             SafeSaveTree safeSaveTree = new SafeSaveTree(transferRoot(), this.guard);
-            SafeSaveTree.State stateStable = safeSaveTree.stable(null, false);
-            safeSaveTree.unchanged(stateStable, false);
+            SafeSaveTree.State stateStable = safeSaveTree.scan(null, false);
             replace(safeSaveTree, fileMkdir, inventoryExtract, handle, str + "-removed", false, new TreeMap((SortedMap) stateStable.inventory.hashes), new boolean[]{false});
             this.stage = FileFailureDetails.Stage.FINALIZE;
             finalizeBackup(property);
@@ -542,11 +537,7 @@ public final class SaveBridgeProvider extends ContentProvider {
 
     private void replace(SafeSaveTree safeSaveTree, File file, SaveArchive.Inventory inventory, RestoreWorkspace.Handle handle, String str, boolean z, Map<String, String> map, boolean[] zArr) throws IOException, ErrnoException {
         handle.validate();
-        this.guard.requireQuiescent();
-        File file2 = null;
-        if (!map.equals(safeSaveTree.scan(null, z).inventory.hashes)) {
-            throw new BridgeFailure("GAME_SAVE_RACE", "Save changed immediately before replacement");
-        }
+
         syncTreeDirectories(file);
         File fileMkdir = mkdir(new File(handle.file(), str));
         File[] fileArrListFiles = safeSaveTree.root.listFiles();
@@ -555,22 +546,18 @@ public final class SaveBridgeProvider extends ContentProvider {
         }
         int length = fileArrListFiles.length;
         int i = 0;
-        boolean z2 = false;
         while (i < length) {
             File file3 = fileArrListFiles[i];
             if (SaveArchive.included(file3.getName())) {
                 handle.validate();
-                this.guard.requireQuiescent();
+
                 SafeSaveTree.checkDirectory(safeSaveTree.root);
                 StructStat structStatStat = SafeSaveTree.stat(file3);
                 SafeSaveTree.requireOwner(structStatStat);
                 if (!OsConstants.S_ISDIR(structStatStat.st_mode)) {
                     SafeSaveTree.requireRegular(structStatStat);
                 }
-                if (!z2 && !map.equals(safeSaveTree.scan(file2, z).inventory.hashes)) {
-                    throw new BridgeFailure("GAME_SAVE_RACE", "Save changed immediately before the first mutation");
-                }
-                this.guard.requireQuiescent();
+
                 handle.validate();
                 SafeSaveTree.checkDirectory(fileMkdir);
                 this.stage = FileFailureDetails.Stage.MOVE_OLD;
@@ -583,14 +570,9 @@ public final class SaveBridgeProvider extends ContentProvider {
                 }
                 syncDirectory(fileMkdir);
                 syncDirectory(safeSaveTree.root);
-                this.guard.requireQuiescent();
-                z2 = true;
+
             }
             i++;
-            file2 = null;
-        }
-        if (!map.equals(safeSaveTree.scan(file2, false).inventory.hashes)) {
-            throw new BridgeFailure("GAME_SAVE_RACE", "A background writer changed the save during replacement");
         }
         File[] fileArrListFiles2 = file.listFiles();
         if (fileArrListFiles2 == null) {
@@ -601,7 +583,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         while (i2 < length2) {
             File file4 = fileArrListFiles2[i2];
             handle.validate();
-            this.guard.requireQuiescent();
+
             SafeSaveTree.checkDirectory(safeSaveTree.root);
             if (!SaveArchive.safeName(file4.getName())) {
                 throw new IOException("Unsafe staged root");
@@ -610,10 +592,7 @@ public final class SaveBridgeProvider extends ContentProvider {
             if (Files.exists(file5.toPath(), LinkOption.NOFOLLOW_LINKS)) {
                 throw new BridgeFailure("SAVE_CHANGED", "A save entry appeared during restore");
             }
-            if (!z2 && !map.equals(safeSaveTree.scan(null, false).inventory.hashes)) {
-                throw new BridgeFailure("GAME_SAVE_RACE", "Save changed immediately before the first insertion");
-            }
-            this.guard.requireQuiescent();
+
             handle.validate();
             SafeSaveTree.checkDirectory(file);
             StructStat structStatStat2 = SafeSaveTree.stat(file4);
@@ -630,16 +609,15 @@ public final class SaveBridgeProvider extends ContentProvider {
             }
             syncDirectory(file);
             syncDirectory(safeSaveTree.root);
-            this.guard.requireQuiescent();
+
             i2++;
-            z2 = true;
         }
         this.stage = FileFailureDetails.Stage.VERIFY;
         handle.validate();
-        if (!inventory.hashes.equals(safeSaveTree.stable(null, true).inventory.hashes)) {
+        if (!inventory.hashes.equals(safeSaveTree.scan(null, true).inventory.hashes)) {
             throw new BridgeFailure("RESTORE_VERIFY_FAILED", "Restored files did not match the requested save");
         }
-        this.guard.requireQuiescent();
+
     }
 
     private void writePending(String str, String str2) throws IOException, ErrnoException {

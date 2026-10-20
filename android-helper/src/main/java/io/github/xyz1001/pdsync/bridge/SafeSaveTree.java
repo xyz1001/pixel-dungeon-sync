@@ -27,12 +27,10 @@ import java.util.TreeMap;
 
 
 final class SafeSaveTree {
-    private final GameGuard guard;
     final File root;
 
     SafeSaveTree(File file, GameGuard gameGuard) {
         this.root = file;
-        this.guard = gameGuard;
     }
 
     static final class State {
@@ -49,63 +47,6 @@ final class SafeSaveTree {
         boolean same(State state) {
             return this.inventory.hashes.equals(state.inventory.hashes) && this.metadata.equals(state.metadata);
         }
-    }
-
-    State stable(File file, boolean z) throws IOException {
-        for (int i = 0; i < 3; i++) {
-            try {
-                this.guard.requireQuiescent();
-                State stateScan = scan(null, z);
-                this.guard.requireQuiescent();
-                try {
-                    Thread.sleep(2000L);
-                    this.guard.requireQuiescent();
-                    State stateScan2 = scan(file, z);
-                    this.guard.requireQuiescent();
-                    if (!stateScan.same(stateScan2)) {
-                        throw new BridgeFailure("SAVE_CHANGED", "Save changed during the quiet observation");
-                    }
-                    State stateScan3 = scan(null, z);
-                    this.guard.requireQuiescent();
-                    if (stateScan2.same(stateScan3)) {
-                        return stateScan2;
-                    }
-                    throw new BridgeFailure("SAVE_CHANGED", "Save changed while it was read");
-                } catch (InterruptedException unused) {
-                    Thread.currentThread().interrupt();
-                    throw new BridgeFailure("INTERRUPTED", "Save operation interrupted");
-                }
-            } catch (BridgeFailure e) {
-                if (!"SAVE_CHANGED".equals(e.code) || i == 2) {
-                    throw e;
-                }
-                if (file != null) {
-                    clearCopy(file);
-                }
-            }
-        }
-        throw new AssertionError("Unreachable retry limit");
-    }
-
-    private static void clearCopy(File file) throws IOException {
-        File[] fileArrListFiles = file.listFiles();
-        if (fileArrListFiles == null) {
-            throw new IOException("Cannot clear retry staging directory");
-        }
-        for (File file2 : fileArrListFiles) {
-            if (Files.isDirectory(file2.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-                clearCopy(file2);
-            }
-            Files.delete(file2.toPath());
-        }
-    }
-
-    void unchanged(State state, boolean z) throws IOException {
-        this.guard.requireQuiescent();
-        if (!state.same(scan(null, z))) {
-            throw new BridgeFailure("SAVE_CHANGED", "Save changed after export or backup; operation cancelled");
-        }
-        this.guard.requireQuiescent();
     }
 
     State scan(File file, boolean z) throws IOException {

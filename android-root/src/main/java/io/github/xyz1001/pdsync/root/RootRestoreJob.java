@@ -19,12 +19,11 @@ public final class RootRestoreJob {
             if(runtime.effectiveUid()!=0)throw new RootFailure(Status.NOT_ROOT);
             if(request.command!=Command.RESTORE&&request.command!=Command.RECOVER)throw new RootFailure(Status.INVALID_REQUEST);
             stage=DiagnosticStage.PM_BINDING; requireFullBinding(request.binding);
-            stage=DiagnosticStage.UID_STATE; requireQuiet(request.binding);
             stage=DiagnosticStage.NATIVE_LOAD;
             MutationOs os=runtime.mutationOs(request.binding);
             stage=DiagnosticStage.PRIVATE_WORKSPACE;
             adapter=new RootRestoreAdapter(os,request.binding,new RootRestoreAdapter.Gate(){
-                public void requireSafe(RootBinding binding)throws IOException{runtime.verifyInstalledMetadata(binding);requireQuiet(binding);}
+                public void requireSafe(RootBinding binding)throws IOException{runtime.verifyInstalledMetadata(binding);}
                 public void quietWait()throws IOException{runtime.quietWait();}
             });
             stage=DiagnosticStage.NONE;
@@ -53,10 +52,8 @@ public final class RootRestoreJob {
             stage=DiagnosticStage.PM_BINDING;requireFullBinding(request.binding);
             adapter.verifyBindingAndQuiescent(adapter.target());
             long bytes=0;for(Entry entry:verified.tree.entries.values())if(!entry.directory())bytes+=entry.content.bytes;
-            RootUidState.Observation observed=runtime.observe(request.binding.uid);
-            if(!observed.reliable||!observed.quiescent())throw new RootFailure(Status.CHANGED);
             Response result=new Response(Status.OK,request.binding.fingerprint(),verified.tree.hashes().isEmpty()?"EMPTY_DIRECTORY":"ALLOWLISTED_FILES_PRESENT",
-                verified.tree.hashes().size(),bytes,SaveArchive.fingerprint(verified.tree.hashes()),observed.state,true,null).withRequest(request,outcome);
+                verified.tree.hashes().size(),bytes,SaveArchive.fingerprint(verified.tree.hashes()),"UNKNOWN",false,null).withRequest(request,outcome);
             if(outcome==RootProtocol.Outcome.RESTORED_CLEANUP_PENDING||outcome==RootProtocol.Outcome.RECOVERED_CLEANUP_PENDING)
                 result=result.withDiagnostic(DiagnosticStage.CLEANUP,DiagnosticCategory.IO,0);
             return result;
@@ -69,11 +66,6 @@ public final class RootRestoreJob {
     }
     private void requireFullBinding(RootBinding expected)throws IOException {
         if(!expected.matchesInstalled(runtime.installed(expected)))throw new RootFailure(Status.BINDING_MISMATCH);
-    }
-    private void requireQuiet(RootBinding binding)throws IOException {
-        RootUidState.Observation state=runtime.observe(binding.uid);
-        if(!state.reliable)throw new RootFailure(Status.UNRELIABLE);
-        if(!state.quiescent())throw new RootFailure(Status.BUSY);
     }
     static Response failure(Request request,Throwable failure,DiagnosticStage stage) {
         Status status=request.command==Command.RECOVER?Status.RECOVERY_FAILED:Status.RESTORE_FAILED;

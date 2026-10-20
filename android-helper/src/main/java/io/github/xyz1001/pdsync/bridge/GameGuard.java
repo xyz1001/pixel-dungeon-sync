@@ -12,11 +12,7 @@ import java.util.Iterator;
 import java.util.List;
 
 
-/** A dedicated process still initializes the original game's Application.
- * It can start background work or touch saves; observation cannot prove launch
- * exclusion. The transaction layer therefore keeps repeated hash checks and
- * refuses foreground, ambiguous, racing, and unobservable process states.
- */
+/** Bound package and save-path identity. Transfers do not poll game lifecycle state. */
 final class GameGuard {
     static final String MAIN = "io.github.xyz1001.pdsync.android";
     private GameBinding binding;
@@ -98,77 +94,9 @@ final class GameGuard {
         }
     }
 
-    static final class Observation {
-        final PackageInfo game;
-        final boolean gameForeground;
-        final boolean gameProcessPresent;
-
-        Observation(PackageInfo packageInfo, boolean z, boolean z2) {
-            this.game = packageInfo;
-            this.gameForeground = z;
-            this.gameProcessPresent = z2;
-        }
-    }
-
-    Observation observe() throws BridgeFailure {
-        PackageInfo packageInfoInstalledGame = installedGame();
-        GameBinding gameBindingBinding = binding();
-        try {
-            ActivityManager activityManager = (ActivityManager) this.context.getSystemService("activity");
-            List<ActivityManager.RunningAppProcessInfo> runningAppProcesses = activityManager == null ? null : activityManager.getRunningAppProcesses();
-            if (runningAppProcesses == null) {
-                throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Game UID process visibility is unavailable");
-            }
-            List<ActivityManager.ProcessErrorStateInfo> processesInErrorState = activityManager.getProcessesInErrorState();
-            if (processesInErrorState != null) {
-                Iterator<ActivityManager.ProcessErrorStateInfo> it = processesInErrorState.iterator();
-                while (it.hasNext()) {
-                    if (it.next().uid == Process.myUid()) {
-                        throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "A game UID process is crashing or unresponsive");
-                    }
-                }
-            }
-            boolean z = false;
-            boolean z2 = false;
-            boolean z3 = false;
-            for (ActivityManager.RunningAppProcessInfo runningAppProcessInfo : runningAppProcesses) {
-                if (runningAppProcessInfo.uid == Process.myUid()) {
-                    if (runningAppProcessInfo.pid == Process.myPid()) {
-                        if (!gameBindingBinding.isHelperProcess(runningAppProcessInfo.processName, runningAppProcessInfo.pkgList)) {
-                            throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Bridge process identity is ambiguous");
-                        }
-                        z = true;
-                    } else {
-                        if (!gameBindingBinding.isGameProcess(runningAppProcessInfo.processName, runningAppProcessInfo.pkgList)) {
-                            throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "An unknown process is running in the game UID");
-                        }
-                        if (GameBinding.blocksTransfer(runningAppProcessInfo.importance)) {
-                            z2 = true;
-                        }
-                        z3 = true;
-                    }
-                }
-            }
-            if (!z) {
-                throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Cannot verify bridge process visibility");
-            }
-            return new Observation(packageInfoInstalledGame, z2, z3);
-        } catch (SecurityException e) {
-            throw new BridgeFailure("PROCESS_STATE_UNKNOWN", "Game UID process observation was denied", e);
-        }
-    }
-
-    PackageInfo requireQuiescent() throws BridgeFailure {
-        Observation observationObserve = observe();
-        if (observationObserve.gameForeground) {
-            throw new BridgeFailure("GAME_FOREGROUND", "Return from the game before syncing its saves");
-        }
-        return observationObserve.game;
-    }
-
     File root() throws BridgeFailure {
         try {
-            return binding().saveRoot(requireQuiescent().applicationInfo.dataDir, this.context.getApplicationInfo().dataDir);
+            return binding().saveRoot(installedGame().applicationInfo.dataDir, this.context.getApplicationInfo().dataDir);
         } catch (IOException e) {
             throw new BridgeFailure("SAVE_ROOT_UNKNOWN", "Cannot resolve Android private game directory", e);
         }

@@ -311,7 +311,7 @@ public final class RootRestoreTransaction {
         Lease lock(Target target) throws IOException;
         void verifyBindingAndQuiescent(Target target) throws IOException;
         Journal readJournal(Target target) throws IOException;
-        /** Stable repeated content/metadata inventory, including the actual save-root attributes. */
+        /** One bounded content inventory, including the actual save-root attributes. */
         LocalSnapshot capture(Target target) throws IOException;
         /**
          * Before any live mutation: create root-private same-device staging under pinned dataDir;
@@ -321,8 +321,13 @@ public final class RootRestoreTransaction {
          * its own exact receipt; it must never mutate LIVE or leave an untracked workspace.
          */
         Workspace prepare(Target target, String transactionId, Incoming incoming, Tree desired, Tree before) throws IOException;
-        /** Fresh bounded scans of all areas; also verifies immutable backup and workspace identity. */
+        /** Full-area inspection for an interrupted or failed transaction. */
         Layout inspect(Workspace workspace) throws IOException;
+        /** Exactly one final readback on the normal path; adapters may avoid reading private copies. */
+        default void verifyFinal(Workspace workspace, Tree expected) throws IOException {
+            require(inspect(workspace).live.equals(expected), Code.CONCURRENT_MUTATION,
+                    "Final live save does not match the transaction");
+        }
         /**
          * Recheck source contents/metadata/identity and destination absence, then one atomic
          * no-replace top-level rename; fsync both parents. Android requires a proven atomic
@@ -372,11 +377,10 @@ public final class RootRestoreTransaction {
             Journal journal = new Journal(Journal.SCHEMA, workspace, local.tree, desired, Phase.FORWARD, 0);
             boolean publicationAttempted = false;
             try {
-                verify(files, journal, 0);
                 publicationAttempted = true;
                 files.saveJournal(null, journal);
                 while (journal.cursor < journal.moves.size()) journal = advance(files, journal);
-                verify(files, journal, journal.cursor);
+                files.verifyFinal(journal.workspace, journal.desired);
                 Journal terminal = journal.at(Phase.COMMITTED, journal.cursor);
                 files.saveJournal(journal, terminal);
                 return finish(files, terminal);
@@ -428,14 +432,13 @@ public final class RootRestoreTransaction {
     }
 
     private Journal advance(FileAccess files, Journal journal) throws IOException {
-        verify(files, journal, journal.cursor);
+        files.verifyBindingAndQuiescent(journal.workspace.target);
         boolean forward = journal.phase == Phase.FORWARD;
         int index = forward ? journal.cursor : journal.cursor - 1;
         require(index >= 0 && index < journal.moves.size(), Code.INVALID_INPUT, "Transaction has no next move");
         Move move = journal.moves.get(index);
         files.move(journal.workspace, forward ? move : move.reverse());
         int nextCursor = journal.cursor + (forward ? 1 : -1);
-        verify(files, journal, nextCursor);
         Journal next = journal.at(journal.phase, nextCursor);
         files.saveJournal(journal, next);
         return next;
@@ -448,7 +451,7 @@ public final class RootRestoreTransaction {
             files.saveJournal(reconciled, next); reconciled = next;
         }
         while (reconciled.cursor > 0) reconciled = advance(files, reconciled);
-        verify(files, reconciled, 0);
+        files.verifyFinal(reconciled.workspace, reconciled.before);
         Journal terminal = reconciled.at(Phase.ROLLED_BACK, 0);
         files.saveJournal(reconciled, terminal);
         return finish(files, terminal);

@@ -309,7 +309,6 @@ public final class RootProtocol {
         boolean unchanged=response.outcome==Outcome.UNCHANGED;
         if((restoreApplied||recoveryApplied||unchanged) && (response.status!=Status.OK||response.archiveLength!=0
                 || !RootBinding.isHash(response.bindingFingerprint)||!RootBinding.isHash(response.contentFingerprint)
-                || !response.reliable||!response.observationState.matches("CACHED|ABSENT")
                 || !response.contentState.matches("EMPTY_DIRECTORY|NO_TRANSFERABLE_FILES|ALLOWLISTED_FILES_PRESENT")))
             throw new IOException("Invalid applied root receipt");
         if(restoreApplied&&(response.command!=Command.RESTORE||!RootBinding.isHash(response.expectedCurrentFingerprint)||!RootBinding.isHash(response.desiredFingerprint)))

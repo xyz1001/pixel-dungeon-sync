@@ -31,6 +31,11 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     private MutationOs.Handle active;
     private final Map<String,MutationOs.Handle> areas = new HashMap<>();
     private boolean engineLease, closed, unknown;
+    /** One job owns the session lock. Reuse its capture until the first live mutation. */
+    private LocalSnapshot captured;
+    private Scan capturedScan;
+    private Map<String,byte[]> capturedBytes;
+    private boolean finalReadback;
     private static final String[] PRIVATE_AREAS = {"incoming", "displaced", "backup", "cleanup"};
     private RootProtocol.DiagnosticStage stage = RootProtocol.DiagnosticStage.NONE;
     public RootProtocol.DiagnosticStage stage() { return stage; }
@@ -74,8 +79,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             for(Map.Entry<String,String> item:inventory.hashes.entrySet()) {
                 try(Parent parent=parent(archiveInput,item.getKey());MutationOs.Handle file=os.openRegular(parent.handle,basename(item.getKey()),false)) {
                     Stat stat=os.stat(file);if(!stat.regular()||stat.uid!=0||stat.links!=1||stat.size<0||stat.size>SaveArchive.MAX_BYTES-total)throw new IOException("Unsafe archive staging");
-                    byte[] bytes=read(file,(int)stat.size);same(stat,os.stat(file));
-                    if(!SaveArchive.sha256(bytes).equals(item.getValue()))throw new IOException("Archive staging changed");
+                    // The archive reader already hashed and fsynced these private files.
                     total+=stat.size;content.put(item.getKey(),new Content(item.getValue(),stat.size,Math.max(0,stat.modifiedSeconds*1000)));
                 }
             }
@@ -141,12 +145,12 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     @Override public LocalSnapshot capture(Target expected) throws IOException {
         stage = RootProtocol.DiagnosticStage.LAYOUT_SCAN;
         verifyBindingAndQuiescent(expected);
-        Scan before = scan(session.filesHandle(), true);
-        gate.quietWait(); verifyBindingAndQuiescent(expected);
-        Scan after = scan(session.filesHandle(), true);
-        if (!before.same(after)) throw new Failure(Code.CONCURRENT_MUTATION, "Save changed during capture");
-        SaveArchive.requireCompleteRuns(after.tree.hashes().keySet());
-        return new LocalSnapshot(after.tree, attributes(session.filesHandle()));
+        if (captured != null) return captured;
+        capturedBytes = new TreeMap<>();
+        capturedScan = scan(session.filesHandle(), true, capturedBytes);
+        SaveArchive.requireCompleteRuns(capturedScan.tree.hashes().keySet());
+        captured = new LocalSnapshot(capturedScan.tree, attributes(session.filesHandle()));
+        return captured;
     }
     @Override public Workspace prepare(Target expected, String transactionId, Incoming incoming,
             Tree desired, Tree before) throws IOException {
@@ -158,8 +162,9 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             if (!receiving && !cleanState()) throw new Failure(Code.RECOVERY_REQUIRED,"Private preparation already exists");
             for (String name : new String[]{RECEIPT,PREPARED,"terminal"}) removeRecordIfPresent(active,name);
         }
-        Scan live = scan(session.filesHandle(), true);
-        if (!live.tree.equals(before)) throw new Failure(Code.CONCURRENT_MUTATION, "Save changed before preparation");
+        if (capturedScan == null || capturedBytes == null || !capturedScan.tree.equals(before))
+            throw new IOException("Restore preparation has no matching captured source");
+        Scan live = capturedScan;
         // The receipt is persisted before any live save mutation. All directories are created privately.
         if (optional(session.workspaceHandle(), ACTIVE) == null) os.mkdirExclusive(session.workspaceHandle(), ACTIVE, 0700);
         os.sync(session.workspaceHandle()); openActive(); setPhase("PREPARING", transactionId);
@@ -172,12 +177,12 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
                 if (!os.children(areas.get(area),1).isEmpty()) throw new Failure(Code.UNSAFE_WORKSPACE,"Private area not empty");
             }
             stage = RootProtocol.DiagnosticStage.MUTATION_PREFLIGHT; preflight();
-            stage = RootProtocol.DiagnosticStage.STAGE_PREPARE; writeTree(areas.get("incoming"), desired, incomingSource);
-            stage = RootProtocol.DiagnosticStage.BACKUP_COPY; writeTree(areas.get("backup"), before, name -> readLiveBytes(name));
-            Scan staged = scan(areas.get("incoming"), false), backup = scan(areas.get("backup"), false);
-            if (!staged.tree.equals(desired) || !backup.tree.equals(before)) throw new IOException("Private copies differ");
-            Scan unchanged = scan(session.filesHandle(), true);
-            if (!unchanged.same(live)) throw new Failure(Code.CONCURRENT_MUTATION, "Save changed during backup");
+            stage = RootProtocol.DiagnosticStage.STAGE_PREPARE;
+            Scan staged = writeTree(areas.get("incoming"), desired, incomingSource);
+            stage = RootProtocol.DiagnosticStage.BACKUP_COPY;
+            Scan backup = writeTree(areas.get("backup"), before, name -> capturedBytes.get(name));
+            incomingSource = null;
+            capturedBytes = null;
             if (archiveInput != null) { archiveInput.close(); archiveInput=null; clearFresh(active,"archive-input",new int[]{0}); }
             receipt = new Receipt(transactionId, target, stable(os.stat(active)), areaIdentities(), live.ids, staged.ids, backup.ids);
             byte[] encoded = receipt.encode();
@@ -227,6 +232,19 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         verifyBindingAndQuiescent(target);
         return new Layout(live.tree, incoming.tree, displaced.tree, backup.tree);
     }
+    /** Normal completion hashes LIVE once. Full-area inspection is reserved for recovery. */
+    @Override public void verifyFinal(Workspace workspace, Tree expected) throws IOException {
+        verifyBindingAndQuiescent(target); load(workspace);
+        stage = RootProtocol.DiagnosticStage.VERIFY;
+        Scan live = scan(session.filesHandle(), true);
+        if (!live.tree.equals(expected))
+            throw new Failure(Code.CONCURRENT_MUTATION, "Restored save did not match the requested content");
+        known(live.ids, receipt.before, receipt.desired);
+        capturedScan = live;
+        captured = new LocalSnapshot(live.tree, attributes(session.filesHandle()));
+        capturedBytes = null;
+        finalReadback = true;
+    }
     private static void known(Map<String,String> actual, Map<String,String> first, Map<String,String> second) throws IOException {
         for (Map.Entry<String,String> item : actual.entrySet())
             if (!item.getValue().equals(first.get(item.getKey())) && (second == null || !item.getValue().equals(second.get(item.getKey()))))
@@ -238,18 +256,25 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     @Override public void move(Workspace workspace, Move move) throws IOException {
         verifyBindingAndQuiescent(target); load(workspace);
         MutationOs.Handle from = area(move.from), to = area(move.to);
-        Scan source = scanPart(from, move.topName);
-        if (!source.tree.equals(move.expectedEntry)) throw new Failure(Code.CONCURRENT_MUTATION, "Move source changed");
-        known(source.ids, move.from == Area.INCOMING ? receipt.desired : receipt.before,
-                move.from == Area.LIVE ? receipt.desired : null);
+        Stat source = os.childStat(from, move.topName); gameOwned(source);
+        Entry expected = move.expectedEntry.entries.get(move.topName);
+        if (expected == null || expected.directory() != source.directory()
+                || (!expected.directory() && (!source.regular() || source.links != 1)))
+            throw new Failure(Code.CONCURRENT_MUTATION, "Move source type changed");
+        String sourceId = stable(source);
+        Map<String,String> allowed = move.from == Area.INCOMING ? receipt.desired : receipt.before;
+        if (!sourceId.equals(allowed.get(move.topName))
+                && !(move.from == Area.LIVE && sourceId.equals(receipt.desired.get(move.topName))))
+            throw new Failure(Code.CONCURRENT_MUTATION, "Move source identity changed");
         if (optional(to, move.topName) != null) throw new Failure(Code.CONCURRENT_MUTATION, "Move destination already exists");
         verifyBindingAndQuiescent(target);
         stage = move.to == Area.LIVE ? RootProtocol.DiagnosticStage.MOVE_NEW : RootProtocol.DiagnosticStage.MOVE_OLD;
+        captured = null; capturedScan = null; capturedBytes = null; finalReadback = false;
         os.renameNoReplace(from, move.topName, to, move.topName);
         try {
             os.sync(from); os.sync(to);
-            Scan moved = scanPart(to, move.topName);
-            if (!source.same(moved)) throw new Failure(Code.CONCURRENT_MUTATION, "Raced move source is preserved");
+            if (!sourceId.equals(stable(os.childStat(to, move.topName))))
+                throw new Failure(Code.CONCURRENT_MUTATION, "Raced move source is preserved");
             verifyBindingAndQuiescent(target);
         } catch (IOException failure) { unknown = true; throw failure; }
     }
@@ -273,9 +298,8 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         verifyBindingAndQuiescent(target); load(terminal.workspace);
         session.cleanupJournalTemporaries();requireWorkspaceNames();
         Layout expected = terminal.expectedLayout(terminal.cursor);
-        Scan live = scan(session.filesHandle(),true);
-        if (!live.tree.equals(expected.live)) throw new Failure(Code.CONCURRENT_MUTATION,"Final live save changed; private backup retained");
-        known(live.ids,receipt.before,receipt.desired);
+        if (!finalReadback || captured == null || !captured.tree.equals(expected.live))
+            verifyFinal(terminal.workspace, expected.live);
         byte[] terminalBytes = RestoreJournalCodec.encode(terminal);
         if (optional(active,"terminal") == null) writeNew(active,"terminal",terminalBytes,null,0);
         else if (!Arrays.equals(readPrivateBytes(active,"terminal",RestoreJournalCodec.MAX_BYTES),terminalBytes))
@@ -321,8 +345,8 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         try(MutationOs.Handle handle=entry.directory()?os.openDirectory(parent,leaf):os.openRegular(parent,leaf,false)) {
             if(!stable(os.stat(handle)).equals(expectedId)||!entry.attributes.equals(attributes(handle)))throw new Failure(Code.CONCURRENT_MUTATION,"Private cleanup metadata changed");
             if(entry.directory()) { if(!os.children(handle,1).isEmpty())throw new Failure(Code.CONCURRENT_MUTATION,"Private cleanup directory gained content"); }
-            else if(stat.links!=1||stat.size!=entry.content.bytes||Math.max(0,stat.modifiedSeconds*1000)!=entry.content.modifiedMillis||!SaveArchive.sha256(read(handle,(int)stat.size)).equals(entry.content.sha256))
-                throw new Failure(Code.CONCURRENT_MUTATION,"Private cleanup bytes changed");
+            else if(!stat.regular()||stat.links!=1)
+                throw new Failure(Code.CONCURRENT_MUTATION,"Private cleanup file type changed");
             same(stat,os.stat(handle));same(stat,os.childStat(parent,leaf));
         }
     }
@@ -409,19 +433,17 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         os.renameNoReplace(active, "probe-a", active, "probe-c");
         os.rmdir(active, "probe-b"); os.rmdir(active, "probe-c"); os.sync(active);
     }
-    private byte[] readLiveBytes(String name) throws IOException {
-        try (RootMutationSession.LiveFile file = session.openLive(name)) { return session.readLive(file, (int)SaveArchive.MAX_BYTES); }
-    }
-    private void writeTree(MutationOs.Handle root, Tree tree, IncomingSource source) throws IOException {
+    private Scan writeTree(MutationOs.Handle root, Tree tree, IncomingSource source) throws IOException {
+        Map<String,String> ids = new TreeMap<>();
         for (Map.Entry<String,Entry> item : tree.entries.entrySet()) {
             String path = item.getKey(); Entry entry = item.getValue();
             try (Parent parent = parent(root, path)) {
                 if (entry.directory()) os.mkdirExclusive(parent.handle, basename(path), 0700);
                 else {
                     byte[] bytes = source.read(path);
-                    if (bytes.length != entry.content.bytes || !SaveArchive.sha256(bytes).equals(entry.content.sha256))
+                    if (bytes == null || bytes.length != entry.content.bytes || !SaveArchive.sha256(bytes).equals(entry.content.sha256))
                         throw new Failure(Code.CONCURRENT_MUTATION, "Copy source differs");
-                    writeNew(parent.handle, basename(path), bytes, entry.attributes, entry.content.modifiedMillis);
+                    ids.put(path, stable(writeNew(parent.handle, basename(path), bytes, entry.attributes, entry.content.modifiedMillis)));
                 }
             }
         }
@@ -430,12 +452,15 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         for (String name : names) if (tree.entries.get(name).directory()) {
             try (Parent parent = parent(root, name); MutationOs.Handle directory = os.openDirectory(parent.handle, basename(name))) {
                 apply(directory, tree.entries.get(name).attributes); os.sync(directory);
+                ids.put(name, stable(os.stat(directory)));
             }
         }
         os.sync(root);
+        return new Scan(tree, ids);
     }
-    private void writeNew(MutationOs.Handle parent, String name, byte[] bytes, Attributes attrs, long modified) throws IOException {
+    private Stat writeNew(MutationOs.Handle parent, String name, byte[] bytes, Attributes attrs, long modified) throws IOException {
         if (bytes == null || bytes.length > Math.max(SaveArchive.MAX_BYTES, RestoreJournalCodec.MAX_BYTES)) throw new IOException("Copy exceeds limit");
+        Stat written;
         try (MutationOs.Handle file = os.createExclusive(parent, name, 0600)) {
             Stat created = os.stat(file);
             if (!created.regular() || created.uid != 0 || created.links != 1 || created.device != target.device) throw new IOException("Unsafe private file");
@@ -443,8 +468,10 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             while (offset < bytes.length) { int n = os.write(file, bytes, (int)offset, bytes.length-(int)offset, offset); if (n <= 0) throw new IOException("Short private write"); offset += n; }
             if (attrs != null) { apply(file, attrs); os.setModifiedTime(file, modified); }
             os.sync(file);
+            written = os.stat(file);
         }
         os.sync(parent);
+        return written;
     }
     private void apply(MutationOs.Handle handle, Attributes attrs) throws IOException {
         if (attrs.uid != binding.uid || (attrs.mode & 0002) != 0 || ((attrs.mode & 0020) != 0 && attrs.gid != binding.uid))
@@ -469,39 +496,42 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         boolean same(Scan other) { return tree.equals(other.tree) && ids.equals(other.ids); }
     }
     private Scan scan(MutationOs.Handle root, boolean live) throws IOException {
+        return scan(root, live, null);
+    }
+    private Scan scan(MutationOs.Handle root, boolean live, Map<String,byte[]> content) throws IOException {
         if (live) {
-            SaveDirectoryPolicy.Content content = session.rootContent();
-            if (!content.transferable()) throw new RootFailure(RootProtocol.Status.UNRECOGNIZED_LAYOUT);
+            SaveDirectoryPolicy.Content layout = session.rootContent();
+            if (!layout.transferable()) throw new RootFailure(RootProtocol.Status.UNRECOGNIZED_LAYOUT);
         } else privateRoot(root);
         Map<String,Entry> entries = new TreeMap<>(); Map<String,String> ids = new TreeMap<>();
-        walk(root,"",entries,ids,new HashSet<>(),new long[]{0},new int[]{0},live);
+        walk(root,"",entries,ids,new HashSet<>(),new long[]{0},new int[]{0},live,content);
         return new Scan(new Tree(entries), ids);
     }
     private Scan scanPart(MutationOs.Handle root, String top) throws IOException {
         Map<String,Entry> entries = new TreeMap<>(); Map<String,String> ids = new TreeMap<>();
-        readEntry(root, top, top, entries, ids, new HashSet<>(), new long[]{0}, new int[]{0});
+        readEntry(root, top, top, entries, ids, new HashSet<>(), new long[]{0}, new int[]{0}, null);
         return new Scan(new Tree(entries), ids);
     }
     private void walk(MutationOs.Handle directory, String prefix, Map<String,Entry> entries, Map<String,String> ids,
-            Set<String> folded, long[] bytes, int[] count, boolean liveRoot) throws IOException {
+            Set<String> folded, long[] bytes, int[] count, boolean liveRoot, Map<String,byte[]> content) throws IOException {
         Stat before = os.stat(directory);
         List<String> names = new ArrayList<>(os.children(directory, SaveArchive.MAX_ENTRIES)); Collections.sort(names);
         for (String leaf : names) {
             String path = prefix.isEmpty() ? leaf : prefix + "/" + leaf;
             if (liveRoot && !SaveArchive.included(path)) continue;
-            readEntry(directory,leaf,path,entries,ids,folded,bytes,count);
+            readEntry(directory,leaf,path,entries,ids,folded,bytes,count,content);
         }
         if (!before.identity().equals(os.stat(directory).identity())) throw new Failure(Code.CONCURRENT_MUTATION,"Directory changed during scan");
     }
     private void readEntry(MutationOs.Handle parent, String leaf, String path, Map<String,Entry> entries,
-            Map<String,String> ids, Set<String> folded, long[] total, int[] count) throws IOException {
+            Map<String,String> ids, Set<String> folded, long[] total, int[] count, Map<String,byte[]> content) throws IOException {
         if (!SaveArchive.safeName(path) || !folded.add(path.toLowerCase(Locale.ROOT)) || ++count[0] > SaveArchive.MAX_ENTRIES)
             throw new RootFailure(RootProtocol.Status.UNSAFE_PATH);
         Stat before = os.childStat(parent,leaf); gameOwned(before);
         if (before.directory()) {
             try (MutationOs.Handle directory = os.openDirectory(parent,leaf)) {
                 same(before,os.stat(directory)); entries.put(path,new Entry(attributes(directory),null)); ids.put(path,stable(before));
-                walk(directory,path,entries,ids,folded,total,count,false);
+                walk(directory,path,entries,ids,folded,total,count,false,content);
             }
         } else {
             if (!before.regular() || before.links != 1 || before.size < 0 || before.size > SaveArchive.MAX_BYTES-total[0])
@@ -509,6 +539,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             try (MutationOs.Handle file = os.openRegular(parent,leaf,false)) {
                 same(before,os.stat(file)); byte[] bytes=read(file,(int)before.size); same(before,os.stat(file));
                 total[0]+=bytes.length; entries.put(path,new Entry(attributes(file),new Content(SaveArchive.sha256(bytes),bytes.length, Math.max(0,before.modifiedSeconds*1000)))); ids.put(path,stable(before));
+                if (content != null) content.put(path, bytes);
             }
         }
         same(before,os.childStat(parent,leaf));

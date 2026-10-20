@@ -44,38 +44,21 @@ public final class RootService {
                 guard.requireClear();
                 if(request.command==RootProtocol.Command.OBSERVE) {
                     stage=RootProtocol.DiagnosticStage.ROOT_OPEN;tree.probe();
-                    stage=RootProtocol.DiagnosticStage.UID_STATE;
-                    RootUidState.Observation observed=runtime.observe(request.binding.uid);
-                    if(!observed.reliable)throw new RootFailure(RootProtocol.Status.UNRELIABLE);
                     stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
                     stage=RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE;guard.requireClear();guard.revalidate();
-                    return readReply(request,"",0,0,"",observed.state,true,null);
+                    return readReply(request,"",0,0,"","UNKNOWN",false,null);
                 }
                 boolean export=request.command==RootProtocol.Command.EXPORT;
                 if(!export&&request.command!=RootProtocol.Command.INSPECT)throw new RootFailure(RootProtocol.Status.INVALID_REQUEST);
-                stage=RootProtocol.DiagnosticStage.UID_STATE;
-                RootUidState.Observation observation=runtime.observe(request.binding.uid);
-                if(export)requireQuiet(observation);
-                stage=RootProtocol.DiagnosticStage.LAYOUT_SCAN;
-                RootSaveTree.Snapshot before=tree.scan(false);
-                runtime.quietWait();
-                stage=RootProtocol.DiagnosticStage.UID_STATE;observation=runtime.observe(request.binding.uid);
-                if(export)requireQuiet(observation);
                 stage=RootProtocol.DiagnosticStage.LAYOUT_SCAN;
                 RootSaveTree.Snapshot captured=tree.scan(export);
-                if(!before.same(captured))throw new RootFailure(RootProtocol.Status.CHANGED);
                 stage=RootProtocol.DiagnosticStage.ARCHIVE_READ;
                 byte[] archive=export?tree.archive(captured):null;
-                stage=RootProtocol.DiagnosticStage.LAYOUT_SCAN;
-                RootSaveTree.Snapshot after=tree.scan(false);
-                if(!captured.same(after))throw new RootFailure(RootProtocol.Status.CHANGED);
-                stage=RootProtocol.DiagnosticStage.UID_STATE;observation=runtime.observe(request.binding.uid);
-                if(export)requireQuiet(observation);
                 stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
                 stage=RootProtocol.DiagnosticStage.ROOT_OPEN;tree.requireRootIdentity(captured);
                 stage=RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE;guard.requireClear();guard.revalidate();
                 return readReply(request,captured.contentState,captured.inventory.hashes.size(),captured.inventory.bytes,
-                        captured.inventory.fingerprint(),observation.state,observation.reliable,archive);
+                        captured.inventory.fingerprint(),"UNKNOWN",false,archive);
             }
         }catch(RootFailure failure){return failed(request,failure.status,stage,failure);}
         catch(RootMutationReadGuard.Failure failure) {
@@ -126,9 +109,5 @@ public final class RootService {
     }
     private void requireBinding(RootBinding expected)throws IOException {
         if(!expected.matchesInstalled(runtime.installed(expected)))throw new RootFailure(RootProtocol.Status.BINDING_MISMATCH);
-    }
-    private static void requireQuiet(RootUidState.Observation observation)throws IOException {
-        if(!observation.reliable)throw new RootFailure(RootProtocol.Status.UNRELIABLE);
-        if(!observation.quiescent())throw new RootFailure(RootProtocol.Status.BUSY);
     }
 }

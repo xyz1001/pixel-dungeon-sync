@@ -1925,8 +1925,8 @@
       "sha256": "8915084cae25f3da6cc792f4d56112ac276602b633b98cbaf5c84ed90bd6e4a8"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/GameGuard.java": {
-      "size": 8725,
-      "sha256": "4df4eba15e0eebfd94fb742cb0e0eb6c03aa4bce187aa275bda1b5222a9afd97"
+      "size": 5074,
+      "sha256": "e46e748b05a9dca32f2fc57560333112a82240cf4f841c8f89192c962b0b5e85"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/MainCallerAuthenticator.java": {
       "size": 2416,
@@ -1941,16 +1941,16 @@
       "sha256": "a9259ec75a4eff5afefe8b30bf29bea219d9429680861290e21b3f8ecd89624b"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SafeSaveTree.java": {
-      "size": 10777,
-      "sha256": "a3b7d8190c21443aab6187728f8192da103c0f47847ddef24735059ac62c2e36"
+      "size": 8381,
+      "sha256": "45295dd41ccce54b7d6dedf8b2eef76d7428fb703d4069cedb4a17d764cb3972"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveArchive.java": {
       "size": 13918,
       "sha256": "8fa64b3d1c69f6b0ff17e71c8a2d51633ce986b9472f4e7ffc7adb552caae570"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveBridgeProvider.java": {
-      "size": 54868,
-      "sha256": "d115d4cce89c797b4bd8d31a7ba9596026d179b34d6420fbd4661b7d3ab7b364"
+      "size": 53041,
+      "sha256": "a658012401b7b63ed46c419ac4241b7b80123016d12820ed2458d4b3d555b13f"
     },
     "android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveDirectoryPolicy.java": {
       "size": 8704,
@@ -1993,8 +1993,8 @@
       "sha256": "8b298b74d4ed78a69d827d30aacc6339df5b7832b5251475b8344f0a814dbe5e"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/AndroidRootRuntime.java": {
-      "size": 10145,
-      "sha256": "920b0ecd2884b63a5e2f013e29e36068610ba3ec885599250405e8d7b9116e2b"
+      "size": 8025,
+      "sha256": "765a0de3bbc3d86b86baf4d7b074223bd421f3267c66516dbe18c827840c4092"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootArchiveInput.java": {
       "size": 2442,
@@ -2025,16 +2025,16 @@
       "sha256": "f341fbbecd6cf2264628f41e94976179ba4f402fd1abd95924d4e6e6dd8925f0"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootProtocol.java": {
-      "size": 26434,
-      "sha256": "a8763e2fa5655bf62a23b5098816372b56108d76007ce3f8a972bb9923bf3033"
+      "size": 26343,
+      "sha256": "81b925ef50cc3cac1ea2134db59fc3fe5300256bdb8e8a2c1a0e17ec664ab24c"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootRestoreAdapter.java": {
-      "size": 43424,
-      "sha256": "711770e32460a4392ec20b5d01cab39891c2e04175800f13c4126fd6cc537958"
+      "size": 44612,
+      "sha256": "f717849834a6d777dca61b616e41930cbc5dec3347ca6404697998d022b0b41c"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootRestoreJob.java": {
-      "size": 8783,
-      "sha256": "3d98886eb39a814511901125ff55262c5237708f0de950dd426e8935eccf887a"
+      "size": 8220,
+      "sha256": "761189e90255317f2b8ea417b256c9b52eb9c213580932608743dbaa5e566407"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootRunner.java": {
       "size": 3327,
@@ -2049,8 +2049,8 @@
       "sha256": "13e3086fd5323f5a8c58dc74bf39c224daf53564446498b71393682f2dd1f5bb"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootService.java": {
-      "size": 9917,
-      "sha256": "f7a594f5cbb1881daee167d510a2c53b2d6cc78ef4337d89002f733730cc9dea"
+      "size": 8350,
+      "sha256": "3c21354304a70ae8bd14a3a92eaba70e9825f60a637e2e684e141c0250a41343"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/RootUidState.java": {
       "size": 4613,
@@ -2085,8 +2085,8 @@
       "sha256": "e01f3dc21373bdc6986c20325e57f49f8174787104dbe54442dc742f8cb196de"
     },
     "android-root/src/main/java/io/github/xyz1001/pdsync/root/restore/RootRestoreTransaction.java": {
-      "size": 35529,
-      "sha256": "4f702b045d2db8211ac154f7a6234866bc8e9e902f61d149cab4455a3da0aa6b"
+      "size": 35831,
+      "sha256": "7fdd0441c6c5bb66b64999a06977d4022fd6299345ca5f421aa06612aa4b510d"
     },
     "android-root/src/main/native/exports.map": {
       "size": 123,
