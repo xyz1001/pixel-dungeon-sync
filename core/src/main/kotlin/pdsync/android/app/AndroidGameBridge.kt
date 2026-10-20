@@ -1,5 +1,6 @@
 package pdsync.android.app
 
+import pdsync.i18n.CoreMessages
 import java.nio.file.Path
 
 interface AndroidGameBridge {
@@ -13,14 +14,13 @@ data class AndroidGameTarget @JvmOverloads constructor(
  val versionName: String,
  val versionCode: Long,
  val apkSha256: String,
- val sourceApkSha256: String = apkSha256,
- val legacyRecoveryReceiptVerified: Boolean = false
+ val sourceApkSha256: String = apkSha256
 ) {
  init {
-  require(versionName.length <= 256 && versionName.none { it.isISOControl() }) { "Invalid installed game version label." }
-  require(versionCode >= 0) { "Invalid installed APK version code." }
-  require(Regex("[0-9a-f]{64}").matches(sourceApkSha256)) { "Original game APK has not been fingerprinted." }
-  require(Regex("[0-9a-f]{64}").matches(apkSha256)) { "The installed game APK has not been fingerprinted." }
+  require(versionName.length <= 256 && versionName.none { it.isISOControl() }) { CoreMessages.ANDROID_INVALID_INSTALLED_GAME_VERSION_LABEL.text() }
+  require(versionCode >= 0) { CoreMessages.ANDROID_INVALID_INSTALLED_APK_VERSION_CODE.text() }
+  require(Regex("[0-9a-f]{64}").matches(sourceApkSha256)) { CoreMessages.ANDROID_ORIGINAL_GAME_APK_HAS_NOT_BEEN_FINGERPRINTED.text() }
+  require(Regex("[0-9a-f]{64}").matches(apkSha256)) { CoreMessages.ANDROID_THE_INSTALLED_GAME_APK_HAS_NOT_BEEN_FINGERPRINTED.text() }
  }
  val packageName get() = identity.packageName
 }

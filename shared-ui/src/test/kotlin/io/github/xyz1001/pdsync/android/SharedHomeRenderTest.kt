@@ -30,6 +30,7 @@ import org.jetbrains.skia.EncodedImageFormat
 import pdsync.presentation.HistoryNode
 import pdsync.presentation.HistoryPresentation
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -54,6 +55,10 @@ class SharedHomeRenderTest {
         val calls = mutableListOf<String>()
         var onPage: (Int) -> Unit = {}
         override fun settings() { calls += "settings" }
+        override fun appreciate() {
+            if (!state.appreciationEnabled) return
+            calls += "appreciate"; state = state.copy(pageActive = false)
+        }
         override fun upload() { calls += "upload" }
         override fun restore() { calls += "restore" }
         override fun launch() { calls += "launch" }
@@ -75,28 +80,110 @@ class SharedHomeRenderTest {
             try {
                 val pixels = render(scene, "home-$width")
                 val bounds = cardBounds(pixels)
-                assertEquals(minOf(820, width - if (width <= 560) 20 else 36).toFloat(), bounds.width, 1f)
-                assertTrue(bounds.bottom <= 742f)
+                assertEquals(minOf(860, width - if (width <= 600) 16 else 32).toFloat(), bounds.width, 1f)
+                assertTrue(bounds.bottom <= 745f)
                 val status = observed.elements.getValue("status")
                 val upload = observed.elements.getValue("upload")
                 val restore = observed.elements.getValue("restore")
                 val launch = observed.elements.getValue("launch")
-                val target = observed.elements.getValue("target")
+                val history = observed.elements.getValue("history")
                 val settings = observed.elements.getValue("settings")
-                val gap = if (width <= 560) 8f else 12f
+                val gap = 16f
                 assertTrue(settings.bottom <= status.top, "settings stays in the compact header")
-                assertEquals(upload.top, restore.top)
+                if (width > 600) assertEquals(upload.top, restore.top) else assertTrue(restore.top >= upload.bottom)
                 assertEquals(upload.width, restore.width, 1f)
-                assertEquals(gap, restore.left - upload.right, .6f)
+                if (width > 600) assertEquals(gap, restore.left - upload.right, .6f)
                 assertTrue(upload.height >= 64f && restore.height >= 64f)
-                assertTrue(status.bottom < upload.top && upload.bottom <= launch.top && launch.bottom <= target.top)
-                for (element in listOf(status, upload, restore, launch, target, settings)) {
+                assertTrue(status.bottom < upload.top && restore.bottom <= launch.top && launch.bottom <= history.top)
+                for (element in listOf(status, upload, restore, launch, history, settings)) {
                     assertTrue(element.left >= bounds.left && element.right <= bounds.right, "content fits at $width: $element")
                 }
-                assertEquals(status.left, target.left, .6f)
-                assertEquals(status.right, target.right, .6f)
+                assertFalse("target" in observed.elements)
+                assertEquals(0f, history.top - launch.bottom, .6f, "history owns its reference heading margin; no explanation-card spacer")
+                assertTrue(assertNotNull(observed.viewport).top > history.top, "M3 graph heading precedes viewport")
+                assertEquals(status.left, history.left, .6f)
+                assertEquals(status.right, history.right, .6f)
+                assertFalse("details-toggle" in observed.elements)
                 assertFalse("details" in observed.elements)
                 assertTrue(host.calls.isEmpty(), "composition must not invoke a platform operation")
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun expiredStatusContainsOnlyTheAuthorizedSupportActionAndRetainsOtherFeedback() {
+        val previousLocale = pdsync.i18n.UiLocale.locale()
+        try {
+            for (locale in listOf(java.util.Locale.SIMPLIFIED_CHINESE, java.util.Locale.ENGLISH)) {
+                pdsync.i18n.UiLocale.setLocale(locale)
+                for ((width, scale) in listOf(320 to 1f, 320 to 1.5f, 320 to 2f, 1165 to 1f)) {
+                    val expired = pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text()
+                    val base = ready().copy(status = expired, statusKind = SharedHomeStatusKind.EXPIRED,
+                        canAppreciate = true, canUpload = false, canRestore = false, notice = "$expired\n$expired")
+                    val host = Host(base)
+                    val observed = Observation()
+                    val scene = ImageComposeScene(width = width, height = 1600, density = Density(1f, scale)) {
+                        CompositionLocalProvider(LocalSharedHomeLayoutObserver provides observed,
+                            LocalSharedHistoryLayoutObserver provides observed) { SharedHomeScreen(host.state, host) }
+                    }
+                    try {
+                        render(scene, "home-expired-${locale.language}-$width-$scale")
+                        val status = observed.elements.getValue("status")
+                        val button = observed.elements.getValue("appreciate")
+                        val label = observed.elements.getValue("expiry-status-text")
+                        assertTrue(button.width >= 48 && button.height >= 42)
+                        assertTrue(button.left >= status.left && button.right <= status.right)
+                        assertTrue(button.top >= status.top && button.bottom <= status.bottom)
+                        assertTrue(status.left >= 8 && status.right <= width - 8)
+                        if (width == 320 && scale >= 1.5f) {
+                            assertTrue(label.width >= 160f, "large-text status keeps enough width for complete words")
+                            assertTrue(label.height <= 2 * 21f * scale + 1f, "expiry needs at most two readable lines")
+                            assertTrue(button.top >= label.bottom + 8f, "the same action wraps below the status")
+                        } else {
+                            assertTrue(label.right <= button.left, "ordinary sizes retain the inline action")
+                        }
+                        assertFalse("notice" in observed.elements, "no second expiry line remains")
+                        repeat(3) { click(scene, button.center) }
+                        assertEquals(listOf("appreciate"), host.calls, "only existing-page navigation runs")
+                        host.state = base.copy(notice = "$expired\nUnrelated feedback")
+                        render(scene, "home-expired-feedback-${locale.language}-$width-$scale")
+                        assertTrue("notice" in observed.elements)
+                        for (state in listOf(base.copy(canAppreciate = false),
+                            base.copy(status = "Ready", statusKind = SharedHomeStatusKind.NEUTRAL))) {
+                            observed.elements.clear()
+                            host.state = state
+                            render(scene, "home-renewed-${locale.language}-$width-$scale-${state.canAppreciate}")
+                            assertFalse("appreciate" in observed.elements)
+                        }
+                    } finally { scene.close() }
+                }
+            }
+        } finally { pdsync.i18n.UiLocale.setLocale(previousLocale) }
+    }
+
+    @Test fun defaultAndSelectedExplanationsAndRoutineSuccessHaveNoPixelsButErrorsRemain() {
+        for (width in listOf(1165, 320)) {
+            val observed = Observation()
+            val host = Host(ready())
+            val scene = scene(width, 1600, host, observed)
+            try {
+                val baseline = render(scene, "home-compact-$width")
+                val baselineHistory = observed.elements.getValue("history")
+                host.state = host.state.copy(notice = "",
+                    restoreTarget = host.state.restoreTarget!!.copy(name = "Removed explanation", notice = "本机已是此进度，无需恢复。"))
+                val routine = render(scene, "home-compact-routine-$width")
+                assertContentEquals(baseline.getRGB(0, 0, width, baseline.height, null, 0, width),
+                    routine.getRGB(0, 0, width, routine.height, null, 0, width))
+                assertFalse("target" in observed.elements)
+                assertFalse("notice" in observed.elements)
+                host.state = host.state.copy(selectedSnapshotId = "snapshot-a")
+                render(scene, "home-compact-selected-$width")
+                assertEquals(baselineHistory, observed.elements.getValue("history"), "selection adds no explanation space")
+                host.state = host.state.copy(notice = "读取云端失败，请重试。", noticeError = true,
+                    restoreTarget = host.state.restoreTarget!!.copy(notice = "暂不能恢复，请重新检查。", noticeError = true))
+                render(scene, "home-compact-errors-$width")
+                assertTrue(observed.elements.getValue("target-error").height > 0)
+                assertTrue(observed.elements.getValue("notice").height > 0)
+                assertTrue(observed.elements.getValue("history").top > baselineHistory.top)
             } finally { scene.close() }
         }
     }
@@ -138,15 +225,44 @@ class SharedHomeRenderTest {
         } finally { scene.close() }
     }
 
-    @Test fun narrowHistoryScrollsOnItsOwnAndTechnicalDetailsStartCollapsed() {
+    @Test fun technicalDetailsNeverAddAnEntryOrContentToHome() {
+        for (width in listOf(1165, 560, 320)) {
+            val observed = Observation()
+            val host = Host(ready().copy(notice = "存档暂不可用，请重试。", noticeError = true))
+            val scene = scene(width, 1600, host, observed)
+            try {
+                val baseline = render(scene, "home-no-details-$width")
+                val baselineElements = observed.elements.toMap()
+                assertEquals(setOf("settings", "status", "upload", "restore", "launch", "notice", "history"),
+                    baselineElements.keys)
+                assertEquals(12f, baselineElements.getValue("history").top - baselineElements.getValue("notice").bottom,
+                    .6f, "history follows the notice directly, without a replacement entry")
+                host.state = host.state.copy(details = "Retained watcher diagnostic\n" + "detail ".repeat(100))
+                val withDetails = render(scene, "home-ignores-details-$width")
+                assertEquals(baselineElements, observed.elements, "diagnostics must not change the home layout")
+                assertContentEquals(
+                    baseline.getRGB(0, 0, width, baseline.height, null, 0, width),
+                    withDetails.getRGB(0, 0, width, withDetails.height, null, 0, width),
+                    "diagnostics must not add visible text, buttons, or a replacement entry",
+                )
+                assertFalse("details-toggle" in observed.elements)
+                assertFalse("details" in observed.elements)
+                assertEquals(setOf("commit-a", "local-current"), observed.layout!!.cards.keys)
+                assertTrue(host.calls.isEmpty(), "diagnostic changes never invoke a platform operation")
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun narrowHistoryScrollsOnItsOwnWithoutTechnicalDetails() {
         val observed = Observation()
         val host = Host(ready().copy(details = "Retained watcher diagnostic\nA long diagnostic line " + "detail ".repeat(40)))
         val scene = scene(320, 1600, host, observed)
         try {
-            render(scene, "home-narrow-details-collapsed")
+            render(scene, "home-narrow-without-details")
+            assertFalse("details-toggle" in observed.elements)
             assertFalse("details" in observed.elements)
             val statusBefore = observed.elements.getValue("status")
-            val targetBefore = observed.elements.getValue("target")
+            val historyBefore = observed.elements.getValue("history")
             val viewport = assertNotNull(observed.viewport)
             val origin = observed.origin
             scene.sendPointerEvent(PointerEventType.Scroll, Offset(viewport.center.x, viewport.top + 80),
@@ -156,16 +272,11 @@ class SharedHomeRenderTest {
             assertTrue(observed.origin.x < origin.x)
             assertEquals(viewport, observed.viewport)
             assertEquals(statusBefore, observed.elements.getValue("status"))
-            assertEquals(targetBefore, observed.elements.getValue("target"))
-            assertTrue(observed.layout!!.cards.values.all { it.width == 200f })
-            click(scene, observed.elements.getValue("details-toggle").center)
-            render(scene, "home-narrow-details-open")
-            assertTrue(observed.elements.getValue("details").height > 0)
-            observed.elements.remove("details")
-            click(scene, observed.elements.getValue("details-toggle").center)
-            render(scene, "home-narrow-details-closed")
+            assertEquals(historyBefore, observed.elements.getValue("history"))
+            assertTrue(observed.layout!!.cards.values.all { it.width == 188f })
+            assertFalse("details-toggle" in observed.elements)
             assertFalse("details" in observed.elements)
-            assertTrue(host.calls.isEmpty(), "details and horizontal scroll never invoke business operations")
+            assertTrue(host.calls.isEmpty(), "horizontal scroll never invokes business operations")
         } finally { scene.close() }
     }
 
@@ -187,14 +298,15 @@ class SharedHomeRenderTest {
             val scene = scene(320, 757, host, observed)
             try {
                 val bounds = cardBounds(render(scene, "home-$name-narrow"))
-                assertEquals(300f, bounds.width, 1f)
-                assertTrue(bounds.left >= 10 && bounds.right <= 310 && bounds.bottom <= 742)
-                for (element in listOf("settings", "upload", "restore", "target")) {
+                assertEquals(304f, bounds.width, 1f)
+                assertTrue(bounds.left >= 8 && bounds.right <= 312 && bounds.bottom <= 745)
+                for (element in listOf("settings", "upload", "restore", "history")) {
                     val rect = observed.elements.getValue(element)
                     assertTrue(rect.left >= 10 && rect.right <= 310)
                 }
                 if (name == "empty") assertTrue(observed.layout!!.cards.isEmpty())
                 if (name == "loading") assertEquals(null, observed.layout)
+                assertFalse("details-toggle" in observed.elements)
                 assertFalse("details" in observed.elements)
                 assertTrue(host.calls.isEmpty())
             } finally { scene.close() }
@@ -220,9 +332,52 @@ class SharedHomeRenderTest {
         }
         val without = bodyAndFooter(false)
         val with = bodyAndFooter(true)
-        assertTrue(with.second >= 46f)
-        assertEquals(with.second + 32f + 1f, without.first - with.first, 1f,
+        assertTrue(with.second >= 42f)
+        assertEquals(with.second + 28f + 1f, without.first - with.first, 1f,
             "the measured action + 32px padding + 1px divider is omitted with the footer")
+    }
+
+    @Test fun archiveLoadingCoversViewportBlocksClicksAndClearsForCompletionOrNavigation() {
+        for ((width, fontScale) in listOf(320 to 1f, 320 to 2f, 1165 to 1f)) {
+            for (populated in listOf(false, true)) {
+                val observed = Observation()
+                val base = ready().let { if (populated) it else it.copy(history = null, restoreTarget = null) }
+                val host = Host(base.copy(archiveLoading = true))
+                val scene = ImageComposeScene(width = width, height = 757, density = Density(1f, fontScale)) {
+                    CompositionLocalProvider(LocalSharedHomeLayoutObserver provides observed,
+                        LocalSharedHistoryLayoutObserver provides observed) { SharedHomeScreen(host.state, host) }
+                }
+                try {
+                    repeat(40) { scene.render(++frame * 16_000_000).close() }
+                    render(scene, "home-archive-loading-$width-$fontScale-$populated")
+                    val scrim = observed.elements.getValue("archive-loading-scrim")
+                    val panel = observed.elements.getValue("archive-loading-panel")
+                    assertEquals(Rect(0f, 0f, width.toFloat(), 757f), scrim)
+                    assertTrue(panel.left >= 24 && panel.right <= width - 24)
+                    assertTrue(panel.top >= 24 && panel.bottom <= 733)
+                    assertEquals(width / 2f, panel.center.x, 1f)
+                    assertEquals(757 / 2f, panel.center.y, 1f)
+                    repeat(3) {
+                        for (name in listOf("settings", "upload", "restore", "launch")) {
+                            click(scene, observed.elements.getValue(name).center)
+                        }
+                    }
+                    assertTrue(host.calls.isEmpty(), "overlay never lets repeated clicks reach actions")
+                    observed.elements.clear()
+                    host.state = base.copy(busy = true, pending = SharedHomeOperation.UPLOAD)
+                    render(scene, "home-archive-complete-other-busy-$width-$fontScale-$populated")
+                    assertFalse("archive-loading-scrim" in observed.elements, "ordinary busy is not an archive read")
+                    observed.elements.clear()
+                    host.state = base.copy(archiveLoading = true, pageActive = false)
+                    render(scene, "home-archive-left-$width-$fontScale-$populated")
+                    assertFalse("archive-loading-scrim" in observed.elements, "inactive pages cannot retain a modal")
+                    host.state = base
+                    render(scene, "home-archive-ready-$width-$fontScale-$populated")
+                    click(scene, observed.elements.getValue("settings").center)
+                    assertEquals(listOf("settings"), host.calls, "completion restores actions")
+                } finally { scene.close() }
+            }
+        }
     }
 
     private fun scene(width: Int, height: Int, host: Host, observed: Observation) =
@@ -253,7 +408,7 @@ class SharedHomeRenderTest {
 
     private fun cardBounds(image: BufferedImage): Rect {
         var left = image.width; var top = image.height; var right = 0; var bottom = 0
-        for (y in 0 until image.height) for (x in 0 until image.width) if ((image.getRGB(x, y) and 0xffffff) != 0xeff3ef) {
+        for (y in 0 until image.height) for (x in 0 until image.width) if ((image.getRGB(x, y) and 0xffffff) in setOf(0xffffff, 0xcbd5e1)) {
             left = minOf(left, x); top = minOf(top, y); right = maxOf(right, x + 1); bottom = maxOf(bottom, y + 1)
         }
         assertTrue(right > left && bottom > top)

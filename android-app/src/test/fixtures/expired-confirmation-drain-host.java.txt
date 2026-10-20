@@ -1,0 +1,204 @@
+package io.github.xyz1001.pdsync.android;
+
+import static pdsync.i18n.AndroidHostMessages.*;
+import static pdsync.i18n.PrepareMessages.*;
+
+import java.util.ArrayDeque;
+
+/** Scheduling and installer ports only; drainPendingSetup is inserted verbatim from production. */
+class MainActivity {
+    enum DiagnosticAction { INSTALL }
+    static final class InstallUiCopy { static final pdsync.i18n.UiText STARTING = new pdsync.i18n.UiText("test.starting", "starting", "starting"); }
+    static final int SYSTEM_INSTALL = 10;
+    enum DiagnosticResult { STARTED, PENDING, FAILED }
+    static final class AndroidDiagnosticLogging { static void confirmationEvent(String phase, DiagnosticResult result) { } }
+    static final class RuntimePlatformCompat { static Object systemConfirmationLaunchOptions() { return "foreground"; } }
+    static final class Token { Object getIntentSender() { return this; } }
+    static final class ModeChoice { Object pending() { return null; } }
+    static final class Session {
+        final GameSetupFlow flow = new GameSetupFlow();
+        final ModeChoice modeChoice = new ModeChoice();
+        boolean running, activationAdvancePending, installationAdvancePending, systemUiDeparted;
+        long confirmationLaunchAttemptAt;
+        String automaticInstallTarget;
+    }
+    static final class Handler {
+        final ArrayDeque<Runnable> pending = new ArrayDeque<>();
+        int posts;
+        void postDelayed(Runnable task, long delay) {
+            require(delay == 500L, "poll delay stays bounded");
+            posts++; pending.add(task);
+        }
+        void flush() {
+            int budget = 30;
+            while (!pending.isEmpty()) {
+                require(--budget > 0, "pending checks cannot spin forever");
+                pending.remove().run();
+            }
+        }
+    }
+    final class Installer {
+        boolean active = true, unavailable, confirmation, returned, external, sessionPresent = true;
+        boolean loseDuringReconcile, finishDuringReconcile, launched, attempted;
+        int sessionId = 7, reconciles, settles, abandons;
+        boolean hasPendingResult() { return active; }
+        boolean externalInstallPending() { return active && external; }
+        boolean hasConfirmation() { return active && confirmation && !unavailable; }
+        boolean confirmationUnavailable() { return active && unavailable; }
+        boolean installationResultBoundary() {
+            return active && SelectedApkInstallPolicy.mayCheckInstalledComponent(
+                    "install", "receipt", "receipt", "PENDING_CONFIRMATION", returned,
+                    sessionId >= 0 && sessionPresent);
+        }
+        boolean confirmationWasLaunched() { return launched; }
+        boolean automaticConfirmationAttempted() { return attempted; }
+        void markConfirmationAttempt() { attempted = true; }
+        Token confirmationToken() { return new Token(); }
+        void confirmationLaunched() { launched = true; }
+        void confirmationLaunchFailed() { launched = false; }
+        boolean mayContinueAfterUninstall() { return false; }
+        String requestNonce() { return "current-nonce"; }
+        String pendingPackage() { return "selected.game"; }
+        String summary() { return "confirmation unavailable; explicit recovery required"; }
+        String lastResultMessage() { return "finished"; }
+        void clearAutomaticContinuation() { }
+        void reconcile(boolean activityReturned) {
+            reconciles++;
+            if (activityReturned) returned = true;
+            if (loseDuringReconcile) unavailable = true;
+            if (finishDuringReconcile) active = false;
+        }
+        void settleClosedSystemRequest() {
+            settles++;
+            if (sessionId >= 0 && sessionPresent) abandons++;
+            active = false;
+        }
+        void validCallback() { confirmation = true; unavailable = false; }
+    }
+    interface Task<T> { T run() throws Exception; }
+    interface Done<T> { void accept(MainActivity owner, T value) throws Exception; }
+    final Session setupSession = new Session();
+    final Installer installer = new Installer();
+    final Handler setupHandler = new Handler();
+    Object rootGame;
+    boolean resumed = true, busy, destroyed, activationReturnPending, systemReturnPending, immediateReturn, failLaunch;
+    int pendingSystemChecks, renders, unavailableRenders, launches, launchAttempts, readinessChecks, continuations, errors;
+    String openedConfirmationNonce = "", notice = "old working state", setupOutcome;
+    MainActivity() { setupSession.flow.select("selected.game"); }
+    boolean isDestroyed() { return destroyed; }
+    void render() { renders++; if (installer.confirmationUnavailable()) unavailableRenders++; }
+    void maybeActivateSetupComponent() { }
+    void refreshReadiness() { readinessChecks++; }
+    void continueInstallation() { continuations++; }
+    void startIntentSenderForResult(Object sender, int code, Object intent, int a, int b, int c, Object options) {
+        launchAttempts++;
+        if (failLaunch) throw new IllegalStateException("installer rejected launch");
+        launches++;
+        if (immediateReturn) systemInstallResult(code);
+    }
+    <T> void setupWork(DiagnosticAction action, String message, Task<T> task, Done<T> done) {
+        require(!busy && !setupSession.running, "only one setup job");
+        busy = setupSession.running = true; notice = message; render();
+        try {
+            T result = task.run();
+            busy = setupSession.running = false;
+            done.accept(this, result);
+            render(); // Mirrors production setupWork completion rendering.
+        } catch (Exception error) { busy = setupSession.running = false; errors++; render(); }
+    }
+
+    /* PRODUCTION_METHODS */
+
+    static int assertions, scenarios;
+    static void require(boolean value, String why) {
+        assertions++;
+        if (!value) throw new AssertionError(why);
+    }
+    static MainActivity unavailable() {
+        MainActivity activity = new MainActivity(); activity.installer.unavailable = true; return activity;
+    }
+    static void preserved(MainActivity activity, String label) {
+        require(activity.installer.active, label + ": checkpoint retained");
+        require(activity.installer.settles == 0 && activity.installer.abandons == 0,
+                label + ": unavailable request never auto-settles or abandons");
+        require(activity.setupHandler.posts == 0, label + ": unavailable request does not reschedule busy polling");
+        require(activity.unavailableRenders > 0, label + ": unavailable state is rendered immediately");
+        require(!activity.busy && !activity.setupSession.running, label + ": UI remains responsive");
+    }
+    public static void main(String[] args) {
+        MainActivity activity = unavailable();
+        activity.installer.returned = activity.systemReturnPending = true;
+        activity.pendingSystemChecks = 11;
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        preserved(activity, "live returned session");
+        require(activity.installer.reconciles == 0, "known unavailable live request does no repeated work"); scenarios++;
+
+        activity = unavailable(); activity.installer.sessionId = -1;
+        require(activity.installer.installationResultBoundary(), "unknown session exercises the permissive result boundary");
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        preserved(activity, "unknown session"); scenarios++;
+
+        activity = unavailable();
+        activity.drainPendingSetup();
+        preserved(activity, "receiver failure between worker jobs"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.loseDuringReconcile = true;
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        preserved(activity, "newly unavailable before budget exhausted");
+        require(activity.installer.reconciles == 1, "new failure reconciles once only"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.loseDuringReconcile = true;
+        activity.systemReturnPending = true; activity.pendingSystemChecks = 11;
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        preserved(activity, "newly unavailable at last poll");
+        require(activity.installer.reconciles == 1, "last poll performs one observation"); scenarios++;
+
+        activity = unavailable(); activity.drainPendingSetup();
+        activity.installer.validCallback(); activity.drainPendingSetup();
+        require(activity.launches == 1, "late valid callback restores confirmation launch");
+        require(activity.installer.settles == 0 && activity.installer.abandons == 0,
+                "late valid callback is not cleaned up"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.finishDuringReconcile = true;
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        require(!activity.installer.active && activity.readinessChecks == 1,
+                "ordinary terminal result still refreshes readiness");
+        require(activity.setupHandler.posts == 0, "terminal result is not polled again"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.external = true;
+        activity.systemReturnPending = activity.installer.returned = true; activity.pendingSystemChecks = 11;
+        activity.drainPendingSetup(); activity.setupHandler.flush();
+        require(activity.installer.active && activity.installer.reconciles == 0 && activity.installer.settles == 0,
+                "external installer never enters ordinary result polling or cleanup");
+        require(activity.renders > 0 && activity.setupHandler.posts == 0,
+                "external wait renders once without scheduling legacy poll"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.confirmation = true; activity.immediateReturn = true;
+        activity.openInstallConfirmation();
+        require(activity.launches == 1 && activity.systemReturnPending && activity.installer.returned,
+                "immediate platform return reaches production result reconciliation");
+        for (int event = 0; event < 40; event++) {
+            activity.openedConfirmationNonce = ""; // Activity-local launch memory may be lost on recreation.
+            activity.openInstallConfirmation();
+            activity.drainPendingSetup();
+        }
+        require(activity.launches == 1, "immediate returned request never automatically relaunches after recreation");
+        activity.setupHandler.flush();
+        require(activity.launches == 1 && activity.setupHandler.posts <= 12,
+                "immediate result remains bounded through deferred checks"); scenarios++;
+
+        activity = new MainActivity(); activity.installer.confirmation = true; activity.failLaunch = true;
+        activity.openInstallConfirmation();
+        require(activity.errors == 1 && activity.installer.attempted && !activity.installer.launched,
+                "launch failure keeps durable attempt while clearing launched marker");
+        activity.failLaunch = false;
+        for (int event = 0; event < 40; event++) activity.openInstallConfirmation();
+        require(activity.launchAttempts == 1, "launch exception cannot create automatic retry loop");
+        activity.retryInstallConfirmation();
+        require(activity.launches == 1 && activity.launchAttempts == 2,
+                "explicit foreground retry remains available after launch failure"); scenarios++;
+
+        System.out.println("expired confirmation drain passed: " + scenarios + " scenarios, " + assertions + " assertions");
+        System.out.println("Boundary: production Activity drain and result-boundary policy; installer, scheduling and rendering are deterministic ports, not Android device evidence.");
+    }
+}

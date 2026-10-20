@@ -1,0 +1,9 @@
+4 / 4
+选择存档
+本机与云端进度不同
+上一步
+处理冲突
+
+ACTIONS
+上一步; disabled=false; bounds=Rect.fromLTRB(241.0, 567.0, 307.0, 609.0)
+处理冲突; disabled=false; bounds=Rect.fromLTRB(943.0, 567.0, 1039.0, 609.0)

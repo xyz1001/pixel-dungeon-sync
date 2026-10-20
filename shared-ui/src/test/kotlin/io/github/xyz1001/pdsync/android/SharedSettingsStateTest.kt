@@ -31,14 +31,16 @@ class SharedSettingsStateTest {
         assertFalse(ready(listOf(passive)).actionEnabled(SharedSettingsKey.SAVE_PATH))
     }
 
-    @Test fun onlySuppliedKeysReachExistingHostCapabilities() {
+    @Test fun onlySuppliedVisibleKeysReachExistingHostCapabilities() {
         val actions = Actions()
         val rows = SharedSettingsKey.entries.map { row(it) }
         var state = ready(rows)
         val interactions = SharedSettingsInteractions({ state }, { actions })
         SharedSettingsKey.entries.forEach(interactions::perform)
         interactions.back()
-        assertEquals(SharedSettingsKey.entries.map { it.name } + "back", actions.calls)
+        assertEquals(SharedSettingsKey.entries.filterNot {
+            it == SharedSettingsKey.RECHECK_SAVES || it == SharedSettingsKey.MAINTENANCE
+        }.map { it.name } + "back", actions.calls)
         actions.calls.clear()
         state = state.copy(rows = listOf(row(SharedSettingsKey.GAME)))
         SharedSettingsKey.entries.forEach(interactions::perform)
@@ -94,17 +96,33 @@ class SharedSettingsStateTest {
         assertEquals(listOf("EXPORT_LOGS"), actions.calls)
     }
 
-    @Test fun valuesStayUnmodifiedAndMaintenanceIsOneOptionalHostEntry() {
+    @Test fun hiddenManualSaveEntriesRemainInHostSnapshotButNeverDispatchFromSettings() {
         val path = "/real/game data/存档/" + "long-directory/".repeat(20)
         val rows = listOf(
             SharedSettingsRow(SharedSettingsKey.SAVE_PATH, "存档位置", path),
-            SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "恢复与维护", "有未完成恢复", "检查", true),
+            SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, "存档检查", "已找到存档", "检查", true),
+            SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "存档管理", "有未完成恢复", "查看", true),
+            SharedSettingsRow(SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传", "已开启", "关闭", true),
         )
-        val state = ready(rows)
+        var state = ready(rows)
         assertEquals(path, state.rows.first().currentValue)
-        assertEquals(2, state.rows.size)
+        assertEquals(rows, state.rows, "host capabilities and values are preserved")
+        assertEquals(listOf(SharedSettingsKey.SAVE_PATH, SharedSettingsKey.AUTOMATIC_UPLOAD),
+            state.visibleRows.map { it.key })
         assertFalse(state.actionEnabled(SharedSettingsKey.SAVE_PATH))
-        assertTrue(state.actionEnabled(SharedSettingsKey.MAINTENANCE))
+        val actions = Actions()
+        val interactions = SharedSettingsInteractions({ state }, { actions })
+        val retainedRecheck = { interactions.perform(SharedSettingsKey.RECHECK_SAVES) }
+        val retainedMaintenance = { interactions.perform(SharedSettingsKey.MAINTENANCE) }
+        repeat(2) {
+            assertFalse(state.actionEnabled(SharedSettingsKey.RECHECK_SAVES))
+            assertFalse(state.actionEnabled(SharedSettingsKey.MAINTENANCE))
+            retainedRecheck(); retainedMaintenance()
+            state = state.copy(rows = rows.map { it.copy(currentValue = "最新宿主状态") })
+        }
+        assertTrue(actions.calls.isEmpty(), "hidden entries cannot dispatch through retained callbacks")
+        interactions.perform(SharedSettingsKey.AUTOMATIC_UPLOAD)
+        assertEquals(listOf("AUTOMATIC_UPLOAD"), actions.calls)
         assertFailsWith<IllegalArgumentException> { ready(listOf(row(), row())) }
     }
 }

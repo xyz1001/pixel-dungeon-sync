@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -35,7 +36,7 @@ class SaveStabilityGuard(
   val before = metadata()
   val captured = captureSnapshot(root, adapter, "stability", "自动识别", null, null)
   val after = metadata()
-  stableCheck(before == after, "读取期间存档发生变化，请等待游戏退出后重试")
+  stableCheck(before == after, CoreMessages.SAVES_CHANGED_WHILE_READING_WAIT_FOR_THE_GAME_TO_EXIT_AND_RETRY.text())
   return SaveFingerprint(captured.manifest.files.toSortedMap(), after)
  }
 
@@ -47,13 +48,13 @@ class SaveStabilityGuard(
   requireStopped()
   val second = fingerprint()
   requireStopped()
-  stableCheck(first == second, "存档仍在写入，请等待文件稳定后重试")
+  stableCheck(first == second, CoreMessages.SAVES_ARE_STILL_BEING_WRITTEN_WAIT_FOR_FILES_TO_STABILIZE_AND_RETRY.text())
   return second
  }
 
  fun requireUnchanged(expected: SaveFingerprint) {
   requireStopped()
-  stableCheck(fingerprint() == expected, "检查后存档发生变化，已取消操作")
+  stableCheck(fingerprint() == expected, CoreMessages.SAVES_CHANGED_AFTER_THE_CHECK_OPERATION_CANCELED.text())
   requireStopped()
  }
 
@@ -68,17 +69,17 @@ class SaveStabilityGuard(
   val stable = awaitStable()
   requireUnchanged(stable)
   val captured = captureSnapshot(root, adapter, profile, version, parent, captureContextProvider?.invoke() ?: captureContext)
-  stableCheck(captured.manifest.files == stable.files, "创建快照期间存档发生变化，已取消操作")
+  stableCheck(captured.manifest.files == stable.files, CoreMessages.SAVES_CHANGED_WHILE_CREATING_THE_SNAPSHOT_OPERATION_CANCELED.text())
   requireUnchanged(stable)
   return StableSaveCapture(captured, stable)
  }
 
- private fun requireStopped() { stableCheck(stopped(), "游戏正在运行或进程状态未知，已暂停存档操作") }
+ private fun requireStopped() { stableCheck(stopped(), CoreMessages.THE_GAME_IS_RUNNING_OR_ITS_PROCESS_STATUS_IS_UNKNOWN_SAVE_OPERATIONS_PAUSED.text()) }
  private fun stableCheck(condition: Boolean, message: String) { if (!condition) throw SaveNotStableException(message) }
 
  private fun metadata(): Map<String, SaveFileMetadata> {
   SafePaths.checked(root)
-  require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { "Save root must be a real directory" }
+  require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { CoreMessages.VALIDATION_SAVE_ROOT_MUST_BE_A_REAL_DIRECTORY.text() }
   val result = sortedMapOf<String, SaveFileMetadata>()
   var bytes = 0L
   var files = 0
@@ -86,11 +87,11 @@ class SaveStabilityGuard(
    // Windows directory enumeration can return cached timestamps and no file key.
    // Read the entry itself for fresh metadata and identity; never follow links.
    val attrs = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
-   require(!attrs.isSymbolicLink && (attrs.isDirectory || attrs.isRegularFile)) { "Unsafe save entry" }
-   require(result.size < MAX_SNAPSHOT_FILES * 4) { "Too many save entries" }
+   require(!attrs.isSymbolicLink && (attrs.isDirectory || attrs.isRegularFile)) { CoreMessages.VALIDATION_UNSAFE_SAVE_ENTRY.text() }
+   require(result.size < MAX_SNAPSHOT_FILES * 4) { CoreMessages.VALIDATION_TOO_MANY_SAVE_ENTRIES.text() }
    if (attrs.isRegularFile) {
     files++; bytes += attrs.size()
-    require(files <= MAX_SNAPSHOT_FILES && bytes <= MAX_SNAPSHOT_BYTES) { "Save files exceed snapshot limits" }
+    require(files <= MAX_SNAPSHOT_FILES && bytes <= MAX_SNAPSHOT_BYTES) { CoreMessages.VALIDATION_SAVE_FILES_EXCEED_SNAPSHOT_LIMITS.text() }
    }
    val name = root.relativize(path).toString().replace('\\', '/')
    result[name] = SaveFileMetadata(attrs.isDirectory, if (attrs.isDirectory) 0 else attrs.size(), attrs.lastModifiedTime(), attrs.fileKey()?.toString())

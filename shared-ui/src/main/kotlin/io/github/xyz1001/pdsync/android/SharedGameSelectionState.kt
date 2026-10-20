@@ -5,7 +5,7 @@ enum class SharedGameSelectionControl {
     CHOOSE_FILE, CHOOSE_INSTALLED, CHOOSE_ROOT, SWITCH_TO_EMBEDDED, CHECK_ACCESS, LAUNCH_GAME,
     ACTIVATE_BRIDGE, INITIALIZE_GAME, OPEN_RECOVERY, CONTINUE_INSTALLATION, OPEN_SYSTEM_CONFIRMATION,
     CANCEL_INSTALLATION, CHECK_EXPIRED_REQUEST, CLEAN_LEGACY_REQUEST, OPEN_INSTALL_SETTINGS,
-    RESCAN, COPY_DIAGNOSTICS,
+    RESCAN, COPY_DIAGNOSTICS, CANCEL_ACCESS_SELECTION, USE_OTHER_INSTALLER, CHECK_EXTERNAL_INSTALL,
 }
 
 data class SharedGameSelectionRow(
@@ -16,8 +16,17 @@ data class SharedGameSelectionRow(
 
 data class SharedGameCandidate(val id: String, val game: SharedGameIdentity, val location: String)
 
+enum class SharedGameAccessMode { NONE, ROOT, APK }
+enum class SharedGameAccessStatus { UNCHECKED, WORKING, READY, FAILED }
+
+/** Display-only observations supplied by Android. They never grant access or enable Next. */
+data class SharedGameAccessState(
+    val mode: SharedGameAccessMode,
+    val status: SharedGameAccessStatus,
+)
+
 /** A platform-owned observation. A selected identity alone never grants permission to continue. */
-data class SharedGameSelectionState(
+data class SharedGameSelectionState @JvmOverloads constructor(
     val game: SharedGameIdentity? = null,
     val selectionId: String? = null,
     val selectionStatus: String = "",
@@ -32,6 +41,7 @@ data class SharedGameSelectionState(
     val warning: String = "",
     val details: String = "",
     val canCopyDiagnostics: Boolean = false,
+    val access: SharedGameAccessState? = null,
 ) {
     init {
         require(rows.map { it.control }.distinct().size == rows.size) { "Game action keys must be unique." }

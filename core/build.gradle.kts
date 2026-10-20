@@ -7,7 +7,12 @@ dependencies {
  testImplementation(kotlin("test")); testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
  testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
-tasks.test { useJUnitPlatform() }
+tasks.test {
+ useJUnitPlatform()
+ // Existing behavioral fixtures are Chinese; localization tests explicitly exercise other locales.
+ systemProperty("user.language", "zh")
+ systemProperty("user.country", "CN")
+}
 
 java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 

@@ -19,7 +19,7 @@ public class Intent implements Parcelable {
  public static Intent parseUri(String value, int flags) {
   String[] parts=new String(java.util.Base64.getDecoder().decode(value),java.nio.charset.StandardCharsets.UTF_8).split("\n",-1);
   if(parts.length!=2) throw new IllegalArgumentException("Malformed test URI");
-  return new Intent(parts[0].equals("null")?null:parts[0]).setPackage(parts[1].equals("null")?null:parts[1]);
+  return new Intent(parts[0].equals("null")?"android.intent.action.VIEW":parts[0]).setPackage(parts[1].equals("null")?null:parts[1]);
  }
  public boolean filterEquals(Intent other) { return java.util.Objects.equals(action,other.action)&&java.util.Objects.equals(targetPackage,other.targetPackage); }
 }

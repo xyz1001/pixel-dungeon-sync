@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import java.io.IOException
 import java.nio.file.DirectoryIteratorException
 import java.nio.file.Files
@@ -13,12 +14,14 @@ import java.util.Locale
 /** Flat, explicit directory slots, never a recursive directory search. */
 data class InstallationSearchRoot(
  val path: String,
- val source: String = "指定安装候选目录",
+ val source: String = CoreMessages.SPECIFIED_INSTALLATION_CANDIDATE_DIRECTORY.text(),
  val relativeDirectories: List<String> = listOf("", "app", "lib/app", "Contents/app"),
  val requireGameName: Boolean = false
 )
 
-data class DefaultSaveDiscovery(val path: String?, val available: Boolean, val reason: String?)
+enum class DefaultSaveDiscoveryReason { NONE, MISSING, UNAVAILABLE }
+data class DefaultSaveDiscovery(val path: String?, val available: Boolean, val reason: String?,
+ val reasonCode: DefaultSaveDiscoveryReason = if (available) DefaultSaveDiscoveryReason.NONE else DefaultSaveDiscoveryReason.UNAVAILABLE)
 data class InstalledTargetCandidate(val path: String, val source: String, val target: TargetGame?, val reason: String) {
  val trusted: Boolean get() = target?.trusted == true
 }
@@ -52,26 +55,26 @@ object ShatteredInstallationPaths {
   val roots = mutableListOf<InstallationSearchRoot>()
   val game = "Shattered Pixel Dungeon"
   if (absolute(home)) {
-   roots += InstallationSearchRoot("$home/Downloads", "下载目录中的游戏 JAR 候选", listOf(""), true)
+   roots += InstallationSearchRoot("$home/Downloads", CoreMessages.GAME_JAR_CANDIDATE_IN_DOWNLOADS.text(), listOf(""), true)
    val image = if (mac) "$game.app" else game
-   roots += InstallationSearchRoot("$home/Downloads/$image", "下载目录中的便携包候选")
-   roots += InstallationSearchRoot("$home/Games/$image", "Games 目录中的便携包候选")
+   roots += InstallationSearchRoot("$home/Downloads/$image", CoreMessages.PORTABLE_PACKAGE_CANDIDATE_IN_DOWNLOADS.text())
+   roots += InstallationSearchRoot("$home/Games/$image", CoreMessages.PORTABLE_PACKAGE_CANDIDATE_IN_GAMES.text())
    if (mac) {
-    roots += InstallationSearchRoot("$home/Applications/$game.app", "用户 Applications 中的应用候选")
-    roots += InstallationSearchRoot("$home/Library/Application Support/Steam/steamapps/common/$game", "默认 Steam 库中的游戏目录候选",
+    roots += InstallationSearchRoot("$home/Applications/$game.app", CoreMessages.APPLICATION_CANDIDATE_IN_USER_APPLICATIONS.text())
+    roots += InstallationSearchRoot("$home/Library/Application Support/Steam/steamapps/common/$game", CoreMessages.GAME_DIRECTORY_CANDIDATE_IN_THE_DEFAULT_STEAM_LIBRARY.text(),
      listOf("", "app", "lib/app", "$game.app/Contents/app"))
    } else if (linux) {
     // Common client layouts only; custom libraries and symlink aliases are deliberately not followed.
-    roots += InstallationSearchRoot("$home/.local/share/Steam/steamapps/common/$game", "默认 Steam 库中的游戏目录候选")
-    roots += InstallationSearchRoot("$home/.steam/steam/steamapps/common/$game", "旧 Steam 布局中的游戏目录候选")
+    roots += InstallationSearchRoot("$home/.local/share/Steam/steamapps/common/$game", CoreMessages.GAME_DIRECTORY_CANDIDATE_IN_THE_DEFAULT_STEAM_LIBRARY.text())
+    roots += InstallationSearchRoot("$home/.steam/steam/steamapps/common/$game", CoreMessages.GAME_DIRECTORY_CANDIDATE_IN_THE_LEGACY_STEAM_LAYOUT.text())
    }
   }
-  if (mac) roots += InstallationSearchRoot("/Applications/$game.app", "Applications 中的应用候选")
+  if (mac) roots += InstallationSearchRoot("/Applications/$game.app", CoreMessages.APPLICATION_CANDIDATE_IN_APPLICATIONS.text())
   if (windows) {
    val programRoots = listOf(context.environment["ProgramFiles(x86)"], context.environment["ProgramFiles"])
     .mapNotNull { it?.replace('\\', '/')?.takeIf(::absolute) }.ifEmpty { listOf("C:/Program Files (x86)", "C:/Program Files") }
    programRoots.distinct().forEach { root ->
-    roots += InstallationSearchRoot("$root/Steam/steamapps/common/$game", "默认 Steam 库中的游戏目录候选")
+    roots += InstallationSearchRoot("$root/Steam/steamapps/common/$game", CoreMessages.GAME_DIRECTORY_CANDIDATE_IN_THE_DEFAULT_STEAM_LIBRARY.text())
    }
   }
   return roots.distinctBy { it.path }
@@ -98,7 +101,7 @@ class ShatteredInstallationDiscovery internal constructor(
  }
 
  /** Manual selection uses the same authoritative inspector and may inspect one larger valid JAR. */
- fun validateJar(path: Path): InstalledTargetCandidate = probe(path, "手动选择", ShatteredVersions::target)
+ fun validateJar(path: Path): InstalledTargetCandidate = probe(path, CoreMessages.MANUAL_SELECTION.text(), ShatteredVersions::target)
 
  fun discover(configuredTarget: String = ""): InstallationDiscoveryResult {
   val candidates = linkedMapOf<String, InstalledTargetCandidate>()
@@ -112,7 +115,7 @@ class ShatteredInstallationDiscovery internal constructor(
    val key = path.toAbsolutePath().toString()
    if (key in candidates) return
    if (attempts >= MAX_CANDIDATES) {
-    incomplete = true; report("候选 JAR 达到 $MAX_CANDIDATES 个检查上限；请手动选择实际使用的 JAR。"); return
+    incomplete = true; report(CoreMessages.REACHED_THE_LIMIT_OF_1_S_CANDIDATE_JARS_TO_INSPECT_SELECT_THE_JAR_YOU_ACTUALLY_USE_MA.text(MAX_CANDIDATES)); return
    }
    attempts++
    val candidate = probe(path, source, inspect)
@@ -121,35 +124,35 @@ class ShatteredInstallationDiscovery internal constructor(
    if (candidate.target == null) incomplete = true
   }
   if (configuredTarget.isNotBlank()) {
-   try { add(Paths.get(configuredTarget), "已配置的游戏 JAR") }
+   try { add(Paths.get(configuredTarget), CoreMessages.CONFIGURED_GAME_JAR.text()) }
    catch (e: IllegalArgumentException) {
-    report("已配置的游戏路径无效：${e.message}")
+    report(CoreMessages.INVALID_CONFIGURED_GAME_PATH_1_S.text(e.message))
    }
   }
-  if (roots.size > MAX_ROOTS) { incomplete = true; report("安装候选根目录超过 $MAX_ROOTS 个上限。") }
+  if (roots.size > MAX_ROOTS) { incomplete = true; report(CoreMessages.INSTALLATION_CANDIDATE_ROOTS_EXCEED_THE_LIMIT_OF_1_S.text(MAX_ROOTS)) }
   for (root in roots.take(MAX_ROOTS)) {
    if (root.relativeDirectories.size > MAX_DIRECTORIES) {
-    incomplete = true; report("安装目录槽位超过 $MAX_DIRECTORIES 个上限。")
+    incomplete = true; report(CoreMessages.INSTALLATION_DIRECTORY_SLOTS_EXCEED_THE_LIMIT_OF_1_S.text(MAX_DIRECTORIES))
    }
    for (slot in root.relativeDirectories.take(MAX_DIRECTORIES)) {
     if (directories.size >= MAX_DIRECTORIES || entries >= MAX_ENTRIES) {
-     incomplete = true; report("目录检查达到有界扫描上限；未搜索整个磁盘。"); break
+     incomplete = true; report(CoreMessages.REACHED_THE_BOUNDED_DIRECTORY_SCAN_LIMIT_THE_ENTIRE_DISK_WAS_NOT_SEARCHED.text()); break
     }
     try {
      val base = strictPath(Paths.get(root.path))
      val relative = Paths.get(slot)
-     require(!relative.isAbsolute && relative.none { it.toString() == "." || it.toString() == ".." }) { "安装目录槽位必须是相对路径且不含 . 或 .." }
+     require(!relative.isAbsolute && relative.none { it.toString() == "." || it.toString() == ".." }) { CoreMessages.INSTALLATION_DIRECTORY_SLOTS_MUST_BE_RELATIVE_PATHS_WITHOUT_OR_SEGMENTS.text() }
      val directory = strictPath(base.resolve(relative))
-     require(directory.startsWith(base)) { "安装目录槽位不能离开候选根目录" }
+     require(directory.startsWith(base)) { CoreMessages.INSTALLATION_DIRECTORY_SLOTS_CANNOT_LEAVE_THE_CANDIDATE_ROOT.text() }
      if (!directories.add(directory)) continue
      val attributes = attributes(directory) ?: continue
-     require(attributes.isDirectory) { "安装候选路径不是目录：$directory" }
+     require(attributes.isDirectory) { CoreMessages.INSTALLATION_CANDIDATE_PATH_IS_NOT_A_DIRECTORY_1_S.text(directory) }
      val found = mutableListOf<Path>()
      Files.newDirectoryStream(directory).use { stream ->
       val iterator = stream.iterator()
       while (iterator.hasNext()) {
        if (entries >= MAX_ENTRIES) {
-        incomplete = true; report("目录条目达到 $MAX_ENTRIES 个上限；请手动选择实际使用的 JAR。"); break
+        incomplete = true; report(CoreMessages.REACHED_THE_LIMIT_OF_1_S_DIRECTORY_ENTRIES_SELECT_THE_JAR_YOU_ACTUALLY_USE_MANUALLY.text(MAX_ENTRIES)); break
        }
        val path = iterator.next(); entries++
        val name = path.fileName.toString().lowercase(Locale.ROOT)
@@ -163,7 +166,7 @@ class ShatteredInstallationDiscovery internal constructor(
      }.thenBy { it.fileName.toString() }).forEach { add(it, root.source) }
     } catch (e: Exception) {
      if (e !is IllegalArgumentException && e !is IOException && e !is SecurityException && e !is DirectoryIteratorException) throw e
-     incomplete = true; report("跳过无法安全读取的候选目录 ${root.path}：${e.message}")
+     incomplete = true; report(CoreMessages.SKIPPED_CANDIDATE_DIRECTORY_1_S_BECAUSE_IT_COULD_NOT_BE_READ_SAFELY_2_S.text(root.path, e.message))
     }
    }
   }
@@ -176,23 +179,24 @@ class ShatteredInstallationDiscovery internal constructor(
    path = ShatteredDefaultSavePaths.resolve(context)
    val checked = strictPath(Paths.get(path))
    val available = attributes(checked)?.isDirectory == true
-   DefaultSaveDiscovery(checked.toString(), available, if (available) null else "未找到默认存档目录。")
+   DefaultSaveDiscovery(checked.toString(), available, if (available) null else CoreMessages.DEFAULT_SAVE_DIRECTORY_NOT_FOUND.text(),
+    if (available) DefaultSaveDiscoveryReason.NONE else DefaultSaveDiscoveryReason.MISSING)
   } catch (e: Exception) {
    if (e !is IllegalArgumentException && e !is IOException && e !is SecurityException && e !is DirectoryIteratorException) throw e
-   DefaultSaveDiscovery(path, false, "无法安全检查默认存档目录：${e.message}")
+   DefaultSaveDiscovery(path, false, CoreMessages.CANNOT_SAFELY_INSPECT_THE_DEFAULT_SAVE_DIRECTORY_1_S.text(e.message))
   }
  }
 
  private fun probe(path: Path, source: String, inspector: (Path) -> TargetGame): InstalledTargetCandidate = try {
   val checked = strictPath(path)
-  require(checked.fileName.toString().endsWith(".jar", ignoreCase = true)) { "请选择 JAR 文件；原生启动器不是已验证的目标游戏。" }
+  require(checked.fileName.toString().endsWith(".jar", ignoreCase = true)) { CoreMessages.CHOOSE_A_JAR_FILE_NATIVE_LAUNCHERS_ARE_NOT_VERIFIED_TARGET_GAMES.text() }
   val attributes = attributes(checked)
-  require(attributes?.isRegularFile == true) { "未找到普通 JAR 文件。" }
+  require(attributes?.isRegularFile == true) { CoreMessages.REGULAR_JAR_FILE_NOT_FOUND.text() }
   val target = inspector(checked)
   InstalledTargetCandidate(checked.toString(), source, target, target.reason)
  } catch (e: Exception) {
   if (e !is IllegalArgumentException && e !is IOException && e !is SecurityException && e !is DirectoryIteratorException) throw e
-  InstalledTargetCandidate(path.toString(), source, null, e.message ?: "无法安全检查此 JAR。")
+  InstalledTargetCandidate(path.toString(), source, null, e.message ?: CoreMessages.CANNOT_SAFELY_INSPECT_THIS_JAR.text())
  }
 
  private fun attributes(path: Path): BasicFileAttributes? = try {
@@ -200,9 +204,9 @@ class ShatteredInstallationDiscovery internal constructor(
  } catch (_: NoSuchFileException) { null }
 
  private fun strictPath(path: Path): Path {
-  require(path.isAbsolute) { "必须使用绝对路径；不会从工作目录猜测游戏位置。" }
+  require(path.isAbsolute) { CoreMessages.AN_ABSOLUTE_PATH_IS_REQUIRED_THE_GAME_LOCATION_WILL_NOT_BE_INFERRED_FROM_THE_WORKING.text() }
   // Reject before SafePaths.normalizes, so link/../target cannot hide a symlink component.
-  require(path.none { it.toString() == "." || it.toString() == ".." }) { "路径不能含 . 或 .. 片段。" }
+  require(path.none { it.toString() == "." || it.toString() == ".." }) { CoreMessages.PATHS_CANNOT_CONTAIN_OR_SEGMENTS.text() }
   return SafePaths.checked(path)
  }
 }

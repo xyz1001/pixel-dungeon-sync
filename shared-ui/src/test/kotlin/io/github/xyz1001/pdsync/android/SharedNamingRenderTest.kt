@@ -52,10 +52,10 @@ class SharedNamingRenderTest {
             }
             try {
                 val image = render(scene, "naming-$width-$height")
-                val buttons = buttonRects(image, 0xe9efea) + buttonRects(image, 0x326650)
+                val buttons = buttonRects(image, 0xf1f5f9) + buttonRects(image, 0x006877)
                 assertEquals(2, buttons.size)
                 buttons.forEach {
-                    assertTrue(it.width >= 90 && it.height >= 46)
+                    assertTrue(it.width >= 88 && it.height >= 40)
                     assertTrue(it.left >= 40 && it.right <= width - 40)
                     assertTrue(it.top >= 16 && it.bottom <= height - 16,
                         "dialog actions remain reachable with a reduced keyboard viewport: $it")
@@ -86,7 +86,7 @@ class SharedNamingRenderTest {
                 render(scene, "naming-open-$save")
                 state = state!!.copy(name = "尚未保存的名称")
                 val image = render(scene, "naming-draft-$save")
-                val target = buttonRects(image, if (save) 0x326650 else 0xe9efea).single().center
+                val target = buttonRects(image, if (save) 0x006877 else 0xf1f5f9).single().center
                 click(scene, target)
                 render(scene, "naming-closed-$save")
                 assertEquals(if (save) "尚未保存的名称" else "原名称", persisted)

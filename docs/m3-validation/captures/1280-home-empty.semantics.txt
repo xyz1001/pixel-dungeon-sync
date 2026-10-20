@@ -1,0 +1,21 @@
+存档同步
+像素地牢
+Shattered Pixel Dungeon · 3.3.8
+设置
+暂无存档记录
+上传到云端
+将本机游戏进度备份至云端空间
+恢复到本机
+取回云端档案并应用至当前设备
+启动游戏
+存档脉络
+云端存档
+本机
+暂无本机存档
+暂无存档历史
+
+ACTIONS
+设置; disabled=false; bounds=Rect.fromLTRB(959.0, 70.0, 1039.0, 112.0)
+上传到云端 | 将本机游戏进度备份至云端空间; disabled=true; bounds=Rect.fromLTRB(241.0, 246.0, 632.0, 336.0)
+恢复到本机 | 取回云端档案并应用至当前设备; disabled=true; bounds=Rect.fromLTRB(648.0, 246.0, 1039.0, 336.0)
+启动游戏; disabled=false; bounds=Rect.fromLTRB(931.0, 358.0, 1039.0, 400.0)

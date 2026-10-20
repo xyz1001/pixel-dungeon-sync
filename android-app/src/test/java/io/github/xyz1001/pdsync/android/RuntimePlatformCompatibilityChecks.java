@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android;
 
+import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Service;
@@ -24,12 +25,14 @@ public final class RuntimePlatformCompatibilityChecks {
     public static void main(String[] args) throws Exception {
         int originalSdk = Build.VERSION.SDK_INT;
         try {
-            for (int sdk : new int[]{26, 27, 28, 29, 30, 31, 32, 33, 35, 36}) {
+            for (int sdk : new int[]{26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}) {
                 Build.VERSION.SDK_INT = sdk;
                 packageIdentity(sdk);
                 insets(sdk);
+                toolbarInsets(sdk);
                 foreground(sdk);
                 confirmation(sdk);
+                confirmationLaunch(sdk);
                 receiver(sdk);
             }
             // Existing correlated callback/retained-token adversarial checks also run on API26.
@@ -38,7 +41,7 @@ public final class RuntimePlatformCompatibilityChecks {
         } finally {
             Build.VERSION.SDK_INT = originalSdk;
         }
-        System.out.println("Runtime SDK compatibility host checks passed: " + assertions + " assertions, SDK 26/27/28/29/30/31/32/33/35/36.");
+        System.out.println("Runtime SDK compatibility host checks passed: " + assertions + " assertions, SDK 26/27/28/29/30/31/32/33/34/35/36.");
         System.out.println("Boundary: host doubles detect wrong SDK branches; Android 8 UI, installer, Binder, ART linkage and services still need device/emulator testing.");
     }
 
@@ -140,6 +143,22 @@ public final class RuntimePlatformCompatibilityChecks {
         equal(16, view.bottom, "IME dismissal restores base padding");
     }
 
+    static void toolbarInsets(int sdk) {
+        View toolbar = new View();
+        WindowInsets insets = new WindowInsets(2, 24, 3, 0);
+        insets.cutout = new DisplayCutout(7, 30, 1, 12);
+        for (int ime : new int[]{0, 240, 420, 240, 0}) {
+            insets.bottom = ime;
+            insets.modern = new android.graphics.Insets(9, 32, 11, ime);
+            RuntimePlatformCompat.applyToolbarInsets(toolbar, insets, 16, 4, 4);
+            equal(16 + (sdk >= 30 ? 9 : sdk >= 28 ? 7 : 2), toolbar.left, "toolbar left safe area");
+            equal(4 + (sdk >= 30 ? 32 : sdk >= 28 ? 30 : 24), toolbar.top, "toolbar top safe area");
+            equal(16 + (sdk >= 30 ? 11 : 3), toolbar.right, "toolbar right safe area");
+            equal(4, toolbar.bottom, "IME never grows the top toolbar or reserves bottom twice");
+            equal(sdk >= 30 ? 135 : 0, insets.requestedTypes, "toolbar excludes IME type");
+        }
+    }
+
     static void foreground(int sdk) {
         Service service = new Service();
         Notification notification = new Notification();
@@ -158,6 +177,22 @@ public final class RuntimePlatformCompatibilityChecks {
                 params.requireUserAction, "never requests installation without user action");
         equal(PendingIntent.FLAG_UPDATE_CURRENT | (sdk >= 31 ? PendingIntent.FLAG_MUTABLE : 0),
                 AndroidCompat.mutableCallbackFlags(), "mutable system callback on every supported SDK");
+    }
+
+    static void confirmationLaunch(int sdk) {
+        ActivityOptions.reset();
+        android.os.Bundle options = RuntimePlatformCompat.systemConfirmationLaunchOptions();
+        if (sdk < 34) {
+            equal(null, options, "legacy launch has no unsupported activity options");
+            equal(0, ActivityOptions.creations, "legacy launch never touches new APIs");
+        } else {
+            check(options != null, "modern launch includes sender opt-in");
+            equal(1, ActivityOptions.creations, "exactly one options object");
+            equal(sdk >= 36 ? ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE
+                    : ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                    options.get("senderBalMode"), "narrowest supported sender launch mode");
+            equal(1, options.size(), "no creator privilege or unrelated launch option");
+        }
     }
 
     static void receiver(int sdk) throws Exception {

@@ -12,24 +12,22 @@ class SaveLayoutDiagnosticsContract(unittest.TestCase):
         self.assertLess(call.index('authenticate()'), call.index('return inspect()'))
         inspect = body(PROVIDER, 'private Bundle inspect()')
         self.assertIn('describeContent(bundleOk, content)', inspect)
-        self.assertIn('putBoolean("transferReady", content.transferable())', inspect)
+        self.assertIn('putBoolean("transferReady", !z || content.transferable())', inspect)
         self.assertNotIn('requireTransferable()', inspect)
         client = body(CLIENT, 'public String inspectReady()')
         self.assertLess(client.index('call("inspect", null)'), client.index('BridgeReadiness.failureCode('))
         self.assertIn('BridgeSaveLayout.fromReply(bundleCall)', client)
         self.assertIn('throw new Failure(readiness.stage, readiness.code,', client)
 
-    def test_main_keeps_readiness_diagnostic_and_existing_copy_action(self):
-        readiness = body(MAIN, 'private void readInstallationReadiness()')
-        self.assertIn('bridge.inspectReady()', readiness)
-        self.assertIn('captureDiagnostic(diagnostic)', readiness)
+    def test_main_keeps_readiness_diagnostic_for_global_export(self):
+        readiness = body(MAIN, 'private void authenticateInstalledBridge(')
+        self.assertIn('.authenticateAccess()', readiness)
+        self.assertIn('captureDiagnostic(error)', readiness)
         capture = body(MAIN, 'private void captureDiagnostic(')
         self.assertIn('BridgeDiagnostics.report(', capture)
         self.assertIn('BridgeDiagnostics.find(exc).saveLayout != null', capture)
-        self.assertIn('Review names before sharing.', capture)
-        copy = body(MAIN, 'public void copyDiagnostic()')
-        self.assertIn('ClipData.newPlainText("PD Sync diagnostic", this.diagnosticReport)', copy)
-        self.assertIn('"android.content.extra.IS_SENSITIVE", true', copy)
+        self.assertIn('DIAGNOSTIC_PRIVACY.text()', capture)
+        self.assertIn('AndroidDiagnosticLogging.failureDetails(error)', readiness)
 
     def test_provider_sends_bounded_diagnostic_fields_only(self):
         describe = body(PROVIDER, 'private static void describeContent(')

@@ -1,6 +1,7 @@
 package pdsync.android
 
-const val ANDROID_LOCAL_DATA_LOSS_WARNING = "本次替换必须先卸载原游戏，包括首次将官方独立 UID 或不同签名的游戏切换为共享 UID 版本的情况。卸载会不可逆地永久删除全部本地存档和战绩；APK 备份不能恢复存档。卸载和安装分别需要你在 Android 系统界面明确确认。卸载前取消会保留原版；卸载后中断只保留待安装 APK，不能恢复已删除的存档。"
+import pdsync.i18n.CoreMessages
+val ANDROID_LOCAL_DATA_LOSS_WARNING get() = CoreMessages.THIS_REPLACEMENT_REQUIRES_UNINSTALLING_THE_ORIGINAL_GAME_FIRST_INCLUDING_THE_FIRST_SW.text()
 
 enum class InstallStage {
     PREPARED_VERIFIED, AWAITING_WARNING_ACKNOWLEDGEMENT, READY_FOR_INSTALLER,

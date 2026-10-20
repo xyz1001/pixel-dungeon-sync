@@ -57,27 +57,27 @@ class SharedSettingsRenderTest {
             try {
                 val image = render(scene, "settings-$width")
                 val card = cardBounds(image)
-                assertEquals(minOf(820, width - if (width <= 560) 20 else 36).toFloat(), card.width, 1f)
+                assertEquals(minOf(860, width - if (width <= 600) 16 else 32).toFloat(), card.width, 1f)
                 assertNoHorizontalOverflow(image, card)
                 val first = observed.elements.getValue("row:GAME")
                 val second = observed.elements.getValue("row:CLOUD_CONNECTION")
                 val back = observed.elements.getValue("back")
-                val innerPadding = if (width <= 560) 20f else 32f
+                val innerPadding = if (width <= 600) 20f else 30f
                 assertEquals(card.left + 1f + innerPadding, first.left, .6f)
                 assertEquals(card.right - 1f - innerPadding, first.right, .6f)
-                assertEquals(12f, second.top - first.bottom, .6f)
+                assertEquals(14f, second.top - first.bottom, .6f)
                 for (key in listOf(SharedSettingsKey.GAME, SharedSettingsKey.CLOUD_CONNECTION)) {
                     val row = observed.elements.getValue("row:$key")
                     val value = observed.elements.getValue("value:$key")
                     val action = observed.elements.getValue("action:$key")
-                    assertTrue(value.right + (if (width <= 560) 8f else 16f) <= action.left + .6f)
-                    assertTrue(action.width >= 46f && action.height >= 46f)
-                    assertTrue(value.left >= row.left + 18f && action.right <= row.right - 18f + .6f)
+                    assertTrue(value.right + 16f <= action.left + .6f)
+                    assertTrue(action.width >= 42f && action.height >= 42f)
+                    assertTrue(value.left >= row.left + 20f && action.right <= row.right - 20f + .6f)
                     assertTrue(row.top < action.bottom && action.bottom <= row.bottom)
-                    if (width <= 560) assertEquals(row.top + 18f, action.top, .6f)
+                    assertEquals(row.center.y, action.center.y, .6f)
                 }
                 assertTrue(back.top > second.bottom && back.bottom < card.bottom)
-                assertTrue(back.bottom <= 742f)
+                assertTrue(back.bottom <= 745f)
                 assertEquals(first.left, back.left, .6f)
                 assertFalse("notice" in observed.elements)
                 assertTrue(host.calls.isEmpty(), "composition never triggers a platform operation")
@@ -106,10 +106,46 @@ class SharedSettingsRenderTest {
                 val value = observed.elements.getValue("value:SAVE_PATH")
                 val action = observed.elements.getValue("action:SAVE_PATH")
                 assertTrue(value.width > 50f && value.right < action.left)
-                assertTrue(action.width >= 46f && action.height >= 46f && action.right < card.right)
+                assertTrue(action.width >= 42f && action.height >= 42f && action.right < card.right)
                 click(scene, action.center)
                 assertEquals(listOf("SAVE_PATH"), host.calls)
             } finally { scene.close() }
+        }
+    }
+
+    @Test fun manualSaveCheckAndManagementLeaveNoRowsButtonsOrReplacementAtAllReferenceWidths() {
+        val hiddenRows = listOf(
+            SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, "存档检查", "已找到存档", "检查", true),
+            SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "存档管理", "管理本地与云端存档", "管理", true),
+        )
+        val visibleRows = ready().rows + SharedSettingsRow(
+            SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传", "已开启", "关闭", true)
+        for (width in listOf(1165, 500, 320)) {
+            val observed = Observation()
+            val host = Host(ready().copy(rows = hiddenRows.take(1) + visibleRows + hiddenRows.drop(1)))
+            val baseline = scene(width, 757, Host(ready().copy(rows = visibleRows)), Observation())
+            val scene = scene(width, 757, host, observed)
+            try {
+                val actual = render(scene, "settings-hidden-manual-saves-$width")
+                val expected = render(baseline, "settings-visible-only-$width")
+                assertTrue(actual.getRGB(0, 0, width, 757, null, 0, width).contentEquals(
+                    expected.getRGB(0, 0, width, 757, null, 0, width)),
+                    "removed entries leave no content, empty space or replacement")
+                for (row in hiddenRows) {
+                    for (element in listOf("row", "title", "value", "action")) {
+                        assertFalse("$element:${row.key}" in observed.elements)
+                    }
+                    assertFalse(row.key in observed.lines)
+                }
+                for (row in visibleRows) {
+                    assertTrue("row:${row.key}" in observed.elements)
+                    click(scene, observed.elements.getValue("action:${row.key}").center)
+                }
+                click(scene, observed.elements.getValue("back").center)
+                assertEquals(visibleRows.map { it.key.name } + "back", host.calls)
+                assertEquals(hiddenRows.take(1) + visibleRows + hiddenRows.drop(1), host.state.rows,
+                    "the shared page does not mutate its host's capabilities")
+            } finally { scene.close(); baseline.close() }
         }
     }
 
@@ -126,7 +162,8 @@ class SharedSettingsRenderTest {
             val value = observed.elements.getValue("value:ACCOUNT_APPRECIATION")
             val action = observed.elements.getValue("action:ACCOUNT_APPRECIATION")
             assertTrue(value.width > 80f && value.right < action.left)
-            assertTrue(action.width <= 100f && action.height > 46f)
+            val row = observed.elements.getValue("row:ACCOUNT_APPRECIATION")
+            assertTrue(action.width <= (row.width - 40f) * .45f + .6f && action.height > 42f)
             click(scene, action.center)
             assertEquals(listOf("ACCOUNT_APPRECIATION"), host.calls)
         } finally { scene.close() }
@@ -142,7 +179,7 @@ class SharedSettingsRenderTest {
             try {
                 val before = render(scene, "settings-scroll-$width-$height-before")
                 val back = observed.elements.getValue("back")
-                assertTrue(back.bottom <= height - if (width <= 560) 15f else 30f)
+                assertTrue(back.bottom <= height - if (width <= 600) 15f else 30f)
                 val bodyPoint = Offset(width / 2f, minOf(240f, back.top - 30f))
                 scene.sendPointerEvent(PointerEventType.Scroll, bodyPoint, scrollDelta = Offset(0f, 20f))
                 val after = render(scene, "settings-scroll-$width-$height-after")
@@ -204,7 +241,7 @@ class SharedSettingsRenderTest {
     private fun cardBounds(image: BufferedImage): Rect {
         var left = image.width; var top = image.height; var right = 0; var bottom = 0
         for (y in 0 until image.height) for (x in 0 until image.width) {
-            if ((image.getRGB(x, y) and 0xffffff) != 0xeff3ef) {
+            if ((image.getRGB(x, y) and 0xffffff) in setOf(0xffffff, 0xcbd5e1)) {
                 left = minOf(left, x); top = minOf(top, y); right = maxOf(right, x + 1); bottom = maxOf(bottom, y + 1)
             }
         }
@@ -213,11 +250,11 @@ class SharedSettingsRenderTest {
     }
 
     private fun assertNoHorizontalOverflow(image: BufferedImage, card: Rect) {
-        val outer = if (image.width <= 560) 10 else (image.width - minOf(820, image.width - 36)) / 2
+        val outer = 2 // Exclude the reference ambient shadow; text bounds are checked separately.
         assertTrue(card.left >= outer && card.right <= image.width - outer)
         for (y in 0 until image.height) {
-            for (x in 0 until outer) assertEquals(0xeff3ef, image.getRGB(x, y) and 0xffffff)
-            for (x in image.width - outer until image.width) assertEquals(0xeff3ef, image.getRGB(x, y) and 0xffffff)
+            for (x in 0 until outer) assertEquals(0xf8fafc, image.getRGB(x, y) and 0xffffff)
+            for (x in image.width - outer until image.width) assertEquals(0xf8fafc, image.getRGB(x, y) and 0xffffff)
         }
     }
 

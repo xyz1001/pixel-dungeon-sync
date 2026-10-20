@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -21,7 +23,7 @@ public final class InstallDiagnostics {
     static final class StageException extends IOException {
         final Stage stage;
         StageException(Stage stage, Exception cause) {
-            super("Install stage: " + stage.label, cause);
+            super(AndroidMessages.INSTALL_DIAGNOSTICS_01.text() + stage.label, cause);
             this.stage = stage;
         }
     }
@@ -36,7 +38,7 @@ public final class InstallDiagnostics {
         final int sessionId, api;
         final boolean commitAttempted;
         Failure(Stage stage, String packageName, int sessionId, int api, boolean commitAttempted, Exception cause) {
-            super("系统安装请求在 " + stage.label + " 阶段未完成。", cause);
+            super(AndroidMessages.INSTALL_STAGE_FAILED.text(stage.label), cause);
             this.stage = stage;
             this.packageName = packageName;
             this.sessionId = sessionId;
@@ -44,10 +46,15 @@ public final class InstallDiagnostics {
             this.commitAttempted = commitAttempted;
         }
         public String userMessage() {
-            return getMessage() + (commitAttempted
-                    ? "提交结果未知，进度已保留；请检查系统请求，不会自动重复提交。"
-                    : "尚未提交安装；准备好的 APK 仍保留。") + "可复制安装诊断查看原因。";
+            return describe(stage, commitAttempted);
         }
+    }
+
+    static String describe(Stage stage, boolean commitAttempted) {
+        String space = pdsync.i18n.UiLocale.isChinese() ? "" : " ";
+        return AndroidMessages.INSTALL_STAGE_FAILED.text(stage.label) + space
+                + (commitAttempted ? AndroidMessages.INSTALL_DIAGNOSTICS_04.text() : AndroidMessages.INSTALL_DIAGNOSTICS_05.text())
+                + space + AndroidMessages.INSTALL_DIAGNOSTICS_06.text();
     }
 
     public static Failure failure(Stage stage, String packageName, int sessionId, int api,

@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import pdsync.SaveSummary
 import pdsync.presentation.HistoryPresentation
 
@@ -22,7 +23,7 @@ data class SharedSavePathState(
     val canUseDefault: Boolean = false,
     val canRetry: Boolean = true,
     val canInitializeGame: Boolean = false,
-    val retryLabel: String = "重新检查存档",
+    val retryLabel: String = SharedMessages.RECHECK_SAVES.text(),
     val canCopyDiagnostics: Boolean = false,
 )
 
@@ -48,12 +49,12 @@ internal data class SharedSavePathSummary(
 /** A missing preview is not an empty directory; nullable play counts stay untouched. */
 internal fun savePathSummary(summary: SaveSummary?): SharedSavePathSummary? = summary?.let {
     SharedSavePathSummary(
-        headline = "${HistoryPresentation.plays(it.plays)} · 存档 ${it.slots.size} 个",
+        headline = SharedMessages.SAVES_HEADLINE.text(HistoryPresentation.plays(it.plays), it.slots.size),
         emptyMessage = if (it.slots.isNotEmpty()) null
-            else if (it.files > 0 || (it.plays ?: 0) > 0) "有记录，暂无可继续的存档。"
-            else "暂无存档。",
+            else if (it.files > 0 || (it.plays ?: 0) > 0) SharedMessages.RECORDS_NO_SAVES.text()
+            else SharedMessages.NO_SAVES.text(),
         slots = it.slots.map { (slot, time) ->
-            SharedSavePathSlot("存档 ${slot.removePrefix("game")}", HistoryPresentation.time(time))
+            SharedSavePathSlot(SharedMessages.SLOT_NAME.text(slot.removePrefix("game")), HistoryPresentation.time(time))
         },
     )
 }
@@ -72,9 +73,9 @@ internal fun SharedSavePathState.shows(control: SharedSavePathControl): Boolean 
 }
 
 internal val SharedSavePathState.primaryLabel: String get() = when {
-    continueAfterRead -> "等待检查…"
-    readStatus == SharedSavePathReadStatus.FAILED -> "重试"
-    else -> "下一步"
+    continueAfterRead -> SharedMessages.WAITING_CHECK.text()
+    readStatus == SharedSavePathReadStatus.FAILED -> SharedMessages.RETRY.text()
+    else -> SharedMessages.NEXT.text()
 }
 
 internal fun SharedSavePathState.enables(control: SharedSavePathControl): Boolean {

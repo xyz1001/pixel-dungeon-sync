@@ -25,6 +25,7 @@ import java.nio.file.Path
 import org.jetbrains.skia.EncodedImageFormat
 import pdsync.AppendCommit
 import pdsync.CommitGraph
+import pdsync.CommitOperationMetadata
 import pdsync.DeviceIdentity
 import pdsync.Manifest
 import pdsync.SaveSummary
@@ -67,19 +68,19 @@ class SharedHistoryRenderTest {
                 val pixels = render(scene, "history-$width")
                 val canvas = assertNotNull(observed.layout)
                 val viewport = assertNotNull(observed.viewport)
-                assertEquals(560f, canvas.width)
+                assertEquals(maxOf(440f, viewport.width), canvas.width, 1f)
                 assertTrue(viewport.left >= 0 && viewport.right <= width, "the history viewport must fit $width")
-                assertTrue(canvas.cards.values.all { it.width == 200f }, "no compressed cards at $width")
+                assertTrue(canvas.cards.values.all { it.width == canvas.width / 2 - 32 }, "no compressed cards at $width")
                 val newest = canvas.cards.getValue("newest")
                 val current = canvas.cards.getValue("local-current")
                 val middle = canvas.cards.getValue("middle")
                 val base = canvas.cards.getValue("base")
                 val baseline = canvas.cards.getValue("local-baseline")
                 assertTrue(newest.top < current.top && current.top < middle.top && middle.top < base.top)
-                assertEquals(base.center.y, baseline.center.y, "equal save-content time aligns measured opposite-lane centers")
+                assertEquals(base.center.y, baseline.center.y, "a baseline and its cloud record align measured opposite-lane centers")
                 assertTrue(base.height > baseline.height, "different measured heights must still share their time-row center")
                 assertTrue(newest.height > base.height, "real measured long names and details must wrap")
-                assertEquals(280f, baseline.center.x - base.center.x)
+                assertEquals(canvas.width / 2, baseline.center.x - base.center.x)
                 assertEquals(view.edges.toSet(), canvas.arrows.map { it.edge }.toSet())
                 val transfer = canvas.arrows.single { it.edge == HistoryEdge("base", "local-baseline") }
                 assertEquals(Offset(base.right, base.center.y), transfer.start)
@@ -97,18 +98,18 @@ class SharedHistoryRenderTest {
                 if (width == 1165) {
                     val cloudEdge = canvas.arrows.single { it.edge == HistoryEdge("middle", "newest") }
                     assertColorNear(pixels, observed.rootPoint((cloudEdge.start + cloudEdge.tip) / 2f),
-                        0x9aaa9f, "the measured cloud edge must actually be painted")
-                    assertColorNear(pixels, observed.rootPoint(transfer.tip), 0x326650,
+                        0x94a3b8, "the measured cloud edge must actually be painted")
+                    assertColorNear(pixels, observed.rootPoint(transfer.tip), 0x006877,
                         "the transfer arrowhead must actually be painted outside the target")
                     val dirtyEdge = canvas.arrows.single { it.edge.dashed }
                     val upper = dirtyEdge.tip.y.toInt() + 16
                     val lower = dirtyEdge.start.y.toInt() - 16
                     val colors = (upper..lower).map { y -> pixels.getRGB(
                         observed.rootPoint(dirtyEdge.start).x.toInt(), observed.rootPoint(Offset(0f, y.toFloat())).y.toInt()) and 0xffffff }
-                    assertTrue(colors.any { nearColor(it, 0x9a8053) }, "dashed baseline stroke must be painted")
-                    assertTrue(colors.any { nearColor(it, 0xf8faf8) }, "dashed baseline must have actual gaps")
+                    assertTrue(colors.any { nearColor(it, 0x855300) }, "dashed baseline stroke must be painted")
+                    assertTrue(colors.any { nearColor(it, 0xffffff) }, "dashed baseline must have actual gaps")
                 }
-                if (width < 560) {
+                if (viewport.width < 440) {
                     val origin = observed.origin
                     val scroll = assertNotNull(observed.scroll)
                     assertTrue(scroll.maxValue > 0)
@@ -201,8 +202,47 @@ class SharedHistoryRenderTest {
         try {
             render(scene, "history-empty")
             assertTrue(observed.layout!!.cards.isEmpty()); assertTrue(observed.layout!!.arrows.isEmpty())
-            assertEquals(208f, observed.layout!!.height)
+            assertEquals(126f, observed.layout!!.height)
         } finally { scene.close() }
+    }
+
+    @Test fun matchingContentWithoutBaselineRendersSyncedCompactPairAtEveryWidth() {
+        val remote = commit("remote", "2026-10-03T22:59:00.123Z")
+        for (width in listOf(1165, 750, 500, 320)) {
+            val state = SyncHistory(CommitGraph(mapOf(remote.id to remote), emptyMap()), null, oldFiles,
+                "本机当前", SaveSummary(mapOf("game1" to "2026-10-03T22:59:00Z"), 1, 1), emptyMap())
+            val presentation = HistoryPresentation.from(state, 0)
+            val observed = Observation()
+            val scene = ImageComposeScene(width = width, height = 600, density = Density(1f)) {
+                SharedConnectionTheme {
+                    CompositionLocalProvider(LocalSharedHistoryLayoutObserver provides observed) {
+                        SharedHistorySection(presentation, remote.snapshot.id, false, {}, {}, {})
+                    }
+                }
+            }
+            try {
+                val pixels = render(scene, "history-synced-no-baseline-$width")
+                val layout = assertNotNull(observed.layout)
+                assertEquals(maxOf(440f, width.toFloat()), layout.width)
+                val cloud = layout.cards.getValue("remote")
+                val local = layout.cards.getValue("local-current")
+                assertEquals(cloud.center.y, local.center.y)
+                assertEquals(16f, layout.width - local.right)
+                assertTrue(layout.height <= maxOf(cloud.height, local.height) + 57f)
+                assertFalse(presentation.nodes.single { it.id == "local-current" }.dirty)
+                val relation = layout.arrows.single()
+                assertTrue(relation.edge.sameContent)
+                assertEquals(32f, local.left - cloud.right)
+                assertEquals("local-current", relation.edge.fromId)
+                assertEquals("remote", relation.edge.toId)
+                assertEquals(local.left, relation.start.x)
+                assertTrue(relation.tip.x > cloud.right && relation.tip.x < relation.start.x)
+                assertTrue(relation.headLeft.x > relation.tip.x && relation.headRight.x > relation.tip.x)
+                assertColorNear(pixels, observed.rootPoint(relation.tip), 0x006877, "single left-facing arrowhead must be painted")
+                val middle = (relation.start + relation.tip) / 2f
+                assertColorNear(pixels, observed.rootPoint(middle), 0x006877, "unlabelled connector must remain continuous")
+            } finally { scene.close() }
+        }
     }
 
     private fun history(): SyncHistory {
@@ -216,6 +256,7 @@ class SharedHistoryRenderTest {
 
     private fun commit(id: String, time: String, parents: List<String> = emptyList()) = AppendCommit(
         id = id, parents = parents, objectBytes = 1,
+        operation = CommitOperationMetadata(device = DeviceIdentity("source-device", "MacBook"), preparedAt = time),
         snapshot = Manifest(game = "shattered", profile = "test", version = "922", id = "snapshot-$id",
             parent = null, sha256 = "c".repeat(64), files = oldFiles, saveVersions = SaveVersions(mapOf("game1" to 922)),
             metadata = SnapshotMetadata(device = DeviceIdentity("source-device", if (id == "newest" || id == "base")

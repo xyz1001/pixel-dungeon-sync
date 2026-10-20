@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -10,12 +12,12 @@ internal data class GameLaunchPlan(val command: List<String>, val directory: Pat
 internal sealed interface GameLaunchResult {
  val message: String
  data class Started(val target: TargetGame, val pid: Long) : GameLaunchResult {
-  override val message = "游戏已启动。"
+  override val message get() = DesktopMessages.GAME_STARTED.text()
  }
  data class AlreadyRunning(val status: GameProcessStatus.Running) : GameLaunchResult {
-  override val message = "游戏已在运行。"
+  override val message get() = DesktopMessages.THE_GAME_IS_ALREADY_RUNNING.text()
  }
- data object Busy : GameLaunchResult { override val message = "正在启动游戏，请稍候。" }
+ data object Busy : GameLaunchResult { override val message get() = DesktopMessages.STARTING_THE_GAME_PLEASE_WAIT.text() }
  data class Failed(override val message: String) : GameLaunchResult
 }
 
@@ -87,36 +89,36 @@ internal class GameLauncher(
    val target = try {
     val path = Path.of(configuredJar)
     require(configuredJar.isNotBlank() && path.isAbsolute && path.fileName.toString().endsWith(".jar", true))
-    inspect(path)?.takeIf { it.trusted } ?: return GameLaunchResult.Failed("游戏文件不可用，请在设置中重新选择游戏。")
-   } catch (_: Exception) { return GameLaunchResult.Failed("游戏文件不可用，请在设置中重新选择游戏。") }
+    inspect(path)?.takeIf { it.trusted } ?: return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text())
+   } catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text()) }
    when (val state = status(target)) {
     is GameProcessStatus.Running -> return GameLaunchResult.AlreadyRunning(state)
-    is GameProcessStatus.Unknown -> return GameLaunchResult.Failed("无法确认游戏状态，请关闭游戏后重试。")
+    is GameProcessStatus.Unknown -> return GameLaunchResult.Failed(DesktopMessages.CANNOT_CONFIRM_GAME_STATUS_CLOSE_THE_GAME_AND_TRY_AGAIN.text())
     GameProcessStatus.Stopped -> Unit
    }
-   if (platform == GameProcessPlatform.UNSUPPORTED) return GameLaunchResult.Failed("当前系统暂不支持启动游戏。")
+   if (platform == GameProcessPlatform.UNSUPPORTED) return GameLaunchResult.Failed(DesktopMessages.LAUNCHING_THE_GAME_IS_NOT_SUPPORTED_ON_THIS_SYSTEM.text())
    // No game save-directory override exists. Do not silently launch against another profile.
    try {
     val location = DefaultProfileLocation(context)
     val defaultRoot = SafePaths.checked(location.resolve())
     val selected = selectedSaveRoot?.let { location.requireSelected(it, false) } ?: defaultRoot
-    if (selected != defaultRoot) return GameLaunchResult.Failed("所选存档目录不是游戏默认位置，请在设置中核对路径后启动。")
-   } catch (_: Exception) { return GameLaunchResult.Failed("无法确认游戏存档位置，请在设置中核对路径。") }
-   val java = javaExecutable() ?: return GameLaunchResult.Failed("未找到 Java 启动程序，请安装 Java 17 或更新同步器。")
+    if (selected != defaultRoot) return GameLaunchResult.Failed(DesktopMessages.THE_SELECTED_SAVE_FOLDER_IS_NOT_THE_GAME_S_DEFAULT_LOCATION_CHECK_THE_PATH.text())
+   } catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.CANNOT_CONFIRM_THE_GAME_S_SAVE_LOCATION_CHECK_THE_PATH_IN_SETTINGS.text()) }
+   val java = javaExecutable() ?: return GameLaunchResult.Failed(DesktopMessages.JAVA_LAUNCHER_NOT_FOUND_INSTALL_JAVA_17_OR_UPDATE_THE_SYNC_APP.text())
    val process = try { start(gameLaunchPlan(target, java, context, platform)) }
-    catch (_: Exception) { return GameLaunchResult.Failed("启动失败，请检查 Java 环境或重新选择游戏后重试。") }
+    catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.LAUNCH_FAILED_CHECK_JAVA_OR_SELECT_THE_GAME_AGAIN_AND_RETRY.text()) }
    child = process
    // Detect immediate JVM/native-library failures without blocking the UI or piping output.
    if (process.waitFor(startupMillis, TimeUnit.MILLISECONDS)) {
     child = null
-    return GameLaunchResult.Failed("游戏启动后已退出，请检查 Java 环境或重新选择游戏后重试。")
+    return GameLaunchResult.Failed(DesktopMessages.THE_GAME_EXITED_AFTER_LAUNCH_CHECK_JAVA_OR_SELECT_THE_GAME_AGAIN_AND_RETRY.text())
    }
    return GameLaunchResult.Started(target, process.pid())
   } catch (_: InterruptedException) {
    Thread.currentThread().interrupt()
-   return GameLaunchResult.Failed("启动检查已中断，请检查游戏窗口后重试。")
+   return GameLaunchResult.Failed(DesktopMessages.LAUNCH_CHECK_INTERRUPTED_CHECK_THE_GAME_WINDOW_AND_TRY_AGAIN.text())
   } catch (_: Exception) {
-   return GameLaunchResult.Failed("启动失败，请检查 Java 环境或重新选择游戏后重试。")
+   return GameLaunchResult.Failed(DesktopMessages.LAUNCH_FAILED_CHECK_JAVA_OR_SELECT_THE_GAME_AGAIN_AND_RETRY.text())
   } finally { starting.set(false) }
  }
 }

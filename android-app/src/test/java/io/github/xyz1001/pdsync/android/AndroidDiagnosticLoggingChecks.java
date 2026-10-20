@@ -100,12 +100,36 @@ public final class AndroidDiagnosticLoggingChecks {
                 if (line.contains("\"stage\":\"VERIFY\"")) check(line.contains(automatic.getId()), "automatic trace bound inside its scope");
             }
             diagnosticSequenceChecks(temporary.resolve("scenarios"));
+            preparationFailureChecks(temporary.resolve("preparation"));
         } finally {
             try (java.util.stream.Stream<Path> files = Files.walk(temporary)) {
                 files.sorted(Comparator.reverseOrder()).forEach(path -> { try { Files.delete(path); } catch (Exception ignored) {} });
             }
         }
         System.out.println("Android diagnostic adapter: " + checks + " host checks passed; no Android service or network executed.");
+    }
+    private static void preparationFailureChecks(Path directory) throws Exception {
+        DiagnosticLog.configure(directory, "0.5.25-test+46", "android");
+        java.util.Map<String,String> evidence = new java.util.LinkedHashMap<>();
+        evidence.put("source","DOCUMENT_PICKER"); evidence.put("stage","SOURCE_SIGNATURE_SET");
+        evidence.put("verifier.issue.0","JAR_SIG_NO_MANIFEST"); evidence.put("input.0.bytes","29962302");
+        evidence.put("input.0.sha256","40c9eea94b545704c6a0edbdfd1a3eb01eaffc3a1d62270adf5ef517ee11e167");
+        evidence.put("cause.0.reason","APK_VERIFIER_REJECTED"); evidence.put("message","PRIVATE_SENTINEL");
+        Throwable wrapped = new java.io.IOException("PRIVATE_SENTINEL", new io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics.Failure(evidence));
+        pdsync.DiagnosticDetails details = AndroidDiagnosticLogging.failureDetails(wrapped);
+        check(details.getValues().containsKey(pdsync.DiagnosticDetails.Field.PREPARATION),"preparation adapter attached evidence");
+        DiagnosticTrace trace=DiagnosticLog.begin(DiagnosticAction.PREPARE,false);
+        for(DiagnosticStage stage:new DiagnosticStage[]{DiagnosticStage.PREPARATION,DiagnosticStage.WORK,DiagnosticStage.FINISHED})
+            AndroidDiagnosticLogging.failure(trace,stage,wrapped);
+        String records=exportedEvents();
+        check(records.contains("JAR_SIG_NO_MANIFEST"),"actual adapter exports verifier issue");
+        check(records.contains("29962302"),"actual adapter exports copy size");
+        check(!records.contains("PRIVATE_SENTINEL"),"adapter drops raw exception and untyped fields");
+        int terminal=0;for(String line:records.split("\\n")) if(line.contains(trace.getId())&&!line.contains("QUEUED")) {
+            terminal++;check(line.contains("APK_VERIFIER_REJECTED"),"all terminal events keep preparation cause");
+            check(!line.contains("\"failure\":\"NONE\""),"failed preparation never loses failure category");
+        }
+        check(terminal==3,"three real stages persisted");
     }
     private static String exportedEvents() throws Exception {
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(DiagnosticLog.snapshotExport()))) {

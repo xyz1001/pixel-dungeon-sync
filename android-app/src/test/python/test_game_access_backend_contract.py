@@ -13,7 +13,7 @@ SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 class GameAccessBackendContract(unittest.TestCase):
     def test_bridge_retains_direct_core_operations_and_explicit_modes(self):
         self.assertIn('class BridgeClient implements GameAccessBackend', CLIENT)
-        self.assertIn('selected.embeddedBridge() ? Mode.EMBEDDED_BRIDGE : Mode.LEGACY_HELPER_BRIDGE',
+        self.assertIn('embedded() ? Mode.EMBEDDED_BRIDGE : Mode.LEGACY_HELPER_BRIDGE',
                       body(CLIENT, 'public Mode mode()'))
         self.assertIn('new Capabilities(true, true, true, true)', CLIENT)
         self.assertIn('return CAPABILITIES;', body(CLIENT, 'public Capabilities capabilities()'))
@@ -38,7 +38,7 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertNotIn('ProcessBuilder', factory)
 
     def test_facade_and_observer_depend_on_the_factory_boundary(self):
-        facade = body(RUNTIME, 'static AndroidSyncFacade facade(')
+        facade = body(RUNTIME, 'private static AndroidSyncFacade createFacade(')
         self.assertIn('backend(context)', facade)
         self.assertIn('GameAccessBackends.forPreparedGame(context, prepared, gameIdentity(context, prepared))', body(RUNTIME, 'GameAccessBackend backend('))
         self.assertNotIn('new BridgeClient(', facade)

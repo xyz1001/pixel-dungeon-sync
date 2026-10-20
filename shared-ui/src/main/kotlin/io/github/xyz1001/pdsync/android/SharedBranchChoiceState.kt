@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -78,12 +79,12 @@ internal class SharedBranchChoiceInteractions(
     val presentation: SharedConfirmationState? get() = currentConfirmation()?.let { proof ->
         val current = state()
         val selected = current.branches.singleOrNull { it.snapshotId == current.selectedId }
-        SharedConfirmationState(proof.token, "如何处理冲突？",
-            listOfNotNull(selected?.let { "所选存档：${it.name}" },
-                "将先备份，再将所选存档设为本机和云端当前进度。所选存档中没有的进度会移除。请退出游戏，并暂停其他存档同步。")
+        SharedConfirmationState(proof.token, SharedMessages.CONFLICT_TITLE.text(),
+            listOfNotNull(selected?.let { SharedMessages.SELECTED_SAVE.text(it.name) },
+                SharedMessages.USE_SELECTED_WARNING.text())
                 .joinToString("\n\n"),
-            confirmLabel = "使用所选进度", confirmEnabled = current.canResolve && current.overwriteSupported && current.hasSelection,
-            secondaryLabel = if (current.mergeSupported) "合并" else null,
+            confirmLabel = SharedMessages.USE_SELECTED.text(), confirmEnabled = current.canResolve && current.overwriteSupported && current.hasSelection,
+            secondaryLabel = if (current.mergeSupported) SharedMessages.MERGE.text() else null,
             secondaryEnabled = current.canResolve && current.mergeSupported, busy = current.busy)
     }
 

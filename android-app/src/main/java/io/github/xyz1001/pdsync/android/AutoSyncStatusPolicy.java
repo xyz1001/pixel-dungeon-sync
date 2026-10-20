@@ -1,10 +1,12 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.util.Objects;
 
 /** Acknowledges one historical idle-observation failure, never a running listener or upload. */
 final class AutoSyncStatusPolicy {
-    static final String IDLE_FAILURE = "多次无法可靠确认游戏已空闲，已停止本次监听。请正常退出游戏后返回首页检查。";
+    static final String IDLE_FAILURE = "pdsync.ui:android.AutoSyncStatusPolicy.01";
     private AutoSyncStatusPolicy() {}
 
     static final class Record {
@@ -20,7 +22,7 @@ final class AutoSyncStatusPolicy {
         }
         boolean idleFailureFor(String selection, String space) {
             // Exact legacy code31 text is intentional: other BLOCKED causes must survive.
-            return "BLOCKED".equals(state) && IDLE_FAILURE.equals(result) && !token.isEmpty()
+            return "BLOCKED".equals(state) && (IDLE_FAILURE.equals(result) || AndroidMessages.AUTO_SYNC_STATUS_POLICY_01.chinese().equals(result) || AndroidMessages.AUTO_SYNC_STATUS_POLICY_01.english().equals(result)) && !token.isEmpty()
                     && startedAt > 0 && !gameSelection.isEmpty() && !namespace.isEmpty()
                     && gameSelection.equals(selection) && namespace.equals(space);
         }

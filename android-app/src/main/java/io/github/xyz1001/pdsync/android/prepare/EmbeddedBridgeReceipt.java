@@ -19,6 +19,8 @@ final class EmbeddedBridgeReceipt {
         if (!dex.matches("classes(?:[2-9]|[1-9][0-9]+)?\\.dex")) throw new IOException("Invalid embedded runtime DEX entry name");
         requireHash(properties, "runtimeDexSha256"); requireHash(properties, "mainAppCertSha256");
         if (!"1".equals(properties.getProperty("bridgeRuntimeVersion"))) throw new IOException("Unsupported embedded bridge runtime version");
+        if (properties.containsKey("bridgeAccessProtocol") && !"1".equals(properties.getProperty("bridgeAccessProtocol")))
+            throw new IOException("Unsupported bridge access protocol receipt");
         for (String field : new String[]{"helperPackage", "sharedUid", "helperSha256", "unsignedHelperSha256", "templateSha256", "helperVersionCode", "helperOnlyUpgrade"}) {
             if (properties.containsKey(field)) throw new IOException("Embedded receipt contains obsolete helper field " + field);
         }

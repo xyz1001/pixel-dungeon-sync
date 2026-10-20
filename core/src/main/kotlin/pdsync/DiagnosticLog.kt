@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -67,7 +68,7 @@ object DiagnosticLog {
  internal const val MAX_FILE_BYTES = 128 * 1024
  internal const val RETENTION_DAYS = 7L
  internal const val MAX_TOTAL_BYTES = MAX_FILE_BYTES * 7
- private const val MAX_LINE_BYTES = 2048
+ private const val MAX_LINE_BYTES = 32 * 1024
  private val lock = Any()
  private val current = ThreadLocal<DiagnosticTrace?>()
  private var configuration: Configuration? = null
@@ -213,20 +214,20 @@ object DiagnosticLog {
    }
    entry("metadata.json", codec.encodeToString(metadata) + "\n")
    entry("events.jsonl", records.joinToString("") { codec.encodeToString(it) + "\n" })
-   entry("应用.log", readableLog(metadata, records))
+   entry(CoreMessages.APPLICATION_LOG.text(), readableLog(metadata, records))
   }
   bytes.toByteArray()
  }
  /** A human-readable view of the same validated snapshot, never arbitrary exception/logcat text. */
  private fun readableLog(metadata: Metadata, records: List<Record>): String = buildString {
-  appendLine("# PD Sync 应用日志")
-  appendLine("# 导出快照不包含本次导出完成结果；不会补录旧版本未记录的历史。")
+  appendLine(CoreMessages.PD_SYNC_APPLICATION_LOG.text())
+  appendLine(CoreMessages.THIS_EXPORT_SNAPSHOT_EXCLUDES_THE_RESULT_OF_THIS_EXPORT_UNRECORDED_EVENTS_FROM_OLDER.text())
   appendLine("# version=${metadata.appVersion} platform=${metadata.platform} exportedAt=${metadata.generatedAtUtc} zone=${metadata.zone}")
   val environment = metadata.environment
   appendLine("# osVersion=${environment.osVersion ?: "unknown"} api=${environment.androidApiLevel ?: "unknown"} brand=${environment.brand ?: "unknown"} model=${environment.model ?: "unknown"} cpu=${environment.cpuArchitectures.joinToString(",")} locale=${environment.locale ?: "unknown"}")
   appendLine("# records=${metadata.recordCount} storageAvailable=${metadata.storageAvailable} retentionDays=${metadata.retentionDays}")
-  if (!metadata.storageAvailable) appendLine("# 日志存储不可用或读取不完整。")
-  if (records.isEmpty()) appendLine("# 没有可导出的已记录事件。")
+  if (!metadata.storageAvailable) appendLine(CoreMessages.LOG_STORAGE_IS_UNAVAILABLE_OR_COULD_NOT_BE_FULLY_READ.text())
+  if (records.isEmpty()) appendLine(CoreMessages.NO_RECORDED_EVENTS_TO_EXPORT.text())
   for (record in records.sortedBy { Instant.parse(it.timestampUtc) }) {
    val level = when (record.result) {
     DiagnosticResult.FAILED -> "ERROR"
@@ -234,62 +235,66 @@ object DiagnosticLog {
     else -> "INFO"
    }
    val explanation = if (record.stage == DiagnosticStage.HTTP && record.httpStatus != null && record.result == DiagnosticResult.SUCCEEDED)
-    "收到 HTTP 响应" else resultText(record.result)
+    CoreMessages.HTTP_RESPONSE_RECEIVED.text() else resultText(record.result)
    append("${record.timestampUtc} $level [${record.operationId}] ${actionText(record.action)} / ${stageText(record.stage)}：$explanation")
    append(" action=${record.action} stage=${record.stage} result=${record.result} automatic=${record.automatic} elapsedMs=${record.elapsedMs}")
    record.httpMethod?.let { append(" method=$it") }
    record.httpStatus?.let { append(" status=$it") }
    if (record.failure != DiagnosticFailure.NONE) append(" error=${record.failure} (${failureText(record.failure)})")
-   record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) -> append(" ${field.name}=$value") }
+   record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) ->
+    if (field == DiagnosticDetails.Field.PREPARATION) {
+     PreparationDiagnosticEvidence.decode(value)?.forEach { (key, fact) -> append(" prep.$key=$fact") }
+    } else append(" ${field.name}=$value")
+   }
    appendLine(" version=${record.appVersion} platform=${record.platform} zone=${record.zone} offsetMinutes=${record.offsetMinutes}")
   }
  }
  private fun actionText(value: DiagnosticAction): String = when (value) {
-  DiagnosticAction.APP_START -> "应用启动"; DiagnosticAction.CONFIGURE -> "配置"
-  DiagnosticAction.CONNECT -> "连接服务"; DiagnosticAction.INSPECT -> "检查存档"
-  DiagnosticAction.HISTORY -> "读取历史"; DiagnosticAction.PREPARE -> "准备游戏"
-  DiagnosticAction.INSTALL -> "安装游戏"; DiagnosticAction.ACCESS_CHECK -> "检查存档访问"
-  DiagnosticAction.LAUNCH -> "启动游戏"; DiagnosticAction.CAPTURE -> "创建快照"
-  DiagnosticAction.PUSH -> "上传存档"; DiagnosticAction.RESTORE -> "恢复存档"
-  DiagnosticAction.RECOVERY -> "处理中断操作"; DiagnosticAction.RESOLVE -> "处理冲突"
-  DiagnosticAction.MERGE -> "合并存档"; DiagnosticAction.ARCHIVE -> "归档操作"
-  DiagnosticAction.EXPORT_LOGS -> "导出日志"; DiagnosticAction.AUTOMATIC_SYNC -> "自动同步"
-  DiagnosticAction.OTHER -> "其他操作"
+  DiagnosticAction.APP_START -> CoreMessages.APPLICATION_STARTUP.text(); DiagnosticAction.CONFIGURE -> CoreMessages.SETTINGS.text()
+  DiagnosticAction.CONNECT -> CoreMessages.CONNECT_TO_SERVICE.text(); DiagnosticAction.INSPECT -> CoreMessages.CHECK_SAVES.text()
+  DiagnosticAction.HISTORY -> CoreMessages.READ_HISTORY.text(); DiagnosticAction.PREPARE -> CoreMessages.PREPARE_GAME.text()
+  DiagnosticAction.INSTALL -> CoreMessages.INSTALL_GAME.text(); DiagnosticAction.ACCESS_CHECK -> CoreMessages.CHECK_SAVE_ACCESS.text()
+  DiagnosticAction.LAUNCH -> CoreMessages.LAUNCH_GAME.text(); DiagnosticAction.CAPTURE -> CoreMessages.CREATE_SNAPSHOT.text()
+  DiagnosticAction.PUSH -> CoreMessages.UPLOAD_SAVES.text(); DiagnosticAction.RESTORE -> CoreMessages.RESTORE_SAVES.text()
+  DiagnosticAction.RECOVERY -> CoreMessages.HANDLE_INTERRUPTED_OPERATION.text(); DiagnosticAction.RESOLVE -> CoreMessages.RESOLVE_CONFLICT.text()
+  DiagnosticAction.MERGE -> CoreMessages.MERGE_SAVES.text(); DiagnosticAction.ARCHIVE -> CoreMessages.ARCHIVE_OPERATION.text()
+  DiagnosticAction.EXPORT_LOGS -> CoreMessages.EXPORT_LOGS.text(); DiagnosticAction.AUTOMATIC_SYNC -> CoreMessages.AUTOMATIC_SYNC.text()
+  DiagnosticAction.OTHER -> CoreMessages.OTHER_OPERATION.text()
  }
  private fun stageText(value: DiagnosticStage): String = when (value) {
-  DiagnosticStage.QUEUED -> "排队"; DiagnosticStage.STARTED -> "开始"
-  DiagnosticStage.CONFIRMATION -> "确认"; DiagnosticStage.GUARD -> "条件检查"
-  DiagnosticStage.WORK -> "执行"; DiagnosticStage.REFRESH -> "刷新"
-  DiagnosticStage.FINISHED -> "结束"; DiagnosticStage.RUNTIME -> "运行状态"
-  DiagnosticStage.CONNECTION -> "连接检查"; DiagnosticStage.NAMESPACE -> "同步目录"
-  DiagnosticStage.HTTP -> "HTTP"; DiagnosticStage.PREPARATION -> "安装准备"
-  DiagnosticStage.INSTALLATION -> "系统安装"; DiagnosticStage.BRIDGE -> "存档访问"
-  DiagnosticStage.READINESS -> "存档就绪检查"; DiagnosticStage.GAME_LAUNCH -> "游戏启动"
-  DiagnosticStage.BACKUP -> "备份"; DiagnosticStage.RESTORE -> "写入恢复"
-  DiagnosticStage.RECOVERY -> "中断恢复"; DiagnosticStage.VERIFY -> "完整性校验"
-  DiagnosticStage.EXPORT -> "导出"
+  DiagnosticStage.QUEUED -> CoreMessages.QUEUED.text(); DiagnosticStage.STARTED -> CoreMessages.STARTED.text()
+  DiagnosticStage.CONFIRMATION -> CoreMessages.CONFIRMATION.text(); DiagnosticStage.GUARD -> CoreMessages.PREREQUISITE_CHECK.text()
+  DiagnosticStage.WORK -> CoreMessages.EXECUTION.text(); DiagnosticStage.REFRESH -> CoreMessages.REFRESH.text()
+  DiagnosticStage.FINISHED -> CoreMessages.FINISHED.text(); DiagnosticStage.RUNTIME -> CoreMessages.RUNTIME_STATUS.text()
+  DiagnosticStage.CONNECTION -> CoreMessages.CONNECTION_CHECK.text(); DiagnosticStage.NAMESPACE -> CoreMessages.SYNC_DIRECTORY.text()
+  DiagnosticStage.HTTP -> "HTTP"; DiagnosticStage.PREPARATION -> CoreMessages.INSTALLATION_PREPARATION.text()
+  DiagnosticStage.INSTALLATION -> CoreMessages.SYSTEM_INSTALLATION.text(); DiagnosticStage.BRIDGE -> CoreMessages.SAVE_ACCESS.text()
+  DiagnosticStage.READINESS -> CoreMessages.SAVE_READINESS_CHECK.text(); DiagnosticStage.GAME_LAUNCH -> CoreMessages.GAME_LAUNCH.text()
+  DiagnosticStage.BACKUP -> CoreMessages.BACKUP.text(); DiagnosticStage.RESTORE -> CoreMessages.RESTORE_WRITE.text()
+  DiagnosticStage.RECOVERY -> CoreMessages.INTERRUPTED_RESTORE.text(); DiagnosticStage.VERIFY -> CoreMessages.INTEGRITY_CHECK.text()
+  DiagnosticStage.EXPORT -> CoreMessages.EXPORT.text()
  }
  private fun resultText(value: DiagnosticResult): String = when (value) {
-  DiagnosticResult.STARTED -> "开始"; DiagnosticResult.SUCCEEDED -> "成功"
-  DiagnosticResult.FAILED -> "失败"; DiagnosticResult.CANCELED -> "已取消"
-  DiagnosticResult.REJECTED -> "未满足操作条件"; DiagnosticResult.SKIPPED -> "已跳过"
-  DiagnosticResult.PENDING -> "等待处理"; DiagnosticResult.CONFLICT -> "存在冲突"
+  DiagnosticResult.STARTED -> CoreMessages.STARTED.text(); DiagnosticResult.SUCCEEDED -> CoreMessages.SUCCESS.text()
+  DiagnosticResult.FAILED -> CoreMessages.FAILED.text(); DiagnosticResult.CANCELED -> CoreMessages.CANCELED.text()
+  DiagnosticResult.REJECTED -> CoreMessages.PREREQUISITES_NOT_MET.text(); DiagnosticResult.SKIPPED -> CoreMessages.SKIPPED.text()
+  DiagnosticResult.PENDING -> CoreMessages.PENDING.text(); DiagnosticResult.CONFLICT -> CoreMessages.CONFLICT_DETECTED.text()
  }
  private fun failureText(value: DiagnosticFailure): String = when (value) {
-  DiagnosticFailure.GAME_NOT_SELECTED -> "尚未选择游戏"; DiagnosticFailure.NOT_CHECKED -> "尚未检查存档访问"
-  DiagnosticFailure.FIRST_LAUNCH_NEEDED -> "游戏尚未创建存档目录"; DiagnosticFailure.UNRECOGNIZED_LAYOUT -> "存档布局无法识别"
-  DiagnosticFailure.SYSTEM_REQUEST_PENDING -> "等待系统安装操作结束"; DiagnosticFailure.CAPABILITY_UNAVAILABLE -> "所需文件操作能力不可用"
-  DiagnosticFailure.NONE -> "无错误"; DiagnosticFailure.BUSY -> "游戏或存档忙碌"
-  DiagnosticFailure.NOT_READY -> "存档尚未就绪"; DiagnosticFailure.RECOVERY_REQUIRED -> "需要处理中断操作"
-  DiagnosticFailure.IDENTITY_MISMATCH -> "应用身份不匹配"; DiagnosticFailure.UNAVAILABLE -> "所需能力不可用"
-  DiagnosticFailure.CANCELED -> "操作取消"; DiagnosticFailure.AUTHENTICATION -> "身份验证失败"
-  DiagnosticFailure.AUTHORIZATION -> "访问未获允许"; DiagnosticFailure.HTTP -> "HTTP 请求未通过"
-  DiagnosticFailure.TIMEOUT -> "网络超时"; DiagnosticFailure.DNS -> "域名解析失败"
-  DiagnosticFailure.CONNECT -> "网络连接失败"; DiagnosticFailure.TLS -> "安全连接失败"
-  DiagnosticFailure.EOF -> "连接提前结束"; DiagnosticFailure.CONNECTION -> "连接中断"
-  DiagnosticFailure.INTERRUPTED -> "网络操作中断"; DiagnosticFailure.NETWORK_IO -> "网络读写失败"
-  DiagnosticFailure.STORAGE -> "文件读写失败"; DiagnosticFailure.VALIDATION -> "数据或操作条件校验失败"
-  DiagnosticFailure.OTHER -> "未分类错误"
+  DiagnosticFailure.GAME_NOT_SELECTED -> CoreMessages.NO_GAME_SELECTED.text(); DiagnosticFailure.NOT_CHECKED -> CoreMessages.SAVE_ACCESS_HAS_NOT_BEEN_CHECKED.text()
+  DiagnosticFailure.FIRST_LAUNCH_NEEDED -> CoreMessages.THE_GAME_HAS_NOT_CREATED_A_SAVE_DIRECTORY.text(); DiagnosticFailure.UNRECOGNIZED_LAYOUT -> CoreMessages.SAVE_LAYOUT_NOT_RECOGNIZED.text()
+  DiagnosticFailure.SYSTEM_REQUEST_PENDING -> CoreMessages.WAITING_FOR_SYSTEM_INSTALLATION_TO_FINISH.text(); DiagnosticFailure.CAPABILITY_UNAVAILABLE -> CoreMessages.REQUIRED_FILE_OPERATIONS_ARE_UNAVAILABLE.text()
+  DiagnosticFailure.NONE -> CoreMessages.NO_ERROR.text(); DiagnosticFailure.BUSY -> CoreMessages.GAME_OR_SAVES_ARE_BUSY.text()
+  DiagnosticFailure.NOT_READY -> CoreMessages.SAVES_ARE_NOT_READY.text(); DiagnosticFailure.RECOVERY_REQUIRED -> CoreMessages.AN_INTERRUPTED_OPERATION_NEEDS_ATTENTION.text()
+  DiagnosticFailure.IDENTITY_MISMATCH -> CoreMessages.APPLICATION_IDENTITY_MISMATCH.text(); DiagnosticFailure.UNAVAILABLE -> CoreMessages.REQUIRED_CAPABILITY_UNAVAILABLE.text()
+  DiagnosticFailure.CANCELED -> CoreMessages.OPERATION_CANCELED.text(); DiagnosticFailure.AUTHENTICATION -> CoreMessages.AUTHENTICATION_FAILED.text()
+  DiagnosticFailure.AUTHORIZATION -> CoreMessages.ACCESS_DENIED.text(); DiagnosticFailure.HTTP -> CoreMessages.HTTP_REQUEST_FAILED.text()
+  DiagnosticFailure.TIMEOUT -> CoreMessages.NETWORK_TIMEOUT.text(); DiagnosticFailure.DNS -> CoreMessages.DNS_LOOKUP_FAILED.text()
+  DiagnosticFailure.CONNECT -> CoreMessages.NETWORK_CONNECTION_FAILED.text(); DiagnosticFailure.TLS -> CoreMessages.SECURE_CONNECTION_FAILED.text()
+  DiagnosticFailure.EOF -> CoreMessages.CONNECTION_ENDED_EARLY.text(); DiagnosticFailure.CONNECTION -> CoreMessages.CONNECTION_INTERRUPTED.text()
+  DiagnosticFailure.INTERRUPTED -> CoreMessages.NETWORK_OPERATION_INTERRUPTED.text(); DiagnosticFailure.NETWORK_IO -> CoreMessages.NETWORK_I_O_FAILED.text()
+  DiagnosticFailure.STORAGE -> CoreMessages.FILE_I_O_FAILED.text(); DiagnosticFailure.VALIDATION -> CoreMessages.DATA_OR_PREREQUISITE_VALIDATION_FAILED.text()
+  DiagnosticFailure.OTHER -> CoreMessages.UNCLASSIFIED_ERROR.text()
  }
  @JvmStatic fun suggestedFilename(): String = synchronized(lock) {
   "pd-sync-diagnostics-${filenameTime.format(configuration?.clock?.instant() ?: Instant.now())}.zip"
@@ -311,11 +316,11 @@ object DiagnosticLog {
      return file
     } catch (_: Exception) {
      try { Files.deleteIfExists(SafePaths.checked(file)) } catch (_: Exception) { /* Own partial file only. */ }
-     throw IOException("Diagnostic export could not be written")
+     throw IOException(CoreMessages.VALIDATION_DIAGNOSTIC_EXPORT_COULD_NOT_BE_WRITTEN.text())
     }
    }
-   throw IOException("Diagnostic export name limit reached")
-  } catch (_: Exception) { throw IOException("Diagnostic export could not be written to the selected directory") }
+   throw IOException(CoreMessages.VALIDATION_DIAGNOSTIC_EXPORT_NAME_LIMIT_REACHED.text())
+  } catch (_: Exception) { throw IOException(CoreMessages.VALIDATION_DIAGNOSTIC_EXPORT_COULD_NOT_BE_WRITTEN_TO_THE_SELECTED_DIRECTORY.text()) }
  }
 
  @JvmStatic fun classify(error: Throwable): DiagnosticFailure = try {

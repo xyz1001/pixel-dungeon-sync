@@ -112,7 +112,6 @@ public final class EmbeddedRuntimeTests {
     public static void main(String[] args) throws Exception {
         int sdk=Integer.parseInt(args[0]);
         byte[] certificate=Base64.getMimeDecoder().decode(new String(Files.readAllBytes(Paths.get(args[1])),java.nio.charset.StandardCharsets.US_ASCII));
-        MainCallerPolicy.requirePinnedSigner(MainCallerPolicy.MAIN_SIGNER_SHA256,new byte[][]{certificate}); assertions++;
         Context c=new Context(); PackageInfo game=new PackageInfo(),main=new PackageInfo();
         game.packageName=GAME; game.versionCode=17; game.versionName="v17";
         game.applicationInfo=new ApplicationInfo(); game.applicationInfo.uid=42; game.applicationInfo.dataDir="/data/user/0/"+GAME;
@@ -120,7 +119,7 @@ public final class EmbeddedRuntimeTests {
         sign(main,certificate,sdk); c.pm.packages.put(GAME,game); c.pm.packages.put(MAIN,main);
         c.pm.uids.put(42,new String[]{GAME}); c.pm.uids.put(10,new String[]{MAIN});
         Bundle metadata=new Bundle(); String origin=String.join("",Collections.nCopies(64,"1"));
-        String[] values={"embedded-v1",GAME,origin,"android-"+origin,origin,"17","v17",MainCallerPolicy.MAIN_SIGNER_SHA256,"1"};
+        String[] values={"embedded-v1",GAME,origin,"android-"+origin,origin,"17","v17","8".repeat(64),"1"};
         for(int i=0;i<values.length;i++) metadata.putString(GameBinding.PREFIX+GameBinding.EMBEDDED_METADATA_NAMES[i],values[i]);
         game.applicationInfo.metaData=metadata;
         ProviderInfo provider=new ProviderInfo(); c.pm.provider=provider;
@@ -138,13 +137,14 @@ public final class EmbeddedRuntimeTests {
         c.pm.uids.put(10,new String[]{MAIN}); main.applicationInfo.uid=11;
         denied(()->MainCallerAuthenticator.authenticateProvider(c,MAIN,10),"changed installed main UID"); main.applicationInfo.uid=10;
         sign(main,new byte[]{1,2,3},sdk);
-        denied(()->MainCallerAuthenticator.authenticateProvider(c,MAIN,10),"wrong current certificate");
+        MainCallerAuthenticator.authenticateProvider(c,MAIN,10); assertions++; // same actual package/UID, another client certificate
+        MainCallerAuthenticator.authenticateActivity(c,MAIN); assertions++;
         main.signatures=new Signature[]{new Signature(certificate)};
-        if(sdk>=28) denied(()->MainCallerAuthenticator.authenticateProvider(c,MAIN,10),"historical/legacy signer cannot override current signer");
+        MainCallerAuthenticator.authenticateProvider(c,MAIN,10); assertions++;
         sign(main,certificate,sdk);
         metadata.putString(GameBinding.PREFIX+"MAIN_APP_CERT_SHA256",origin);
-        denied(()->MainCallerAuthenticator.authenticateProvider(c,MAIN,10),"manifest cannot redefine pin");
-        metadata.putString(GameBinding.PREFIX+"MAIN_APP_CERT_SHA256",MainCallerPolicy.MAIN_SIGNER_SHA256);
+        MainCallerAuthenticator.authenticateProvider(c,MAIN,10); assertions++; // historical metadata does not pin the main client
+        metadata.putString(GameBinding.PREFIX+"MAIN_APP_CERT_SHA256","8".repeat(64));
         metadata.put(GameBinding.PREFIX+"BRIDGE_RUNTIME_VERSION",1);
         denied(()->MainCallerAuthenticator.authenticateProvider(c,MAIN,10),"resource/integer metadata rejected");
         metadata.putString(GameBinding.PREFIX+"BRIDGE_RUNTIME_VERSION","1");
@@ -218,7 +218,8 @@ class EmbeddedRuntimeTests(unittest.TestCase):
             self.assertIn('authenticate();', match.group(1), method)
         self.assertIn('int iAuthenticate = authenticate();', source)
         self.assertNotIn('enforceCallingPermission', source)
-        self.assertIn('? getContext().getNoBackupFilesDir() : getContext().getFilesDir()', source)
+        self.assertNotIn('getContext().getNoBackupFilesDir()', source)
+        self.assertNotIn('getContext().getFilesDir()', source)
         auth = (PRODUCTION / 'MainCallerAuthenticator.java').read_text()
         self.assertNotIn('getString(', auth)
         self.assertNotIn('checkPermission', auth)

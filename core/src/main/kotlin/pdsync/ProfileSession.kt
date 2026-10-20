@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.CoreSessionMessages
+
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -16,18 +18,18 @@ object SafePaths {
   val absolute = path.toAbsolutePath().normalize()
   var cursor: Path? = absolute
   while (cursor != null) {
-   require(!Files.isSymbolicLink(cursor)) { "路径不能含符号链接：$cursor" }
+   require(!Files.isSymbolicLink(cursor)) { CoreSessionMessages.PATHS_CANNOT_CONTAIN_SYMBOLIC_LINKS.text(cursor) }
    cursor = cursor.parent
   }
   return absolute
  }
  fun directory(path: Path): Path {
   val checked = checked(path)
-  require(Files.isDirectory(checked, LinkOption.NOFOLLOW_LINKS)) { "请选择已存在的存档目录" }
+  require(Files.isDirectory(checked, LinkOption.NOFOLLOW_LINKS)) { CoreSessionMessages.SELECT_AN_EXISTING_SAVES_FOLDER.text() }
   return checked.toRealPath()
  }
  fun disjoint(a: Path, b: Path) {
-  require(!a.startsWith(b) && !b.startsWith(a)) { "存档目录与同步器数据目录不能互相包含" }
+  require(!a.startsWith(b) && !b.startsWith(a)) { CoreSessionMessages.THE_SAVES_FOLDER_AND_SYNC_DATA_FOLDER_CANNOT_CONTAIN_ONE.text() }
  }
  fun atomicWrite(path: Path, bytes: ByteArray) {
   atomicWrite(path,bytes) { from,to -> Files.move(from,to,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);Unit }
@@ -45,20 +47,20 @@ object SafePaths {
   } finally { Files.deleteIfExists(temp) }
  }
  fun boundedRead(path: Path, limit: Int): ByteArray = Files.newInputStream(checked(path)).use {
-  it.readUpTo(limit + 1).also { data -> require(data.size <= limit) { "本地文件过大" } }
+  it.readUpTo(limit + 1).also { data -> require(data.size <= limit) { CoreSessionMessages.THE_LOCAL_FILE_IS_TOO_LARGE.text() } }
  }
 }
 
 /** Reject ambiguous raw paths before HttpUrl can normalize away the configured root boundary. */
 private fun validateRawEndpoint(endpoint: String) {
- require(endpoint.length <= 8192 && endpoint.none { it.isWhitespace() || it.isISOControl() || it == '\\' }) { "服务地址格式无效" }
- val uri = try { java.net.URI(endpoint) } catch (_: Exception) { throw IllegalArgumentException("服务地址格式无效") }
- require(uri.isAbsolute && !uri.isOpaque && uri.rawAuthority != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "服务地址不能含账号、查询参数或片段" }
+ require(endpoint.length <= 8192 && endpoint.none { it.isWhitespace() || it.isISOControl() || it == '\\' }) { CoreSessionMessages.INVALID_SERVICE_ADDRESS_FORMAT.text() }
+ val uri = try { java.net.URI(endpoint) } catch (_: Exception) { throw IllegalArgumentException(CoreSessionMessages.INVALID_SERVICE_ADDRESS_FORMAT.text()) }
+ require(uri.isAbsolute && !uri.isOpaque && uri.rawAuthority != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { CoreSessionMessages.THE_SERVICE_ADDRESS_CANNOT_CONTAIN_AN_ACCOUNT_QUERY_PARAMETERS_OR.text() }
  val rawPath = uri.rawPath ?: ""
- require("//" !in rawPath) { "服务地址包含不明确的路径" }
+ require("//" !in rawPath) { CoreSessionMessages.THE_SERVICE_ADDRESS_CONTAINS_AN_AMBIGUOUS_PATH.text() }
  rawPath.split('/').forEach { raw ->
-  val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException("服务地址编码无效") }
-  require(decoded != "." && decoded != ".." && decoded.none { it == '/' || it == '\\' || it == '%' || it.isISOControl() }) { "服务地址不能包含路径跳转或编码分隔符" }
+  val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException(CoreSessionMessages.INVALID_SERVICE_ADDRESS_ENCODING.text()) }
+  require(decoded != "." && decoded != ".." && decoded.none { it == '/' || it == '\\' || it == '%' || it.isISOControl() }) { CoreSessionMessages.THE_SERVICE_ADDRESS_CANNOT_CONTAIN_PATH_TRAVERSAL_OR_ENCODED_SEPARATORS.text() }
  }
 }
 
@@ -77,11 +79,11 @@ private fun validateRawEndpoint(endpoint: String) {
 ) {
  override fun toString() = "AppConfig(profile=$profile, targetGame=$targetGame, onboardingProgress=$onboardingProgress, password=<redacted>)"
  fun validated(): AppConfig {
-  require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "档案名只允许 1–64 位字母、数字、下划线或连字符" }
+  require(profile.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { CoreSessionMessages.PROFILE_NAMES_MUST_CONTAIN_1_64_LETTERS_DIGITS_UNDERSCORES_OR.text() }
   validateRawEndpoint(endpoint)
   val url = endpoint.toHttpUrl()
-  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "服务地址不能含账号、密码、查询参数或片段" }
-  require(url.scheme == "https" || url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost", "::1")) { "服务必须使用 HTTPS；仅本机演示允许 HTTP" }
+  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { CoreSessionMessages.THE_SERVICE_ADDRESS_CANNOT_CONTAIN_CREDENTIALS_QUERY_PARAMETERS_OR_A.text() }
+  require(url.scheme == "https" || url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost", "::1")) { CoreSessionMessages.THE_SERVICE_MUST_USE_HTTPS_HTTP_IS_ALLOWED_ONLY_FOR.text() }
   return copy(endpoint = url.toString().trimEnd('/'), version = null)
  }
 }
@@ -98,11 +100,11 @@ class ConfigFile(private val path: Path) {
  fun load(): AppConfig? = try { if (exists())
   json.decodeFromString<AppConfig>(SafePaths.boundedRead(path, 16 * 1024).decodeToString())
    .copy(saveRoot = "").validated() else null
- } catch (_: Exception) { error("配置文件无法读取或已损坏；原文件保留，请重新填写设置。") }
+ } catch (_: Exception) { error(CoreSessionMessages.THE_CONFIGURATION_IS_UNREADABLE_OR_DAMAGED_THE_ORIGINAL_FILE_IS.text()) }
  fun save(config: AppConfig) {
   val safe = config.validated()
   val bytes = json.encodeToString(Persisted(safe.endpoint, safe.profile, safe.targetGame, safe.username, safe.rememberPassword, safe.autoUploadPaused, safe.onboardingProgress, safe.password, safe.selectedSaveRoot, safe.connectionProvider)).encodeToByteArray()
-  require(bytes.size <= 16 * 1024) { "配置过大，未保存" }
+  require(bytes.size <= 16 * 1024) { CoreSessionMessages.THE_CONFIGURATION_IS_TOO_LARGE_AND_WAS_NOT_SAVED.text() }
   preserveLegacy()
   SafePaths.atomicWrite(path, bytes)
  }
@@ -119,7 +121,7 @@ class ConfigFile(private val path: Path) {
    try { Files.write(backup, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE) }
    catch (_: FileAlreadyExistsException) { }
   }
-  require(SafePaths.boundedRead(backup, 16 * 1024).contentEquals(bytes)) { "旧配置备份校验失败，未覆盖原配置" }
+  require(SafePaths.boundedRead(backup, 16 * 1024).contentEquals(bytes)) { CoreSessionMessages.THE_OLD_CONFIGURATION_BACKUP_FAILED_VERIFICATION_THE_ORIGINAL_CONFIGURATION_WAS.text() }
  }
 }
 
@@ -141,22 +143,24 @@ interface ProfileVersions {
 object ShatteredProfileVersions : ProfileVersions {
  override fun annotate(snapshot: Snapshot): Snapshot {
   val files = Snapshots.verify(snapshot, Shattered)
+  require(recordedGamePackage(snapshot.manifest) == GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_HAS_NO_VERIFIABLE_GAME_PACKAGE_IDENTITY.text() }
   val detected = try { ShatteredVersions.detect(files) } catch (e: Exception) {
-   SaveVersions(emptyMap(), emptyList(), "无法识别：${e.message}")
+   SaveVersions(emptyMap(), emptyList(), CoreSessionMessages.UNRECOGNIZED.text(e.message))
   }
-  return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected))
+  return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected,
+   gamePackage = GameCloudIdentity.SHATTERED_PACKAGE))
  }
  override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(java.nio.file.Paths.get(path))
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   val actual = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))
-  snapshot.manifest.saveVersions?.let { require(it == actual) { "快照的版本元数据与存档内容不一致" } }
-  require(recordedGamePackage(snapshot.manifest) == "com.shatteredpixel.shatteredpixeldungeon") { "快照属于不同游戏包，不能恢复到所选游戏。" }
-  val target = target(targetPath) ?: error("请先选择目标游戏 JAR；不能从存档推断已安装游戏版本")
+  snapshot.manifest.saveVersions?.let { require(it == actual) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_SAVE_CONTENTS.text() } }
+  require(recordedGamePackage(snapshot.manifest) == GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_BELONGS_TO_A_DIFFERENT_GAME_PACKAGE_AND_CANNOT.text() }
+  val target = target(targetPath) ?: error(CoreSessionMessages.SELECT_THE_TARGET_GAME_JAR_FIRST_THE_INSTALLED_GAME_VERSION.text())
   ShatteredVersions.requireCompatible(actual, target)
  }
 }
 
-/** Each scope binds a physical save directory, adapter, remote endpoint, profile, and version. */
+/** Current scopes bind a physical save directory, adapter, remote endpoint, and profile. */
 class ProfileSession(
  config: AppConfig, private val stateRoot: Path, val adapter: GameAdapter = Shattered,
  private val versions: ProfileVersions = ShatteredProfileVersions,
@@ -168,7 +172,7 @@ class ProfileSession(
  private val state = SafePaths.checked(stateRoot)
  private val metadata = if (deviceLabel == null) DeviceMetadata(state) else DeviceMetadata(state, hostname = deviceLabel)
  internal val directoryMetadata = DirectoryMetadataStore(root)
- private val scopeKey = hash(listOf("auto-version-v2", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
+ private val scopeKey = hash(listOf("package-current-v1", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
  val directory: Path = state.resolve("profiles").resolve(scopeKey)
  private val historyRoot = directory.resolve("history")
  private val backupRoot = directory.resolve("backups")
@@ -177,17 +181,16 @@ class ProfileSession(
  private val queueKey = scopeKey
  init {
   val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() }?.let { java.nio.file.Paths.get(it).toAbsolutePath().normalize() }
-  require(root.parent != null && root != userHome) { "不能选择磁盘根目录或用户主目录" }
+  require(root.parent != null && root != userHome) { CoreSessionMessages.A_DISK_ROOT_OR_YOUR_HOME_FOLDER_CANNOT_BE_SELECTED.text() }
   SafePaths.disjoint(root, state)
-  validateRoot()
-  locked { importLegacyScopes() }
+  locked { validateRoot() }
  }
  fun validateRoot(): Int {
   require(SafePaths.directory(root) == root)
-  require(Files.isReadable(root) && Files.isWritable(root)) { "目录需要读写权限" }
-  Files.walk(root).use { paths -> paths.forEach { require(!Files.isSymbolicLink(it)) { "存档目录不能含符号链接" } } }
+  require(Files.isReadable(root) && Files.isWritable(root)) { CoreSessionMessages.THE_FOLDER_REQUIRES_READ_AND_WRITE_ACCESS.text() }
+  Files.walk(root).use { paths -> paths.forEach { require(!Files.isSymbolicLink(it)) { CoreSessionMessages.THE_SAVES_FOLDER_CANNOT_CONTAIN_SYMBOLIC_LINKS.text() } } }
   return Snapshots.capture(root, adapter, config.profile, "自动识别", null).manifest.files.size.also {
-   require(it > 0 || Files.list(root).use { entries -> entries.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { "未发现 gameN/game.dat 或 rankings / badges / journal；请选择档案根目录（或全空的恢复目标目录）" }
+   require(it > 0 || Files.list(root).use { entries -> entries.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { CoreSessionMessages.NO_GAMEN_GAME_DAT_RANKINGS_BADGES_OR_JOURNAL_FILES_WERE.text() }
   }
  }
  internal fun <T> locked(action: () -> T): T {
@@ -195,85 +198,25 @@ class ProfileSession(
   val lock = SafePaths.checked(state.resolve("locks/${hash(root.toString().encodeToByteArray())}.lock"))
   FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
    val acquired = try { channel.tryLock() } catch (_: java.nio.channels.OverlappingFileLockException) { null }
-   check(acquired != null) { "另一项同步器操作正在使用此存档，请稍后重试" }
+   check(acquired != null) { CoreSessionMessages.ANOTHER_SYNC_OPERATION_IS_USING_THESE_SAVES_TRY_AGAIN_LATER.text() }
    acquired.use { return action() }
   }
  }
- /** One-time, non-destructive import of scopes whose old key proves this exact root/endpoint/profile. */
- private fun importLegacyScopes() {
-  val profiles = SafePaths.checked(state.resolve("profiles"))
-  if (!profiles.exists()) return
-  data class Legacy(val key: String, val directory: Path, val entries: List<Path>, val pending: Snapshot?, val head: String?)
-  val candidates = Files.list(profiles).use { paths ->
-   val dirs = paths.iterator().asSequence().toList(); require(dirs.size <= 4096) { "本地档案目录过多，停止自动导入" }
-   dirs.mapNotNull { old ->
-    val key = old.fileName.toString()
-    if (key == scopeKey || !key.matches(Regex("[0-9a-f]{64}"))) return@mapNotNull null
-    SafePaths.checked(old)
-    if (!Files.isDirectory(old, LinkOption.NOFOLLOW_LINKS)) return@mapNotNull null
-    if (SafePaths.checked(directory.resolve("imported-$key.txt")).exists()) return@mapNotNull null
-    val oldHistory = SafePaths.checked(old.resolve("history"))
-    if (!oldHistory.exists()) return@mapNotNull null
-    val entries = Files.list(oldHistory).use { stream -> stream.filter { it.fileName.toString().endsWith(".entry.json") }.iterator().asSequence().toList() }
-    require(entries.size <= 10000) { "旧历史条目过多，停止自动导入" }
-    // The old scope encoded one declared version; any valid entry can prove its binding.
-    val bound = entries.take(32).any { entryPath ->
-     val entry = runCatching { json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString()) }.getOrNull()
-     entry != null && entry.manifest.game == adapter.id && entry.manifest.profile == config.profile &&
-      hash(listOf(adapter.id, root.toString(), config.endpoint, config.profile, entry.manifest.version).joinToString("\n").encodeToByteArray()) == key
-    }
-    if (!bound) return@mapNotNull null
-    val oldHeadPath = SafePaths.checked(old.resolve("head.txt"))
-    val oldHead = if (oldHeadPath.exists()) SafePaths.boundedRead(oldHeadPath, 128).decodeToString().trim().also {
-     require(it.matches(Regex("[0-9a-fA-F-]{36}"))) { "旧同步基线损坏，停止导入" }
-    } else null
-    val pending = PendingSnapshots(old.resolve("pending"), adapter).load(key)
-    Legacy(key, old, entries, pending, oldHead)
-   }
-  }
-  if (candidates.isEmpty()) return
-  val currentPending = queue.load(queueKey)
-  val allPending = (candidates.mapNotNull { it.pending } + listOfNotNull(currentPending))
-  require(allPending.map { it.manifest.id }.distinct().size <= 1) { "多个旧待上传快照存在歧义；保留全部原数据，未自动选择" }
-  if (allPending.isNotEmpty()) require(allPending.all {
-   it.manifest == allPending.first().manifest && it.zip.contentEquals(allPending.first().zip)
-  }) { "旧待上传快照身份冲突，停止导入" }
-  val allHeads = (candidates.mapNotNull { it.head } + listOfNotNull(head())).distinct()
-  require(allHeads.size <= 1) { "多个旧同步基线不一致；保留全部原数据，未自动选择" }
-  candidates.forEach { old ->
-   old.entries.forEach { entryPath ->
-    val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
-    checkedManifest(entry.manifest)
-    require(entryPath.fileName.toString() == "${entry.manifest.id}.entry.json")
-    val snapshot = Snapshot(entry.manifest, SafePaths.boundedRead(old.directory.resolve("history/${entry.manifest.id}.zip"), MAX_SNAPSHOT_BYTES))
-    Snapshots.verify(snapshot, adapter)
-    val destination = historyRoot.resolve("${entry.manifest.id}.entry.json")
-    val existed = SafePaths.checked(destination).exists()
-    remember(snapshot, entry.reason)
-    if (!existed) SafePaths.atomicWrite(destination, json.encodeToString(entry).encodeToByteArray())
-   }
-  }
-  if (currentPending == null && allPending.isNotEmpty()) queue.save(queueKey, allPending.first())
-  if (head() == null && allHeads.isNotEmpty()) setHead(allHeads.single())
-  // Originals, including raw backup files and original pending markers, are never deleted.
-  candidates.forEach { SafePaths.atomicWrite(directory.resolve("imported-${it.key}.txt"), "copied-and-verified".encodeToByteArray()) }
- }
-
  fun deviceIdentity(): DeviceIdentity = metadata.currentDevice()
  internal fun operationMetadata(): CommitOperationMetadata = metadata.operation()
- internal fun guard(stopped: () -> Boolean) { if (!stopped()) throw SaveNotStableException("游戏正在运行或进程状态未知，请等待游戏退出") }
+ internal fun guard(stopped: () -> Boolean) { if (!stopped()) throw SaveNotStableException(CoreSessionMessages.THE_GAME_IS_RUNNING_OR_ITS_PROCESS_STATE_IS_UNKNOWN.text()) }
  private fun checkedManifest(manifest: Manifest) {
   require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
-  require(manifest.game == adapter.id && manifest.profile == config.profile) { "快照游戏或档案不匹配" }
+  require(adapter.acceptsManifest(manifest) && manifest.profile == config.profile) { CoreSessionMessages.THE_SNAPSHOT_GAME_OR_PROFILE_DOES_NOT_MATCH.text() }
   manifest.metadata?.validated(manifest.files.keys)
   manifest.directoryMetadata?.validated(manifest.files)
  }
  internal fun capture(stopped: () -> Boolean, parent: String? = head(), persistDirectoryMetadata: Boolean = true): Snapshot {
   guard(stopped); validateRoot()
   val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
-  require(snapshot.manifest.files.isNotEmpty()) { "空目录只能用于恢复，不能创建或上传空快照" }
+  require(snapshot.manifest.files.isNotEmpty()) { CoreSessionMessages.AN_EMPTY_FOLDER_CAN_ONLY_BE_USED_FOR_RESTORING_EMPTY.text() }
   guard(stopped)
-  if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException("采集期间存档发生变化；已停止操作，等待文件稳定后重试")
+  if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException(CoreSessionMessages.SAVES_CHANGED_DURING_CAPTURE_THE_OPERATION_STOPPED_WAIT_FOR_FILES.text())
   return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists(),persist=persistDirectoryMetadata)))
  }
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
@@ -283,13 +226,13 @@ class ProfileSession(
   remoteObservedAt?.let(::requireUtcTimestamp)
   checkedManifest(snapshot.manifest); Snapshots.verify(snapshot, adapter)
   snapshot.manifest.saveVersions?.let { evidence ->
-   require(versions.annotate(snapshot).manifest.saveVersions == evidence) { "快照的版本元数据与实际内容不一致" }
+   require(versions.annotate(snapshot).manifest.saveVersions == evidence) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_ACTUAL_CONTENTS.text() }
   }
   val id = snapshot.manifest.id
   val entryPath = historyRoot.resolve("$id.entry.json")
   if (SafePaths.checked(entryPath).exists()) {
    val old = loadSnapshot(id)
-   require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { "同名历史快照内容不一致" }
+   require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text() }
    val existing = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
    existing.remoteObservedAt?.let(::requireUtcTimestamp)
    if (existing.remoteObservedAt != null || remoteObservedAt == null) return existing
@@ -323,32 +266,32 @@ class ProfileSession(
  // Immutable history reads do not take the mutation lock. Restore repeats this check under the lock.
  fun checkRestore(id: String) = versions.checkRestore(loadSnapshot(id), config.targetGame)
  internal fun checkRestore(snapshot: Snapshot) = versions.checkRestore(snapshot,config.targetGame)
- fun createSnapshot(stopped: () -> Boolean): HistoryEntry = locked { remember(capture(stopped), "本地快照") }
+ fun createSnapshot(stopped: () -> Boolean): HistoryEntry = locked { remember(capture(stopped), CoreSessionMessages.LOCAL_SNAPSHOT.text()) }
  internal fun legacyPending(): Snapshot? = queue.load(queueKey)
  internal fun archiveLegacyPending() {
-  queue.load(queueKey)?.let { remember(it, "已归档旧版待上传快照") }; queue.clear()
+  queue.load(queueKey)?.let { remember(it, CoreSessionMessages.LEGACY_PENDING_SNAPSHOT_ARCHIVED.text()) }; queue.clear()
  }
  fun hasPending(): Boolean = locked { queue.load(queueKey) != null }
  fun readRemote(store: Store): HistoryEntry? = locked {
   val remote = store.head() ?: return@locked null
   val snapshot = store.download(remote.manifest)
   checkedManifest(snapshot.manifest); Snapshots.verify(snapshot, adapter)
-  remember(snapshot, "已读取远端快照")
+  remember(snapshot, CoreSessionMessages.REMOTE_SNAPSHOT_LOADED.text())
  }
  fun restoreRemote(id: String, store: Store, stopped: () -> Boolean): RestoreResult = locked {
   guard(stopped)
-  require(queue.load(queueKey) == null) { "请先处理或归档待上传快照" }
+  require(queue.load(queueKey) == null) { CoreSessionMessages.RESOLVE_OR_ARCHIVE_THE_PENDING_SNAPSHOT_FIRST.text() }
   val snapshot = loadSnapshot(id)
-  require(store.head()?.manifest == snapshot.manifest) { "远端已发生变化；没有恢复，请重新读取远端" }
+  require(store.head()?.manifest == snapshot.manifest) { CoreSessionMessages.REMOTE_DATA_CHANGED_NOTHING_WAS_RESTORED_RELOAD_THE_REMOTE_DATA.text() }
   val result = restore(snapshot, stopped)
   setHead(snapshot.manifest.id)
   result
  }
  private fun preserve(conflict: Conflict, store: Store): PushResult.Diverged {
-  remember(conflict.local, "冲突 · 本地分支")
+  remember(conflict.local, CoreSessionMessages.CONFLICT_LOCAL_BRANCH.text())
   val remote = store.download(conflict.remote.manifest)
   checkedManifest(remote.manifest); Snapshots.verify(remote, adapter)
-  remember(remote, "冲突 · 远端分支")
+  remember(remote, CoreSessionMessages.CONFLICT_REMOTE_BRANCH.text())
   return PushResult.Diverged(PreservedConflict(conflict.local, remote, conflict.remote))
  }
  private fun pushPending(snapshot: Snapshot, store: Store): PushResult = try {
@@ -359,24 +302,24 @@ class ProfileSession(
  fun push(store: Store, stopped: () -> Boolean): PushResult = locked {
   guard(stopped)
   val snapshot = queue.load(queueKey) ?: capture(stopped).also {
-   remember(it, "同步采集快照"); queue.save(queueKey, it)
+   remember(it, CoreSessionMessages.SYNC_CAPTURE.text()); queue.save(queueKey, it)
   }
-  remember(snapshot, "同步采集快照")
+  remember(snapshot, CoreSessionMessages.SYNC_CAPTURE.text())
   pushPending(snapshot, store)
  }
  private fun unchanged(conflict: PreservedConflict, store: Store): PushResult.Diverged? {
   val now = store.head()
-  require(now != null) { "远端历史已消失；已停止，双方历史保留" }
+  require(now != null) { CoreSessionMessages.REMOTE_HISTORY_DISAPPEARED_THE_OPERATION_STOPPED_AND_BOTH_HISTORIES_ARE.text() }
   return if (now.manifest != conflict.head.manifest || now.etag != conflict.head.etag)
    preserve(Conflict(conflict.local, now), store) else null
  }
  fun chooseLocal(conflict: PreservedConflict, store: Store, stopped: () -> Boolean): PushResult = locked {
   guard(stopped)
-  require(queue.load(queueKey)?.manifest?.id == conflict.local.manifest.id) { "待处理分支已变更，请重新同步" }
+  require(queue.load(queueKey)?.manifest?.id == conflict.local.manifest.id) { CoreSessionMessages.THE_PENDING_BRANCH_CHANGED_SYNC_AGAIN.text() }
   unchanged(conflict, store)?.let { return@locked it }
-  remember(conflict.local, "冲突 · 本地分支"); remember(conflict.remote, "冲突 · 远端分支")
+  remember(conflict.local, CoreSessionMessages.CONFLICT_LOCAL_BRANCH.text()); remember(conflict.remote, CoreSessionMessages.CONFLICT_REMOTE_BRANCH.text())
   val chosen = conflict.local.copy(manifest = conflict.local.manifest.copy(id = UUID.randomUUID().toString(), parent = conflict.remote.manifest.id))
-  remember(chosen, "冲突解决 · 采用本地")
+  remember(chosen, CoreSessionMessages.CONFLICT_RESOLUTION_SELECTED_LOCAL_SAVES.text())
   // Both originals are saved before replacing the retry marker.
   queue.replace(queueKey, chosen)
   pushPending(chosen, store)
@@ -387,12 +330,12 @@ class ProfileSession(
   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
   var backupFingerprint: SaveFingerprint? = null
   val backupPath = Snapshots.restore(snapshot, root, backupRoot, adapter, "自动识别", stopped,
-   onBackupReady = { backup, _ -> entry = remember(backup, "恢复前自动备份") },
+   onBackupReady = { backup, _ -> entry = remember(backup, CoreSessionMessages.AUTOMATIC_BACKUP_BEFORE_RESTORE.text()) },
    validateCompatibility = { candidate, _ -> versions.checkRestore(candidate, config.targetGame) },
    captureBackup = { current ->
     require(current == root)
     val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
-    require(expectedFiles==null || captured.snapshot.manifest.files==expectedFiles) { "恢复前本机内容已变化，请重新选择" }
+    require(expectedFiles==null || captured.snapshot.manifest.files==expectedFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_RESTORING_SELECT_AGAIN.text() }
     backupFingerprint = captured.fingerprint
     versions.annotate(captured.snapshot).let { it.copy(manifest=it.manifest.copy(directoryMetadata=directoryMetadata.observe(it.manifest.files,initialImport=!historyRoot.exists()))) }
    }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) },
@@ -400,21 +343,21 @@ class ProfileSession(
   return RestoreResult(snapshot.manifest, requireNotNull(entry), backupPath)
  }
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = locked {
-  require(queue.load(queueKey) == null) { "还有待上传/冲突快照，请先重试或明确归档待上传快照" }
+  require(queue.load(queueKey) == null) { CoreSessionMessages.AN_UPLOAD_OR_CONFLICT_SNAPSHOT_IS_PENDING_RETRY_OR_EXPLICITLY.text() }
   restore(loadSnapshot(id), stopped)
  }
  fun chooseRemote(conflict: PreservedConflict, store: Store, stopped: () -> Boolean): Pair<RestoreResult?, PushResult.Diverged?> = locked {
   guard(stopped)
-  require(queue.load(queueKey)?.manifest?.id == conflict.local.manifest.id) { "待处理分支已变更，请重新同步" }
+  require(queue.load(queueKey)?.manifest?.id == conflict.local.manifest.id) { CoreSessionMessages.THE_PENDING_BRANCH_CHANGED_SYNC_AGAIN.text() }
   unchanged(conflict, store)?.let { return@locked null to it }
-  remember(conflict.local, "冲突 · 本地分支"); remember(conflict.remote, "冲突 · 远端分支")
+  remember(conflict.local, CoreSessionMessages.CONFLICT_LOCAL_BRANCH.text()); remember(conflict.remote, CoreSessionMessages.CONFLICT_REMOTE_BRANCH.text())
   val result = restore(conflict.remote, stopped)
   setHead(conflict.remote.manifest.id); queue.clear()
   result to null
  }
  /** Explicit UI confirmation is required. No remote changes; immutable history is retained. */
  fun archivePending() = locked {
-  queue.load(queueKey)?.let { remember(it, "已归档待上传快照") }
+  queue.load(queueKey)?.let { remember(it, CoreSessionMessages.PENDING_SNAPSHOT_ARCHIVED.text()) }
   queue.clear()
  }
 }

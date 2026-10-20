@@ -1,0 +1,2 @@
+content=390x900; density=1.0; fontScale=1.0; synthetic=true; renderer=production Compose; native decorations excluded; native OS/device behavior not tested
+Production dialog body over a synthetic backdrop; native modal/Back/Escape excluded

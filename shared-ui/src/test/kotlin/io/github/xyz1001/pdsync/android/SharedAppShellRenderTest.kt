@@ -48,7 +48,7 @@ class SharedAppShellRenderTest {
                                 modifier = Modifier.onGloballyPositioned { next = it.boundsInRoot() })
                         }) {
                         SharedForm(Modifier.onGloballyPositioned { form = it.boundsInRoot() }) {
-                            SharedTextField("WebDAV 地址", "", {},
+                            SharedTextField("WebDAV 服务器地址", "", {},
                                 modifier = Modifier.onGloballyPositioned { field = it.boundsInRoot() })
                         }
                     }
@@ -56,15 +56,15 @@ class SharedAppShellRenderTest {
             }
             try {
                 val pixels = render(scene, "shell-$width")
-                val narrow = width <= 560
-                val outer = if (narrow) 10 else 18
-                val inner = if (narrow) 20 else 32
-                val cardWidth = minOf(820, width - outer * 2)
+                val narrow = width <= 600
+                val outer = if (narrow) 8 else 16
+                val inner = if (narrow) 20 else 30
+                val cardWidth = minOf(860, width - outer * 2)
                 val measuredCard = cardPixelBounds(pixels)
-                assertTrue(measuredCard.width <= 820f, "card maximum at $width")
+                assertTrue(measuredCard.width <= 860f, "card maximum at $width")
                 assertEquals(cardWidth.toFloat(), measuredCard.width, 1f, "actual card pixels at $width")
                 val expectedLeft = (width - cardWidth) / 2f + 1 + inner
-                val expectedFormWidth = minOf(510, cardWidth - 2 - inner * 2).toFloat()
+                val expectedFormWidth = minOf(560, cardWidth - 2 - inner * 2).toFloat()
                 val measuredForm = assertNotNull(form)
                 val measuredField = assertNotNull(field)
                 val measuredBack = assertNotNull(back)
@@ -75,9 +75,9 @@ class SharedAppShellRenderTest {
                 assertEquals(measuredForm.width, measuredField.width, .1f)
                 assertEquals(expectedLeft, measuredBack.left, .6f, "Back left at $width")
                 assertEquals(width - expectedLeft, measuredNext.right, .6f, "primary right at $width")
-                assertTrue(measuredBack.height >= 46, "Back target at $width")
-                assertTrue(measuredNext.height >= 46, "primary target at $width")
-                val expectedFooterBottom = (if (narrow) 15 else 30) + 570 - 1 - (if (narrow) 16 else 20)
+                assertTrue(measuredBack.height >= 42, "Back target at $width")
+                assertTrue(measuredNext.height >= 42, "primary target at $width")
+                val expectedFooterBottom = (if (narrow) 12 else 24) + 602 - 1 - (if (narrow) 14 else 16)
                 assertEquals(expectedFooterBottom.toFloat(), measuredNext.bottom, .6f, "570px minimum card at $width")
                 assertTrue(measuredField.bottom < measuredNext.top)
                 assertTrue(measuredBack.left >= 0 && measuredNext.right <= width)
@@ -156,7 +156,7 @@ class SharedAppShellRenderTest {
         controller.close()
     }
 
-    @Test fun chooserOfficialFormAndAppreciationShareTheNarrowShell() {
+    @Test fun chooserAndLoggedOutOfficialFormShareTheNarrowShell() {
         // Work is deliberately queued: rendering must not authenticate or contact an external service.
         val queued = mutableListOf<Runnable>()
         val controller = SharedConnectionController(
@@ -185,8 +185,8 @@ class SharedAppShellRenderTest {
                 }
                 try {
                     val card = cardPixelBounds(render(scene, "$name-$width"))
-                    assertTrue(card.left >= 10f && card.right <= width - 10f)
-                    assertTrue(card.bottom <= 742f, "$name footer stays in viewport")
+                    assertTrue(card.left >= 8f && card.right <= width - 8f)
+                    assertTrue(card.bottom <= 745f, "$name footer stays in viewport")
                 } finally { scene.close() }
             }
         }
@@ -196,12 +196,11 @@ class SharedAppShellRenderTest {
         controller.editPassword("long-password-kept-private")
         renderState("official")
         controller.openAppreciation()
-        assertNotNull(controller.state.appreciation)
-        renderState("appreciation")
-        controller.back()
+        assertEquals(null, controller.state.appreciation)
+        assertFalse(controller.state.canAppreciate)
         assertEquals(ConnectionEntryModel.Mode.OFFICIAL, controller.state.mode)
         assertEquals("long_username_" + "x".repeat(49), controller.state.username)
-        assertTrue(queued.isNotEmpty())
+        assertTrue(queued.isEmpty())
         controller.close()
     }
 
@@ -212,7 +211,7 @@ class SharedAppShellRenderTest {
         var right = 0
         var bottom = 0
         for (y in 0 until image.height) for (x in 0 until image.width) {
-            if ((image.getRGB(x, y) and 0xffffff) != 0xeff3ef) {
+            if ((image.getRGB(x, y) and 0xffffff) in setOf(0xffffff, 0xcbd5e1)) {
                 left = minOf(left, x); top = minOf(top, y)
                 right = maxOf(right, x + 1); bottom = maxOf(bottom, y + 1)
             }

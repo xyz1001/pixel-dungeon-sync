@@ -1,5 +1,6 @@
 """Step 1 source wiring. The real shared layout/actions run in JVM tests; native dialogs need device QA."""
 from pathlib import Path
+import re
 import unittest
 from test_embedded_install_contract import body
 
@@ -8,7 +9,8 @@ MAIN = (REPO / 'android-app/src/main/java/io/github/xyz1001/pdsync/android/MainA
 BRIDGE = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidOnboardingComposition.kt').read_text()
 DESKTOP = (REPO / 'desktop/src/main/kotlin/pdsync/Main.kt').read_text()
 SCREEN = (REPO / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedGameSelectionScreen.kt').read_text()
-PICKER = (REPO / 'android-app/src/main/java/io/github/xyz1001/pdsync/android/InstalledAppPickerDialog.java').read_text()
+PICKER = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidInstalledAppPickerComposition.kt').read_text()
+MODE_DIALOG = (REPO / 'android-app/src/main/java/io/github/xyz1001/pdsync/android/GameModeChoiceDialog.java').read_text()
 
 
 class SharedGameSelectionAndroidContract(unittest.TestCase):
@@ -20,8 +22,9 @@ class SharedGameSelectionAndroidContract(unittest.TestCase):
         self.assertLess(route.index(game), route.index('ScrollView scrollView'))
         self.assertIn('SharedGameSelectionScreen(state, actions)', BRIDGE)
         self.assertIn('SharedGameSelectionScreen(discoveryState, object : SharedGameSelectionActions', DESKTOP)
-        self.assertIn('SharedAppShell(title = "选择游戏", eyebrow = "1 / 4"', SCREEN)
-        self.assertEqual(1, SCREEN.count('SharedActionButton("下一步"'))
+        self.assertIn('SharedAppShell(title = SharedMessages.CHOOSE_GAME.text(), eyebrow = SharedMessages.STEP_ONE.text()', SCREEN)
+        self.assertIn('if (recoveryRows.isEmpty())', SCREEN)
+        self.assertEqual(2, SCREEN.count('SharedActionButton(SharedMessages.NEXT_CONNECT.text()'))
         self.assertNotIn('private void renderRootDiscovery()', MAIN)
 
     def test_callbacks_recheck_current_page_and_live_capabilities(self):
@@ -37,8 +40,10 @@ class SharedGameSelectionAndroidContract(unittest.TestCase):
             self.assertIn(check, guard)
         forward = body(MAIN, 'void m103x3c55a874()')
         self.assertIn('this.page != SyncPage.DISCOVERY', forward)
-        self.assertIn('if (canRequestSaveAccess())', forward)
-        self.assertIn('navigate(SyncPage.PATH)', forward)
+        self.assertIn('if (!canAdvanceGameSelection()) return', forward)
+        self.assertIn('navigate(SyncPage.CONNECTION)', forward)
+        self.assertNotIn('SyncPage.PATH', forward)
+        self.assertNotIn('previewPath(', forward)
 
     def test_system_picker_cancel_and_installed_filter_keep_selection(self):
         picker = body(MAIN, 'public void pickApks()')
@@ -51,24 +56,66 @@ class SharedGameSelectionAndroidContract(unittest.TestCase):
         for reset in ('prepared = null', 'rootGame = null', 'resetAccessSelection()', 'requestPrepare('):
             self.assertNotIn(reset, cancel)
         for behavior in ('state.setQuery', 'state.setShowAll', 'state.visible(candidates, selectedPackage)',
-                         '.setNegativeButton("取消", null)'):
+                         'SharedGamePickerDialog(', 'Lifecycle.State.RESUMED', 'onDismiss = { close() }'):
             self.assertIn(behavior, PICKER)
 
-    def test_typed_rows_keep_all_installation_and_root_capabilities(self):
+    def test_typed_rows_expose_choices_without_internal_system_actions(self):
         state = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
         host = body(MAIN, 'private void renderDiscovery()')
-        for action in ('CHOOSE_INSTALLED', 'CHOOSE_FILE', 'CHOOSE_ROOT', 'SWITCH_TO_EMBEDDED',
-                       'CHECK_ACCESS', 'LAUNCH_GAME', 'ACTIVATE_BRIDGE', 'INITIALIZE_GAME', 'OPEN_RECOVERY',
-                       'CONTINUE_INSTALLATION', 'OPEN_SYSTEM_CONFIRMATION', 'CANCEL_INSTALLATION',
-                       'CHECK_EXPIRED_REQUEST', 'CLEAN_LEGACY_REQUEST', 'OPEN_INSTALL_SETTINGS', 'RESCAN'):
+        for action in ('CHOOSE_INSTALLED', 'CHOOSE_FILE', 'OPEN_RECOVERY', 'CANCEL_INSTALLATION'):
             self.assertIn('SharedGameSelectionControl.' + action, state)
             self.assertIn('case ' + action + ':', host)
-        for safety in ('ready.canContinueInstallation()', 'this.installer.hasConfirmation() && !obsolete',
-                       'activeRequest && !obsolete', 'ready.requiresGameUninstall()', '永久删除全部本地存档和战绩',
-                       'ready.identityVerified && !activeRequest && !recovery', 'canRequestSaveAccess()'):
-            self.assertIn(safety, state)
+        for action in ('OPEN_INSTALL_SETTINGS', 'RESCAN', 'ACTIVATE_BRIDGE',
+                       'CHECK_ACCESS'):
+            self.assertNotIn('SharedGameSelectionControl.' + action, state)
+        self.assertIn('canAdvanceGameSelection()', state)
+        self.assertIn('!active && !recovery', state)
         for io in ('.inspectReady(', '.exportTo(', '.requestUninstall(', '.requestInstall('):
             self.assertNotIn(io, state)
+
+    def test_inline_apk_choice_dispatches_selected_source_immediately(self):
+        state = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
+        for action in ('CHOOSE_ROOT', 'SWITCH_TO_EMBEDDED', 'CANCEL_ACCESS_SELECTION'):
+            self.assertIn('SharedGameSelectionControl.' + action, state)
+        self.assertNotIn('SharedGameSelectionControl.CONTINUE_INSTALLATION', state)
+        self.assertNotIn('已选择修改 APK 模式', state)
+        self.assertNotIn('Root 授权成功。', state)
+        self.assertIn('new SharedGameAccessState(', state)
+        self.assertIn('pending == null && canAdvanceGameSelection()', state)
+        self.assertNotIn('visibleNotice()', state)
+        self.assertIn('offerGameModeChoice(GameModeChoice.Source.installed(packageName))',
+                      body(MAIN, 'private void selectInstalledForSetup('))
+        self.assertIn('offerGameModeChoice(GameModeChoice.Source.files(', body(MAIN, 'protected void onActivityResult('))
+        apk_card = body(MAIN, 'private void chooseInlineApkMode()')
+        self.assertIn('accessMode = GameModeChoice.Mode.APK', apk_card)
+        self.assertIn('dispatchInlineAccess(request, GameModeChoice.Mode.APK)', apk_card)
+        install = body(MAIN, 'private void beginInlineInstallation()')
+        self.assertIn('dispatchInlineAccess(request, GameModeChoice.Mode.APK)', install)
+        dispatch = body(MAIN, 'private void dispatchInlineAccess(')
+        for guard in ('this.setupSession.owner != this', '!this.resumed', 'this.page != SyncPage.DISCOVERY',
+                      'this.installer.hasActiveRequest()', 'restoreNeedsAttention()', 'this.setupSession.modeChoice.awaiting(request)'):
+            self.assertIn(guard, dispatch)
+        self.assertIn('resolveRootSetupSource(selected)', dispatch)
+        self.assertIn('chooseApkSetupSource(selected)', dispatch)
+        self.assertNotIn('GameModeChoiceDialog.show', MAIN)
+        back = body(MAIN, 'public void onBackPressed()')
+        self.assertIn('modeChoice.awaiting(this.setupSession.modeChoice.pending())', back)
+        self.assertIn('cancelInlineAccessSelection()', back)
+        cancel = body(MAIN, 'private void cancelInlineAccessSelection()')
+        self.assertIn('modeChoice.cancel(request)', cancel)
+        for mutation in ('resetAccessSelection(', 'flow.select(', 'requestPrepare(', 'rootGame = null'):
+            self.assertNotIn(mutation, cancel)
+
+    def test_verified_apk_has_no_redundant_success_or_other_installer_entry(self):
+        state = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
+        self.assertNotIn('SharedGameSelectionControl.USE_OTHER_INSTALLER', state)
+        for source in ('visibleNotice()', 'this.installer.summary()', 'this.setupOutcome', 'statusDescription()'):
+            self.assertNotIn(source, state)
+        self.assertIn('canAdvanceGameSelection(), "", false,', state)
+        self.assertIn('state.access == null && state.notice.isNotBlank()', SCREEN)
+        self.assertIn('state.access == null && state.warning.isNotBlank()', SCREEN)
+        for action in ('CHECK_EXTERNAL_INSTALL', 'CANCEL_INSTALLATION', 'OPEN_SYSTEM_CONFIRMATION', 'CHECK_EXPIRED_REQUEST'):
+            self.assertIn('SharedGameSelectionControl.' + action, state)
 
 
 if __name__ == '__main__':

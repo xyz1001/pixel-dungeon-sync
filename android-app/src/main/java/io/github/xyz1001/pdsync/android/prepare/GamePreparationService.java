@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android.prepare;
 
+import pdsync.i18n.PrepareMessages;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -121,6 +123,8 @@ public final class GamePreparationService {
         private final File runtimeDex;
 
         public boolean embeddedBridge() { return EMBEDDED_BRIDGE_MODE.equals(bridgeMode); }
+        /** Stable receipt ID, not an APK identity or permission to skip validation. */
+        public String installationReceiptId() { return id; }
         private final boolean completeInstalledSet;
         public final File gameApk;
         public final List<File> gameApks;
@@ -155,6 +159,20 @@ public final class GamePreparationService {
         public final String signingCertificateSha256;
         public final String sourceApkSetSha256;
         public final List<String> sourceSignerCertificateSha256;
+        public final GameSourceIdentity.Provenance sourceProvenance;
+        public final boolean adoptedEmbedded;
+        public final boolean selectedFileInstallation;
+
+        /** Files covered by the in-memory validation session; never authority to skip cold validation. */
+        public List<File> validationFiles() {
+            List<File> files = new ArrayList<>(originals); files.addAll(gameApks);
+            if (runtimeDex != null) files.add(runtimeDex);
+            if (helperApk != null) files.add(helperApk);
+            if (helperTemplate != null) files.add(helperTemplate);
+            if (unsignedHelperApk != null) files.add(unsignedHelperApk);
+            files.add(new File(gameApk.getParentFile(), "receipt.properties"));
+            return Collections.unmodifiableList(files);
+        }
         private final String templateSha256;
         private final File unsignedHelperApk;
         private final String unsignedHelperSha256;
@@ -165,8 +183,13 @@ public final class GamePreparationService {
             gameLabel = required(properties, "gameLabel");
             gameVersionName = properties.getProperty("gameVersionName", "");
             gameVersionCode = number(properties, "gameVersionCode", 0, Long.MAX_VALUE);
-            sourceSignerCertificateSha256 = Collections.unmodifiableList(Arrays.asList(required(properties, "sourceCertificates").split(",", -1)));
-            GameSourceIdentity identity = new GameSourceIdentity(gamePackage, sourceSignerCertificateSha256);
+            GameSourceIdentity identity = GameSourceIdentity.read(properties);
+            sourceSignerCertificateSha256 = identity.signerCertificateSha256;
+            sourceProvenance = identity.provenance;
+            adoptedEmbedded = "true".equals(properties.getProperty("adoptedEmbedded"));
+            selectedFileInstallation = "true".equals(properties.getProperty("selectedFileInstallation"));
+            if (adoptedEmbedded != (sourceProvenance == GameSourceIdentity.Provenance.INHERITED_EMBEDDED))
+                throw new IOException("Inherited source provenance receipt mismatch");
             originIdentity = requiredHash(properties, "originIdentity");
             namespaceId = required(properties, "namespaceId");
             if (!identity.originIdentity.equals(originIdentity) || !identity.namespaceId.equals(namespaceId)) throw new IOException("Source namespace receipt mismatch");
@@ -240,7 +263,13 @@ public final class GamePreparationService {
         Context applicationContext = context.getApplicationContext();
         this.context = applicationContext;
         this.packages = applicationContext.getPackageManager();
-        this.root = new File(applicationContext.getNoBackupFilesDir(), "local-apk-preparation-v1");
+        try {
+            // Framework storage may have a platform parent alias (for example /data/user/0).
+            // Resolve that trusted boundary only; staging-root, receipt-dir and leaf aliases still fail validation.
+            this.root = new File(applicationContext.getNoBackupFilesDir().getCanonicalFile(), "local-apk-preparation-v1");
+        } catch (IOException unavailable) {
+            throw new IllegalStateException(PrepareMessages.DIRECTORY_UNAVAILABLE.text(), unavailable);
+        }
     }
 
     public String currentLocalCertificateSha256() throws Exception {
@@ -250,7 +279,6 @@ public final class GamePreparationService {
                 return null;
             }
             String strFingerprint = LocalApkSigner.fingerprint(privateKeyEntryExisting);
-            validateIdentityMarker(strFingerprint);
             return strFingerprint;
         } catch (Exception e) {
             throw PreparationDiagnostics.failure(PreparationDiagnostics.Stage.LOCAL_KEY, e);
@@ -368,7 +396,7 @@ public final class GamePreparationService {
 
                     if (InstalledPreparationReuse.sameApkSet(listCapture, preparedPairLoadReceipt.gameHashes)) {
                         validatePrepared(preparedPairLoadReceipt);
-                        GameSourceIdentity gameSourceIdentity = new GameSourceIdentity(preparedPairLoadReceipt.gamePackage, preparedPairLoadReceipt.sourceSignerCertificateSha256);
+                        GameSourceIdentity gameSourceIdentity = GameSourceIdentity.read(preparedPairLoadReceipt.receiptProperties);
                         if (preparedPairLoadReceipt.legacyIdentity) {
                             gameSourceIdentity = GameSourceIdentity.legacyTransport(gameSourceIdentity);
                         }
@@ -385,7 +413,9 @@ public final class GamePreparationService {
                     }
                 }
             }
-            throw new IOException("This installed game was locally re-signed, but its exact original publisher receipt is unavailable. Preserve the installed game and saves; select the original source APK set to recover its cloud identity.");
+            // A receipt is a cache, not a trust root. The explicit modification path below
+            // independently validates recognized embedded code and preserves its bound namespace.
+            return null;
         } catch (Exception e) {
             throw PreparationDiagnostics.failure(stage, e);
         }
@@ -401,6 +431,56 @@ public final class GamePreparationService {
 
     public synchronized PreparedPair prepareSelectedApk(Uri uri, boolean z, InputStream inputStream) throws Exception {
         return prepareSelectedApks(Collections.singletonList(uri), z, inputStream);
+    }
+
+    /**
+     * Reads only manifest identity after the user explicitly chooses Root for picked files.
+     * This is not source trust, an installation, or preparation: Root will access the installed
+     * package selected by this identity, never the APK file. No receipt or selected target is saved.
+     */
+    public synchronized String inspectSelectedApkPackage(List<Uri> uris) throws Exception {
+        PreparationDiagnostics.Metadata metadata = diagnosticMetadata(PreparationDiagnostics.Source.DOCUMENT_PICKER,
+                null, -1, uris == null ? -1 : uris.size());
+        File temporary = new File(root.getParentFile(), "picked-root-inspection-" + UUID.randomUUID());
+        try {
+            if (uris == null || uris.isEmpty() || uris.size() > 256)
+                throw new IOException("Select one base APK and any required split APK files");
+            Set<Uri> distinct = new HashSet<>();
+            for (Uri uri : uris) {
+                if (uri == null || !"content".equals(uri.getScheme()) || !distinct.add(uri))
+                    throw new IOException("Select distinct APK files through the system document picker");
+            }
+            ensureDirectory(temporary);
+            String packageName = null;
+            long version = -1, totalBytes = 0;
+            int bases = 0;
+            Set<String> splits = new HashSet<>();
+            for (int i = 0; i < uris.size(); i++) {
+                File copy = new File(temporary, "identity-" + i + ".apk");
+                PreparationInputEvidence evidence = new PreparationInputEvidence(i);
+                metadata.inputs.add(evidence);
+                try (InputStream input = context.getContentResolver().openInputStream(uris.get(i))) {
+                    PreparationInputCapture.copy(input, copy, ApkArchive.MAX_APK_BYTES, evidence);
+                }
+                totalBytes += evidence.bytes;
+                if (totalBytes > 8589934592L) throw new IOException("Selected APK set exceeds the 8 GiB technical staging limit");
+                BinaryManifestPatch.ManifestInfo info;
+                try { info = BinaryManifestPatch.inspect(ApkArchive.manifest(copy)); evidence.metadata(info); }
+                catch (Exception invalid) { evidence.metadataStatus = "FAILED"; throw invalid; }
+                if (info.packageName == null || !info.packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))
+                    throw new IOException("APK manifest has no package identity");
+                if (packageName == null) { packageName = info.packageName; version = info.versionCode; }
+                else if (!packageName.equals(info.packageName) || version != info.versionCode)
+                    throw new IOException("Selected APK identities do not match");
+                if (info.splitName.isEmpty()) bases++;
+                else if (!splits.add(info.splitName)) throw new IOException("Selected split APK is duplicated");
+                if (!copy.delete()) throw new IOException("Could not discard temporary APK identity copy");
+            }
+            if (bases != 1) throw new IOException("Select exactly one base APK");
+            return packageName;
+        } catch (Exception error) {
+            throw PreparationDiagnostics.failure(PreparationDiagnostics.Stage.EXTRACTION, error, metadata);
+        } finally { discardIncompleteStage(temporary); }
     }
 
     public synchronized PreparedPair prepareSelectedApks(List<Uri> uris, boolean consent, InputStream runtime) throws Exception {
@@ -438,7 +518,10 @@ public final class GamePreparationService {
             long bytes = 0;
             for (int i = 0; i < sources.size(); i++) {
                 File file = new File(directory, "intake-" + i + ".apk");
-                try (InputStream input = sources.get(i).open()) { ApkArchive.copyToNewFile(input, file, 2147483647L); }
+                PreparationInputEvidence evidence = new PreparationInputEvidence(i); metadata.inputs.add(evidence);
+                try (InputStream input = sources.get(i).open()) { PreparationInputCapture.copy(input, file, ApkArchive.MAX_APK_BYTES, evidence); }
+                try { evidence.metadata(BinaryManifestPatch.inspect(ApkArchive.manifest(file))); }
+                catch (Exception invalidManifest) { evidence.metadataStatus = "FAILED"; throw invalidManifest; }
                 bytes += file.length();
                 if (bytes > 8589934592L) throw new IOException("Selected APK set exceeds the 8 GiB technical staging limit");
                 intake.add(file);
@@ -454,19 +537,30 @@ public final class GamePreparationService {
             stage = PreparationDiagnostics.Stage.SOURCE_SIGNATURE_SET;
             boolean[] complete = new boolean[]{installedGame != null};
             ApkSetValidator.ValidatedSet set = ApkSetValidator.inspect(recoverOriginalSourcesIfLocal(intake, directory, complete, proof), complete[0], proof[0]);
-            metadata = diagnosticMetadata(source, set.identity.gamePackage, set.base.manifest.versionCode, set.apks.size());
+            for (int i = 0; i < intake.size(); i++) {
+                // Recovered original files are separately checked against their retained receipt.
+                // Every unreplaced selected input must still equal the bytes captured from SAF.
+                if (intake.get(i).exists() && !metadata.inputs.get(i).cacheSha256.equals(ApkArchive.sha256(intake.get(i))))
+                    throw new IOException("Source input cache digest mismatch");
+            }
+            PreparationDiagnostics.Metadata parsedMetadata = diagnosticMetadata(source, set.identity.gamePackage, set.base.manifest.versionCode, set.apks.size());
+            parsedMetadata.inputs.addAll(metadata.inputs); metadata = parsedMetadata;
             if (installedGame != null && (!set.identity.gamePackage.equals(installedGame.packageName) || set.base.manifest.versionCode != installedGame.versionCode)) throw new IOException("Extracted APK identity differs from the selected installation");
-            String sourceHash = ApkSetValidator.sourceSetSha256(set);
+            String inputSetHash = ApkSetValidator.sourceSetSha256(set);
+            String sourceHash = inputSetHash;
             stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
-            GameSourceIdentity identity = set.identity;
+            File runtimeDex = new File(directory, "bridge-runtime.dex");
+            if (runtime == null) throw new IOException("The bundled bridge runtime is unavailable");
+            ApkArchive.copyToNewFile(runtime, runtimeDex, 16777216);
+            List<File> sortedInputs = new ArrayList<>(); for (ApkSetValidator.SourceApk apk : set.apks) sortedInputs.add(apk.file);
+            EmbeddedBridgeUpgrade inherited = EmbeddedBridgeUpgrade.inspect(sortedInputs, runtimeDex);
+            GameSourceIdentity identity = inherited == null ? set.identity : GameSourceIdentity.inherited(inherited.binding);
+            if (inherited != null) sourceHash = inherited.binding.sourceApkSetSha256;
             String versionName = resolvedVersionName(set.base.file, set.base.manifest);
             if (identity.gamePackage.equals(context.getPackageName()) || identity.gamePackage.equals(HELPER_PACKAGE) || identity.gamePackage.startsWith(HELPER_PACKAGE + ".")) throw new IOException("The sync app or a historical helper cannot be selected as the game");
             String authority = EmbeddedBridgeReceipt.authority(identity);
             String mainCertificate = currentMainCertificateSha256();
             BinaryManifestPatch.BridgeBinding binding = new BinaryManifestPatch.BridgeBinding(authority, identity.gamePackage, identity.originIdentity, identity.namespaceId, sourceHash, set.base.manifest.versionCode, versionName, mainCertificate, BRIDGE_RUNTIME_VERSION);
-            File runtimeDex = new File(directory, "bridge-runtime.dex");
-            if (runtime == null) throw new IOException("The bundled bridge runtime is unavailable");
-            ApkArchive.copyToNewFile(runtime, runtimeDex, 16777216);
             stage = PreparationDiagnostics.Stage.MANIFEST_PATCH;
             List<File> originals = new ArrayList<>(), unsignedGames = new ArrayList<>(), games = new ArrayList<>();
             for (int i = 0; i < set.apks.size(); i++) {
@@ -476,9 +570,15 @@ public final class GamePreparationService {
                 unsignedGames.add(new File(directory, "unsigned-" + i + ".apk"));
                 games.add(new File(directory, gameName(i)));
             }
-            ApkArchive.validateBridgeRuntime(originals, runtimeDex, binding);
-            ApkArchive.InjectedDex injected = ApkArchive.injectProvider(originals.get(0), unsignedGames.get(0), runtimeDex, binding);
-            for (int i = 1; i < originals.size(); i++) ApkArchive.patchProviderSplit(originals.get(i), unsignedGames.get(i));
+            ApkArchive.InjectedDex injected;
+            if (inherited == null) {
+                ApkArchive.validateBridgeRuntime(originals, runtimeDex, binding);
+                injected = ApkArchive.injectProvider(originals.get(0), unsignedGames.get(0), runtimeDex, binding);
+                for (int i = 1; i < originals.size(); i++) ApkArchive.patchProviderSplit(originals.get(i), unsignedGames.get(i));
+            } else {
+                injected = inherited.replaceBase(originals.get(0), unsignedGames.get(0), runtimeDex, binding);
+                for (int i = 1; i < originals.size(); i++) ApkArchive.copyToNewFile(new FileInputStream(originals.get(i)), unsignedGames.get(i), ApkArchive.MAX_APK_BYTES);
+            }
             stage = PreparationDiagnostics.Stage.LOCAL_KEY;
             KeyStore.PrivateKeyEntry key = obtainIdentity(consent, identity);
             String certificate = LocalApkSigner.fingerprint(key);
@@ -487,18 +587,24 @@ public final class GamePreparationService {
                 stage = PreparationDiagnostics.Stage.GAME_SIGNING;
                 LocalApkSigner.sign(unsignedGames.get(i), games.get(i), key);
                 stage = PreparationDiagnostics.Stage.PAYLOAD_VALIDATION;
-                protectedCount += i == 0 ? ApkArchive.verifyProviderPayload(originals.get(i), games.get(i), binding, injected) : ApkArchive.verifyProviderSplitPayload(originals.get(i), games.get(i));
+                protectedCount += inherited == null
+                        ? (i == 0 ? ApkArchive.verifyProviderPayload(originals.get(i), games.get(i), binding, injected) : ApkArchive.verifyProviderSplitPayload(originals.get(i), games.get(i)))
+                        : (i == 0 ? inherited.verifyBasePayload(originals.get(i), games.get(i), binding, injected) : EmbeddedBridgeUpgrade.verifySplitPayload(originals.get(i), games.get(i)));
             }
             stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
             Properties receipt = new Properties();
             receipt.setProperty("format", "3"); receipt.setProperty("id", id);
+            receipt.setProperty("selectedFileInstallation", Boolean.toString(installedGame == null));
             receipt.setProperty("bridgeMode", EMBEDDED_BRIDGE_MODE); receipt.setProperty("bridgeHostPackage", identity.gamePackage);
             receipt.setProperty("runtimeDexName", injected.name); receipt.setProperty("runtimeDexSha256", injected.sha256);
             receipt.setProperty("bridgeRuntimeVersion", BRIDGE_RUNTIME_VERSION); receipt.setProperty("mainAppCertSha256", mainCertificate);
+            receipt.setProperty("bridgeAccessProtocol", "1");
             receipt.setProperty("gamePackage", identity.gamePackage);
             receipt.setProperty("gameLabel", installedGame == null ? gameLabel(originals.get(0), set.base.manifest) : installedGame.label);
             receipt.setProperty("gameVersionName", versionName); receipt.setProperty("gameVersionCode", Long.toString(set.base.manifest.versionCode));
-            receipt.setProperty("sourceCertificates", String.join(",", identity.signerCertificateSha256)); receipt.setProperty("sourceApkSetSha256", sourceHash);
+            identity.write(receipt); receipt.setProperty("sourceApkSetSha256", sourceHash);
+            receipt.setProperty("inputApkSetSha256", inputSetHash);
+            receipt.setProperty("adoptedEmbedded", Boolean.toString(inherited != null));
             receipt.setProperty("originIdentity", identity.originIdentity); receipt.setProperty("namespaceId", identity.namespaceId); receipt.setProperty("authority", authority);
             receipt.setProperty("completeInstalledSet", Boolean.toString(complete[0])); receipt.setProperty("apkCount", Integer.toString(originals.size()));
             for (int i = 0; i < originals.size(); i++) {
@@ -537,6 +643,9 @@ public final class GamePreparationService {
         }
     }
 
+    /** Bounded current-pointer read, without requiring retained APKs or receipt contents. */
+    public synchronized String currentReceiptId() throws IOException { return readCurrentReceiptId(); }
+
     private String readCurrentReceiptId() throws IOException {
         AtomicFile atomicFile = new AtomicFile(new File(this.root, "current"));
         if (!atomicFile.getBaseFile().exists()) {
@@ -563,9 +672,23 @@ public final class GamePreparationService {
         }
     }
 
+    /** Display-only metadata. Installation must pass reloadPreparedForInstallation. */
+    public synchronized PreparedPair reloadPreparedMetadata() throws Exception {
+        String id = readCurrentReceiptId(); return id == null ? null : loadReceipt(id);
+    }
+
+    public synchronized PreparedPair reloadPreparedForInstallation(PreparedPair pair) throws Exception {
+        if (pair == null) return reloadPrepared();
+        if (!ValidatedPreparationCache.isUnchanged(pair)) validatePrepared(pair);
+        PreparedPair refreshed = loadReceipt(pair.id);
+        if (!ValidatedPreparationCache.isUnchanged(pair) || !refreshed.receiptProperties.equals(pair.receiptProperties)) {
+            validatePrepared(refreshed); return refreshed;
+        }
+        ValidatedPreparationCache.remember(refreshed); return refreshed;
+    }
+
     public synchronized PreparedPair refreshInstallStrategies(PreparedPair preparedPair) throws Exception {
-        validatePrepared(preparedPair);
-        return loadReceipt(preparedPair.id);
+        return reloadPreparedForInstallation(preparedPair);
     }
 
     public synchronized void validatePrepared(PreparedPair preparedPair) throws Exception {
@@ -603,12 +726,14 @@ public final class GamePreparationService {
             stage = PreparationDiagnostics.Stage.SOURCE_SIGNATURE_SET;
             ApkSetValidator.ValidatedSet validatedSetInspect = ApkSetValidator.inspect(preparedPair.originals, preparedPair.completeInstalledSet, preparedPair.installedSourceProof);
             stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
-            if (!preparedPair.sourceApkSetSha256.equals(ApkSetValidator.sourceSetSha256(validatedSetInspect)) || !preparedPair.originIdentity.equals(validatedSetInspect.identity.originIdentity) || !preparedPair.gamePackage.equals(validatedSetInspect.base.manifest.packageName) || preparedPair.gameVersionCode != validatedSetInspect.base.manifest.versionCode || !preparedPair.gameVersionName.equals(resolvedVersionName(validatedSetInspect.base.file, validatedSetInspect.base.manifest))) {
+            String expectedInputHash = preparedPair.receiptProperties.getProperty("inputApkSetSha256", preparedPair.sourceApkSetSha256);
+            if (!expectedInputHash.equals(ApkSetValidator.sourceSetSha256(validatedSetInspect)) || (!preparedPair.adoptedEmbedded && (!preparedPair.originIdentity.equals(validatedSetInspect.identity.originIdentity)
+                    || (preparedPair.receiptProperties.containsKey("sourceProvenance") && preparedPair.sourceProvenance != validatedSetInspect.identity.provenance))) || !preparedPair.gamePackage.equals(validatedSetInspect.base.manifest.packageName) || preparedPair.gameVersionCode != validatedSetInspect.base.manifest.versionCode || !preparedPair.gameVersionName.equals(resolvedVersionName(validatedSetInspect.base.file, validatedSetInspect.base.manifest))) {
                 throw new IOException("Source identity/version receipt mismatch");
             }
             if (preparedPair.embeddedBridge()) {
                 validateEmbeddedPayload(preparedPair, canonicalFile, strCurrentLocalCertificateSha256);
-                return;
+                ValidatedPreparationCache.remember(preparedPair); return;
             }
             int iVerifyLegacyGame = 0;
             for (int i3 = 0; i3 < preparedPair.gameApks.size(); i3++) {
@@ -656,16 +781,22 @@ public final class GamePreparationService {
         try {
             if (!pair.runtimeDex.getCanonicalFile().equals(new File(directory, "bridge-runtime.dex"))) throw new IOException("Bridge runtime path is outside app-owned staging");
             if (!BRIDGE_RUNTIME_VERSION.equals(pair.bridgeRuntimeVersion)) throw new IOException("Unsupported retained bridge runtime version");
-            if (!pair.mainAppCertSha256.equals(currentMainCertificateSha256())) throw new IOException("The prepared bridge is pinned to a different sync-app certificate. Reprepare using the retained original APK set.");
-            BinaryManifestPatch.BridgeBinding binding = new BinaryManifestPatch.BridgeBinding(pair.authority, pair.gamePackage, pair.originIdentity, pair.namespaceId, pair.sourceApkSetSha256, pair.gameVersionCode, pair.gameVersionName, pair.mainAppCertSha256, pair.bridgeRuntimeVersion);
+            // Historical metadata remains exact for payload verification. Caller identity is
+            // checked by Binder UID/package, so changing the main app certificate is not a gate.
+            BinaryManifestPatch.BridgeBinding binding = new BinaryManifestPatch.BridgeBinding(pair.authority, pair.gamePackage, pair.originIdentity, pair.namespaceId, pair.sourceApkSetSha256, pair.gameVersionCode, pair.gameVersionName, pair.mainAppCertSha256, pair.bridgeRuntimeVersion, true, pair.receiptProperties.getProperty("bridgeAccessProtocol"));
             ApkArchive.InjectedDex injected = new ApkArchive.InjectedDex(pair.runtimeDexName, pair.runtimeDexSha256);
             stage = PreparationDiagnostics.Stage.PAYLOAD_VALIDATION;
             if (!pair.runtimeDexSha256.equals(ApkArchive.sha256(pair.runtimeDex))) throw new IOException("Staged bridge runtime digest mismatch");
-            ApkArchive.validateBridgeRuntime(pair.originals, pair.runtimeDex, binding);
+            EmbeddedBridgeUpgrade inherited = pair.adoptedEmbedded ? EmbeddedBridgeUpgrade.inspect(pair.originals, pair.runtimeDex) : null;
+            if (pair.adoptedEmbedded) {
+                if (inherited == null || !matchesInheritedBinding(pair, inherited.binding)) throw new IOException("Inherited source binding receipt mismatch");
+            } else ApkArchive.validateBridgeRuntime(pair.originals, pair.runtimeDex, binding);
             int protectedCount = 0;
             for (int i = 0; i < pair.gameApks.size(); i++) {
                 stage = PreparationDiagnostics.Stage.PAYLOAD_VALIDATION;
-                protectedCount += i == 0 ? ApkArchive.verifyProviderPayload(pair.originals.get(i), pair.gameApks.get(i), binding, injected) : ApkArchive.verifyProviderSplitPayload(pair.originals.get(i), pair.gameApks.get(i));
+                protectedCount += inherited == null
+                        ? (i == 0 ? ApkArchive.verifyProviderPayload(pair.originals.get(i), pair.gameApks.get(i), binding, injected) : ApkArchive.verifyProviderSplitPayload(pair.originals.get(i), pair.gameApks.get(i)))
+                        : (i == 0 ? inherited.verifyBasePayload(pair.originals.get(i), pair.gameApks.get(i), binding, injected) : EmbeddedBridgeUpgrade.verifySplitPayload(pair.originals.get(i), pair.gameApks.get(i)));
                 stage = PreparationDiagnostics.Stage.OUTPUT_SIGNATURE;
                 LocalApkSigner.verify(pair.gameApks.get(i), localCertificate);
             }
@@ -674,6 +805,13 @@ public final class GamePreparationService {
         } catch (Exception e) {
             throw PreparationDiagnostics.failure(stage, e);
         }
+    }
+
+    private static boolean matchesInheritedBinding(PreparedPair pair, BinaryManifestPatch.BridgeBinding binding) {
+        return pair.gamePackage.equals(binding.gamePackage) && pair.originIdentity.equals(binding.originIdentity)
+                && pair.namespaceId.equals(binding.namespaceId) && pair.sourceApkSetSha256.equals(binding.sourceApkSetSha256)
+                && pair.authority.equals(binding.authority) && pair.gameVersionCode == binding.gameVersionCode
+                && pair.gameVersionName.equals(binding.gameVersionName);
     }
 
     private PreparedPair loadReceipt(String str) throws Exception {
@@ -738,7 +876,9 @@ public final class GamePreparationService {
             String strCurrentLocalCertificateSha256 = currentLocalCertificateSha256();
             if (strCurrentLocalCertificateSha256 != null) {
                 stage = PreparationDiagnostics.Stage.SOURCE_SIGNATURE_SET;
-                if (containsLocalSigner(list, strCurrentLocalCertificateSha256, installedSourceProofArr[0])) {
+                boolean embeddedMarkers = false;
+                for (File sourceFile : list) embeddedMarkers |= BinaryManifestPatch.hasEmbeddedPreparationMarkers(ApkArchive.manifest(sourceFile));
+                if (containsLocalSigner(list, strCurrentLocalCertificateSha256, installedSourceProofArr[0]) || embeddedMarkers) {
                     stage = PreparationDiagnostics.Stage.RECEIPT_VALIDATION;
                     ArrayList arrayList = new ArrayList();
                     Iterator<File> it = list.iterator();
@@ -779,7 +919,8 @@ public final class GamePreparationService {
                             }
                         }
                     }
-                    throw new IOException("These APKs were re-signed by this sync app, but their original publisher receipt is unavailable. Select the original source APK set so its cloud identity can be preserved.");
+                    if (embeddedMarkers) return list; // Independently classified below; never blindly reinjected.
+                    throw new IOException("Public compatibility signing alone cannot establish original source identity; no embedded binding was found");
                 }
             }
             return list;
@@ -840,23 +981,9 @@ public final class GamePreparationService {
         return (manifestInfo.applicationLabel == null || manifestInfo.applicationLabel.isEmpty()) ? manifestInfo.packageName : manifestInfo.applicationLabel;
     }
 
-    private KeyStore.PrivateKeyEntry obtainIdentity(boolean z, GameSourceIdentity gameSourceIdentity) throws Exception {
-        KeyStore.PrivateKeyEntry privateKeyEntryExisting = LocalApkSigner.existing();
-        if (privateKeyEntryExisting == null) {
-            if (identityMarkerExists()) {
-                throw new IOException("The prior local signing key is missing while its saved identity remains. Recover the original key; a replacement cannot safely update prepared games.");
-            }
-            if (!z) {
-                throw new IOException("Confirm creation of this phone's non-exportable signing key. Clearing or uninstalling the sync app loses the key and can prevent prepared game updates.");
-            }
-            privateKeyEntryExisting = LocalApkSigner.createAfterExplicitConsent(true);
-        }
-        String strFingerprint = LocalApkSigner.fingerprint(privateKeyEntryExisting);
-        validateIdentityMarker(strFingerprint);
-        if (!identityMarkerExists()) {
-            writeBytes(new File(this.root, "identity.sha256"), strFingerprint.getBytes(StandardCharsets.US_ASCII));
-        }
-        return privateKeyEntryExisting;
+    private KeyStore.PrivateKeyEntry obtainIdentity(boolean consent, GameSourceIdentity identity) throws Exception {
+        // This intentionally public dedicated compatibility identity is bundled, not generated or exported from Keystore.
+        return LocalApkSigner.existing();
     }
 
     private void rejectMismatchedInstalledIdentity(String str, String str2, String str3, String str4) throws Exception {

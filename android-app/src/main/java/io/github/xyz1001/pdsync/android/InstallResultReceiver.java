@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -9,6 +11,7 @@ import android.content.SharedPreferences;
 public final class InstallResultReceiver extends BroadcastReceiver {
     @Override // android.content.BroadcastReceiver
     public void onReceive(Context context, Intent intent) {
+        synchronized (SystemConfirmationToken.CHECKPOINT_LOCK) {
         SharedPreferences sharedPreferences = context.getSharedPreferences("install-checkpoint-v1", 0);
         String string = sharedPreferences.getString("nonce", "");
         if (string.isEmpty()) {
@@ -21,21 +24,25 @@ public final class InstallResultReceiver extends BroadcastReceiver {
             if (intExtra == -1) {
                 Intent intentNestedIntent = AndroidCompat.nestedIntent(intent, "android.intent.extra.INTENT");
                 if (intentNestedIntent == null) {
-                    editorPutInt.putString("state", "RESULT").putString("message", "系统未返回安装确认界面。");
+                    AndroidDiagnosticLogging.confirmationEvent("CONFIRMATION_RETAIN", pdsync.DiagnosticResult.FAILED);
+                    editorPutInt.putString("state", "RESULT").putString("message", StoredAndroidText.store(AndroidMessages.INSTALL_RESULT_RECEIVER_01.text()));
                 } else {
                     try {
-                        editorPutInt.putString("state", "PENDING_CONFIRMATION").putString("confirmation", SystemConfirmationToken.retain(context, string, intentNestedIntent)).putString("message", "等待你的 Android 系统确认。点击“继续系统确认”。");
+                        editorPutInt.remove("confirmationUnavailable").putString("state", "PENDING_CONFIRMATION").putString("confirmation", SystemConfirmationToken.retain(context, string, intentNestedIntent)).putString("message", StoredAndroidText.store(AndroidMessages.INSTALL_RESULT_RECEIVER_02.text()));
+                        AndroidDiagnosticLogging.confirmationEvent("CONFIRMATION_RETAIN", pdsync.DiagnosticResult.SUCCEEDED);
                     } catch (Exception unused) {
-                        editorPutInt.putString("state", "PENDING_CONFIRMATION").remove("confirmation").putString("message", "系统确认令牌未能保留。请使用“检查失效系统请求”，不要猜测操作已完成。");
+                        AndroidDiagnosticLogging.confirmationEvent("CONFIRMATION_RETAIN", pdsync.DiagnosticResult.FAILED);
+                        editorPutInt.putBoolean("confirmationUnavailable", true).putString("state", "PENDING_CONFIRMATION").remove("confirmation").putString("message", StoredAndroidText.store(AndroidMessages.INSTALL_RESULT_RECEIVER_03.text()));
                     }
                 }
             } else {
                 SystemConfirmationToken.cancel(context, string, sharedPreferences.getString("confirmation", null));
-                editorPutInt.putString("state", "RESULT").remove("confirmation").putString("message", intExtra == 0 ? "系统报告操作成功，正在等待应用状态复核。" : "系统操作被取消或未成功，安装包仍然保留。");
+                editorPutInt.putString("state", "RESULT").remove("confirmation").putString("message", StoredAndroidText.store(intExtra == 0 ? AndroidMessages.INSTALL_RESULT_RECEIVER_04.text() : AndroidMessages.INSTALL_RESULT_RECEIVER_05.text()));
             }
             if (editorPutInt.commit()) {
                 context.sendBroadcast(new Intent("io.github.xyz1001.pdsync.android.INSTALL_CHANGED").setPackage(context.getPackageName()));
             }
         }
+    }
     }
 }

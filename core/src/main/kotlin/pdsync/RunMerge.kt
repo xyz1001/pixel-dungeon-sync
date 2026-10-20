@@ -1,8 +1,9 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import java.util.UUID
 
-class RunMergeException(message: String): IllegalStateException("合并失败：$message。未修改存档。")
+class RunMergeException(message: String): IllegalStateException(CoreMessages.MERGE_FAILED_1_S_SAVES_WERE_NOT_MODIFIED.text(message))
 data class RunMergeResult(val snapshot: Snapshot, val slots: Int, val addedSlots: Int, val decisions: List<String>)
 
 /** Plans and copies complete verified run units in memory; never touches a save directory/network. */
@@ -13,13 +14,13 @@ object RunMergePlanner {
  private fun input(snapshot: Snapshot, adapter: GameAdapter): Input {
   val files=Snapshots.verify(snapshot,adapter)
   val versions=ShatteredVersions.detect(files)
-  if(versions.runs.values.any { it!=896 })fail("当前仅验证 Shattered 3.3.8 写入格式")
-  val metadata=snapshot.manifest.directoryMetadata ?: fail("快照缺少单局身份，需要先建立共同身份基线")
+  if(versions.runs.values.any { it!=896 })fail(CoreMessages.ONLY_THE_SHATTERED_3_3_8_WRITE_FORMAT_IS_CURRENTLY_VERIFIED.text())
+  val metadata=snapshot.manifest.directoryMetadata ?: fail(CoreMessages.SNAPSHOT_HAS_NO_RUN_IDENTITIES_ESTABLISH_A_SHARED_IDENTITY_BASELINE_FIRST.text())
   metadata.validated(snapshot.manifest.files)
-  if((versions.runs.keys+versions.inactiveSlots).any { !Regex("game[1-6]").matches(it) })fail("存在超出已验证六槽范围的存档")
+  if((versions.runs.keys+versions.inactiveSlots).any { !Regex("game[1-6]").matches(it) })fail(CoreMessages.SAVES_EXCEED_THE_VERIFIED_SIX_SLOT_RANGE.text())
   val runs=versions.runs.keys.associate { slot ->
    val identity=metadata.runs.getValue(slot)
-   val id=identity.runUUID ?: fail("$slot 的单局身份尚未确认，不能按槽位或种子猜测")
+   val id=identity.runUUID ?: fail(CoreMessages.RUN_IDENTITY_FOR_1_S_IS_NOT_VERIFIED_IT_CANNOT_BE_GUESSED_FROM_A_SLOT_OR_SEED.text(slot))
    id to Run(slot,identity,snapshot,files.filterKeys { it.startsWith("$slot/") })
   }
   val globals=files.filterKeys { !it.startsWith("game") }
@@ -27,15 +28,15 @@ object RunMergePlanner {
  }
 
  fun plan(base: Snapshot, branches: List<Snapshot>, target: TargetGame, context: SnapshotCaptureContext, adapter: GameAdapter = Shattered): RunMergeResult {
-  if(!target.trusted || (target.mergeFormat!="shattered-896" && (target.displayVersion!="3.3.8"||target.versionCode!=896)))fail("所选游戏版本尚未验证槽位合并能力")
+  if(!target.trusted || (target.mergeFormat!="shattered-896" && (target.displayVersion!="3.3.8"||target.versionCode!=896)))fail(CoreMessages.SLOT_MERGING_HAS_NOT_BEEN_VERIFIED_FOR_THE_SELECTED_GAME_VERSION.text())
   require(branches.isNotEmpty() && branches.size<=MAX_COMMIT_PARENTS+1)
   val all=listOf(base)+branches
-  if(all.any { it.manifest.game!=base.manifest.game||it.manifest.profile!=base.manifest.profile })fail("档案不一致")
+  if(all.any { !adapter.acceptsManifest(it.manifest)||it.manifest.profile!=base.manifest.profile })fail(CoreMessages.PROFILE_MISMATCH.text())
   val packages=all.map { recordedGamePackage(it.manifest) }
   val source=all.map { it.manifest.gameSource }.distinct().singleOrNull()
   val knownPackages=packages.filterNotNull().distinct()
-  if(knownPackages.size>1 || packages.any { it==null })fail("Game package families differ or legacy package identity is unknown")
-  val packageName=if(base.manifest.game==Shattered.id && all.all { it.manifest.gamePackage==null && it.manifest.gameSource==null }) null else knownPackages.singleOrNull()
+  if(knownPackages.size>1 || packages.any { it==null })fail(CoreMessages.VALIDATION_GAME_PACKAGES_DIFFER_OR_PACKAGE_IDENTITY_IS_UNKNOWN.text())
+  val packageName=knownPackages.single()
   val before=input(base,adapter); val inputs=branches.map { input(it,adapter) }
   val globals=GlobalRecordMerge.plan(before.globals,inputs.map { it.globals })
   val globalFiles=globals.files
@@ -47,14 +48,14 @@ object RunMergePlanner {
    when {
     variants.isEmpty() -> (inputs.first().runs[id] ?: old)?.let { outputRuns+=it }
     variants.size==1 -> variants.single()?.let { outputRuns+=it }
-    variants.any { it==null } -> fail("单局 ${id.take(8)} 存在删除与继续推进的冲突")
+    variants.any { it==null } -> fail(CoreMessages.RUN_1_S_HAS_A_CONFLICT_BETWEEN_DELETION_AND_FURTHER_PROGRESS.text(id.take(8)))
     else -> variants.filterNotNull().forEach { run ->
      outputRuns+=run.copy(identity=run.identity.copy(runUUID=UUID.randomUUID().toString(),parentRunUUIDs=listOf(id),previousRunUUID=null))
     }
    }
-   decisions+="${id.take(8)}："+when { variants.size>1->"保留 ${variants.size} 个完整分支";variants.singleOrNull()==null&&variants.isNotEmpty()->"采用删除";variants.isEmpty()->"保持原内容";else->"采用唯一改动" }
+   decisions+="${id.take(8)}："+when { variants.size>1->CoreMessages.KEEP_1_S_COMPLETE_BRANCHES.text(variants.size);variants.singleOrNull()==null&&variants.isNotEmpty()->CoreMessages.USE_DELETION.text();variants.isEmpty()->CoreMessages.KEEP_ORIGINAL_CONTENTS.text();else->CoreMessages.USE_THE_ONLY_CHANGE.text() }
   }
-  if(outputRuns.size>6)fail("需要 ${outputRuns.size} 个游戏槽位，容量只有 6 个")
+  if(outputRuns.size>6)fail(CoreMessages.TEXT_1_S_GAME_SLOTS_ARE_NEEDED_BUT_CAPACITY_IS_ONLY_6.text(outputRuns.size))
   val occupied=mutableSetOf<Int>();val merged=globalFiles.toMutableMap();val identities=linkedMapOf<String,RunIdentity>()
   val times=mutableMapOf<String,String>()
   globalFiles.forEach { (path,bytes) ->
@@ -73,7 +74,7 @@ object RunMergePlanner {
    }
    identities[name]=run.identity
   }
-  if(merged.isEmpty())fail("结果没有可验证的存档内容")
+  if(merged.isEmpty())fail(CoreMessages.THE_RESULT_CONTAINS_NO_VERIFIABLE_SAVE_DATA.text())
   val files=merged.mapValues { hash(it.value) }
   val metadata=DirectorySnapshotMetadata(displayName=branches.first().manifest.directoryMetadata?.displayName.orEmpty(),contentSha256=contentSha256(files),runs=identities).validated(files)
   val provenance=if(times.keys==files.keys)SnapshotMetadata(device=context.device,capturedAt=context.capturedAt,fileModifiedAt=times).validated(files.keys) else null

@@ -2,10 +2,13 @@ package pdsync
 
 import io.github.xyz1001.pdsync.android.SharedGameIdentity
 import io.github.xyz1001.pdsync.android.SharedHomeOperation
+import io.github.xyz1001.pdsync.android.SharedHomeStatusKind
+import io.github.xyz1001.pdsync.android.showAppreciation
 import io.github.xyz1001.pdsync.android.launchEnabled
 import io.github.xyz1001.pdsync.android.restoreEnabled
 import io.github.xyz1001.pdsync.android.targetTitle
 import io.github.xyz1001.pdsync.android.uploadEnabled
+import io.github.xyz1001.pdsync.android.refreshHistoryEnabled
 import org.junit.jupiter.api.Test
 import pdsync.presentation.HistoryPresentation
 import kotlin.test.*
@@ -31,8 +34,85 @@ class DesktopSharedHomeAdapterTest {
   selectedId = history.defaultSnapshot, selectedByUser = false, restoreIssue = null,
   history = history, historyPage = 0, game = SharedGameIdentity("Shattered Pixel Dungeon", "3.3.8"),
   automaticStatus = "自动上传已开启。",
-  historyOwner = config, historyVerified = true,
+  historyOwner = config, historyVerified = true, localHistoryVerified = true,
  )
+
+ @Test fun expiredAuthenticatedAccountDisablesTransfersButKeepsLaunchAndHistory() {
+  val base = ready()
+  val state = DesktopSharedHomeAdapter.state(base.copy(serviceExpired = true))
+  assertFalse(state.uploadEnabled)
+  assertFalse(state.restoreEnabled)
+  assertTrue(state.launchEnabled)
+  assertEquals(pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text(), state.status)
+  assertEquals(SharedHomeStatusKind.EXPIRED, state.statusKind)
+  assertNotNull(state.restoreTarget)
+ }
+
+ @Test fun historyRefreshRequiresKnownCurrentAccessButNeverRequiresAnUploadSourceOrOldHistory() {
+  val base = ready().copy(historyRefreshAccessKnown = true)
+  for (available in listOf(base, base.copy(history = null, hasSession = false, selectedId = null),
+   base.copy(history = history(emptyList()).copy(currentFiles = emptyMap()), remoteTips = emptySet()),
+   base.copy(localHistoryVerified = false, historyVerified = false, historyOwner = null,
+    locationIssue = "previous local read failed", game = null),
+   base.copy(pendingUpload = true, pendingUploadSourceAvailable = false),
+   base.copy(gameStatus = GameProcessStatus.Running(setOf(1L))))) {
+   assertTrue(DesktopSharedHomeAdapter.state(available).refreshHistoryEnabled)
+  }
+  for (blocked in listOf(base.copy(historyRefreshAccessKnown = false), base.copy(connected = false),
+   base.copy(serviceExpired = true), base.copy(config = null),
+   base.copy(config = config.copy(onboardingProgress = OnboardingProgress.PENDING)),
+   base.copy(busy = true), base.copy(archiveLoading = true), base.copy(pageActive = false),
+   base.copy(connectingAtStartup = true), base.copy(appClosed = true))) {
+   assertFalse(DesktopSharedHomeAdapter.state(blocked).refreshHistoryEnabled)
+  }
+ }
+
+ @Test fun appreciationOnlyAppearsForTheCurrentExpiredBuiltinIdentity() {
+  val official = config.copy(endpoint = DESKTOP_OFFICIAL_ROOT, connectionProvider = "official")
+  val base = ready().copy(config = official, serviceExpired = true)
+  val expired = DesktopSharedHomeAdapter.state(base)
+  assertTrue(expired.showAppreciation)
+  assertTrue(desktopHomeAppreciationAllowed(official, expired))
+  for (changed in listOf(null, official.copy(connectionProvider = "custom"),
+   official.copy(endpoint = "https://dav.example.test/"), official.copy(username = ""))) {
+   val unknown = DesktopSharedHomeAdapter.state(base.copy(config = changed))
+   assertFalse(unknown.showAppreciation)
+   assertFalse(desktopHomeAppreciationAllowed(changed, expired))
+  }
+  for (blocked in listOf(base.copy(busy = true), base.copy(archiveLoading = true),
+   base.copy(pageActive = false), base.copy(appClosed = true), base.copy(connectingAtStartup = true))) {
+   assertFalse(desktopHomeAppreciationAllowed(official, DesktopSharedHomeAdapter.state(blocked)))
+  }
+  assertFalse(DesktopSharedHomeAdapter.state(base.copy(serviceExpired = false)).showAppreciation)
+ }
+
+ @Test fun expiryReplacesTheExistingStatusAndNeverDuplicatesIndependentNotice() {
+  val expiredText = pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text()
+  val base = ready().copy(serviceExpired = true, operationStatus = expiredText,
+   connectionNotice = "$expiredText\n请重新检查连接。", automaticStatus = expiredText)
+  val expired = DesktopSharedHomeAdapter.state(base.copy(busy = true))
+  assertEquals(expiredText, expired.status)
+  assertEquals(SharedHomeStatusKind.EXPIRED, expired.statusKind)
+  assertEquals("请重新检查连接。", expired.notice)
+  val renewed = DesktopSharedHomeAdapter.state(base.copy(serviceExpired = false, connectionNotice = expiredText,
+   historyVerified = false))
+  assertNotEquals(expiredText, renewed.status)
+  assertEquals("", renewed.notice)
+  assertFalse(renewed.showAppreciation)
+ }
+
+ @Test fun archiveLoadingIsIndependentOfUnrelatedBusyWorkAndHiddenOffHome() {
+  val base = ready()
+  assertFalse(DesktopSharedHomeAdapter.state(base.copy(busy = true)).archiveLoading)
+  assertFalse(DesktopSharedHomeAdapter.state(base.copy(connectingAtStartup = true)).archiveLoading)
+  val reading = DesktopSharedHomeAdapter.state(base.copy(archiveLoading = true))
+  assertTrue(reading.archiveLoading)
+  assertFalse(reading.uploadEnabled)
+  assertFalse(reading.restoreEnabled)
+  assertFalse(reading.launchEnabled)
+  assertFalse(DesktopSharedHomeAdapter.state(base.copy(archiveLoading = true, pageActive = false)).archiveLoading)
+  assertFalse(DesktopSharedHomeAdapter.state(base.copy(archiveLoading = true, appClosed = true)).archiveLoading)
+ }
 
  @Test fun uniqueDefaultTargetIsRealButDoesNotPretendTheUserSelectedIt() {
   val history = history().copy(aliases = mapOf("snapshot-tip" to "远征记录"))
@@ -90,34 +170,31 @@ class DesktopSharedHomeAdapterTest {
   assertFalse(sameDesktopHomeProfile(null, config))
  }
 
- @Test fun unverifiedUploadRestoreAndLaunchRetainThePreviousHostCapabilityMatrix() {
+ @Test fun unverifiedReadsCannotEnableEitherTransferEvenDuringUnfinishedSetup() {
   val base = ready().copy(historyVerified = false)
-  for (connected in listOf(false, true)) for (session in listOf(false, true))
-   for (pending in listOf(false, true)) for (complete in listOf(false, true))
-    for (conflict in listOf(false, true)) for (tips in listOf(emptySet(), setOf("a"), setOf("a", "b")))
-     for (selected in listOf(null, "snapshot-tip")) for (issue in listOf(null, "不兼容")) {
-      val current = base.copy(connected = connected, hasSession = session, pendingUpload = pending,
-       config = base.config!!.copy(onboardingProgress = if (complete) OnboardingProgress.COMPLETE else OnboardingProgress.PENDING),
-       hasConflict = conflict, remoteTips = tips, selectedId = selected, restoreIssue = issue)
-      val state = DesktopSharedHomeAdapter.state(current)
-      assertEquals(!connected || session && (pending || current.history!!.currentFiles.isNotEmpty()), state.canUpload)
-      assertEquals(session && connected && (!complete || !pending &&
-       (conflict || tips.size > 1 || selected != null && issue == null)), state.canRestore)
-      assertTrue(state.canLaunch)
-     }
+  for (pending in listOf(false, true)) for (complete in listOf(false, true))
+   for (conflict in listOf(false, true)) for (tips in listOf(emptySet(), setOf("a"), setOf("a", "b")))
+    for (selected in listOf(null, "snapshot-tip")) for (issue in listOf(null, "不兼容")) {
+     val current = base.copy(pendingUpload = pending, pendingUploadSourceAvailable = pending,
+      config = base.config!!.copy(onboardingProgress = if (complete) OnboardingProgress.COMPLETE else OnboardingProgress.PENDING),
+      hasConflict = conflict, remoteTips = tips, selectedId = selected, restoreIssue = issue)
+     val state = DesktopSharedHomeAdapter.state(current)
+     assertFalse(state.canUpload); assertFalse(state.canRestore)
+     assertTrue(state.canLaunch)
+    }
  }
 
  @Test fun verifiedFullContentEqualityDisablesOnlyTheUnnecessaryTransfers() {
   val same = DesktopSharedHomeAdapter.state(ready())
   assertFalse(same.canUpload); assertFalse(same.canRestore); assertTrue(same.canLaunch)
-  assertEquals("已同步", same.status)
+  assertEquals("进度已同步 · 本机与云端档案完全一致", same.status)
   assertEquals("本机已是此进度，无需恢复。", same.restoreTarget?.notice)
 
   // A changed global record is still a different save even when slot/play counts and names match.
   val different = history().copy(currentFiles = files + ("badges.dat" to "c".repeat(64)))
   val changed = DesktopSharedHomeAdapter.state(ready(different))
   assertTrue(changed.canUpload); assertTrue(changed.canRestore)
-  assertNotEquals("已同步", changed.status)
+  assertNotEquals("进度已同步 · 本机与云端档案完全一致", changed.status)
   assertEquals("", changed.restoreTarget?.notice)
  }
 
@@ -127,13 +204,13 @@ class DesktopSharedHomeAdapterTest {
   val selected = DesktopSharedHomeAdapter.state(ready(history).copy(selectedId = "snapshot-old", selectedByUser = true))
   assertTrue(selected.canUpload); assertFalse(selected.canRestore)
   assertEquals("snapshot-old", selected.restoreTarget?.snapshotId)
-  assertNotEquals("已同步", selected.status)
+  assertNotEquals("进度已同步 · 本机与云端档案完全一致", selected.status)
   val latest = DesktopSharedHomeAdapter.state(ready(history))
   assertTrue(latest.canUpload); assertTrue(latest.canRestore)
  }
 
  @Test fun equalityNeverHidesPendingBranchRecoveryOrUnfinishedSetup() {
-  val pending = DesktopSharedHomeAdapter.state(ready().copy(pendingUpload = true))
+  val pending = DesktopSharedHomeAdapter.state(ready().copy(pendingUpload = true, pendingUploadSourceAvailable = true))
   assertTrue(pending.canUpload); assertFalse(pending.canRestore)
   assertContains(pending.status, "重试上传")
   val conflict = DesktopSharedHomeAdapter.state(ready().copy(hasConflict = true))
@@ -148,14 +225,14 @@ class DesktopSharedHomeAdapterTest {
 
  @Test fun unknownFailedOrOtherAccountHistoryCannotClaimIdenticalContent() {
   val base = ready()
-  for (unverified in listOf(base.copy(historyVerified = false), base.copy(historyOwner = null),
+  for (unverified in listOf(base.copy(historyVerified = false), base.copy(localHistoryVerified = false), base.copy(historyOwner = null),
    base.copy(historyOwner = config.copy(username = "previous-account")),
    base.copy(historyOwner = config.copy(profile = "previous-profile")),
    base.copy(locationIssue = "Unable to read save"), base.copy(remoteTips = emptySet()),
    base.copy(history = base.history!!.copy(graph = base.history.graph.copy(pending = mapOf("missing" to "unverified")))))) {
    val state = DesktopSharedHomeAdapter.state(unverified)
-   assertTrue(state.canUpload); assertTrue(state.canRestore)
-   assertNotEquals("已同步", state.status)
+   assertFalse(state.canUpload); assertFalse(state.canRestore)
+   assertNotEquals("进度已同步 · 本机与云端档案完全一致", state.status)
    assertEquals("", state.restoreTarget?.notice)
   }
  }
@@ -168,9 +245,12 @@ class DesktopSharedHomeAdapterTest {
    assertFalse(state.uploadEnabled); assertFalse(state.restoreEnabled); assertFalse(state.launchEnabled)
   }
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(gameStatus = GameProcessStatus.Running(setOf(123L)))).canLaunch)
+  val running = DesktopSharedHomeAdapter.state(base.copy(gameStatus = GameProcessStatus.Running(setOf(123L))))
+  assertFalse(running.canUpload)
+  assertFalse(running.canRestore)
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(config = null)).canLaunch)
   // The existing disconnected Upload remains an intentional route into login.
-  assertTrue(DesktopSharedHomeAdapter.state(base.copy(connected = false, hasSession = false)).canUpload)
+  assertTrue(DesktopSharedHomeAdapter.state(base.copy(connected = false)).canUpload)
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(hasSession = false)).canRestore)
  }
 
@@ -184,9 +264,76 @@ class DesktopSharedHomeAdapterTest {
   val unknown = DesktopSharedHomeAdapter.state(base.copy(history = null, hasSession = false, selectedId = null))
   assertNull(unknown.history)
   assertContains(unknown.emptyTargetMessage, "正在读取")
-  val pending = DesktopSharedHomeAdapter.state(base.copy(history = empty, selectedId = null, pendingUpload = true))
+  val unverifiedPending = DesktopSharedHomeAdapter.state(base.copy(history = empty, selectedId = null,
+   remoteTips = emptySet(), pendingUpload = true))
+  assertFalse(unverifiedPending.canUpload); assertFalse(unverifiedPending.canRestore)
+  val pending = DesktopSharedHomeAdapter.state(base.copy(history = empty, selectedId = null, remoteTips = emptySet(),
+   pendingUpload = true, pendingUploadSourceAvailable = true))
   assertTrue(pending.canUpload); assertFalse(pending.canRestore)
   assertContains(pending.status, "重试上传")
+ }
+
+ @Test fun eachDirectionRequiresItsOwnNonemptySourceRegardlessOfSetupCompletion() {
+  for (complete in listOf(false, true)) for (localPresent in listOf(false, true))
+   for (remotePresent in listOf(false, true)) {
+    val observed = history(if (remotePresent) listOf(commit("tip")) else emptyList()).copy(
+     currentFiles = if (localPresent) mapOf("game1/game.dat" to "c".repeat(64)) else emptyMap())
+    val current = ready(observed).copy(
+     config = config.copy(onboardingProgress = if (complete) OnboardingProgress.COMPLETE else OnboardingProgress.PENDING),
+     remoteTips = if (remotePresent) setOf("snapshot-tip") else emptySet())
+    val state = DesktopSharedHomeAdapter.state(current)
+    assertEquals(localPresent, state.uploadEnabled, "complete=$complete local=$localPresent cloud=$remotePresent")
+    assertEquals(remotePresent, state.restoreEnabled, "complete=$complete local=$localPresent cloud=$remotePresent")
+   }
+ }
+
+ @Test fun selectedEmptyOrMissingSnapshotCannotFallBackToAnotherNonemptyCloudSource() {
+  val observed = history(listOf(commit("empty", content = emptyMap()), commit("tip")))
+   .copy(currentFiles = mapOf("game1/game.dat" to "c".repeat(64)))
+  val base = ready(observed).copy(remoteTips = setOf("snapshot-empty", "snapshot-tip"))
+  assertTrue(DesktopSharedHomeAdapter.state(base.copy(selectedId = null)).canRestore)
+  for (selected in listOf("snapshot-empty", "missing")) {
+   val state = DesktopSharedHomeAdapter.state(base.copy(selectedId = selected, selectedByUser = true))
+   assertTrue(state.canUpload)
+   assertFalse(state.canRestore, "must not substitute another snapshot for $selected")
+   assertFalse(desktopHomeTransferAllowed(OperationAction.CLOUD_HISTORY, state))
+  }
+ }
+
+ @Test fun noGameUnknownProcessStaleOwnerAndInterruptedReadsBlockHostEntry() {
+  val base = ready(history().copy(currentFiles = mapOf("game1/game.dat" to "c".repeat(64))))
+  val states = listOf(base.copy(game = null), base.copy(config = null),
+   base.copy(gameStatus = GameProcessStatus.Unknown("not inspected")),
+   base.copy(archiveLoading = true), base.copy(localHistoryVerified = false),
+   base.copy(historyVerified = false), base.copy(history = null),
+   base.copy(historyOwner = config.copy(username = "old-account")),
+   base.copy(config = config.copy(targetGame = "/other-game.jar")),
+   base.copy(config = config.copy(selectedSaveRoot = "/other-saves")),
+   base.copy(locationIssue = "unreadable"), base.copy(hasSession = false))
+  for (current in states) {
+   val state = DesktopSharedHomeAdapter.state(current)
+   assertFalse(state.uploadEnabled); assertFalse(state.restoreEnabled)
+   for (action in listOf(OperationAction.PUSH, OperationAction.RESTORE,
+    OperationAction.REMOTE_TIP, OperationAction.CLOUD_HISTORY)) {
+    assertFalse(desktopHomeTransferAllowed(action, state), "direct entry $action must recheck current sources")
+   }
+   assertTrue(desktopHomeTransferAllowed(OperationAction.ARCHIVE, state), "recovery maintenance stays separate")
+  }
+  // Confirmation is a different page, but must still use the same current capability checks.
+  val confirmation = DesktopSharedHomeAdapter.state(base.copy(pageActive = false))
+  assertFalse(confirmation.restoreEnabled)
+  assertTrue(desktopHomeTransferAllowed(OperationAction.CLOUD_HISTORY, confirmation))
+ }
+
+ @Test fun disconnectedUploadOpensLoginOnlyForKnownCurrentNonemptySource() {
+  val local = history(emptyList()).copy(currentFiles = files)
+  val base = ready(local).copy(connected = false, remoteTips = emptySet(), historyVerified = false)
+  assertTrue(DesktopSharedHomeAdapter.state(base).uploadEnabled)
+  for (blocked in listOf(base.copy(history = local.copy(currentFiles = emptyMap())),
+   base.copy(localHistoryVerified = false), base.copy(historyOwner = null), base.copy(game = null))) {
+   val state = DesktopSharedHomeAdapter.state(blocked)
+   assertFalse(state.uploadEnabled); assertFalse(state.restoreEnabled)
+  }
  }
 
  @Test fun technicalMessagesStayInDetailsAndUnknownSaveTimesStayUnknown() {
@@ -220,7 +367,8 @@ class DesktopSharedHomeAdapterTest {
   repeat(20) { page ->
    val state = DesktopSharedHomeAdapter.state(ready(history).copy(historyPage = page))
    assertEquals(HistoryPresentation.from(history, page), state.history)
-   assertEquals(1, state.history!!.nodes.single { it.id == "local-current" }.row)
+   assertEquals(state.history!!.nodes.single { it.id == "new" }.row,
+    state.history.nodes.single { it.id == "local-current" }.row)
    assertContains(state.history.nodes.single { it.id == "local-current" }.detail, "已进行0场游戏")
   }
   assertEquals(original, history)

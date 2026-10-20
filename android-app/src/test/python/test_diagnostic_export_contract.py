@@ -17,11 +17,32 @@ class DiagnosticExportContract(unittest.TestCase):
     def test_settings_contains_only_one_export_button(self):
         settings = body(MAIN, 'private void renderSettings()')
         self.assertEqual(settings.count('new SharedSettingsRow(SharedSettingsKey.EXPORT_LOGS,'), 1)
-        self.assertIn('"导出日志", !diagnosticExport.busy()', settings)
+        self.assertIn('EXPORT_LOGS_212.text(), !diagnosticExport.busy()', settings)
         self.assertIn('if (!diagnosticExport.busy()) chooseDiagnosticDirectory()', settings)
         start = body(MAIN, 'private void chooseDiagnosticDirectory()')
         for forbidden in ('work(', 'sync(', 'SyncRuntime.', 'requestReadinessRefresh(', 'Root', 'Network'):
             self.assertNotIn(forbidden, start)
+
+    def test_wizard_header_moves_existing_export_without_global_toolbar(self):
+        self.assertNotIn('withDiagnosticToolbar', MAIN)
+        self.assertNotIn('globalDiagnosticExport', MAIN)
+        self.assertIn('new SharedDiagnosticAction(this::chooseDiagnosticDirectory)', MAIN)
+        action = body(MAIN, 'public SharedDiagnosticAction wizardDiagnosticAction()')
+        self.assertIn('wizardDiagnosticExport.setEnabled(!diagnosticExport.busy())', action)
+        self.assertNotIn('this.busy', action)
+        changed = body(MAIN, 'void onDiagnosticExportChanged()')
+        self.assertIn('wizardDiagnosticExport.setEnabled(!diagnosticExport.busy())', changed)
+        root = Path(__file__).resolve().parents[4]
+        viewport = (root / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidAppViewport.kt').read_text()
+        shell = (root / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedAppShell.kt').read_text()
+        self.assertIn('LocalSharedDiagnosticAction provides diagnosticAction', viewport)
+        self.assertIn('LocalActivity.current as? MainActivity', viewport)
+        self.assertNotIn('LocalContext.current', viewport)
+        self.assertIn('onboardingStep in 1..2', shell)
+        self.assertIn('SharedDiagnosticExportButton(diagnosticAction)', shell)
+        self.assertIn('enabled = action.enabled', shell)
+        self.assertIn('onClick = action.onClick::run', shell)
+        self.assertIn('SharedReferenceIcon("log", Modifier.size(18.dp))', shell)
 
     def test_system_picker_temporary_read_write_grants_no_custom_browser(self):
         choose = body(EXPORT, 'void chooseDirectory(')
@@ -37,7 +58,7 @@ class DiagnosticExportContract(unittest.TestCase):
         selected = body(result, 'if (i == AndroidDiagnosticExport.REQUEST_DIRECTORY)')
         self.assertIn('diagnosticExport.onDirectoryResult(this, i2, intent)', selected)
         self.assertIn('return;', selected)
-        self.assertLess(result.index(selected), result.index('if (i == 8103)'))
+        self.assertLess(result.index(selected), result.index('if (i == ACTIVATE_HELPER)'))
         self.assertIn('i == 8101 && i2 == -1', result)
         self.assertIn('i != 8102 || this.busy', result)
 
@@ -69,7 +90,7 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('DocumentsContract.deleteDocument(resolver, created)', EXPORT)
         self.assertNotIn('delete(', WRITER)
         self.assertNotIn('deleteIfExists', EXPORT)
-        self.assertIn('日志导出失败，请检查目录权限和剩余空间后重试。', EXPORT)
+        self.assertIn('AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_04.text()', EXPORT)
 
     def test_rotation_uses_one_process_state_weak_owner_and_no_persisted_uri(self):
         self.assertIn('private static final AndroidDiagnosticExport INSTANCE', EXPORT)
@@ -88,7 +109,7 @@ class DiagnosticExportContract(unittest.TestCase):
         guard = body(resume, 'if (diagnosticPickerReturn || diagnosticExport.busy())')
         self.assertIn('return;', guard)
         self.assertLess(resume.index(guard), resume.index('AutoSyncService.knownReturn(this)'))
-        self.assertLess(resume.index(guard), resume.index('requestReadinessRefresh()'))
+        self.assertLess(resume.index(guard), resume.index('if (this.initialLoad'))
         pause = body(MAIN, 'protected void onPause()')
         self.assertIn('if (!diagnosticExport.selecting()) AutoSyncService.recordDeparture(this)', pause)
 
@@ -126,7 +147,7 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('DiagnosticLog.failure(DiagnosticStage.REFRESH, error)', refresh)
         self.assertIn('return result;', refresh)
         self.assertIn('result instanceof AutomaticHistoryOutcome', MAIN)
-        self.assertIn('work(DiagnosticAction.LAUNCH, "正在核对首次启动', MAIN)
+        self.assertIn('work(DiagnosticAction.LAUNCH, CHECKING_THE_GAME_AND_BUILT_IN_282.text()', MAIN)
         self.assertIn('failDiagnostics(failure)', body(SERVICE, 'public void poll()'))
         self.assertIn('DiagnosticStage.FINISHED', body(SERVICE, 'private synchronized void failDiagnostics('))
 

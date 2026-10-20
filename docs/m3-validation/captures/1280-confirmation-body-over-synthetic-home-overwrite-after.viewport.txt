@@ -1,0 +1,2 @@
+content=1280x900; density=1.0; fontScale=1.0; synthetic=true; renderer=production Compose; native decorations excluded; native OS/device behavior not tested
+Component callbacks only; no transfer or persistence performed

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- M3 Forest Green Gradient -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#14462b" />
+      <stop offset="50%" stop-color="#0f3420" />
+      <stop offset="100%" stop-color="#071b11" />
+    </linearGradient>
+
+    <!-- Inner Ambient Glow -->
+    <radialGradient id="rimGlow" cx="256" cy="180" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.22" />
+      <stop offset="60%" stop-color="#10b981" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.5" />
+    </radialGradient>
+
+    <!-- Sync Glow Gradient -->
+    <linearGradient id="syncGlow" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67e8f9" />
+      <stop offset="50%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+
+    <!-- Sync Arrow Glow Filter -->
+    <filter id="arrowGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="glow" />
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- M3 Squircle Background -->
+  <rect x="32" y="32" width="448" height="448" rx="100" ry="100" fill="url(#bgGrad)" />
+  <rect x="32" y="32" width="448" height="448" rx="100" ry="100" fill="url(#rimGlow)" />
+  <rect x="33.5" y="33.5" width="445" height="445" rx="98.5" ry="98.5" stroke="#6ee7b7" stroke-width="2.5" stroke-opacity="0.3" />
+
+  <!-- Outer Luminous Sync Arrows (Orbit Radius 192, COMPLETELY OUTSIDE THE CHEST) -->
+  <g filter="url(#arrowGlow)" opacity="0.95">
+    <!-- Top-Right Sweep & Connected Arrowhead -->
+    <path d="M 81.4 176.2 A 192 192 0 0 1 447.9 251.5" stroke="url(#syncGlow)" stroke-width="14" stroke-linecap="round" fill="none" />
+    <polygon points="447.9,279.5 466.9,241.5 428.9,241.5" fill="#67e8f9" />
+
+    <!-- Bottom-Left Sweep & Connected Arrowhead -->
+    <path d="M 430.5 336.0 A 192 192 0 0 1 64.0 260.1" stroke="url(#syncGlow)" stroke-width="14" stroke-linecap="round" fill="none" />
+    <polygon points="64.0,232.1 45.0,270.1 83.0,270.1" fill="#67e8f9" />
+  </g>
+
+  <!-- Authentic Original Shattered Pixel Dungeon Chest -->
+  <ellipse cx="256" cy="366" rx="105" ry="14" fill="#000000" opacity="0.45" />
+  <image href="data:image/png;base64,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" x="139" y="143" width="235" height="227" style="image-rendering: pixelated;" />
+</svg>

@@ -34,6 +34,23 @@ public final class PayloadInventory {
         try (InputStream input = new FileInputStream(runtime)) { return ApkArchive.readLimited(input, MAX_DEX_BYTES); }
     }
 
+    static void validateSourceDex(File source) throws IOException {
+        try (ZipFile zip = new ZipFile(source)) {
+            java.util.Enumeration<? extends ZipEntry> entries = zip.entries();
+            int dexCount = 0; Set<String> names = new HashSet<>();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (!isDexEntry(entry.getName())) continue;
+                require(!entry.isDirectory() && entry.getSize() >= 112 && entry.getSize() <= MAX_DEX_BYTES,
+                        "Source DEX missing, truncated, or oversized");
+                try (InputStream input = zip.getInputStream(entry)) { classNames(ApkArchive.readLimited(input, MAX_DEX_BYTES)); }
+                dexCount++; names.add(entry.getName());
+            }
+            for (int i = 1; i <= dexCount; i++) require(names.contains(i == 1 ? "classes.dex" : "classes" + i + ".dex"),
+                    "Source APK has a non-contiguous DEX entry sequence");
+        }
+    }
+
     public static void requireNoClassCollisions(List<File> sourceApks, File runtime) throws IOException {
         requireNoClassCollisions(sourceApks, readRuntime(runtime));
     }

@@ -1,10 +1,22 @@
 package io.github.xyz1001.pdsync.android;
 
 import java.util.Objects;
+import pdsync.presentation.SyncPage;
 
 /** Pure presentation guards shared by the Activity and host regression checks. */
 final class AndroidUiFlowPolicy {
     private AndroidUiFlowPolicy() {}
+
+    /** Old path/comparison pages resume at services; they must never revive removed setup steps. */
+    static SyncPage currentPage(SyncPage page) {
+        if (page == SyncPage.PATH || page == SyncPage.COMPARISON) return SyncPage.CONNECTION;
+        return page;
+    }
+
+    /** An interrupted confirmation is not reusable after Activity recreation. */
+    static SyncPage restoredPage(SyncPage page) {
+        return page == SyncPage.CONFIRM ? SyncPage.HOME : currentPage(page);
+    }
 
     /** Editing and then reverting must not resurrect a previous successful DAV test. */
     static String invalidateProofOnEdit(String proof, String beforeFingerprint, String afterFingerprint) {

@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -37,12 +39,12 @@ final class InstallSessionWriter {
         final long length;
         final String apkSetSha256;
         Snapshot(List<Entry> entries, long length, List<String> hashes) {
-            this.entries = entries; this.length = length; this.apkSetSha256 = ApkSetIdentity.digest(hashes);
+            this.entries = java.util.Collections.unmodifiableList(new ArrayList<>(entries)); this.length = length; this.apkSetSha256 = ApkSetIdentity.digest(hashes);
         }
     }
 
     static Snapshot inspect(List<File> files) throws Exception {
-        if (files == null || files.isEmpty()) throw new IOException("APK 集合为空。");
+        if (files == null || files.isEmpty()) throw new IOException(AndroidMessages.PACKAGE_TRUST_20.text());
         ArrayList<Entry> entries = new ArrayList<>();
         ArrayList<String> hashes = new ArrayList<>();
         long total = 0;
@@ -56,17 +58,17 @@ final class InstallSessionWriter {
 
     private static Entry inspect(File file) throws Exception {
         long length = file.length();
-        if (!file.isFile() || length <= 0) throw new IOException("APK 来源文件缺失或为空。");
+        if (!file.isFile() || length <= 0) throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_01.text());
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         long count = 0;
         try (InputStream input = new FileInputStream(file)) {
             byte[] buffer = new byte[65536]; int n;
             while ((n = input.read(buffer)) != -1) {
-                if (n > length - count) throw new IOException("APK 来源长度已变化。");
+                if (n > length - count) throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_02.text());
                 digest.update(buffer, 0, n); count += n;
             }
         }
-        if (count != length || file.length() != length) throw new IOException("APK 来源长度已变化。");
+        if (count != length || file.length() != length) throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_02.text());
         return new Entry(file, count, hex(digest.digest()));
     }
 
@@ -87,7 +89,7 @@ final class InstallSessionWriter {
             }
         }
         String actual = ApkSetIdentity.digest(hashes);
-        if (!snapshot.apkSetSha256.equals(actual)) throw new IOException("系统写入 APK 集合校验失败。");
+        if (!snapshot.apkSetSha256.equals(actual)) throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_03.text());
         return actual;
     }
 
@@ -96,12 +98,12 @@ final class InstallSessionWriter {
         InstallDiagnostics.Stage stage = InstallDiagnostics.Stage.READ_SOURCE_VERIFY;
         try {
             if (length <= 0 || expected == null || !expected.matches("[0-9a-f]{64}"))
-                throw new IOException("APK 写入校验信息无效。");
+                throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_04.text());
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long written = 0;
             byte[] buffer = new byte[65536]; int n;
             while ((n = input.read(buffer)) != -1) {
-                if (n > length - written) throw new IOException("APK 来源超过已验证长度。");
+                if (n > length - written) throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_05.text());
                 stage = InstallDiagnostics.Stage.WRITE;
                 output.write(buffer, 0, n);
                 // Only account for a whole write after OutputStream accepted it. Any partial
@@ -111,7 +113,7 @@ final class InstallSessionWriter {
             }
             String actual = hex(digest.digest());
             if (written != length || !actual.equals(expected))
-                throw new IOException("APK 写入字节数或 SHA-256 与已验证来源不一致。");
+                throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_06.text());
             stage = InstallDiagnostics.Stage.FSYNC;
             sync.fsync(output);
             return actual;
@@ -124,7 +126,7 @@ final class InstallSessionWriter {
         for (Entry expected : snapshot.entries) {
             Entry actual = inspect(expected.file);
             if (expected.length != actual.length || !expected.sha256.equals(actual.sha256))
-                throw new IOException("APK 来源在写入期间发生变化。");
+                throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_07.text());
         }
     }
 
@@ -133,7 +135,7 @@ final class InstallSessionWriter {
         for (int i = 0; i < count; i++) expected.add(name(i));
         if (count <= 0 || actual == null || actual.length != count
                 || !expected.equals(new HashSet<>(Arrays.asList(actual))))
-            throw new IOException("系统暂存 APK 文件名集合不一致。");
+            throw new IOException(AndroidMessages.INSTALL_SESSION_WRITER_08.text());
     }
 
     private static String name(int index) { return index == 0 ? "base.apk" : "split_" + index + ".apk"; }

@@ -34,6 +34,37 @@ class SharedNamingStateTest {
         assertEquals(listOf("当前草稿", ""), saved)
     }
 
+    @Test fun draftLimitPreservesUnicodeCharactersAndLeavesPersistenceToTheHost() {
+        var state = SharedNamingState(4, "")
+        val saved = mutableListOf<String>()
+        val interactions = SharedNamingInteractions({ state }, { state = state.copy(name = it) },
+            { saved += it }, {})
+        interactions.edit(4, "🙂".repeat(41))
+        assertEquals("🙂".repeat(40), state.name)
+        assertTrue(saved.isEmpty())
+        interactions.edit(4, "  待保存  ")
+        assertEquals("  待保存  ", state.name, "typing does not trim or persist a draft")
+        interactions.save(4)
+        assertEquals(listOf("  待保存  "), saved)
+    }
+
+    @Test fun identityMaintenanceIsExplicitAndRejectsStaleBusyAndDisposedCallbacks() {
+        var state = SharedNamingState(4, "名称")
+        val calls = mutableListOf<String>()
+        val interactions = SharedNamingInteractions({ state }, {}, { calls += "save" },
+            { calls += "dismiss" }, { calls += "identity" })
+        interactions.maintenance(3)
+        state = state.copy(busy = true)
+        interactions.maintenance(4)
+        assertTrue(calls.isEmpty())
+        state = state.copy(busy = false)
+        interactions.maintenance(4)
+        assertEquals(listOf("identity"), calls)
+        interactions.dispose()
+        interactions.maintenance(4)
+        assertEquals(listOf("identity"), calls)
+    }
+
     @Test fun staleAndBusyNamingCallbacksCannotWriteOrDismissAnotherTarget() {
         var state: SharedNamingState? = SharedNamingState(4, "原名称")
         val calls = mutableListOf<String>()

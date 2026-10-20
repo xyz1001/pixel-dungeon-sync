@@ -1,0 +1,32 @@
+存档同步
+像素地牢
+Shattered Pixel Dungeon · 3.3.8
+设置
+内置服务已到期，请前往设置续期
+上传到云端
+将本机游戏进度备份至云端空间
+恢复到本机
+取回云端档案并应用至当前设备
+启动游戏
+存档脉络
+云端存档
+本机
+本机存档
+本机当前 · 未同步云端
+10-09 10:00
+2 个槽位 · 已进行28场游戏
+重命名
+云端存档
+云端当前分支
+10-09 09:00
+MacBook · 2 个槽位
+重命名
+
+ACTIONS
+设置; disabled=false; bounds=Rect.fromLTRB(959.0, 70.0, 1039.0, 112.0)
+上传到云端 | 将本机游戏进度备份至云端空间; disabled=true; bounds=Rect.fromLTRB(241.0, 246.0, 632.0, 336.0)
+恢复到本机 | 取回云端档案并应用至当前设备; disabled=true; bounds=Rect.fromLTRB(648.0, 246.0, 1039.0, 336.0)
+启动游戏; disabled=false; bounds=Rect.fromLTRB(931.0, 358.0, 1039.0, 400.0)
+重命名; disabled=false; bounds=Rect.fromLTRB(959.0, 611.0, 1023.0, 633.0)
+云端存档 | 云端当前分支 | 10-09 09:00 | MacBook · 2 个槽位; disabled=false; bounds=Rect.fromLTRB(257.0, 661.0, 624.0, 751.0)
+重命名; disabled=false; bounds=Rect.fromLTRB(560.0, 757.0, 624.0, 779.0)

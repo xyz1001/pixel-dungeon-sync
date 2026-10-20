@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -14,12 +16,12 @@ internal object NativeGameChooser {
 
  fun selection(directory: String?, file: String?): String? {
   if (file == null) return null // Cancel must not reuse the previous selection.
-  require(accepts(file)) { "请选择 JAR 文件；未更改原有游戏选择。" }
-  require(!directory.isNullOrBlank()) { "无法确定所选文件的位置。" }
+  require(accepts(file)) { DesktopMessages.SELECT_A_JAR_FILE_THE_PREVIOUS_GAME_SELECTION_IS_UNCHANGED.text() }
+  require(!directory.isNullOrBlank()) { DesktopMessages.CANNOT_DETERMINE_THE_SELECTED_FILE_S_LOCATION.text() }
   return File(directory, file).absolutePath
  }
 
- fun dialog(parent: Frame, initial: String): FileDialog = FileDialog(parent, "选择目标游戏 JAR（只读取，不运行）", FileDialog.LOAD).apply {
+ fun dialog(parent: Frame, initial: String): FileDialog = FileDialog(parent, DesktopMessages.CHOOSE_TARGET_GAME_JAR_READ_ONLY_NOT_RUN.text(), FileDialog.LOAD).apply {
   isMultipleMode = false
   directory = initial.takeIf { it.isNotBlank() }?.let { File(it).absoluteFile.parent }
    ?: System.getProperty("user.home")

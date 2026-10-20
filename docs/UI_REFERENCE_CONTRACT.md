@@ -1,3 +1,5 @@
+> Historical document. For code59, the v21-M3 design and two-step setup contract in [M3_REFERENCE_CONTRACT.md](M3_REFERENCE_CONTRACT.md) supersedes older colours, geometry, account layout and setup-step descriptions below. Historical validation results do not validate code59.
+
 # Shared UI reference contract
 
 ## Authority and scope
@@ -48,30 +50,45 @@ game metadata enters the product. Reference: `app.mjs:78–79`.
 
 ### 2. Save path
 
-Path, folder selection where supported, concise preview and slot times. Editing
-invalidates the old preview. Reading, queued continuation, failure/retry and Back
+Display the resolved path as labelled, wrapping text on both platforms, never as
+an editable or read-only text field. No alternative/default path controls or extra
+explanation. Keep the concise preview, slot times and existing Back/Next footer.
+Reading, queued continuation, failure/retry and Back
 must have explicit state; a stale result cannot advance a changed page or draft.
 The primary footer action expresses Next/Waiting/Retry rather than stacking
-several independent controls. Android's trusted private path can remain read-only.
+several independent controls. Keep platform path resolution and preview adapters.
 Reference: `app.mjs:80–92`, `model.mjs:316–324,338–352`.
 
 ### 3. Cloud connection
 
-Fresh setup begins with the approved official/custom choice. Custom connection
-uses address, username, password and Test Connection; official connection uses
-login/registration with the real service and existing appreciation/expiry flow.
-All subpages use the same shell, constrained form and footer. Test success stays
-on this page and enables Next; changing the tested fields invalidates that proof.
-An unchanged successfully saved configuration does not require arbitrary repeated
-tests. Failed test, Back and cancellation cannot discard saved configuration.
+Fresh setup offers `使用内置服务` and `自定义 WebDAV`. Custom connection keeps
+address, username, password and Test Connection: only its successful real DAV
+probe enables Next, and field changes invalidate that proof. Built-in service
+uses real login/registration and authenticated account expiry, with no Test
+Connection button or DAV probe on login/Next. A current, unexpired account enables
+Next; activation saves credentials without inventing a DAV proof or sync baseline.
+Actual comparison/synchronization still performs and validates real DAV requests.
+The explicit initial built-in comparison prepares only the two app-owned namespace
+directories using the existing bounded path; preparation failures stay on comparison
+and never become empty-cloud results, sync baselines or automatic uploads.
+
+After built-in login, hide credential fields and login/registration controls; show
+the usage expiry and appreciation action with `赞赏可续期一年`. Expired accounts keep expiry/appreciation
+visible but Next disabled. Exact saved credentials reauthenticate through read-only
+account metadata on re-entry. Trusted historical expiry can remain visible after
+an expired saved account returns 401, labelled as last confirmed; cached history
+never grants Next. New/unverified failed logins keep the form and no appreciation.
+All subpages use the same shell, constrained form and footer. Failed authentication,
+failed custom tests, Back and cancellation cannot discard saved configuration.
 Reference layout: `app.mjs:94–102,155–162`; real state and account behavior:
 `SharedConnectionController`, `ConnectionEntryModel` and production adapters.
 
 ### 4. Choose save
 
 - Both sides empty: concise configuration-complete state, Back and one Finish.
-- Verified identical: concise result, collapsed details and one Finish. No Upload,
-  Restore or Postpone actions. This later requirement supersedes the mock footer.
+- Verified identical: `进度已同步` and one Finish. No detail entry, progress expansion,
+  Back, Upload, Restore or Postpone actions. Keep real errors. This later requirement
+  supersedes the mock footer.
 - Local-only/cloud-only: progress choice card followed by one Finish, enabled
   after selection and current validation.
 - Different/conflict: one Handle Conflict action and a shared confirmation dialog
@@ -88,6 +105,7 @@ snapshot proofs. UI alignment does not change transaction/backup guarantees.
 
 Compact header/status, Upload/Restore actions, selected/default restoration target
 and two-lane history. Keep the approved Launch Game action and real naming.
+Home has no details toggle or expanded diagnostic content.
 Cloud is left, local right. Visible nodes share rows by save-content time in
 newest-first order; local current/baseline are not pinned to row 0/1. Equal-time
 nodes in different lanes may align. Preserve true parents and transfer direction.
@@ -101,15 +119,22 @@ Reference: `app.mjs:21–61,111–112`, `model.mjs:180–233`, history CSS.
 
 Concise bordered horizontal rows with current value on the left and an action on
 the right, Return in the shared footer. Retain real log export and necessary
-maintenance capabilities in the same restrained presentation. No diagnostic or
+maintenance capabilities outside this page as required. Omit the manual
+`存档检查` and `存档管理` entries; automatic checking and sync remain unchanged. No diagnostic or
 technical explanatory panels in the normal flow. Reference: `app.mjs:113–114`.
 
 ## Later requirements that override mock content
 
+- Step 2 displays the path as labelled, wrapping text, with no editable/read-only
+  input, alternative/default path buttons or extra explanation; keep save status,
+  summary and existing Back/Next navigation (2026-10-15 clarification).
 - Step 1 uses the selected game's real icon when available. The shared page has no
   details toggle; Desktop keeps the initial automatic scan, omits manual rescan,
   and labels the selected-game file chooser `重新选择` (2026-10-15 clarification).
 
+- Step 3 calls the service `内置服务`. Built-in Next is gated by authenticated,
+  current account access, while custom WebDAV keeps its separate test/proof gate.
+  Expiry/appreciation replace credential inputs after login (2026-10-15 clarification).
 - Official account login/registration, 72-hour trial, expiry and appreciation are
   real later features absent from the prototype. Do not revert to custom-only.
 - Count wording is `已进行x场游戏`; missing count displays zero without writing a

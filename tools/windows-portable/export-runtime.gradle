@@ -1,0 +1,62 @@
+// Export the exact resolved desktop runtime without changing product code or locks.
+// Run with: gradle -I tools/windows-portable/export-runtime.gradle \
+//   :desktop:exportWindowsPortableRuntime -PwindowsPortableClasspath=/absolute/path/runtime.json
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated {
+    def git = { List<String> arguments ->
+        def command = ['git', '-C', rootProject.projectDir.absolutePath] + arguments
+        def process = new ProcessBuilder(command).redirectErrorStream(true).start()
+        def output = process.inputStream.getText('UTF-8').trim()
+        if (process.waitFor() != 0) throw new GradleException("Git source check failed: ${output}")
+        output
+    }
+    def sourceCommit = git(['rev-parse', 'HEAD'])
+    def sourceTreeClean = git(['status', '--porcelain', '--untracked-files=normal']).isEmpty()
+    def desktop = rootProject.project(':desktop')
+    def releaseVersion = desktop.providers.gradleProperty('windowsPortableVersion').orNull
+    def releaseCode = desktop.providers.gradleProperty('windowsPortableVersionCode').orNull
+    if (!releaseVersion || !releaseCode ||
+        !(releaseVersion ==~ /[A-Za-z0-9][A-Za-z0-9._-]*/) || !(releaseCode ==~ /[1-9][0-9]*/)) {
+        throw new GradleException('Set -PwindowsPortableVersion and -PwindowsPortableVersionCode.')
+    }
+    // Both JARs share pdsync packages. Whichever loads first must expose the same
+    // diagnostic version through Package.getImplementationVersion().
+    [desktop, rootProject.project(':core')].each { project ->
+        project.tasks.named('jar').configure {
+            manifest.attributes(
+                'Implementation-Title': 'Pixel Dungeon Save Sync',
+                'Implementation-Version': releaseVersion,
+                'PDSync-Version-Code': releaseCode,
+                'PDSync-Source-Revision': sourceCommit)
+        }
+    }
+    desktop.tasks.register('exportWindowsPortableRuntime') {
+        dependsOn desktop.tasks.named('jar')
+        dependsOn rootProject.project(':core').tasks.named('jar')
+        doLast {
+            def destination = desktop.providers.gradleProperty('windowsPortableClasspath').orNull
+            if (!destination) {
+                throw new GradleException('Set -PwindowsPortableClasspath to the output JSON path.')
+            }
+            def artifacts = desktop.configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.collect {
+                [group: it.moduleVersion.id.group, name: it.name,
+                 version: it.moduleVersion.id.version, classifier: it.classifier,
+                 file: it.file.absolutePath]
+            }.sort { a, b -> a.file <=> b.file }
+            def jar = desktop.tasks.named('jar').get().archiveFile.get().asFile
+            if (git(['rev-parse', 'HEAD']) != sourceCommit ||
+                !sourceTreeClean || !git(['status', '--porcelain', '--untracked-files=normal']).isEmpty()) {
+                throw new GradleException('Commit all source changes before exporting a release runtime.')
+            }
+            def report = [schema: 1, mainClass: 'pdsync.MainKt',
+                          sourceCommit: sourceCommit, version: releaseVersion,
+                          versionCode: Integer.parseInt(releaseCode),
+                          desktopJar: jar.absolutePath, artifacts: artifacts]
+            def output = new File(destination)
+            output.parentFile.mkdirs()
+            output.text = JsonOutput.prettyPrint(JsonOutput.toJson(report)) + '\n'
+            logger.lifecycle("Portable runtime exported: ${output}")
+        }
+    }
+}

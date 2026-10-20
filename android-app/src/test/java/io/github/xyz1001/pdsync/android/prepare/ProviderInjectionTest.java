@@ -61,14 +61,14 @@ public final class ProviderInjectionTest {
             check(Arrays.equals(patched, BinaryManifestPatch.patchProvider(originalManifest, binding)), "deterministic manifest patch");
             BinaryManifestPatch.ManifestInfo info = BinaryManifestPatch.inspect(patched);
             check(info.packageName.equals("com.example.game") && info.versionCode == 123 && info.versionName.equals("test"), "manifest game identity remains original");
-            check(info.sharedUserId == null && !info.hasSharedUserMaxSdkVersion && info.targetSandboxVersion == 1, "no shared UID and sandbox one");
+            check(info.sharedUserId == null && !info.hasSharedUserMaxSdkVersion && info.targetSandboxVersion == 2, "no shared UID and original sandbox retained");
             check(info.applicationLabel.equals("Original game") && info.minSdkVersion == 26, "original app label and minimum SDK retained");
             BinaryManifestPatch.verifyProviderManifest(patched, binding); checks++;
             byte[] noActivation = BinaryManifestPatch.patchProvider(originalManifest, binding(false));
             BinaryManifestPatch.verifyProviderManifest(noActivation, binding(false)); checks++;
             rejects(() -> BinaryManifestPatch.verifyProviderManifest(noActivation, binding), "missing requested activation");
             rejects(() -> BinaryManifestPatch.patchProvider(patched, binding), "blind reinjection");
-            check(binding.metadata().size() == 9 && binding.metadata().get("io.github.xyz1001.pdsync.MAIN_APP_CERT_SHA256").equals(PIN), "exact nine direct-string metadata bindings");
+            check(binding.metadata().size() == 10 && binding.metadata().get("io.github.xyz1001.pdsync.MAIN_APP_CERT_SHA256").equals(PIN), "exact ten direct-string metadata bindings including pure handshake");
             rejects(() -> new BinaryManifestPatch.BridgeBinding(AUTHORITY + ";other", "com.example.game", ORIGIN, "android-"+ORIGIN,SOURCE,123,"test",PIN,"1"), "authority list injection");
             rejects(() -> new BinaryManifestPatch.BridgeBinding(AUTHORITY, "com.example.game", ORIGIN, "wrong",SOURCE,123,"test",PIN,"1"), "namespace mismatch");
             rejects(() -> new BinaryManifestPatch.BridgeBinding(AUTHORITY, "com.example.game", ORIGIN, "android-"+ORIGIN,SOURCE,123,"test","not-a-cert","1"), "invalid main certificate pin");
@@ -158,7 +158,7 @@ public final class ProviderInjectionTest {
             ApkArchive.patchProviderSplit(split,splitOutput);
             ApkArchive.verifyProviderSplitPayload(split,splitOutput); checks++;
             BinaryManifestPatch.ManifestInfo splitInfo = BinaryManifestPatch.inspect(ApkArchive.manifest(splitOutput));
-            check(splitInfo.splitName.equals("config.arm64") && splitInfo.sharedUserId == null && splitInfo.targetSandboxVersion == 1, "split identity retained with UID migration only");
+            check(splitInfo.splitName.equals("config.arm64") && splitInfo.sharedUserId == null && splitInfo.targetSandboxVersion == 2, "split identity retained with UID migration only");
             check(ApkArchive.entryHashes(split).keySet().equals(ApkArchive.entryHashes(splitOutput).keySet()), "split receives no extra entry");
             rejects(() -> ApkArchive.injectProvider(split,temp.resolve("inject-split.apk").toFile(),runtime,binding), "runtime forbidden in split");
             rejects(() -> ApkArchive.patchProviderSplit(source,temp.resolve("split-base.apk").toFile()), "base cannot enter split-only patch path");

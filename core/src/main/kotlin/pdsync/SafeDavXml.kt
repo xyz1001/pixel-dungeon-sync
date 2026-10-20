@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.CoreValidationMessages
+
 import java.io.StringReader
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -13,7 +15,7 @@ import org.xml.sax.helpers.DefaultHandler
 /** Parser-independent bounds and declaration rejection protect runtimes with partial JAXP support. */
 object SafeDavXml {
  fun parse(bytes: ByteArray, factory: DocumentBuilderFactory = DocumentBuilderFactory.newInstance()): Document = try {
-  require(bytes.size <= 2 * 1024 * 1024) { "XML too large" }
+  require(bytes.size <= 2 * 1024 * 1024) { CoreValidationMessages.XML_TOO_LARGE.text() }
   val text = decode(bytes)
   preflight(text)
   factory.isNamespaceAware = true
@@ -32,17 +34,17 @@ object SafeDavXml {
    "http://www.oracle.com/xml/jaxp/properties/maxElementDepth" to 64
   ).forEach { (name, value) -> runCatching { factory.setAttribute(name, value) } }
   factory.newDocumentBuilder().apply {
-   setEntityResolver { _, _ -> throw SAXException("External XML resources are forbidden") }
+   setEntityResolver { _, _ -> throw SAXException(CoreValidationMessages.EXTERNAL_XML_RESOURCES_ARE_FORBIDDEN.text()) }
    setErrorHandler(object : DefaultHandler() {
     override fun error(e: SAXParseException) { throw e }
     override fun fatalError(e: SAXParseException) { throw e }
    })
   }.parse(InputSource(StringReader(text)))
- } catch (_: Exception) { throw IllegalArgumentException("Invalid or unsafe WebDAV listing XML") }
+ } catch (_: Exception) { throw IllegalArgumentException(CoreValidationMessages.INVALID_OR_UNSAFE_WEBDAV_LISTING_XML.text()) }
 
  private fun decode(bytes: ByteArray): String {
   fun prefix(vararg expected: Int) = bytes.size >= expected.size && expected.indices.all { (bytes[it].toInt() and 255) == expected[it] }
-  require(!prefix(0, 0, 254, 255) && !prefix(255, 254, 0, 0)) { "UTF-32 is not supported" }
+  require(!prefix(0, 0, 254, 255) && !prefix(255, 254, 0, 0)) { CoreValidationMessages.UTF_32_IS_NOT_SUPPORTED.text() }
   val (charset, offset) = when {
    prefix(239, 187, 191) -> Charsets.UTF_8 to 3
    prefix(254, 255) -> Charsets.UTF_16BE to 2
@@ -64,7 +66,7 @@ object SafeDavXml {
     text.startsWith("<!--", start) -> { val end = text.indexOf("-->", start + 4); require(end >= 0); position = end + 3 }
     text.startsWith("<![CDATA[", start) -> { val end = text.indexOf("]]>", start + 9); require(end >= 0); position = end + 3 }
     text.startsWith("<?", start) -> { val end = text.indexOf("?>", start + 2); require(end >= 0); position = end + 2 }
-    text.startsWith("<!", start) -> throw IllegalArgumentException("XML declarations are forbidden")
+    text.startsWith("<!", start) -> throw IllegalArgumentException(CoreValidationMessages.XML_DECLARATIONS_ARE_FORBIDDEN.text())
     else -> {
      var end = start + 1; var quote = '\u0000'
      while (end < text.length) {

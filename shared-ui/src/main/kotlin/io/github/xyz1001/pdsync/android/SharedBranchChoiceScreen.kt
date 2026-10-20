@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -36,17 +37,17 @@ fun SharedBranchChoiceScreen(state: SharedBranchChoiceState, actions: SharedBran
         DisposableEffect(interactions) { onDispose { interactions.dispose() } }
         val observer = LocalSharedBranchChoiceLayoutObserver.current
         val confirmation = interactions.presentation
-        SharedAppShell(title = "选择云端存档", game = state.game, footer = {
-            SharedActionButton("返回", interactions::back, enabled = state.canInteract && confirmation == null,
+        SharedAppShell(title = SharedMessages.CHOOSE_CLOUD_SAVE.text(), game = state.game, footer = {
+            SharedActionButton(SharedMessages.BACK.text(), interactions::back, enabled = state.canInteract && confirmation == null,
                 style = SharedButtonStyle.TEXT, modifier = observedBranch("back", observer))
             Spacer(Modifier.weight(1f))
-            SharedActionButton(if (state.hasBranches) "处理冲突" else "重新比较", interactions::primary,
+            SharedActionButton(if (state.hasBranches) SharedMessages.HANDLE_CONFLICT.text() else SharedMessages.COMPARE_AGAIN.text(), interactions::primary,
                 enabled = state.primaryEnabled && confirmation == null, modifier = observedBranch("primary", observer))
         }) {
-            Text(if (state.hasBranches) "选择要继续的进度" else "分支已变化，请重新比较。",
-                fontSize = 16.sp, lineHeight = 25.6.sp)
+            Text(if (state.hasBranches) SharedMessages.CHOOSE_PROGRESS.text() else SharedMessages.BRANCH_CHANGED.text(),
+                fontSize = 15.sp, lineHeight = 22.5.sp)
             Spacer(Modifier.height(16.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.branches.forEach { branch ->
                     Column(Modifier.fillMaxWidth().then(observedBranch("branch:${branch.snapshotId}", observer))) {
                         ComparisonChoiceCard(branch.name, branch.summary, state.selectedId == branch.snapshotId,
@@ -57,15 +58,15 @@ fun SharedBranchChoiceScreen(state: SharedBranchChoiceState, actions: SharedBran
             }
             if (state.notice.isNotBlank()) Text(state.notice,
                 Modifier.fillMaxWidth().padding(top = 12.dp), color = SharedUiColors.muted,
-                fontSize = 14.sp, lineHeight = 22.4.sp)
-            if (state.canPreserveLocal) SharedActionButton("上传本机，保留两份", interactions::preserveLocal,
+                fontSize = 13.sp, lineHeight = 19.5.sp)
+            if (state.canPreserveLocal) SharedActionButton(SharedMessages.UPLOAD_KEEP_BOTH.text(), interactions::preserveLocal,
                 enabled = state.preserveEnabled && confirmation == null, style = SharedButtonStyle.SECONDARY,
                 modifier = Modifier.padding(top = 12.dp).then(observedBranch("preserve", observer)))
             if (state.details.isNotBlank()) {
                 var expanded by remember(state.observation, state.details) { mutableStateOf(false) }
-                SharedActionButton(if (expanded) "收起详细信息" else "详细信息", { expanded = !expanded },
+                SharedActionButton(if (expanded) SharedMessages.HIDE_DETAILS.text() else SharedMessages.DETAILS.text(), { expanded = !expanded },
                     style = SharedButtonStyle.TEXT)
-                if (expanded) Text(state.details, color = SharedUiColors.muted, fontSize = 12.sp, lineHeight = 19.2.sp)
+                if (expanded) Text(state.details, color = SharedUiColors.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
         }

@@ -1,0 +1,7 @@
+4 / 4
+选择存档
+进度已同步
+完成
+
+ACTIONS
+完成; disabled=false; bounds=Rect.fromLTRB(971.0, 567.0, 1039.0, 609.0)

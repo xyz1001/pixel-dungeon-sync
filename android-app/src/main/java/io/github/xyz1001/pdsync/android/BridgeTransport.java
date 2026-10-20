@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import io.github.xyz1001.pdsync.android.BridgeDiagnostics;
 
 /* loaded from: classes.dex */
@@ -74,6 +76,63 @@ final class BridgeTransport {
             throw (BridgeDiagnostics.Failure) failure;
         }
         return new Result<>(reply, detail);
+    }
+
+    private static final java.util.concurrent.ThreadPoolExecutor ACCESS_WORKERS = new java.util.concurrent.ThreadPoolExecutor(
+            0, 2, 30, java.util.concurrent.TimeUnit.SECONDS, new java.util.concurrent.SynchronousQueue<>(),
+            runnable -> { Thread thread = new Thread(runnable, "bridge-access"); thread.setDaemon(true); return thread; });
+
+    /** Bounds both provider acquisition and IPC without unbounded abandoned thread creation. */
+    static <R> Result<R> exchangeBounded(Acquirer<R> acquirer, Disposer<R> disposer,
+            FailureFactory failures, long timeoutMillis) {
+        if (timeoutMillis <= 0) throw new IllegalArgumentException(AndroidMessages.BRIDGE_TRANSPORT_01.text());
+        final BoundedResult<R> state = new BoundedResult<>();
+        final long started = System.nanoTime();
+        try {
+            ACCESS_WORKERS.execute(() -> {
+                Result<R> result = null; Throwable error = null;
+                try { result = exchange(acquirer, disposer, failures); }
+                catch (Throwable failed) { error = failed; }
+                synchronized (state) {
+                    if (!state.abandoned) {
+                        state.result = result; state.failure = error; state.completed = true; state.notifyAll();
+                        return;
+                    }
+                }
+                // A client acquired after timeout is closed by exchange; dispose its late reply too.
+                if (result != null && result.reply != null) try { disposer.discard(result.reply); }
+                catch (Exception ignored) { /* timed-out caller cannot consume this resource */ }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            throw failures.create(BridgeDiagnostics.Stage.PROVIDER_ACQUIRE, "ACCESS_WORKERS_BUSY", busy,
+                    info(false, started, BridgeDiagnostics.ClientClose.NOT_ACQUIRED));
+        }
+        synchronized (state) {
+            long deadline = started + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+            while (!state.completed) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    state.abandoned = true;
+                    throw failures.create(BridgeDiagnostics.Stage.IPC_CALL, "ACCESS_HANDSHAKE_TIMEOUT", null,
+                            info(false, started, BridgeDiagnostics.ClientClose.NOT_ACQUIRED));
+                }
+                try { java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(state, remaining); }
+                catch (InterruptedException interrupted) {
+                    state.abandoned = true; Thread.currentThread().interrupt();
+                    throw failures.create(BridgeDiagnostics.Stage.IPC_CALL, "ACCESS_HANDSHAKE_CANCELED", interrupted,
+                            info(false, started, BridgeDiagnostics.ClientClose.NOT_ACQUIRED));
+                }
+            }
+            if (state.failure instanceof Error) throw (Error)state.failure;
+            if (state.failure instanceof RuntimeException) throw (RuntimeException)state.failure;
+            if (state.failure != null) throw new IllegalStateException(state.failure);
+            return state.result;
+        }
+    }
+    private static final class BoundedResult<R> {
+        boolean abandoned, completed;
+        Result<R> result;
+        Throwable failure;
     }
 
     private static BridgeDiagnostics.TransportInfo info(boolean z, long j, BridgeDiagnostics.ClientClose clientClose) {

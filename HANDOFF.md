@@ -1,3 +1,7 @@
+> Android code69 / 0.5.48-test：手机页面按内容高度排布，取消600dp卡内撑高；详见 [CODE69_MOBILE_CONTENT_HEIGHT](docs/CODE69_MOBILE_CONTENT_HEIGHT.md)。以下版本记录保留供追溯。
+
+> 最新 code61 / 0.5.40-test 系统安装确认修复见 docs/CODE61_SYSTEM_CONFIRMATION.md；其余内容为历史交接记录。
+
 # 云端迁移交接（2026-10-08，源码包说明）
 
 本机开发/构建/UI 已停止，最后指令到达前的运行已完成：34 测试、0 failure/error/skipped；BUILD SUCCESSFUL；PDSYNC_UI_SMOKE_OK 790x612。相关原始 JUnit XML 与日志在 docs/evidence。本包不含 .local、Gradle/JDK 缓存、构建产物、真实存档、测试存档或远端数据，也不含私人服务凭据。源码保留公开 loopback demo/demo 及测试假值，它们不是用户凭据。

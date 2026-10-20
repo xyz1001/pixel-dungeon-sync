@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 /** Inputs are explicit so path rules can be tested without changing process-wide properties. */
 data class SavePathContext(
  val osName: String,
@@ -34,7 +35,7 @@ object ShatteredDefaultSavePaths : GameSavePaths {
    }
    context.osName.contains("Linux") -> linux(context)
    context.osName.contains("Mac") -> unixAbsolute(context.userHome, "user.home") + "/Library/Application Support/Shattered Pixel Dungeon"
-   else -> throw IllegalArgumentException("No verified Shattered default save directory for operating system '${context.osName}'.")
+   else -> throw IllegalArgumentException(CoreMessages.NO_VERIFIED_SHATTERED_DEFAULT_SAVE_DIRECTORY_FOR_OPERATING_SYSTEM_1_S.text(context.osName))
   }
  }
 
@@ -53,19 +54,19 @@ object ShatteredDefaultSavePaths : GameSavePaths {
 
  private fun unixAbsolute(value: String?, name: String): String {
   require(value != null && value.startsWith('/') && '\u0000' !in value) {
-   "$name must be a nonempty absolute path to resolve Shattered's default save directory; no fallback was used."
+   CoreMessages.TEXT_1_S_MUST_BE_A_NONEMPTY_ABSOLUTE_PATH_TO_RESOLVE_SHATTERED_S_DEFAULT_SAVE_DIRECTORY_NO.text(name)
   }
   return value
  }
 
  private fun windowsHome(value: String?): String {
-  require(!value.isNullOrEmpty()) { "user.home is missing; cannot resolve Shattered's default save directory." }
+  require(!value.isNullOrEmpty()) { CoreMessages.USER_HOME_IS_MISSING_CANNOT_RESOLVE_SHATTERED_S_DEFAULT_SAVE_DIRECTORY.text() }
   val path = value.replace('\\', '/')
   val driveAbsolute = Regex("^[A-Za-z]:/.*").matches(path)
   val uncAbsolute = path.startsWith("//") && path.substring(2).split('/').let { it.size >= 2 && it[0].isNotEmpty() && it[1].isNotEmpty() }
   val body = if (driveAbsolute) path.substring(2) else path
   require((driveAbsolute || uncAbsolute) && body.none { it < ' ' || it in "<>\"|?*:" }) {
-   "user.home must be an absolute Windows drive or UNC path to resolve Shattered's default save directory."
+   CoreMessages.USER_HOME_MUST_BE_AN_ABSOLUTE_WINDOWS_DRIVE_OR_UNC_PATH_TO_RESOLVE_SHATTERED_S_DEFAUL.text()
   }
   return path
  }

@@ -82,6 +82,7 @@ public final class BinaryManifestPatch {
         public final boolean isFeatureSplit;
         public final boolean isSplitRequired;
         public final int minSdkVersion;
+        public final int targetSdkVersion;
         public final String packageName;
         public final boolean playSplitsRequired;
         public final List<String> requiredSplitTypes;
@@ -127,6 +128,7 @@ public final class BinaryManifestPatch {
             this.applicationLabel = nodeSingleChild != null ? BinaryManifestPatch.displayValue(nodeSingleChild.find("http://schemas.android.com/apk/res/android", "label"), list, strStringValue) : strStringValue;
             Node nodeSingleChild2 = document.singleChild(node, "uses-sdk", false);
             this.minSdkVersion = nodeSingleChild2 == null ? 1 : BinaryManifestPatch.boundedInt(nodeSingleChild2.find("http://schemas.android.com/apk/res/android", "minSdkVersion"), 1);
+            this.targetSdkVersion = nodeSingleChild2 == null ? minSdkVersion : BinaryManifestPatch.boundedInt(nodeSingleChild2.find(ANDROID_NS, "targetSdkVersion"), minSdkVersion);
             ArrayList arrayList = new ArrayList();
             HashSet hashSet = new HashSet();
             for (Node node2 : document.nodes) {
@@ -151,6 +153,7 @@ public final class BinaryManifestPatch {
         public final long gameVersionCode;
         public final String gameVersionName, mainAppCertSha256, bridgeRuntimeVersion;
         public final boolean includeActivationActivity;
+        public final String accessProtocol;
 
         public BridgeBinding(String authority, String gamePackage, String originIdentity, String namespaceId,
                 String sourceApkSetSha256, long gameVersionCode, String gameVersionName,
@@ -162,6 +165,15 @@ public final class BinaryManifestPatch {
         public BridgeBinding(String authority, String gamePackage, String originIdentity, String namespaceId,
                 String sourceApkSetSha256, long gameVersionCode, String gameVersionName,
                 String mainAppCertSha256, String bridgeRuntimeVersion, boolean includeActivationActivity) throws IOException {
+            this(authority, gamePackage, originIdentity, namespaceId, sourceApkSetSha256, gameVersionCode,
+                    gameVersionName, mainAppCertSha256, bridgeRuntimeVersion, includeActivationActivity, "1");
+        }
+
+        public BridgeBinding(String authority, String gamePackage, String originIdentity, String namespaceId,
+                String sourceApkSetSha256, long gameVersionCode, String gameVersionName,
+                String mainAppCertSha256, String bridgeRuntimeVersion, boolean includeActivationActivity, String accessProtocol) throws IOException {
+            require(accessProtocol == null || "1".equals(accessProtocol), "Unsupported bridge access protocol");
+            this.accessProtocol = accessProtocol;
             require(authority != null && authority.length() <= 255 && authority.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+"), "Invalid bridge authority");
             require(gamePackage != null && gamePackage.length() <= 255 && gamePackage.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+"), "Invalid bound game package");
             requireHexDigest(originIdentity, "origin identity");
@@ -190,6 +202,7 @@ public final class BinaryManifestPatch {
             values.put(BINDING_PREFIX + "GAME_VERSION_NAME", gameVersionName);
             values.put(METADATA_PREFIX + "MAIN_APP_CERT_SHA256", mainAppCertSha256);
             values.put(METADATA_PREFIX + "BRIDGE_RUNTIME_VERSION", bridgeRuntimeVersion);
+            if (accessProtocol != null) values.put(METADATA_PREFIX + "BRIDGE_ACCESS_PROTOCOL", accessProtocol);
             return Collections.unmodifiableMap(values);
         }
     }
@@ -277,8 +290,8 @@ public final class BinaryManifestPatch {
         document.root.remove(ANDROID_NS, "sharedUserId");
         document.root.remove(ANDROID_NS, "sharedUserMaxSdkVersion");
         document.root.remove(ANDROID_NS, "sharedUserLabel");
-        if (boundedInt(document.root.find(ANDROID_NS, "targetSandboxVersion"), 1) != 1)
-            document.setInt(document.root, "targetSandboxVersion", 1);
+        // Embedded providers do not share a UID. Preserve the source sandbox policy.
+        // Relaxing targetSandboxVersion is neither needed for v2/v3 output nor an unsigned-input fix.
     }
 
     private static void rejectBridgeConflicts(Document document, Node application, String gamePackage,
@@ -331,6 +344,90 @@ public final class BinaryManifestPatch {
         if (application != null) rejectBridgeConflicts(document, application, info.packageName, binding);
     }
 
+    public static boolean hasEmbeddedPreparationMarkers(byte[] bytes) throws IOException {
+        Document document = new Document(bytes);
+        for (Node node : document.nodes) {
+            String name = stringValue(node.find(ANDROID_NS, "name"), document.pool.strings, "");
+            if (BRIDGE_PROVIDER.equals(name) || BRIDGE_ACTIVATION.equals(name) || name.startsWith(BINDING_PREFIX)
+                    || (METADATA_PREFIX + "BRIDGE_MODE").equals(name)) return true;
+        }
+        return false;
+    }
+
+    /** Strictly reconstruct the declared binding. This is continuity metadata, never publisher authentication. */
+    public static BridgeBinding readProviderBinding(byte[] bytes) throws IOException {
+        if (!hasEmbeddedPreparationMarkers(bytes)) return null;
+        Document document = new Document(bytes); ManifestInfo info = new ManifestInfo(document);
+        Node application = document.singleChild(document.root, "application", true);
+        Map<String, String> values = new LinkedHashMap<>(); String authority = null; boolean activation = false;
+        for (Node node : document.nodes) {
+            if (node.parent != application || node.namespace != null) continue;
+            String name = stringValue(node.find(ANDROID_NS, "name"), document.pool.strings, "");
+            if ("provider".equals(node.name) && BRIDGE_PROVIDER.equals(name)) {
+                require(authority == null, "Duplicate embedded bridge provider");
+                authority = stringValue(node.find(ANDROID_NS, "authorities"), document.pool.strings, null);
+            }
+            if ("activity".equals(node.name) && BRIDGE_ACTIVATION.equals(name)) activation = true;
+            if ("meta-data".equals(node.name) && (name.startsWith(BINDING_PREFIX) || name.startsWith(METADATA_PREFIX))) {
+                require(node.find(ANDROID_NS, "resource") == null && !values.containsKey(name), "Ambiguous embedded metadata");
+                String value = stringValue(node.find(ANDROID_NS, "value"), document.pool.strings, null);
+                require(value != null, "Embedded metadata must contain direct strings"); values.put(name, value);
+            }
+        }
+        require(BRIDGE_MODE.equals(values.get(METADATA_PREFIX + "BRIDGE_MODE")), "Unknown embedded bridge mode");
+        long version;
+        try { version = Long.parseLong(values.get(BINDING_PREFIX + "GAME_VERSION_CODE")); }
+        catch (RuntimeException invalid) { throw new IOException("Invalid embedded version binding", invalid); }
+        BridgeBinding binding = new BridgeBinding(authority, values.get(BINDING_PREFIX + "GAME_PACKAGE"),
+                values.get(BINDING_PREFIX + "ORIGIN_IDENTITY"), values.get(BINDING_PREFIX + "NAMESPACE_ID"),
+                values.get(BINDING_PREFIX + "SOURCE_APK_SHA256"), version, values.get(BINDING_PREFIX + "GAME_VERSION_NAME"),
+                values.get(METADATA_PREFIX + "MAIN_APP_CERT_SHA256"), values.get(METADATA_PREFIX + "BRIDGE_RUNTIME_VERSION"), activation,
+                values.get(METADATA_PREFIX + "BRIDGE_ACCESS_PROTOCOL"));
+        require(values.equals(binding.metadata()), "Unexpected embedded binding metadata");
+        require(authority.equals("io.github.xyz1001.pdsync.embedded.g" + binding.originIdentity.substring(0, 32) + ".files"),
+                "Embedded authority does not match origin binding");
+        verifyProviderManifest(bytes, binding);
+        for (Node node : document.nodes) {
+            if (node.parent != application || node.namespace != null) continue;
+            String name = stringValue(node.find(ANDROID_NS, "name"), document.pool.strings, "");
+            if (BRIDGE_PROVIDER.equals(name) || BRIDGE_ACTIVATION.equals(name)) continue;
+            String process = stringValue(node.find(ANDROID_NS, "process"), document.pool.strings, "");
+            require(!BRIDGE_PROCESS.equals(process) && !(info.packageName + BRIDGE_PROCESS).equals(process),
+                    "Unrecognized component shares embedded bridge process");
+            if ("provider".equals(node.name)) for (String candidate : stringValue(node.find(ANDROID_NS, "authorities"), document.pool.strings, "").split(";", -1))
+                require(!authority.equals(candidate.trim()), "Duplicate embedded bridge authority");
+        }
+        return binding;
+    }
+
+    static byte[] replaceProviderBinding(byte[] bytes, BridgeBinding expected, BridgeBinding replacement) throws IOException {
+        BridgeBinding actual = readProviderBinding(bytes);
+        require(actual != null && actual.metadata().equals(expected.metadata()) && actual.authority.equals(expected.authority),
+                "Embedded source binding changed");
+        require(expected.gamePackage.equals(replacement.gamePackage) && expected.originIdentity.equals(replacement.originIdentity)
+                && expected.namespaceId.equals(replacement.namespaceId) && expected.sourceApkSetSha256.equals(replacement.sourceApkSetSha256)
+                && expected.authority.equals(replacement.authority) && expected.gameVersionCode == replacement.gameVersionCode
+                && expected.gameVersionName.equals(replacement.gameVersionName), "Embedded upgrade must preserve source binding");
+        Document document = new Document(bytes); Node application = document.singleChild(document.root, "application", true);
+        for (Node node : document.nodes) if (node.parent == application && "meta-data".equals(node.name)) {
+            String name = stringValue(node.find(ANDROID_NS, "name"), document.pool.strings, "");
+            if (replacement.metadata().containsKey(name)) document.setString(node, ANDROID_NS, "value", replacement.metadata().get(name));
+        }
+        for (Map.Entry<String, String> value : replacement.metadata().entrySet()) {
+            if (expected.metadata().containsKey(value.getKey())) continue;
+            Node added = document.appendElement(application, "meta-data");
+            document.setString(added, ANDROID_NS, "name", value.getKey()); document.setString(added, ANDROID_NS, "value", value.getValue());
+        }
+        if (!expected.includeActivationActivity && replacement.includeActivationActivity) {
+            Node activity = document.appendElement(application, "activity");
+            document.setString(activity, ANDROID_NS, "name", BRIDGE_ACTIVATION);
+            document.setString(activity, ANDROID_NS, "process", BRIDGE_PROCESS); document.setBool(activity, "exported", true);
+            document.setString(activity, ANDROID_NS, "permission", "");
+        }
+        require(!expected.includeActivationActivity || replacement.includeActivationActivity, "Embedded activation removal is unsupported");
+        byte[] result = document.encode(); verifyProviderManifest(result, replacement); return result;
+    }
+
     /** Structural self-check also usable by receipt validation; it does not establish source trust. */
     public static void verifyProviderManifest(byte[] bytes, BridgeBinding binding) throws IOException {
         require(binding != null, "Missing bridge binding");
@@ -338,7 +435,7 @@ public final class BinaryManifestPatch {
         ManifestInfo info = new ManifestInfo(document);
         require(binding.gamePackage.equals(info.packageName) && binding.gameVersionCode == info.versionCode
                 && (info.versionNameResource || binding.gameVersionName.equals(info.versionName)) && info.splitName.isEmpty() && info.sharedUserId == null && !info.hasSharedUserMaxSdkVersion
-                && info.minSdkVersion >= BRIDGE_MIN_SDK && info.targetSandboxVersion == 1 && document.root.find(ANDROID_NS, "sharedUserLabel") == null,
+                && info.minSdkVersion >= BRIDGE_MIN_SDK && document.root.find(ANDROID_NS, "sharedUserLabel") == null,
                 "Embedded bridge manifest identity failed");
         Node application = document.singleChild(document.root, "application", true);
         require(boolValue(application.find(ANDROID_NS, "hasCode"), true), "Bridge application has no code");

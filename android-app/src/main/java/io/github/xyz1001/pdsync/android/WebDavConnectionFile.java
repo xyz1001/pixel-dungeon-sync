@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -96,7 +98,7 @@ final class WebDavConnectionFile {
         public void validate() throws IOException {
             ConnectionEndpointPolicy.validate(this.endpoint, this.username, this.password);
             if (!this.profile.matches("[A-Za-z0-9_-]{1,64}")) {
-                throw new IOException("同步档案名只支持 1–64 位英文字母、数字、下划线和短横线。");
+                throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_01.text());
             }
         }
 
@@ -172,7 +174,7 @@ final class WebDavConnectionFile {
                 }
                 return value;
             } catch (IOException | RuntimeException invalid) {
-                throw new IOException("无法读取已保存的连接文件。原文件已保留；请重试读取，或重新填写并测试后保存。");
+                throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_02.text());
             } finally {
                 if (bytes != null) Arrays.fill(bytes, (byte) 0);
             }
@@ -193,7 +195,7 @@ final class WebDavConnectionFile {
                 save(valueLoad2);
                 return valueLoad2;
             } catch (Exception unused) {
-                throw new IOException("旧版连接迁移失败，原加密文件已保留。请重试读取，或重新填写并测试后保存。");
+                throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_03.text());
             }
         }
     }
@@ -202,7 +204,7 @@ final class WebDavConnectionFile {
         synchronized (FILE_LOCK) {
             value.validate();
             if (value.isTemporary()) {
-                throw new IOException("本机 HTTP 测试仅本次使用，不覆盖已保存的连接。");
+                throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_04.text());
             }
             Properties properties = new Properties();
             properties.setProperty("version", "1");
@@ -227,7 +229,7 @@ final class WebDavConnectionFile {
             writer.writeAndSync(temporary, bytes);
             writer.replace(temporary, path);
         } catch (IOException | RuntimeException failure) {
-            throw new IOException("无法保存连接文件，原连接未更改。编辑内容已保留；请检查可用存储空间后重试。");
+            throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_05.text());
         } finally {
             Arrays.fill(bytes, (byte) 0);
             if (temporary != null) {

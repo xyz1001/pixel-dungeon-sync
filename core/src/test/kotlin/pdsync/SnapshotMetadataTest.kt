@@ -4,6 +4,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import pdsync.presentation.HistoryPresentation
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
@@ -135,6 +136,12 @@ class SnapshotMetadataTest {
    assertEquals(publishTime, plan.commit.operation!!.preparedAt)
    assertNotEquals(plan.commit.snapshot.metadata!!.device.id, plan.commit.operation!!.device.id)
    assertContentEquals(source.zip, plan.zip); assertEquals(source.manifest.sha256, plan.commit.snapshot.sha256)
+   val history = SyncHistory(CommitGraph(mapOf(plan.commit.id to plan.commit), emptyMap()),
+    plan.commit.id, source.manifest.files, "", null, emptyMap())
+   val presentation = HistoryPresentation.from(history, 0)
+   assertEquals(setOf(HistoryPresentation.time(publishTime)), presentation.nodes.map { it.time }.toSet())
+   assertEquals(1, presentation.rows)
+   assertEquals(source.manifest.metadata, plan.commit.snapshot.metadata)
   }
  }
 

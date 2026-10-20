@@ -53,18 +53,18 @@ class SharedBranchChoiceRenderTest {
             try {
                 val image = render(scene, "branches-$width")
                 val card = cardBounds(image)
-                assertEquals(minOf(820, width - if (width <= 560) 20 else 36).toFloat(), card.width, 1f)
+                assertEquals(minOf(860, width - if (width <= 600) 16 else 32).toFloat(), card.width, 1f)
                 assertNoHorizontalOverflow(image, card)
                 val first = observed.elements.getValue("branch:snapshot-a")
                 val second = observed.elements.getValue("branch:snapshot-b")
-                assertEquals(card.left + 1f + if (width <= 560) 20f else 32f, first.left, .6f)
-                assertEquals(12f, second.top - first.bottom, .6f)
+                assertEquals(card.left + 1f + if (width <= 600) 20f else 30f, first.left, .6f)
+                assertEquals(8f, second.top - first.bottom, .6f)
                 assertTrue(host.calls.isEmpty(), "composition must not perform any host operation")
                 val primary = observed.elements.getValue("primary")
                 val back = observed.elements.getValue("back")
-                assertTrue(primary.height >= 46f && back.height >= 46f)
+                assertTrue(primary.height >= 42f && back.height >= 42f)
                 assertTrue(back.left < primary.left && primary.right <= first.right + .6f)
-                assertTrue(primary.bottom <= 742f && back.bottom <= 742f)
+                assertTrue(primary.bottom <= 745f && back.bottom <= 745f)
                 assertTrue(primary.top > second.bottom)
                 click(scene, second.center)
                 render(scene, "branches-selected-$width")
@@ -127,7 +127,7 @@ class SharedBranchChoiceRenderTest {
                 assertNoHorizontalOverflow(before, card)
                 val back = observed.elements.getValue("back")
                 val primary = observed.elements.getValue("primary")
-                assertTrue(primary.bottom <= height - if (width <= 560) 15f else 30f)
+                assertTrue(primary.bottom <= height - if (width <= 600) 15f else 30f)
                 assertTrue(primary.right < card.right && back.left > card.left)
                 scene.sendPointerEvent(PointerEventType.Scroll, Offset(width / 2f, minOf(220f, back.top - 20f)),
                     scrollDelta = Offset(0f, 20f))
@@ -157,7 +157,7 @@ class SharedBranchChoiceRenderTest {
     private fun cardBounds(image: BufferedImage): Rect {
         var left = image.width; var top = image.height; var right = 0; var bottom = 0
         for (y in 0 until image.height) for (x in 0 until image.width) {
-            if ((image.getRGB(x, y) and 0xffffff) != 0xeff3ef) {
+            if ((image.getRGB(x, y) and 0xffffff) in setOf(0xffffff, 0xcbd5e1)) {
                 left = minOf(left, x); top = minOf(top, y); right = maxOf(right, x + 1); bottom = maxOf(bottom, y + 1)
             }
         }
@@ -166,11 +166,11 @@ class SharedBranchChoiceRenderTest {
     }
 
     private fun assertNoHorizontalOverflow(image: BufferedImage, card: Rect) {
-        val outer = if (image.width <= 560) 10 else (image.width - minOf(820, image.width - 36)) / 2
+        val outer = 2 // Exclude the reference ambient shadow; text bounds are checked separately.
         assertTrue(card.left >= outer && card.right <= image.width - outer)
         for (y in 0 until image.height) {
-            for (x in 0 until outer) assertEquals(0xeff3ef, image.getRGB(x, y) and 0xffffff)
-            for (x in image.width - outer until image.width) assertEquals(0xeff3ef, image.getRGB(x, y) and 0xffffff)
+            for (x in 0 until outer) assertEquals(0xf8fafc, image.getRGB(x, y) and 0xffffff)
+            for (x in image.width - outer until image.width) assertEquals(0xf8fafc, image.getRGB(x, y) and 0xffffff)
         }
     }
 

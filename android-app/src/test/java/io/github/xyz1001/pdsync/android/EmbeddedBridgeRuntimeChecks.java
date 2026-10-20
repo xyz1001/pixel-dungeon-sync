@@ -64,7 +64,6 @@ public final class EmbeddedBridgeRuntimeChecks {
             f -> f.pair.signingCertificateSha256 = "c".repeat(64),
             f -> f.game.signatures = new Signature[]{new Signature(new byte[]{7})},
             f -> f.game.signingInfo.signatures = new Signature[]{new Signature(new byte[]{7})},
-            f -> f.pair.mainAppCertSha256 = "c".repeat(64),
             f -> f.game.applicationInfo.uid = 100,
             f -> f.game.sharedUserId = "old.shared.uid",
             f -> f.main.sharedUserId = "other.shared.uid",
@@ -94,14 +93,18 @@ public final class EmbeddedBridgeRuntimeChecks {
             f -> f.game.applicationInfo.metaData.put(Fixture.META + "BOUND_GAME_PACKAGE", "other"),
             f -> f.game.applicationInfo.metaData.put(Fixture.META + "BOUND_ORIGIN_IDENTITY", "b".repeat(64)),
             f -> f.game.applicationInfo.metaData.put(Fixture.META + "BOUND_NAMESPACE_ID", "other"),
-            f -> f.game.applicationInfo.metaData.put(Fixture.META + "BOUND_SOURCE_APK_SHA256", "c".repeat(64)),
-            f -> f.game.applicationInfo.metaData.put(Fixture.META + "MAIN_APP_CERT_SHA256", "c".repeat(64)));
+            f -> f.game.applicationInfo.metaData.put(Fixture.META + "BOUND_SOURCE_APK_SHA256", "c".repeat(64)));
         for (int sdk : new int[]{26, 36}) {
             Build.VERSION.SDK_INT = sdk;
             try (Fixture f = new Fixture()) {
                 check(!PackageTrust.requireBridgeForExchange(f.context, f.pair, f.pin), "Embedded trust succeeds with real matching file digests");
                 check(f.pair.validationCount == 1, "Prepared receipt validated before provider use");
                 check(f.helperLookups == 0, "No helper package lookup");
+                f.main.signatures = new Signature[]{new Signature(new byte[]{9,8,7})};
+                f.main.signingInfo.signatures = f.main.signatures;
+                f.pair.mainAppCertSha256 = "c".repeat(64);
+                f.game.applicationInfo.metaData.put(Fixture.META + "MAIN_APP_CERT_SHA256", "d".repeat(64));
+                check(!PackageTrust.requireBridgeForExchange(f.context, f.pair, f.pin), "Different client signer and historical pin do not gate package identity");
                 f.provider.readPermission = ""; f.provider.writePermission = "";
                 check(!PackageTrust.requireBridgeForExchange(f.context, f.pair, f.pin), "Explicit empty provider permissions accepted");
                 Files.writeString(f.installed, "tampered");

@@ -46,8 +46,41 @@ class AutomaticUploadPersistenceTest {
  }
  @Test fun `interrupted restore marker excludes background retry`() {
   val a=session(); assertFails { a.push(Memory()) { true } }; assertTrue(a.retryablePending())
+  assertTrue(a.retryablePendingSourceAvailable())
   a.directory.resolve("append-v2/apply-required.txt").writeText("restore")
   assertTrue(a.hasPending()); assertFalse(a.retryablePending())
+  assertFalse(a.retryablePendingSourceAvailable())
+ }
+ @Test fun `verified frozen retry remains available after live save disappears`() {
+  val a=session(); val store=Memory()
+  assertFalse(a.retryablePendingSourceAvailable())
+  assertFailsWith<SocketException> { a.push(store) { true } }
+  val repository=AppendRepository(a.directory.resolve("append-v2"),Shattered,"demo")
+  val frozen=repository.pending()!!
+  a.root.resolve("game1/game.dat").deleteExisting()
+  assertTrue(a.syncHistory().currentFiles.isEmpty())
+  assertTrue(a.retryablePendingSourceAvailable())
+  store.offline=false
+  assertEquals(frozen.commit, assertIs<AppendPushResult.Success>(a.push(store) { true }).commit)
+  assertFalse(a.retryablePendingSourceAvailable())
+ }
+ @Test fun `corrupt frozen bytes cannot qualify as an upload source`() {
+  val a=session(); assertFails { a.push(Memory()) { true } }
+  val repository=AppendRepository(a.directory.resolve("append-v2"),Shattered,"demo")
+  val frozen=repository.pending()!!
+  a.directory.resolve("append-v2/uploads/${frozen.commit.id}.zip").writeBytes(byteArrayOf(1,2,3))
+  assertFails { a.retryablePendingSourceAvailable() }
+ }
+ @Test fun `empty frozen plan is rejected even with a nonempty live source`() {
+  val a=session()
+  val empty=temp.resolve("empty").createDirectory()
+  val repository=AppendRepository(a.directory.resolve("append-v2"),Shattered,"demo")
+  assertFailsWith<IllegalArgumentException> {
+   repository.prepare(Snapshots.capture(empty,Shattered,"demo","test",null),emptyList())
+  }
+  assertFalse(a.hasPending()); assertFalse(a.retryablePending())
+  assertTrue(a.observedFiles().isNotEmpty())
+  assertFalse(a.retryablePendingSourceAvailable(), "retry uses the frozen plan, never the current live content")
  }
  @Test fun `pause preference round trips without secrets`() {
   val file=ConfigFile(temp.resolve("config.json")); file.save(AppConfig(autoUploadPaused=true))

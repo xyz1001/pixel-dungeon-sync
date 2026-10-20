@@ -10,13 +10,16 @@ class DesktopGameSelectionCopyTest {
     @Test fun desktopSelectionKeepsInitialScanAndNativeChooserWithoutRescanAction() {
         val main = Files.readString(Path.of("src/main/kotlin/pdsync/Main.kt"))
         val page = main.substringAfter("Page.DISCOVERY -> {").substringBefore("Page.PATH ->")
-        assertTrue(page.contains("else \"重新选择\""))
+        assertTrue(page.contains("else DesktopMessages.CHANGE_GAME.text()"))
+        assertFalse(page.contains("已找到"))
+        assertFalse(page.contains("selectionStatus ="), "selected game should use the empty status default")
+        assertTrue(page.contains("game = selectedGame?.let { gameIdentity(it) }"))
         assertFalse(page.contains("SharedGameSelectionRow(SharedGameSelectionControl.RESCAN"))
         assertTrue(page.contains("chooseSetupGame()"))
         assertTrue(main.contains("NativeGameChooser.choose"))
         assertTrue(main.contains("rescanDiscovery()"))
         val shared = Files.readString(Path.of("../shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedGameSelectionScreen.kt"))
         assertFalse(shared.contains("详细信息"))
-        assertTrue(shared.contains("下一步"))
+        assertTrue(shared.contains("SharedMessages.NEXT_CONNECT.text()"))
     }
 }

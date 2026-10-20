@@ -1,0 +1,319 @@
+package io.github.xyz1001.pdsync.android;
+
+import java.util.*;
+
+/** Real Activity guard/read methods with deterministic scheduling and read-only I/O ports. */
+class MainActivity {
+    enum SyncPage { HOME, SETTINGS }
+    enum OnboardingProgress { COMPLETE, INCOMPLETE }
+    enum DiagnosticAction { INSPECT }
+    enum DiagnosticStage { VERIFY }
+    enum DiagnosticFailure { RECOVERY_REQUIRED, NONE }
+    static class Text { String text() { return "checking saves"; } }
+    static final Text CHECKING_SAVES_144 = new Text();
+    static class SecureConnectionStore { static class Connection {} }
+    static class SyncRuntime {
+        static SecureConnectionStore.Connection account;
+        static String selection, namespace;
+        static boolean unavailable;
+        static SecureConnectionStore.Connection currentConnection() { return account; }
+        static String currentSelectionToken(MainActivity host) throws Exception {
+            if (unavailable) throw new Exception("selection unavailable");
+            return selection;
+        }
+        static String currentNamespace(MainActivity host) throws Exception {
+            if (unavailable) throw new Exception("namespace unavailable");
+            return namespace;
+        }
+    }
+    static class Installer { boolean active; boolean hasActiveRequest() { return active; } }
+    static class Readiness { String statusDescription() { return "not ready"; } }
+    static class AutomaticHistory { boolean inFlight; Object ticket, connection; }
+    static class AutoSyncStatusPolicy { static class Record {} }
+    static class AutoSyncService {
+        static AutoSyncStatusPolicy.Record beginManualInspection(MainActivity a) { return new AutoSyncStatusPolicy.Record(); }
+        static void verifiedManualInspection(MainActivity a, AutoSyncStatusPolicy.Record record,
+                AndroidSyncFacade.Inspection inspection) { a.verified++; }
+    }
+    static class Snapshot {
+        final String id;
+        Snapshot(String id) { this.id = id; }
+        String getId() { return id; }
+    }
+    static class AppendCommit {
+        final Snapshot snapshot;
+        AppendCommit(String id) { snapshot = new Snapshot(id); }
+        Snapshot getSnapshot() { return snapshot; }
+    }
+    static class SyncHistory {
+        final List<AppendCommit> cloud = new ArrayList<>();
+        List<AppendCommit> getCloud() { return cloud; }
+        String getDefaultSnapshot() { return cloud.isEmpty() ? null : cloud.get(0).snapshot.id; }
+    }
+    interface Hook { void run() throws Exception; }
+    interface Change { void run(MainActivity host) throws Exception; }
+    interface Task { boolean run() throws Exception; }
+    interface Done { void accept(boolean result) throws Exception; }
+    static class AndroidSyncFacade {
+        static class Inspection {
+            String kind = "BOTH_EMPTY";
+            String getKind() { return kind; }
+            String getMessage() { return "fresh history"; }
+            boolean getNeedsRestoreRecovery() { return false; }
+        }
+        final Inspection observed = new Inspection();
+        final SyncHistory history = new SyncHistory();
+        Hook inspectHook = () -> {}, historyHook = () -> {};
+        int reads, historyReads;
+        Inspection inspect() throws Exception { reads++; inspectHook.run(); return observed; }
+        SyncHistory historyPresentation(Inspection observation) throws Exception {
+            check(observation == observed, "history must use this exact inspection");
+            historyReads++; historyHook.run(); return history;
+        }
+    }
+    static class SyncInspectionDiagnostics {
+        enum Stage { RUNTIME, INSPECT, HISTORY }
+        static Exception at(Stage stage, Exception error) { return error; }
+    }
+    static class InstallDiagnostics { static Object find(Exception error) { return null; } }
+    static class PreparationDiagnostics { static Object find(Exception error) { return null; } }
+    static class BridgeDiagnostics { static Object find(Exception error) { return null; } }
+    static class DiagnosticLog { static void record(Object... arguments) {} }
+    static class AndroidDiagnosticLogging { static Object inspectionResult(String kind, boolean failed) { return null; } }
+    static class StaleArchiveReadException extends Exception {}
+
+    SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
+    final HomeArchiveReadState archiveReads = new HomeArchiveReadState();
+    final RenewalArchiveReadState renewalArchiveRead = new RenewalArchiveReadState();
+    final Installer installer = new Installer();
+    final Readiness readinessState = new Readiness();
+    final AutomaticHistory automaticHistoryState = new AutomaticHistory();
+    SyncPage page = SyncPage.HOME;
+    OnboardingProgress progress = OnboardingProgress.COMPLETE;
+    boolean resumed = true, destroyed, sharedAppreciationOnly, busy, available = true, ready = true;
+    boolean cloudVerified = true;
+    AndroidSyncFacade facade = new AndroidSyncFacade(), preparedOfficialNamespaceFacade = facade;
+    AndroidSyncFacade nextFacade = new AndroidSyncFacade();
+    AndroidSyncFacade.Inspection inspection = facade.observed;
+    SyncHistory history = facade.history;
+    Object homeObservationOwner = new Object();
+    String notice = "old notice", details = "old details", selected = "old snapshot", explicitHomeSelection = selected;
+    int workCalls, facadeCreations, published, verified, namespacePreparations, errors, renders;
+    Task pendingTask;
+    Done pendingDone;
+    Boolean pendingValue;
+    Exception failure;
+
+    MainActivity() {
+        SyncRuntime.account = connection; SyncRuntime.selection = "game-a"; SyncRuntime.namespace = "space-a";
+        SyncRuntime.unavailable = false;
+    }
+    boolean isDestroyed() { return destroyed; }
+    boolean homeAccountAccessAvailable() { return available; }
+    boolean readyForSaves() { return ready; }
+    boolean currentAutomaticHistory(Object ticket, Object account) { return account == connection; }
+    String comparisonCopy() { return "comparison ready"; }
+    String safeText(String value) { return value; }
+    void render() { renders++; }
+    void reportError(Exception error) { errors++; failure = error; }
+    Object diagnosticInspectionDetails(AndroidSyncFacade.Inspection result) { return null; }
+    Object currentHomeContext(int token) { return new Object(); }
+    void publishArchiveReadState() { published++; }
+    void prepareOfficialHomeNamespace(AndroidSyncFacade owner) { namespacePreparations++; }
+    AndroidSyncFacade sync() {
+        check(preparedOfficialNamespaceFacade == null, "manual read must discard prepared facade");
+        if (facade == null) { facadeCreations++; facade = nextFacade; }
+        return facade;
+    }
+    void work(DiagnosticAction action, String label, Task task, Done done) {
+        check(action == DiagnosticAction.INSPECT && "checking saves".equals(label), "reuse existing inspection work");
+        check(!cloudVerified && inspection == null && history == null && homeObservationOwner == null,
+                "manual read must clear old observation before worker");
+        check(facade == null && preparedOfficialNamespaceFacade == null, "manual read must discard cached facade");
+        check(!busy && pendingTask == null, "duplicate read queued");
+        busy = true; workCalls++; pendingTask = task; pendingDone = done;
+    }
+    void runWorker() {
+        Task task = pendingTask; pendingTask = null;
+        check(task != null, "no worker queued");
+        try { pendingValue = task.run(); } catch (Exception error) { failure = error; }
+    }
+    void finishWorker() throws Exception {
+        Done done = pendingDone; pendingDone = null; busy = false;
+        if (failure != null) {
+            if (!(failure instanceof StaleArchiveReadException)) reportError(failure);
+        } else {
+            try { done.accept(pendingValue); }
+            catch (Exception error) { reportError(error); }
+        }
+    }
+    void runPending() throws Exception { runWorker(); finishWorker(); }
+    /* PRODUCTION_METHODS */
+
+    static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    static void terminal(MainActivity host) {
+        check(!host.archiveReads.loading() && !host.busy, "terminal read left refresh locked");
+        check(host.namespacePreparations == 0, "manual read provisioned the remote namespace");
+    }
+    static void guards() throws Exception {
+        Change[] changes = {
+            a -> a.connection = null,
+            a -> a.progress = OnboardingProgress.INCOMPLETE,
+            a -> a.resumed = false,
+            a -> a.destroyed = true,
+            a -> a.page = SyncPage.SETTINGS,
+            a -> a.sharedAppreciationOnly = true,
+            a -> a.busy = true,
+            a -> a.archiveReads.begin(),
+            a -> { a.automaticHistoryState.inFlight = true; a.automaticHistoryState.connection = a.connection; },
+            a -> a.installer.active = true,
+            a -> a.ready = false,
+            a -> a.available = false
+        };
+        for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity host = new MainActivity(); changes[condition].run(host);
+            check(!host.canRefreshHomeHistory(), "manual refresh guard missing: " + condition);
+            host.refreshHomeHistory();
+            check(host.workCalls == 0 && host.facadeCreations == 0 && host.errors == 0,
+                    "blocked manual entry queued I/O: " + condition);
+        }
+        MainActivity unrelated = new MainActivity(); unrelated.automaticHistoryState.inFlight = true;
+        unrelated.automaticHistoryState.connection = new SecureConnectionStore.Connection();
+        check(unrelated.canRefreshHomeHistory(), "another account's automatic loading must not block current HOME");
+    }
+    static void emptyUnknownHistoryAndRepeatedClicks() throws Exception {
+        MainActivity host = new MainActivity();
+        host.history = null; host.inspection = null; host.facade = null; host.homeObservationOwner = null;
+        host.cloudVerified = false;
+        check(host.canRefreshHomeHistory(), "no previous observation must remain refreshable");
+        for (int click = 0; click < 10; click++) host.refreshHomeHistory();
+        check(host.workCalls == 1 && host.facadeCreations == 0 && host.busy,
+                "repeated clicks must coalesce before worker begins");
+        host.runPending(); terminal(host);
+        check(host.history != null && host.history.cloud.isEmpty() && host.cloudVerified && host.verified == 1,
+                "confirmed empty history must publish a valid empty observation");
+        check(host.facadeCreations == 1 && host.facade.reads == 1 && host.facade.historyReads == 1,
+                "refresh must perform exactly one fresh inspect and paired history read");
+        check(host.selected == null && host.explicitHomeSelection == null, "missing snapshot selection must clear");
+        check(host.published == 2 && "comparison ready".equals(host.notice) && "fresh history".equals(host.details),
+                "reuse existing loading and comparison feedback");
+        AndroidSyncFacade first = host.facade;
+        host.nextFacade = new AndroidSyncFacade(); host.nextFacade.history.cloud.add(new AppendCommit("new snapshot"));
+        check(host.canRefreshHomeHistory(), "completion must permit an explicit subsequent refresh");
+        host.refreshHomeHistory(); host.runPending(); terminal(host);
+        check(host.workCalls == 2 && host.facadeCreations == 2 && host.facade != first && first.reads == 1,
+                "subsequent refresh must replace rather than reuse previous facade");
+        check(host.history == host.nextFacade.history && "new snapshot".equals(host.selected),
+                "second refresh publishes newly observed cloud history");
+    }
+    static void manualConsumesPendingRenewal() throws Exception {
+        MainActivity host = new MainActivity();
+        host.renewalArchiveRead.open(host.connection, SyncRuntime.selection, SyncRuntime.namespace, false);
+        host.renewalArchiveRead.started(); host.renewalArchiveRead.result(true);
+        host.refreshHomeHistory(); host.runPending(); host.drainRenewalArchiveRead();
+        check(host.workCalls == 1 && host.facade.reads == 1, "manual refresh must consume same-scope pending renewal");
+    }
+    static Change[] scopeChanges() {
+        return new Change[] {
+            a -> a.connection = new SecureConnectionStore.Connection(),
+            a -> SyncRuntime.account = new SecureConnectionStore.Connection(),
+            a -> SyncRuntime.selection = "game-b",
+            a -> SyncRuntime.namespace = "space-b",
+            a -> a.page = SyncPage.SETTINGS,
+            a -> a.resumed = false,
+            a -> a.destroyed = true,
+            a -> a.sharedAppreciationOnly = true,
+            a -> SyncRuntime.unavailable = true
+        };
+    }
+    static void staleBeforeWorkerAndBeforeCompletion() throws Exception {
+        Change[] changes = scopeChanges();
+        for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity host = new MainActivity(); host.refreshHomeHistory(); changes[condition].run(host);
+            host.runPending(); terminal(host);
+            check(host.facadeCreations == 0 && host.failure instanceof StaleArchiveReadException && host.errors == 0,
+                    "stale queued worker inspected or reported old scope: " + condition);
+            check(host.history == null && !host.cloudVerified, "stale queued worker authorized old observation");
+        }
+        for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity host = new MainActivity(); host.refreshHomeHistory(); host.runWorker();
+            changes[condition].run(host); host.notice = "new scope notice"; host.details = "new scope details";
+            host.finishWorker(); terminal(host);
+            check("new scope notice".equals(host.notice) && "new scope details".equals(host.details),
+                    "stale completion overwrote new scope feedback: " + condition);
+        }
+        MainActivity foreignRuntime = new MainActivity(); SyncRuntime.account = new SecureConnectionStore.Connection();
+        foreignRuntime.refreshHomeHistory();
+        check(foreignRuntime.workCalls == 0 && foreignRuntime.history != null, "foreign runtime owner must reject before clearing history");
+        MainActivity unavailable = new MainActivity(); SyncRuntime.unavailable = true; unavailable.refreshHomeHistory();
+        check(unavailable.workCalls == 0 && unavailable.errors == 1 && unavailable.renders == 1,
+                "scope failure must use existing error and rendering path");
+    }
+    static void staleDuringRead() throws Exception {
+        Change[] changes = scopeChanges();
+        for (int stage = 0; stage < 2; stage++) for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity host = new MainActivity(); Change change = changes[condition];
+            Hook leave = () -> change.run(host);
+            if (stage == 0) host.nextFacade.inspectHook = leave; else host.nextFacade.historyHook = leave;
+            host.refreshHomeHistory(); host.runPending(); terminal(host);
+            check(Boolean.FALSE.equals(host.pendingValue) && host.failure == null && host.errors == 0,
+                    "stale in-flight read accepted or reported old scope: " + stage + "/" + condition);
+            check(host.history == null && host.inspection == null && !host.cloudVerified && host.verified == 0,
+                    "stale in-flight read polluted new observation: " + stage + "/" + condition);
+            check(host.published == 2, "stale read failed to release loading state");
+        }
+    }
+    static void failureAfterLeavingScope() throws Exception {
+        Change[] changes = scopeChanges();
+        for (int stage = 0; stage < 2; stage++) for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity host = new MainActivity();
+            Hook fail = () -> { throw new java.io.IOException("old scope offline"); };
+            if (stage == 0) host.nextFacade.inspectHook = fail; else host.nextFacade.historyHook = fail;
+            host.refreshHomeHistory(); host.runWorker();
+            check(Boolean.FALSE.equals(host.pendingValue), "failed read must defer its error until scoped completion");
+            changes[condition].run(host); host.notice = "new scope notice"; host.details = "new scope details";
+            host.finishWorker(); terminal(host);
+            check(host.errors == 0 && host.failure == null && "new scope notice".equals(host.notice)
+                    && "new scope details".equals(host.details), "late old-scope failure must not replace new feedback");
+        }
+        MainActivity invalidated = new MainActivity();
+        invalidated.nextFacade.inspectHook = () -> invalidated.archiveReads.invalidate();
+        invalidated.refreshHomeHistory(); invalidated.runPending(); terminal(invalidated);
+        check(invalidated.errors == 0 && invalidated.failure == null && !invalidated.cloudVerified,
+                "superseded read in same HOME must silently discard stale observation");
+    }
+    static void failureBlockedReadinessAndRetry() throws Exception {
+        for (int stage = 0; stage < 2; stage++) for (Exception failure : List.of(
+                new java.io.IOException("offline"), new InterruptedException("cancelled"))) {
+            MainActivity host = new MainActivity();
+            Hook fail = () -> { throw failure; };
+            if (stage == 0) host.nextFacade.inspectHook = fail; else host.nextFacade.historyHook = fail;
+            host.refreshHomeHistory(); host.runPending(); terminal(host);
+            check(host.failure == failure && host.errors == 1 && !host.cloudVerified && host.history == null,
+                    "failed refresh must preserve error and remove stale history");
+            check(host.canRefreshHomeHistory() && host.published == 2, "failure must release refresh/loading for retry");
+            host.failure = null; host.nextFacade = new AndroidSyncFacade();
+            host.refreshHomeHistory(); host.runPending(); terminal(host);
+            check(host.cloudVerified && host.workCalls == 2 && host.facadeCreations == 2,
+                    "retry must recover through a fresh read");
+        }
+        MainActivity blocked = new MainActivity(); blocked.nextFacade.observed.kind = "BLOCKED";
+        blocked.refreshHomeHistory(); blocked.runPending(); terminal(blocked);
+        check(blocked.inspection != null && blocked.history == null && !blocked.cloudVerified
+                && blocked.verified == 0 && blocked.nextFacade.historyReads == 0,
+                "blocked read must remain unknown instead of authorized empty history");
+        MainActivity readiness = new MainActivity(); readiness.refreshHomeHistory(); readiness.ready = false;
+        readiness.runPending(); terminal(readiness);
+        check(readiness.facadeCreations == 0 && "not ready".equals(readiness.notice),
+                "readiness lost after click must stop before I/O and use existing feedback");
+        MainActivity rotated = new MainActivity(); rotated.refreshHomeHistory();
+        rotated.destroyed = true; rotated.archiveReads.close(); rotated.runPending(); terminal(rotated);
+        MainActivity replacement = new MainActivity(); replacement.refreshHomeHistory(); replacement.runPending();
+        terminal(replacement); check(replacement.cloudVerified, "replacement HOME must independently refresh after rotation");
+    }
+    public static void main(String[] args) throws Exception {
+        guards(); emptyUnknownHistoryAndRepeatedClicks(); manualConsumesPendingRenewal();
+        staleBeforeWorkerAndBeforeCompletion(); staleDuringRead(); failureAfterLeavingScope(); failureBlockedReadinessAndRetry();
+        System.out.println("Manual HOME history refresh execution passed");
+    }
+}

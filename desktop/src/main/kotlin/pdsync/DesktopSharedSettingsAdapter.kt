@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import io.github.xyz1001.pdsync.android.SharedGameIdentity
 import io.github.xyz1001.pdsync.android.SharedSettingsActions
 import io.github.xyz1001.pdsync.android.SharedSettingsKey
@@ -43,29 +45,29 @@ internal object DesktopSharedSettingsAdapter {
   val config = current.config
   val notice = notice(current)
   val rows = buildList {
-   add(SharedSettingsRow(SharedSettingsKey.GAME, "游戏", current.game?.summary ?: "尚未选择游戏",
-    "更换", config != null))
-   add(SharedSettingsRow(SharedSettingsKey.SAVE_PATH, "存档位置", current.savePath.ifBlank { "尚未选择" },
-    "修改", true))
-   add(SharedSettingsRow(SharedSettingsKey.CLOUD_CONNECTION, "云端连接", if (config == null) "尚未配置" else
-    listOf(if (config.connectionProvider == "official") "官方服务" else "自定义服务",
-     config.username, if (current.connected) "已连接" else "未连接").filter(String::isNotBlank).joinToString(" · "),
-    "修改", true))
-   add(SharedSettingsRow(SharedSettingsKey.AUTOMATIC_UPLOAD, "自动上传", when {
-    config == null -> "尚未配置"
-    config.autoUploadPaused -> "已暂停"
-    else -> "已开启"
-   }, if (config?.autoUploadPaused == true) "开启" else "暂停", config != null))
-   add(SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, "存档检查",
-    if (current.hasSession) "已读取" else "尚未就绪", "重新检查", true))
-   add(SharedSettingsRow(SharedSettingsKey.REVIEW_SETUP, "四步引导",
-    if (config?.onboardingProgress == OnboardingProgress.COMPLETE) "已完成" else "尚未完成", "重新检查", true))
+   add(SharedSettingsRow(SharedSettingsKey.GAME, DesktopMessages.GAME.text(), current.game?.summary ?: DesktopMessages.NO_GAME_SELECTED.text(),
+    DesktopMessages.CHANGE.text(), config != null))
+   add(SharedSettingsRow(SharedSettingsKey.SAVE_PATH, DesktopMessages.SAVE_LOCATION.text(), current.savePath.ifBlank { DesktopMessages.NOT_SELECTED.text() },
+    DesktopMessages.EDIT.text(), true))
+   add(SharedSettingsRow(SharedSettingsKey.CLOUD_CONNECTION, DesktopMessages.CLOUD_CONNECTION.text(), if (config == null) DesktopMessages.NOT_CONFIGURED.text() else
+    listOf(if (config.connectionProvider == "official") DesktopMessages.BUILT_IN_SERVICE.text() else DesktopMessages.CUSTOM_SERVICE.text(),
+     config.username, if (current.connected) DesktopMessages.CONNECTED.text() else DesktopMessages.DISCONNECTED.text()).filter(String::isNotBlank).joinToString(" · "),
+    DesktopMessages.EDIT.text(), true))
+   add(SharedSettingsRow(SharedSettingsKey.AUTOMATIC_UPLOAD, DesktopMessages.AUTOMATIC_UPLOAD.text(), when {
+    config == null -> DesktopMessages.NOT_CONFIGURED.text()
+    config.autoUploadPaused -> DesktopMessages.PAUSED.text()
+    else -> DesktopMessages.ENABLED.text()
+   }, if (config?.autoUploadPaused == true) DesktopMessages.ENABLE.text() else DesktopMessages.PAUSE.text(), config != null, toggleEnabled = config != null && !config.autoUploadPaused))
+   add(SharedSettingsRow(SharedSettingsKey.RECHECK_SAVES, DesktopMessages.SAVE_CHECK.text(),
+    if (current.hasSession) DesktopMessages.READ.text() else DesktopMessages.NOT_READY.text(), DesktopMessages.CHECK_AGAIN.text(), true))
+   add(SharedSettingsRow(SharedSettingsKey.REVIEW_SETUP, DesktopMessages.SETUP_GUIDE.text(),
+    if (config?.onboardingProgress == OnboardingProgress.COMPLETE) DesktopMessages.COMPLETE.text() else DesktopMessages.INCOMPLETE.text(), DesktopMessages.CHECK_AGAIN.text(), true, setupComplete = config?.onboardingProgress == OnboardingProgress.COMPLETE))
    if (current.hasSession || current.pendingUpload) {
-    add(SharedSettingsRow(SharedSettingsKey.MAINTENANCE, "存档管理",
-     if (current.pendingUpload) "有未完成的上传" else current.currentName.ifBlank { "名称与单局身份" },
-     "管理", true))
+    add(SharedSettingsRow(SharedSettingsKey.MAINTENANCE, DesktopMessages.MANAGE_SAVES.text(),
+     if (current.pendingUpload) DesktopMessages.AN_UPLOAD_IS_INCOMPLETE.text() else current.currentName.ifBlank { DesktopMessages.NAMES_AND_RUN_IDENTITIES.text() },
+     DesktopMessages.MANAGE.text(), true))
    }
-   add(SharedSettingsRow(SharedSettingsKey.EXPORT_LOGS, "日志", "", "导出", true))
+   add(SharedSettingsRow(SharedSettingsKey.EXPORT_LOGS, DesktopMessages.LOGS.text(), "", DesktopMessages.EXPORT.text(), true))
   }
   return SharedSettingsState(current.game, rows,
    pageActive = current.pageActive && !current.appClosed && !current.managementOpen && !current.editorOpen,
@@ -76,20 +78,20 @@ internal object DesktopSharedSettingsAdapter {
  /** Only short, actionable results belong on the page. Raw diagnostics remain available on demand. */
  private fun notice(current: DesktopSettingsContext): Pair<String, Boolean>? = when {
   !current.diagnosticExportNotice.isNullOrBlank() ->
-   if (current.diagnosticExportNotice.startsWith("日志已导出：")) "日志已导出。" to false
-   else concise(current.diagnosticExportNotice, "日志导出失败，请重试。") to true
-  current.operationNotice?.startsWith("设置未保存：") == true -> "设置未保存，请重试。" to true
-  current.operationNotice?.startsWith("目标游戏未保存：") == true -> "游戏未更换，请重新选择。" to true
-  current.operationNotice?.startsWith("无法更新存档信息：") == true ->
-   concise(current.operationNotice, "存档信息未更新，请重试。") to true
-  !current.targetError.isNullOrBlank() -> "游戏文件不可用，请重新选择。" to true
-  !current.locationIssue.isNullOrBlank() -> "无法读取存档，请重新检查。" to true
+   if (current.diagnosticExportNotice.startsWith(DesktopMessages.LOGS_EXPORTED.text())) DesktopMessages.LOGS_EXPORTED_79.text() to false
+   else concise(current.diagnosticExportNotice, DesktopMessages.LOG_EXPORT_FAILED_PLEASE_TRY_AGAIN.text()) to true
+  current.operationNotice?.startsWith(DesktopMessages.SETTINGS_NOT_SAVED.text()) == true -> DesktopMessages.SETTINGS_NOT_SAVED_PLEASE_TRY_AGAIN.text() to true
+  current.operationNotice?.startsWith(DesktopMessages.TARGET_GAME_NOT_SAVED.text()) == true -> DesktopMessages.GAME_NOT_CHANGED_PLEASE_SELECT_IT_AGAIN.text() to true
+  current.operationNotice?.startsWith(DesktopMessages.CANNOT_UPDATE_SAVE_INFORMATION.text()) == true ->
+   concise(current.operationNotice, DesktopMessages.SAVE_INFORMATION_NOT_UPDATED_PLEASE_TRY_AGAIN.text()) to true
+  !current.targetError.isNullOrBlank() -> DesktopMessages.GAME_FILE_UNAVAILABLE_PLEASE_SELECT_IT_AGAIN.text() to true
+  !current.locationIssue.isNullOrBlank() -> DesktopMessages.CANNOT_READ_SAVES_PLEASE_CHECK_AGAIN.text() to true
   else -> null
  }
 
  private fun concise(raw: String, fallback: String): String {
   val translated = NoviceCopy.feedback(raw, fallback)
-  return if (translated == raw && (raw.startsWith("无法更新存档信息：") ||
+  return if (translated == raw && (raw.startsWith(DesktopMessages.CANNOT_UPDATE_SAVE_INFORMATION.text()) ||
     raw.contains(Regex("https?://|[A-Za-z]:[\\\\/]|(^|\\s)/|Exception|Error|failed|denied", RegexOption.IGNORE_CASE)))) fallback
    else translated
  }

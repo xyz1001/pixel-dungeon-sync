@@ -14,6 +14,10 @@ public final class GameAccessBackends {
         // This path remains unchanged for all existing retained preparations.
         return new BridgeClient(context, prepared, identity);
     }
+    public static GameAccessBackend forInstalledBridge(Context context,
+            InstalledBridgeBinding binding, AndroidGameIdentity identity) {
+        return new BridgeClient(context, binding, identity);
+    }
     public static GameAccessBackend forRootGame(Context context, SelectedRootGame selected,
             AndroidGameIdentity identity) throws Exception {
         return new RootGameBridge(context, selected, identity);

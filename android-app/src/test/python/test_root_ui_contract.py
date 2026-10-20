@@ -9,46 +9,54 @@ SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 
 
 class RootUiContract(unittest.TestCase):
+    def test_setup_next_requires_proven_root_access(self):
+        advance = body(MAIN, 'private boolean canAdvanceGameSelection()')
+        self.assertIn('readyForSaves() && !restoreNeedsAttention()', advance)
+        self.assertIn('canAdvanceGameSelection()', body(MAIN, 'private SharedGameSelectionState gameSelectionState()'))
+        self.assertIn('canAdvanceGameSelection()', body(MAIN, 'void m103x3c55a874()'))
+        request = body(MAIN, 'private void requestRootAuthorization()')
+        self.assertNotIn('SyncPage.PATH', request)
+        self.assertNotIn('previewPath()', request)
+
     def test_automatic_refresh_only_verifies_root_metadata(self):
         readiness = body(MAIN, 'private void readInstallationReadiness()')
-        self.assertLess(readiness.index('readRootReadiness()'), readiness.index('this.preparation.reloadPrepared()'))
+        self.assertLess(readiness.index('readRootReadiness()'), readiness.index('this.preparation.reloadPreparedMetadata()'))
         root = body(MAIN, 'private void readRootReadiness()')
-        self.assertIn('backend.targetGame()', root)
+        self.assertNotIn('backend.targetGame()', root)
+        self.assertIn('PackageTrust.installed(this, this.rootGame.gamePackage)', root)
         self.assertIn('backend.capabilities()', root)
         self.assertIn('AccessStatus.NOT_CHECKED', root)
         for operation in ('inspectReady(', 'observeLifecycle(', 'exportTo(', 'probeRootAuthorization('):
             self.assertNotIn(operation, root)
         initial = body(MAIN, 'Object m68x764cc8a4(')
-        self.assertIn('z && this.rootGame == null && readyForSaves()', initial)
+        self.assertNotIn('readComparison()', initial)
+        self.assertNotIn('checkRootAccess()', initial)
         resumed = body(MAIN, 'void m69xebc6eee5(')
         self.assertIn('this.rootGame == null && this.page == SyncPage.HOME', resumed)
 
     def test_explicit_check_has_no_repeated_custom_authorization_gate(self):
-        self.assertEqual(MAIN.count('SyncRuntime.probeRootAuthorization(this)'), 1)
         request = body(MAIN, 'private void requestRootAuthorization()')
         self.assertNotIn('confirm(', request)
         self.assertIn('!this.resumed', request)
-        self.assertIn('chosen.matches(SyncRuntime.rootGame(this))', request)
-        self.assertIn('checkRootAccess()', request)
-        check = body(MAIN, 'private void checkRootAccess()')
-        self.assertIn('!this.resumed', check)
+        self.assertIn('RootSetupAuthorization.probe(getApplicationContext(), packageName)', request)
+        self.assertIn('authorizeRoot(generation, packageName)', request)
+        self.assertNotIn('checkRootAccess(', request)
+        self.assertNotIn('SyncPage.PATH', request)
+        check = body(MAIN, 'private void checkRootAccess(boolean setupOnly)')
         self.assertIn('if (hasAnyRestoreJournal()) {', check)
         self.assertIn('SyncRuntime.probeRootAuthorization(this)', check)
         self.assertIn('AccessStatus.RECOVERY_NEEDED', check)
         self.assertLess(check.index('inspectReady()'), check.index('AccessStatus.READY'))
         discovery = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
-        check_button = discovery.split('SharedGameSelectionControl.CHECK_ACCESS', 1)[1].split(';', 1)[0]
-        self.assertNotIn('restorePending', check_button)
-        self.assertNotIn('!recovery', check_button)
-        self.assertIn('!activeRequest', check_button)
-        self.assertIn('boolean activeRequest = this.installer.hasActiveRequest()', discovery)
+        self.assertIn('!active && !recovery', discovery)
+        self.assertNotIn('SharedGameSelectionControl.CHECK_ACCESS', discovery)
 
     def test_restart_allows_deliberate_operations_without_claiming_ready(self):
         requestable = body(MAIN, 'private boolean canRequestSaveAccess()')
         self.assertIn('canRequestRootAccess()', requestable)
         self.assertNotIn('AccessStatus.READY', requestable)
         startup = body(MAIN, 'void m69xebc6eee5(')
-        self.assertIn('if (!canRequestSaveAccess())', startup)
+        self.assertIn('if (!canRequestSaveAccess() && !canAdvanceGameSelection())', startup)
         self.assertNotIn('checkRootAccess()', startup)
         preview = body(MAIN, 'private SaveSummary readPathPreview(')
         self.assertLess(preview.index('checkRootAccess(request, backend)'), preview.index('exportTo('))
@@ -95,7 +103,8 @@ class RootUiContract(unittest.TestCase):
     def test_restore_and_recovery_capabilities_gate_both_ui_and_actions(self):
         self.assertIn('accessCapabilities.restoreSupported', body(MAIN, 'private boolean restoreSupported()'))
         self.assertIn('accessCapabilities.interruptedBackupRecovery', body(MAIN, 'private boolean backupRecoverySupported()'))
-        self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private void renderHome()'))
+        self.assertIn('canHomeRestore()', body(MAIN, 'private void renderHome()'))
+        self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private boolean canHomeRestore()'))
         self.assertIn('backupRecoverySupported()', body(MAIN, 'private SettingsCapabilities settingsCapabilities()'))
         self.assertIn('if (capabilities.canRecoverBackup)', body(MAIN, 'private void showSettingsMaintenance('))
         for signature in ('public void requestRestore()', 'public void previewMerge()', 'void m87x12f15700()'):

@@ -21,10 +21,20 @@ public final class ApkSetValidator {
         public final File file;
         public final BinaryManifestPatch.ManifestInfo manifest;
         public final List<String> signerCertificateSha256;
+        public final GameSourceIdentity.Provenance provenance;
 
         public SourceApk(File file, BinaryManifestPatch.ManifestInfo manifestInfo, List<String> list) {
+            this(file, manifestInfo, list, GameSourceIdentity.Provenance.VERIFIED_SIGNER);
+        }
+
+        SourceApk(File file, BinaryManifestPatch.ManifestInfo manifestInfo, LocalApkSigner.SourceSignatures signatures) {
+            this(file, manifestInfo, signatures.certificates, GameSourceIdentity.Provenance.valueOf(signatures.kind.name()));
+        }
+
+        private SourceApk(File file, BinaryManifestPatch.ManifestInfo manifestInfo, List<String> list, GameSourceIdentity.Provenance provenance) {
             this.file = file;
             this.manifest = manifestInfo;
+            this.provenance = provenance;
             ArrayList arrayList = new ArrayList(list);
             Collections.sort(arrayList);
             this.signerCertificateSha256 = Collections.unmodifiableList(arrayList);
@@ -39,7 +49,7 @@ public final class ApkSetValidator {
         ValidatedSet(SourceApk sourceApk, List<SourceApk> list) throws IOException {
             this.base = sourceApk;
             this.apks = Collections.unmodifiableList(new ArrayList(list));
-            this.identity = new GameSourceIdentity(sourceApk.manifest.packageName, sourceApk.signerCertificateSha256);
+            this.identity = GameSourceIdentity.of(sourceApk.manifest.packageName, sourceApk.signerCertificateSha256, sourceApk.provenance);
         }
     }
 
@@ -71,7 +81,7 @@ public final class ApkSetValidator {
             if (installedSourceProof != null) {
                 installedSourceProof.validateManifest(manifestInfoValidateSource);
             }
-            arrayList.add(new SourceApk(file, manifestInfoValidateSource, LocalApkSigner.sourceCertificates(file, installedSourceProof)));
+            arrayList.add(new SourceApk(file, manifestInfoValidateSource, LocalApkSigner.sourceSignatures(file, installedSourceProof)));
         }
         return validate(arrayList, z);
     }
@@ -116,7 +126,7 @@ public final class ApkSetValidator {
             if (sourceApk.manifest.versionCode != manifestInfo2.versionCode) {
                 throw new IOException("Split APK version code differs from the base: " + normalized(manifestInfo2.splitName));
             }
-            if (!sourceApk.signerCertificateSha256.equals(sourceApk3.signerCertificateSha256)) {
+            if (sourceApk.provenance != sourceApk3.provenance || !sourceApk.signerCertificateSha256.equals(sourceApk3.signerCertificateSha256)) {
                 throw new IOException("Split APK signer differs from the base: " + normalized(manifestInfo2.splitName));
             }
             String strNormalized2 = normalized(manifestInfo2.configForSplit);

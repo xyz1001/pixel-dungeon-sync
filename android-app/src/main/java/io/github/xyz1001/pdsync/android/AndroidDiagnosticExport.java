@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -53,7 +55,7 @@ final class AndroidDiagnosticExport {
         catch (RuntimeException unavailable) {
             state.cancelSelection();
             trace.failure(DiagnosticStage.EXPORT, unavailable);
-            complete("无法打开系统目录选择器，请重试。");
+            complete(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_01.text());
         }
     }
 
@@ -76,15 +78,15 @@ final class AndroidDiagnosticExport {
             try (AutoCloseable ignored = DiagnosticLog.bind(exportTrace)) {
                 if (tree == null || !"content".equals(tree.getScheme()) || !DocumentsContract.isTreeUri(tree)
                         || (grants & TEMPORARY_GRANTS) != TEMPORARY_GRANTS)
-                    throw new SecurityException("Directory permission unavailable");
+                    throw new SecurityException(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_02.text());
                 // Snapshot is bounded and immutable before any destination document is created.
                 byte[] snapshot = DiagnosticLog.snapshotExport();
                 DiagnosticExportWriter.write(snapshot, uniqueFilename(), new SafDestination(app.getContentResolver(), tree));
                 exportTrace.record(DiagnosticStage.EXPORT, DiagnosticResult.SUCCEEDED);
-                message = "日志已导出。";
+                message = AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_03.text();
             } catch (Exception failure) {
                 exportTrace.failure(DiagnosticStage.EXPORT, failure);
-                message = "日志导出失败，请检查目录权限和剩余空间后重试。";
+                message = AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_04.text();
             }
             if (state.finish(ticket)) complete(message);
         });
@@ -115,18 +117,18 @@ final class AndroidDiagnosticExport {
                 if (metadata == null || !metadata.moveToFirst()
                         || !DocumentsContract.Document.MIME_TYPE_DIR.equals(metadata.getString(0))
                         || (metadata.getLong(1) & DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE) == 0)
-                    throw new IOException("Directory not writable");
+                    throw new IOException(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_05.text());
             }
             // Refuse collisions and providers that return an old document instead of creating.
             Set<String> existing = new HashSet<>();
             Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
             try (Cursor cursor = resolver.query(children,
                     new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
-                if (cursor == null) throw new IOException("Directory listing unavailable");
+                if (cursor == null) throw new IOException(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_06.text());
                 int rows = 0;
                 while (cursor.moveToNext()) {
                     if (++rows > 10000 || filename.equals(cursor.getString(1)))
-                        throw new IOException("Directory conflict");
+                        throw new IOException(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_07.text());
                     existing.add(cursor.getString(0));
                 }
             }
@@ -134,7 +136,7 @@ final class AndroidDiagnosticExport {
             if (candidate == null || !"content".equals(candidate.getScheme())
                     || !tree.getAuthority().equals(candidate.getAuthority())
                     || existing.contains(DocumentsContract.getDocumentId(candidate)))
-                throw new IOException("Document not created");
+                throw new IOException(AndroidMessages.ANDROID_DIAGNOSTIC_EXPORT_08.text());
             created = candidate;
         }
         public OutputStream openWrite() throws IOException { return resolver.openOutputStream(created, "w"); }

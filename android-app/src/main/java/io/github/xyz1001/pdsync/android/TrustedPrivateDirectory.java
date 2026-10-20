@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.IOException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
@@ -60,7 +62,7 @@ final class TrustedPrivateDirectory {
         requireAbsolute(path2);
         String string = path2.getFileName().toString();
         if ((!"cache".equals(string) && !"files".equals(string)) || !path.equals(path2.getParent())) {
-            throw unsafe("Android private directory is not an immediate cache/files child");
+            throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_01.text());
         }
         State stateDirectory = directory(statReader.lstat(path), i);
         State stateDirectory2 = directory(statReader.lstat(path2), i);
@@ -83,7 +85,7 @@ final class TrustedPrivateDirectory {
                 return this.root;
             }
         }
-        throw unsafe("Android private directory changed during resolution");
+        throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_02.text());
     }
 
     TemporaryDirectory createTemporaryDirectory(String str) throws IOException {
@@ -105,7 +107,7 @@ final class TrustedPrivateDirectory {
 
         Path path() throws IOException {
             if (this.closed) {
-                throw TrustedPrivateDirectory.unsafe("Preview directory is already closed");
+                throw TrustedPrivateDirectory.unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_03.text());
             }
             TrustedPrivateDirectory.this.checkedPath();
             TrustedPrivateDirectory.this.same(this.state, this.temporary);
@@ -114,7 +116,7 @@ final class TrustedPrivateDirectory {
                 TrustedPrivateDirectory.this.same(this.state, this.temporary);
                 return this.temporary;
             }
-            throw TrustedPrivateDirectory.unsafe("Preview directory contains a symbolic link");
+            throw TrustedPrivateDirectory.unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_04.text());
         }
 
         @Override // java.lang.AutoCloseable
@@ -131,7 +133,7 @@ final class TrustedPrivateDirectory {
                 for (Path path : list) {
                     path();
                     if (!path.equals(path.toRealPath(new LinkOption[0]))) {
-                        throw TrustedPrivateDirectory.unsafe("Preview cleanup encountered a symbolic link");
+                        throw TrustedPrivateDirectory.unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_05.text());
                     }
                     Files.delete(path);
                 }
@@ -152,7 +154,7 @@ final class TrustedPrivateDirectory {
     /* JADX INFO: Access modifiers changed from: private */
     public void same(State state, Path path) throws IOException {
         if (!state.same(directory(this.reader.lstat(path), this.uid))) {
-            throw unsafe("Android private directory was replaced");
+            throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_06.text());
         }
     }
 
@@ -160,16 +162,16 @@ final class TrustedPrivateDirectory {
         if (state.directory && state.uid == i) {
             return state;
         }
-        throw unsafe("Android private directory is linked, not a directory, or owned by another UID");
+        throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_07.text());
     }
 
     private static void requireAbsolute(Path path) throws IOException {
         if (path == null || !path.isAbsolute() || path.getParent() == null || path.getFileName() == null) {
-            throw unsafe("Android did not provide an absolute private directory");
+            throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_08.text());
         }
         for (Path path2 : path) {
             if (".".equals(path2.toString()) || "..".equals(path2.toString())) {
-                throw unsafe("Android private directory contains a path traversal");
+                throw unsafe(AndroidMessages.TRUSTED_PRIVATE_DIRECTORY_09.text());
             }
         }
     }

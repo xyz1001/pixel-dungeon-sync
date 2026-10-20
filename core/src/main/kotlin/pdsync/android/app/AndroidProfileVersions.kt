@@ -1,5 +1,6 @@
 package pdsync.android.app
 
+import pdsync.i18n.CoreMessages
 import pdsync.*
 
 class UnsupportedAndroidSaveFormatException(message: String, cause: Throwable? = null): IllegalArgumentException(message, cause), ReasonedSyncFailure {
@@ -15,33 +16,29 @@ class AndroidProfileVersions(
  override fun annotate(snapshot: Snapshot): Snapshot {
   val detected = detect(snapshot)
   val installed = installedTarget()
-  val source = snapshot.manifest.gameSource ?: if (identity.originalSourceIdentity == AndroidGameIdentity.KNOWN_SHATTERED_ORIGIN && capabilities(installed).minimumRestoreVersion != null) null
-   else GameSaveSource(identity.originalSourceIdentity, installed.sourceApkSha256)
-  val sameSource = snapshot.manifest.gameSource == null || snapshot.manifest.gameSource.originalSourceIdentity == identity.originalSourceIdentity
-  val legacyShattered = snapshot.manifest.game == Shattered.id && source == null && identity.packageName == "com.shatteredpixel.shatteredpixeldungeon"
+  val source = snapshot.manifest.gameSource ?: GameSaveSource(identity.originalSourceIdentity, installed.sourceApkSha256)
   return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected, gameSource = source,
-   gamePackage = snapshot.manifest.gamePackage ?: if (sameSource && !legacyShattered) identity.packageName else null))
+   gamePackage = snapshot.manifest.gamePackage ?: identity.packageName))
  }
  fun detect(snapshot: Snapshot): SaveVersions = try { ShatteredVersions.detect(Snapshots.verify(snapshot, adapter)) }
- catch (failure: IllegalArgumentException) { throw UnsupportedAndroidSaveFormatException("Unsupported or unreadable save format for ${identity.displayName}: ${failure.message}. Files were not treated as an empty save directory.", failure) }
+ catch (failure: IllegalArgumentException) { throw UnsupportedAndroidSaveFormatException(CoreMessages.ANDROID_UNSUPPORTED_OR_UNREADABLE_SAVE_FORMAT_FOR_1_S_2_S_FILES_WERE_NOT_TREATED_AS_AN_EMPTY_SAVE.text(identity.displayName, failure.message), failure) }
  override fun target(path: String): TargetGame {
   val installed = installedTarget(); val capability = capabilities(installed)
   return TargetGame("android-package:${installed.packageName}", installed.versionName, capability.maximumRestoreVersion ?: 0,
    installed.apkSha256, true, capability.minimumRestoreVersion,
-   if (capability.minimumRestoreVersion == null) "Same-package recognized saves can be restored without changing their bytes. This package's loader version bounds are unknown; arbitrary APK version labels do not establish them. Semantic merge requires a known schema."
-   else "Same-package restore uses the known save-loader version range; original signer and APK fingerprints remain provenance, not compatibility restrictions.",
+   if (capability.minimumRestoreVersion == null) CoreMessages.ANDROID_SAME_PACKAGE_RECOGNIZED_SAVES_CAN_BE_RESTORED_WITHOUT_CHANGING_THEIR_BYTES_THIS_PACKAGE_S.text()
+   else CoreMessages.ANDROID_SAME_PACKAGE_RESTORE_USES_THE_KNOWN_SAVE_LOADER_VERSION_RANGE_ORIGINAL_SIGNER_AND_APK_FING.text(),
    if (capability.mergePolicy == AndroidMergePolicy.SHATTERED_896) "shattered-896" else null)
  }
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   val detected = detect(snapshot)
-  snapshot.manifest.saveVersions?.let { require(it == detected) { "Save-version metadata does not match the snapshot bytes." } }
-  val packageName = recordedGamePackage(snapshot.manifest)
-   ?: if (snapshot.manifest.gameSource?.originalSourceIdentity == identity.originalSourceIdentity) identity.packageName else null
-  require(packageName != null) { "This legacy snapshot has no recorded game package. Its cloud namespace alone cannot establish the package family." }
-  require(packageName == identity.packageName) { "This snapshot belongs to a different game package. A shared cloud namespace does not combine different package families." }
+  snapshot.manifest.saveVersions?.let { require(it == detected) { CoreMessages.ANDROID_SAVE_VERSION_METADATA_DOES_NOT_MATCH_THE_SNAPSHOT_BYTES.text() } }
+  val packageName = snapshot.manifest.gamePackage
+  require(packageName != null) { CoreMessages.ANDROID_THIS_SNAPSHOT_HAS_NO_RECORDED_GAME_PACKAGE_AND_CANNOT_BE_RESTORED.text() }
+  require(packageName == identity.packageName) { CoreMessages.ANDROID_THIS_SNAPSHOT_BELONGS_TO_A_DIFFERENT_GAME_PACKAGE_A_SHARED_CLOUD_NAMESPACE_DOES_NOT_COMBIN.text() }
   val target = target(targetPath)
   if (target.minimumSaveVersion != null) ShatteredVersions.requireCompatible(detected, target)
-  else require(detected.runs.isNotEmpty() && detected.unknownReason == null) { "Restore is unsupported because these files contain no recognized live save writer version." }
+  else require(detected.runs.isNotEmpty() && detected.unknownReason == null) { CoreMessages.ANDROID_RESTORE_IS_UNSUPPORTED_BECAUSE_THESE_FILES_CONTAIN_NO_RECOGNIZED_LIVE_SAVE_WRITER_VERSION.text() }
  }
  private fun capabilities(installed: AndroidGameTarget): AndroidSaveCapabilities {
   if (identity.saveCapabilities.minimumRestoreVersion != null) return identity.saveCapabilities
@@ -54,6 +51,6 @@ class AndroidProfileVersions(
  }
  fun requireMerge() {
   if (capabilities(installedTarget()).mergePolicy != AndroidMergePolicy.SHATTERED_896)
-   throw RunMergeException("This game's semantic merge format has not been verified; its snapshots can be kept as separate branches")
+   throw RunMergeException(CoreMessages.ANDROID_THIS_GAME_S_SEMANTIC_MERGE_FORMAT_HAS_NOT_BEEN_VERIFIED_ITS_SNAPSHOTS_CAN_BE_KEPT_AS_SEPAR.text())
  }
 }

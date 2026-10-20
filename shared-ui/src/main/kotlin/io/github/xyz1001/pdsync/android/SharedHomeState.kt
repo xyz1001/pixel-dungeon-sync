@@ -1,28 +1,38 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import pdsync.presentation.HistoryPresentation
 
 /**
  * Host-owned facts and capabilities. Display names, times and status text are never evidence of
  * synchronization. Hosts retain their operation lock and revalidate the actual save before writing.
  */
-data class SharedHomeState(
+data class SharedHomeState @JvmOverloads constructor(
     val game: SharedGameIdentity?,
     val status: String,
     val pageActive: Boolean = false,
     val busy: Boolean = false,
+    /** Actual home archive reads only, independent of unrelated operations. */
+    val archiveLoading: Boolean = false,
     val canUpload: Boolean = false,
     val canRestore: Boolean = false,
     val canLaunch: Boolean = false,
     val pending: SharedHomeOperation = SharedHomeOperation.NONE,
     val restoreTarget: SharedHomeRestoreTarget? = null,
     val selectedSnapshotId: String? = null,
-    val emptyTargetMessage: String = "暂无可恢复的云端存档",
+    val emptyTargetMessage: String = SharedMessages.NO_CLOUD_RESTORE.text(),
     val history: HistoryPresentation? = null,
     val notice: String = "",
     val noticeError: Boolean = false,
     val details: String = "",
+    val statusKind: SharedHomeStatusKind = SharedHomeStatusKind.NEUTRAL,
+    /** Current authenticated official-account identity; this never grants sync permission. */
+    val canAppreciate: Boolean = false,
+    /** A current home history read is available; this never grants save-write permission. */
+    val canRefreshHistory: Boolean = false,
 )
+
+enum class SharedHomeStatusKind { NEUTRAL, SYNCED, WARNING, EXPIRED, RUNNING, CONFLICT }
 
 enum class SharedHomeOperation { NONE, UPLOAD, RESTORE, MERGE, LAUNCH }
 
@@ -38,6 +48,8 @@ data class SharedHomeRestoreTarget(
 
 interface SharedHomeActions {
     fun settings()
+    /** Opens the existing appreciation page, without initiating a payment. */
+    fun appreciate() {}
     fun upload()
     fun restore()
     fun launch()
@@ -45,14 +57,19 @@ interface SharedHomeActions {
     /** Null identifies the real current local directory, as in SharedHistorySection. */
     fun rename(snapshotId: String?)
     fun changeHistoryPage(page: Int)
+    fun refreshHistory() {}
 }
 
-internal val SharedHomeState.canInteract: Boolean get() = pageActive && !busy
+internal val SharedHomeState.canInteract: Boolean get() = pageActive && !busy && !archiveLoading
 internal val SharedHomeState.uploadEnabled: Boolean get() = canInteract && canUpload
 internal val SharedHomeState.restoreEnabled: Boolean get() = canInteract && canRestore
 internal val SharedHomeState.launchEnabled: Boolean get() = canInteract && canLaunch
+internal val SharedHomeState.refreshHistoryEnabled: Boolean get() = canInteract && canRefreshHistory
+internal val SharedHomeState.showAppreciation: Boolean
+    get() = statusKind == SharedHomeStatusKind.EXPIRED && canAppreciate
+internal val SharedHomeState.appreciationEnabled: Boolean get() = canInteract && showAppreciation
 internal val SharedHomeState.targetTitle: String
-    get() = if (selectedSnapshotId == null) "默认恢复最新云端存档" else "已选择存档"
+    get() = if (selectedSnapshotId == null) SharedMessages.DEFAULT_RESTORE.text() else SharedMessages.SELECTED_SAVE_TITLE.text()
 internal val SharedHomeRestoreTarget.summary: String
     get() = listOf(name, source, time).filter(String::isNotBlank).joinToString(" · ")
 
@@ -62,9 +79,11 @@ internal class SharedHomeInteractions(
     private val actions: () -> SharedHomeActions,
 ) {
     fun settings() { if (state().canInteract) actions().settings() }
+    fun appreciate() { if (state().appreciationEnabled) actions().appreciate() }
     fun upload() { if (state().uploadEnabled) actions().upload() }
     fun restore() { if (state().restoreEnabled) actions().restore() }
     fun launch() { if (state().launchEnabled) actions().launch() }
+    fun refreshHistory() { if (state().refreshHistoryEnabled) actions().refreshHistory() }
 
     fun selectSnapshot(snapshotId: String) {
         val current = state()
@@ -89,3 +108,9 @@ internal class SharedHomeInteractions(
         }
     }
 }
+
+/** Expiry has one typed status location; remove only its standalone feedback lines. */
+internal val SharedHomeState.visibleNotice: String
+    get() = withoutHomeExpiryNotice(notice)
+
+internal fun withoutHomeExpiryNotice(notice: String): String = TrustedEntitlementCache.withoutExpiryNotice(notice)

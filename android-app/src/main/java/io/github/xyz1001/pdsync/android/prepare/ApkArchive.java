@@ -59,6 +59,7 @@ public final class ApkArchive {
 
     public static BinaryManifestPatch.ManifestInfo validateSource(File file) throws IOException {
         entryHashes(file);
+        PayloadInventory.validateSourceDex(file);
         BinaryManifestPatch.ManifestInfo manifestInfoInspect = BinaryManifestPatch.inspect(manifest(file));
         if (manifestInfoInspect.packageName == null || manifestInfoInspect.packageName.isEmpty()) {
             throw new IOException("APK manifest has no package identity");
@@ -160,8 +161,16 @@ public final class ApkArchive {
     }
 
     private static void rewriteManifest(File source, File output, byte[] manifest, String addedName, byte[] addedBytes) throws IOException {
+        rewriteManifest(source, output, manifest, addedName, addedBytes, false);
+    }
+
+    static void replaceEmbedded(File source, File output, byte[] manifest, String dexName, byte[] dex) throws IOException {
+        rewriteManifest(source, output, manifest, dexName, dex, true);
+    }
+
+    private static void rewriteManifest(File source, File output, byte[] manifest, String addedName, byte[] addedBytes, boolean replacing) throws IOException {
         Map<String, String> sourceEntries = entryHashes(source);
-        if ((addedName == null) != (addedBytes == null) || addedName != null && sourceEntries.containsKey(addedName))
+        if ((addedName == null) != (addedBytes == null) || addedName != null && sourceEntries.containsKey(addedName) != replacing)
             throw new IOException("Invalid/duplicate added APK payload");
         if (source.getCanonicalFile().equals(output.getCanonicalFile()) || !output.createNewFile()) throw new IOException("Output must be a new file");
         try (ZipFile input = new ZipFile(source); FileOutputStream file = new FileOutputStream(output); ZipOutputStream zip = new ZipOutputStream(file)) {
@@ -171,7 +180,7 @@ public final class ApkArchive {
                 if (isSignature(original.getName())) continue;
                 ZipEntry entry = new ZipEntry(original.getName()); entry.setMethod(original.getMethod());
                 if (original.getTime() >= 0) entry.setTime(original.getTime());
-                byte[] replacement = MANIFEST.equals(original.getName()) ? manifest : null;
+                byte[] replacement = MANIFEST.equals(original.getName()) ? manifest : replacing && original.getName().equals(addedName) ? addedBytes : null;
                 if (original.getMethod() == ZipEntry.STORED) {
                     if (replacement == null) { entry.setSize(original.getSize()); entry.setCrc(original.getCrc()); }
                     else { CRC32 crc = new CRC32(); crc.update(replacement); entry.setSize(replacement.length); entry.setCrc(crc.getValue()); }
@@ -181,7 +190,7 @@ public final class ApkArchive {
                 else try (InputStream data = input.getInputStream(original)) { copyLimited(data, zip, MAX_ENTRY_BYTES); }
                 zip.closeEntry();
             }
-            if (addedName != null) {
+            if (addedName != null && !replacing) {
                 ZipEntry entry = new ZipEntry(addedName);
                 entry.setTime(0); entry.setMethod(ZipEntry.DEFLATED);
                 zip.putNextEntry(entry); zip.write(addedBytes); zip.closeEntry();
@@ -275,9 +284,18 @@ public final class ApkArchive {
                 if (hashes.size() >= MAX_ENTRIES || unsafeName(name) || hashes.containsKey(name)) throw new IOException("Duplicate, excessive, or unsafe ZIP entry: " + name);
                 if (entry.getMethod() != ZipEntry.STORED && entry.getMethod() != ZipEntry.DEFLATED) throw new IOException("Unsupported ZIP compression method");
                 if (entry.getSize() < 0 || entry.getSize() > MAX_ENTRY_BYTES || entry.getSize() + total > MAX_UNCOMPRESSED_BYTES) throw new IOException("Oversized ZIP payload");
-                MessageDigest digest = digest(); long read;
-                try (InputStream data = zip.getInputStream(entry)) { read = hashStream(data, digest, Math.min(MAX_ENTRY_BYTES, MAX_UNCOMPRESSED_BYTES - total)); }
+                MessageDigest digest = digest(); CRC32 crc = new CRC32(); long read = 0;
+                try (InputStream data = zip.getInputStream(entry)) {
+                    byte[] buffer = new byte[65536]; int count;
+                    while ((count = data.read(buffer)) != -1) {
+                        if (count == 0) continue;
+                        read += count;
+                        if (read > Math.min(MAX_ENTRY_BYTES, MAX_UNCOMPRESSED_BYTES - total)) throw new IOException("Oversized ZIP payload");
+                        digest.update(buffer, 0, count); crc.update(buffer, 0, count);
+                    }
+                }
                 if (read != entry.getSize()) throw new IOException("ZIP entry size mismatch");
+                if (crc.getValue() != entry.getCrc()) throw new IOException("ZIP entry CRC mismatch");
                 total += read; hashes.put(name, hex(digest.digest()));
             }
         }
@@ -301,7 +319,7 @@ public final class ApkArchive {
     }
 
     private static boolean unsafeName(String str) {
-        if (str.isEmpty() || str.startsWith("/") || str.indexOf(92) >= 0 || str.indexOf(0) >= 0) {
+        if (str.isEmpty() || str.startsWith("/") || str.indexOf(92) >= 0 || str.indexOf(0) >= 0 || str.indexOf(':') >= 0 || str.contains("//")) {
             return true;
         }
         for (String str2 : str.split("/", -1)) {
@@ -316,7 +334,7 @@ public final class ApkArchive {
         return SIGNATURE.matcher(str).matches();
     }
 
-    private static Map<String, String> protectedEntries(Map<String, String> map) {
+    static Map<String, String> protectedEntries(Map<String, String> map) {
         TreeMap treeMap = new TreeMap(map);
         treeMap.entrySet().removeIf(new Predicate() { // from class: io.github.xyz1001.pdsync.android.prepare.ApkArchive$$ExternalSyntheticLambda0
             @Override // java.util.function.Predicate

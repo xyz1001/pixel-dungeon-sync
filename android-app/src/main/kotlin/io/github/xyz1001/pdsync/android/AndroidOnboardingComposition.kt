@@ -1,16 +1,11 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.AndroidHostMessages.*
+
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.ui.Modifier
 import pdsync.SaveSummary
-import pdsync.OnboardingKind
 import pdsync.SyncHistory
-import pdsync.android.app.AndroidSyncFacade
 import pdsync.presentation.HistoryPresentation
 
 /** Thin Android host. Path resolution, read/proof checks and operations stay in MainActivity. */
@@ -18,7 +13,7 @@ object AndroidOnboardingComposition {
     @JvmStatic
     fun showGameSelection(activity: ComponentActivity, state: SharedGameSelectionState, actions: SharedGameSelectionActions) {
         activity.setContent {
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+            AndroidAppViewport {
                 SharedGameSelectionScreen(state, actions)
             }
         }
@@ -28,7 +23,7 @@ object AndroidOnboardingComposition {
     @JvmStatic
     fun showSettings(activity: ComponentActivity, state: SharedSettingsState, actions: SharedSettingsActions) {
         activity.setContent {
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+            AndroidAppViewport {
                 SharedSettingsScreen(state, actions)
             }
         }
@@ -86,86 +81,29 @@ object AndroidOnboardingComposition {
             override fun copyDiagnostics() = copyDiagnostics.run()
         }
         activity.setContent {
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+            AndroidAppViewport {
                 SharedSavePathScreen(state, actions, game)
-            }
-        }
-    }
-
-    /** Map the actual facade observation; presentation counts never prove equality or permission. */
-    @JvmStatic
-    fun showComparison(
-        activity: ComponentActivity,
-        observed: AndroidSyncFacade.Inspection?,
-        history: SyncHistory?,
-        game: SharedGameIdentity?,
-        localDevice: String,
-        cloudVerified: Boolean,
-        restoreSupported: Boolean,
-        configured: Boolean,
-        pageActive: Boolean,
-        busy: Boolean,
-        selectedProgress: SharedProgressChoice?,
-        selectedId: String?,
-        notice: String,
-        details: String,
-        canCopyDiagnostics: Boolean,
-        confirmation: SharedComparisonConfirmation?,
-        feedbackError: Boolean,
-        actions: SharedComparisonActions,
-    ) {
-        val kind = observed?.kind?.let { runCatching { OnboardingKind.valueOf(it) }.getOrDefault(OnboardingKind.BLOCKED) }
-        val summary = savePathSummary(history?.summary)
-        val state = SharedComparisonState(
-            kind = kind,
-            cloudVerified = cloudVerified,
-            needsRestoreRecovery = observed?.needsRestoreRecovery == true,
-            retryablePending = observed?.isRetryablePending == true,
-            canCompleteWithoutTransfer = observed?.canCompleteWithoutTransfer == true,
-            canAdoptRemote = observed?.canAdoptRemote == true,
-            canKeepLocalProgress = observed?.canKeepLocalProgress == true,
-            restoreSupported = restoreSupported,
-            pageActive = pageActive,
-            configured = configured,
-            busy = busy,
-            game = game,
-            localLabel = history?.currentName?.takeIf(String::isNotBlank) ?: localDevice,
-            localDetails = summary?.let { (listOf(it.headline) + it.slots).joinToString("\n") }.orEmpty(),
-            localFileCount = observed?.localFileCount,
-            remoteChoices = observed?.remoteVersions.orEmpty().map { remote ->
-                SharedComparisonRemoteChoice(remote.snapshotId, remote.displayName,
-                    listOfNotNull(remote.deviceLabel, HistoryPresentation.time(remote.capturedAt), remote.versionSummary)
-                        .filter(String::isNotBlank).joinToString(" · "))
-            },
-            selectedProgress = selectedProgress,
-            selectedId = selectedId,
-            notice = notice,
-            details = details,
-            canCopyDiagnostics = canCopyDiagnostics,
-            confirmation = confirmation,
-            feedbackError = feedbackError,
-        )
-        activity.setContent {
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedComparisonScreen(state, actions)
             }
         }
     }
 
     /** Same physical home/history as desktop; target lookup deliberately uses the full history. */
     @JvmStatic
+    @JvmOverloads
     fun showHome(
         activity: ComponentActivity,
         history: SyncHistory?,
         historyPage: Int,
         game: SharedGameIdentity?,
         status: String,
+        statusKind: SharedHomeStatusKind,
         pageActive: Boolean,
         busy: Boolean,
         canUpload: Boolean,
         canRestore: Boolean,
         canLaunch: Boolean,
         pending: SharedHomeOperation,
+        archiveLoading: Boolean,
         selectedId: String?,
         explicitSelection: String?,
         content: SharedHomeContent,
@@ -173,14 +111,21 @@ object AndroidOnboardingComposition {
         noticeError: Boolean,
         details: String,
         actions: SharedHomeActions,
+        naming: SharedHistoryNamingController,
+        canAppreciate: Boolean = false,
+        canRefreshHistory: Boolean = false,
     ) {
         val targetId = selectedId ?: history?.defaultSnapshot
         val target = history?.cloud?.firstOrNull { it.snapshot.id == targetId }
         val state = SharedHomeState(
             game = game,
             status = status,
+            statusKind = statusKind,
+            canAppreciate = canAppreciate,
+            canRefreshHistory = canRefreshHistory,
             pageActive = pageActive,
             busy = busy,
+            archiveLoading = archiveLoading,
             canUpload = canUpload,
             canRestore = canRestore,
             canLaunch = canLaunch,
@@ -191,19 +136,19 @@ object AndroidOnboardingComposition {
                     snapshotId = snapshot.id,
                     name = history.aliases[snapshot.id]?.takeIf(String::isNotBlank)
                         ?: snapshot.directoryMetadata?.displayName?.takeIf(String::isNotBlank)
-                        ?: "存档 ${commit.id.take(6)}",
-                    source = snapshot.metadata?.device?.label ?: "来源未知",
+                        ?: SAVE_SHORT_ID.text(commit.id.take(6)),
+                    source = snapshot.metadata?.device?.label ?: UNKNOWN_SOURCE.text(),
                     time = HistoryPresentation.time(snapshot.metadata?.latestFileModifiedAt),
                     notice = if (content.restoreUnnecessary)
-                        "本机已是此进度，无需恢复。" else "",
+                        THIS_DEVICE_ALREADY_HAS_THIS_PROGRESS_NO.text() else "",
                 )
             },
             selectedSnapshotId = explicitSelection?.takeIf { it == selectedId },
             emptyTargetMessage = when {
-                selectedId != null -> "所选存档不在当前已验证历史中，请重新检查。"
-                history == null -> "正在读取恢复目标…"
-                history.graph.tips.size > 1 -> "请选择要恢复的云端分支"
-                else -> "暂无可恢复的云端存档"
+                selectedId != null -> THE_SELECTED_SAVE_IS_NOT_IN_THE.text()
+                history == null -> READING_RESTORE_TARGETS.text()
+                history.graph.tips.size > 1 -> SELECT_THE_CLOUD_BRANCH_TO_RESTORE.text()
+                else -> NO_CLOUD_SAVES_ARE_AVAILABLE_TO_RESTORE.text()
             },
             history = history?.let { HistoryPresentation.from(it, historyPage) },
             notice = notice,
@@ -211,8 +156,8 @@ object AndroidOnboardingComposition {
             details = details,
         )
         activity.setContent {
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedHomeScreen(state, actions)
+            AndroidAppViewport {
+                SharedHomeScreen(state, actions, naming = naming.naming)
             }
         }
     }

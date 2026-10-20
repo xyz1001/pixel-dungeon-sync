@@ -12,8 +12,10 @@ class GameIconContract(unittest.TestCase):
     def test_both_current_selection_types_supply_only_their_own_icon(self):
         identity = body(MAIN, 'private SharedGameIdentity selectedGameIdentity()')
         self.assertIn('AndroidGameIcon.load(this, this.rootGame.gamePackage, this.rootGame.sourceApkSetSha256, null)', identity)
-        self.assertIn('AndroidGameIcon.load(this, this.prepared.gamePackage, this.prepared.sourceApkSetSha256, this.prepared.gameApk)', identity)
-        self.assertEqual(2, identity.count('new SharedGameIdentity('))
+        self.assertIn('AndroidGameIcon.loadArchive(this, this.prepared.gamePackage, this.prepared.gameApk)', identity)
+        self.assertEqual(4, identity.count('new SharedGameIdentity('))
+        self.assertIn("this.selectedInstalledGame.packageName", identity)
+        self.assertIn("this.installedBridge.gamePackage", identity)
         self.assertIn('return null;', identity)
 
     def test_adapter_is_metadata_only_and_has_no_persistent_selection_writes(self):

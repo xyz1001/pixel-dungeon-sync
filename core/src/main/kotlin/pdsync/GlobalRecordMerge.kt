@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 /** The three persistent global bundles are independent merge domains, never one all-or-nothing blob. */
 internal object GlobalRecordMerge {
  data class Result(val files: Map<String,ByteArray>,val decisions: List<String>)
@@ -7,7 +8,7 @@ internal object GlobalRecordMerge {
  fun plan(base: Map<String,ByteArray>, branches: List<Map<String,ByteArray>>): Result {
   require(branches.isNotEmpty())
   val keys=(base.keys+branches.flatMap { it.keys }).sorted()
-  if(keys.any { it !in supported })globalFail("存在不支持的全局文件")
+  if(keys.any { it !in supported })globalFail(CoreMessages.UNSUPPORTED_GLOBAL_FILES_FOUND.text())
   val output=linkedMapOf<String,ByteArray>();val decisions=mutableListOf<String>()
   fun same(a:ByteArray?,b:ByteArray?)=if(a==null)b==null else b!=null&&a.contentEquals(b)
   for(path in keys) {
@@ -23,11 +24,11 @@ internal object GlobalRecordMerge {
     "badges.dat" -> BadgeMerge.merge(before,inputs)
     "journal.dat" -> JournalMerge.merge(before,inputs)
     "rankings.dat" -> RankingsMerge.merge(before,inputs)
-    else -> globalFail("不支持的全局文件 $path")
+    else -> globalFail(CoreMessages.UNSUPPORTED_GLOBAL_FILE_1_S.text(path))
    }
    // Reuse an exact original encoding if semantics match; otherwise write deterministic gzip JSON.
    output[path]=originals.zip(inputs).firstOrNull { it.second==result }?.first ?: GlobalBundles.encode(result)
-   decisions+="$path：通过 3.3.8 语义校验后合并 ${inputs.size} 个分支"
+   decisions+=CoreMessages.TEXT_1_S_MERGED_2_S_BRANCHES_AFTER_3_3_8_SEMANTIC_VALIDATION.text(path, inputs.size)
   }
   if(keys.any { path -> path in setOf("badges.dat","journal.dat") && branches.any { !same(base[path],it[path]) } })
    validateLegacyCatalogDefaults(base,branches,output)
@@ -48,17 +49,17 @@ internal object GlobalRecordMerge {
    val bundle=files["journal.dat"]?.let { GlobalBundles.decode(it,"journal.dat") } ?: return emptyMap()
    val classes=bundle["catalog_classes"] ?: return emptyMap()
    val names=globalStringSet(classes,"journal.dat/catalog_classes").toList()
-   val states=bundle["catalog_seen"] as? kotlinx.serialization.json.JsonArray ?: globalFail("旧徽章图鉴的发现数组缺失")
-   if(states.size!=names.size)globalFail("旧徽章图鉴的平行数组不完整")
+   val states=bundle["catalog_seen"] as? kotlinx.serialization.json.JsonArray ?: globalFail(CoreMessages.DISCOVERY_ARRAY_IS_MISSING_FROM_THE_LEGACY_BADGE_CATALOG.text())
+   if(states.size!=names.size)globalFail(CoreMessages.PARALLEL_ARRAYS_IN_THE_LEGACY_BADGE_CATALOG_ARE_INCOMPLETE.text())
    return names.mapIndexed { i,name -> name to globalBoolean(states[i],"journal.dat/catalog_seen") }.toMap()
   }
   val input=sources.map(::rows);val output=rows(result)
   if(flags.first())for(name in input.drop(1).flatMap { it.keys }.toSet()) {
    if(name !in input.first() && input.drop(1).any { it[name]==false })
-    globalFail("旧徽章驱动的图鉴状态可能回退，缺少已验证的分类迁移依据")
+    globalFail(CoreMessages.LEGACY_BADGE_DRIVEN_CATALOG_STATE_COULD_REGRESS_VERIFIED_CATEGORY_MIGRATION_INFORMATI.text())
   }
   for((name,seen) in output)if(!seen && input.indices.any { flags[it] && name !in input[it] })
-   globalFail("旧徽章与缺席的图鉴条目存在隐式发现状态，不能丢弃该状态")
+   globalFail(CoreMessages.LEGACY_BADGES_AND_MISSING_CATALOG_ENTRIES_IMPLY_DISCOVERY_STATE_THAT_CANNOT_BE_DISCAR.text())
  }
 
 }

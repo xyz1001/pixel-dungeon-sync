@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -27,8 +28,8 @@ fun contentSha256(files: Map<String, String>): String {
  require(files.size <= MAX_SNAPSHOT_FILES)
  val names = hashSetOf<String>()
  files.forEach { (path, digest) ->
-  require(safePath(path) && !isDirectoryMetadata(path) && names.add(path.lowercase(java.util.Locale.ROOT))) { "Invalid content path" }
-  require(digestPattern.matches(digest)) { "Invalid file digest" }
+  require(safePath(path) && !isDirectoryMetadata(path) && names.add(path.lowercase(java.util.Locale.ROOT))) { CoreMessages.VALIDATION_INVALID_CONTENT_PATH.text() }
+  require(digestPattern.matches(digest)) { CoreMessages.VALIDATION_INVALID_FILE_DIGEST.text() }
  }
  val sorted = files.keys.sortedWith { a, b ->
   val left=a.encodeToByteArray(); val right=b.encodeToByteArray()
@@ -48,7 +49,7 @@ fun contentSha256(files: Map<String, String>): String {
 /** Hashes each complete run relative to its own directory, so moving slots keeps content identity. */
 fun runContentHashes(files: Map<String,String>): Map<String,String> = files.keys.map { it.substringBefore('/') }
  .filter { slotPattern.matches(it) }.distinct().associateWith { slot ->
-  require("$slot/game.dat" in files) { "Incomplete run: $slot" }
+  require("$slot/game.dat" in files) { CoreMessages.VALIDATION_INCOMPLETE_RUN_1_S.text(slot) }
   contentSha256(files.filterKeys { it.startsWith("$slot/") }.mapKeys { it.key.removePrefix("$slot/") })
  }
 
@@ -73,13 +74,13 @@ fun runContentHashes(files: Map<String,String>): Map<String,String> = files.keys
  val runs: Map<String,RunIdentity> = emptyMap()
 ) {
  fun validated(files: Map<String,String>): DirectorySnapshotMetadata = also {
-  require(schema==1 && hashAlgorithm==CONTENT_HASH_ALGORITHM) { "Unsupported directory metadata" }
-  require(displayName==sanitizeSnapshotName(displayName)) { "Invalid snapshot name" }
-  require(contentSha256==pdsync.contentSha256(files)) { "Directory digest mismatch" }
+  require(schema==1 && hashAlgorithm==CONTENT_HASH_ALGORITHM) { CoreMessages.VALIDATION_UNSUPPORTED_DIRECTORY_METADATA.text() }
+  require(displayName==sanitizeSnapshotName(displayName)) { CoreMessages.VALIDATION_INVALID_SNAPSHOT_NAME.text() }
+  require(contentSha256==pdsync.contentSha256(files)) { CoreMessages.VALIDATION_DIRECTORY_DIGEST_MISMATCH.text() }
   val digests=runContentHashes(files)
-  require(runs.keys==digests.keys) { "Incomplete run identity map" }
+  require(runs.keys==digests.keys) { CoreMessages.VALIDATION_INCOMPLETE_RUN_IDENTITY_MAP.text() }
   runs.forEach { (slot,run) -> run.validated(); require(run.contentSha256==digests.getValue(slot)) }
-  val ids=runs.values.mapNotNull { it.runUUID }; require(ids.distinct()==ids) { "Duplicate run identity" }
+  val ids=runs.values.mapNotNull { it.runUUID }; require(ids.distinct()==ids) { CoreMessages.VALIDATION_DUPLICATE_RUN_IDENTITY.text() }
  }
 }
 
@@ -121,7 +122,7 @@ class DirectoryMetadataStore(private val root: Path,
    requireUniqueJsonKeys(text)
    SidecarRead.Valid(json.decodeFromString<DirectorySidecar>(text).validated())
   }
- } catch(e: Exception) { SidecarRead.Damaged(e.message ?: "Invalid directory metadata") }
+ } catch(e: Exception) { SidecarRead.Damaged(e.message ?: CoreMessages.VALIDATION_INVALID_DIRECTORY_METADATA.text()) }
 
  fun write(value: DirectorySidecar) {
   value.validated(); SafePaths.directory(root)
@@ -154,7 +155,7 @@ class DirectoryMetadataStore(private val root: Path,
  }
 
  fun rename(name: String, files: Map<String,String>): DirectorySnapshotMetadata {
-  require(read() !is SidecarRead.Damaged) { "目录元数据损坏，未覆盖原文件" }
+  require(read() !is SidecarRead.Damaged) { CoreMessages.DIRECTORY_METADATA_IS_CORRUPT_THE_ORIGINAL_FILE_WAS_NOT_OVERWRITTEN.text() }
   observe(files)
   val old=(read() as SidecarRead.Valid).value
   write(old.copy(displayName=sanitizeSnapshotName(name)))
@@ -163,10 +164,10 @@ class DirectoryMetadataStore(private val root: Path,
 
  /** Explicit same-run/new-run choice is bound to the freshly observed complete file set. */
  fun confirmRun(slot: String, expectedFiles: Map<String,String>, sameRun: Boolean): DirectorySnapshotMetadata {
-  require(read() !is SidecarRead.Damaged) { "目录元数据损坏，无法确认单局身份" }
+  require(read() !is SidecarRead.Damaged) { CoreMessages.DIRECTORY_METADATA_IS_CORRUPT_RUN_IDENTITIES_CANNOT_BE_VERIFIED.text() }
   observe(expectedFiles)
   val old=(read() as SidecarRead.Valid).value; val run=old.runs.getValue(slot)
-  val id=if(sameRun)requireNotNull(run.previousRunUUID) { "缺少可确认的来源身份" } else UUID.randomUUID().toString()
+  val id=if(sameRun)requireNotNull(run.previousRunUUID) { CoreMessages.NO_VERIFIABLE_SOURCE_IDENTITY.text() } else UUID.randomUUID().toString()
   write(old.copy(runs=old.runs+(slot to RunIdentity(id,run.contentSha256))))
   return observe(expectedFiles)
  }

@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,7 +34,7 @@ class DefaultSavePathsTest {
  @Test fun linuxRejectsEmptyXdgInsteadOfUsingTheHomeFallbackOrFilesystemRoot() {
   val error = assertFailsWith<IllegalArgumentException> { resolve("Linux", environment = mapOf("XDG_DATA_HOME" to "")) }
   assertTrue(error.message!!.contains("XDG_DATA_HOME"))
-  assertTrue(error.message!!.contains("no fallback"))
+  assertEquals(CoreMessages.TEXT_1_S_MUST_BE_A_NONEMPTY_ABSOLUTE_PATH_TO_RESOLVE_SHATTERED_S_DEFAULT_SAVE_DIRECTORY_NO.text("XDG_DATA_HOME"), error.message)
  }
 
  @Test fun linuxRejectsRelativeXdgInsteadOfUsingWorkingDirectory() {
@@ -99,7 +100,7 @@ class DefaultSavePathsTest {
   assertEquals("/Users/Tester/Library/Application Support/Shattered Pixel Dungeon", resolve("Mac", "/Users/Tester"))
   listOf("Darwin", "macOS", "linux", "windows 11", "Plan 9", "", "Android").forEach { unsupported ->
    val error = assertFailsWith<IllegalArgumentException> { resolve(unsupported) }
-   assertTrue(error.message!!.contains("No verified Shattered default save directory"))
+   assertEquals(CoreMessages.NO_VERIFIED_SHATTERED_DEFAULT_SAVE_DIRECTORY_FOR_OPERATING_SYSTEM_1_S.text(unsupported), error.message)
   }
  }
 

@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.json.*
 
 /** Shattered 3.3.8 badges.dat: additive badge names plus official downward replacement closure.
@@ -8,8 +9,8 @@ import kotlinx.serialization.json.*
  */
 internal object BadgeMerge {
  fun merge(base: JsonObject?, branches: List<JsonObject>): JsonObject {
-  if(branches.isEmpty())globalFail("badges.dat 缺少合并分支")
-  val old=base?.let { globalStringSet(it["badges"], "badges.dat/badges 基线") }.orEmpty()
+  if(branches.isEmpty())globalFail(CoreMessages.BADGES_DAT_HAS_NO_BRANCHES_TO_MERGE.text())
+  val old=base?.let { globalStringSet(it["badges"], CoreMessages.BADGES_DAT_BADGES_BASELINE.text()) }.orEmpty()
   val sets=branches.map { globalStringSet(it["badges"], "badges.dat/badges") }
   val result=mergeOpaqueFields(base,branches,setOf("badges"),"badges.dat")
   // Preserve earned baseline progress even after a branch resets its badge set.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="38"
-    android:versionName="0.5.17-root-test"
+    android:versionCode="89"
+    android:versionName="0.5.68-test"
     android:compileSdkVersion="36"
     android:compileSdkVersionCodename="16"
     package="io.github.xyz1001.pdsync.android"
@@ -21,6 +21,13 @@
         android:protectionLevel="signature"/>
     <uses-permission android:name="io.github.xyz1001.pdsync.android.ACCESS_BRIDGE"/>
     <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="content" android:mimeType="application/vnd.android.package-archive"/>
+        </intent>
+        <intent><action android:name="android.content.pm.action.CONFIRM_INSTALL"/></intent>
+        <intent><action android:name="android.intent.action.INSTALL_PACKAGE"/></intent>
+        <intent><action android:name="android.intent.action.UNINSTALL_PACKAGE"/></intent>
         <package android:name="io.github.xyz1001.pdsync.bridge"/>
         <intent>
             <action android:name="android.intent.action.MAIN"/>
@@ -33,7 +40,9 @@
     <application
         android:name="io.github.xyz1001.pdsync.android.DiagnosticApplication"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:label="像素地牢同步 · 测试版"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:debuggable="false"
         android:allowBackup="false"
         android:supportsRtl="true"
@@ -53,6 +62,11 @@
         <receiver
             android:name="io.github.xyz1001.pdsync.android.InstallResultReceiver"
             android:exported="false"/>
+        <provider
+            android:name="io.github.xyz1001.pdsync.android.ExternalApkProvider"
+            android:authorities="io.github.xyz1001.pdsync.android.external-apk"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
         <service
             android:name="io.github.xyz1001.pdsync.android.AutoSyncService"
             android:exported="false"

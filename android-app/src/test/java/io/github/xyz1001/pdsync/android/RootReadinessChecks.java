@@ -48,7 +48,7 @@ public final class RootReadinessChecks {
         check(!metadata.canContinue(), "PM-only verification is not Root authorization");
         check(metadata.canRequestRootAccess(), "Stored selection may request access without a separate restart authorization button");
         check(metadata.installationDescription().contains("尚不代表 Root 权限"), "Identity copy does not claim Root readiness");
-        check(metadata.accessDescription().contains("不会自动请求 Root"), "Unrequested startup access is explicitly excluded");
+        check(metadata.accessDescription().equals(pdsync.i18n.AndroidMessages.INSTALLATION_READINESS_18.text()), "Unverified Root status uses its localized metadata-only copy");
         check(InstallationReadiness.classify("ROOT_AUTH_REQUIRED") == InstallationReadiness.AccessStatus.SECURITY_ERROR, "Authorization failure classified");
         check(InstallationReadiness.classify("ROOT_DENIED_OR_EXITED") == InstallationReadiness.AccessStatus.IPC_ERROR, "Denial classified without fake success");
         check(InstallationReadiness.classify("ROOT_RUNNER_TIMEOUT") == InstallationReadiness.AccessStatus.IPC_ERROR, "Watchdog timeout never implies completion");

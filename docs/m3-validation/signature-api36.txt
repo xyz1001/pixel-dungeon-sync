@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): false
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=PDSync Development, OU=Development
+Signer #1 certificate SHA-256 digest: c8abff58567323eec90ae8782f00cc828568a93fa51b10632051ba2003e3db79
+Signer #1 certificate SHA-1 digest: 554001c1416fdd071b4f053f1773953acde455f8
+Signer #1 certificate MD5 digest: b1ca3e951bb8267d532121c105790c4c
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 3072
+Signer #1 public key SHA-256 digest: 34afd50b91d3b2e522eff541f59d51618875027ea815552b4da969f7ed29a4be
+Signer #1 public key SHA-1 digest: 0d4d2d983cf2d8f0aae4a3d829de7b24a122b799
+Signer #1 public key MD5 digest: 7aed979f052ce845a61215a203864a0b

@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -91,7 +93,7 @@ internal class DesktopSavePathAdapter(
   if (!active || previewBlocked || pendingPreview != null || !state.canRequestRead ||
    state.readStatus != SharedSavePathReadStatus.UNREAD) return null
   state = state.copy(summary = null, canContinue = false,
-   readStatus = SharedSavePathReadStatus.READING, notice = "正在检查存档…")
+   readStatus = SharedSavePathReadStatus.READING, notice = DesktopMessages.CHECKING_SAVES.text())
   return Preview(state.path, revision).also { pendingPreview = it }
  }
 
@@ -114,8 +116,8 @@ internal class DesktopSavePathAdapter(
     else -> SharedSavePathReadStatus.FAILED
    },
    notice = when {
-    safeMissing -> "下一步将创建此存档目录。"
-    result.isFailure -> NoviceCopy.feedback(result.exceptionOrNull()?.message.orEmpty(), "无法读取存档，请重试。")
+    safeMissing -> DesktopMessages.THIS_SAVE_FOLDER_WILL_BE_CREATED_IN_THE_NEXT_STEP.text()
+    result.isFailure -> NoviceCopy.feedback(result.exceptionOrNull()?.message.orEmpty(), DesktopMessages.CANNOT_READ_SAVES_PLEASE_TRY_AGAIN.text())
     else -> ""
    })
   return continueRequested
@@ -124,7 +126,7 @@ internal class DesktopSavePathAdapter(
  fun showError(message: String?) {
   pendingPreview = null
   previewBlocked = true
-  state = state.copy(summary = null, notice = NoviceCopy.feedback(message.orEmpty(), "无法读取存档，请重试。"),
+  state = state.copy(summary = null, notice = NoviceCopy.feedback(message.orEmpty(), DesktopMessages.CANNOT_READ_SAVES_PLEASE_TRY_AGAIN.text()),
    details = message.orEmpty(), canContinue = false,
    continueAfterRead = false, readStatus = SharedSavePathReadStatus.FAILED)
  }
@@ -135,7 +137,7 @@ internal fun inspectSelectedSaveDirectory(root: Path): SaveSummary {
  val summary = SaveSummary.read(root)
  require(summary.files > 0 || Files.list(root).use { children ->
   children.allMatch { isDirectoryMetadata(it.fileName.toString()) }
- }) { "此目录没有可识别存档，请选择档案根目录或空目录" }
+ }) { DesktopMessages.NO_RECOGNIZED_SAVES_IN_THIS_FOLDER_SELECT_THE_PROFILE_ROOT_OR_AN_EMPTY_FOLD.text() }
  return summary
 }
 

@@ -19,4 +19,4 @@ mapfile -t STUBS < <(find "$HERE/fixtures/game-icon-stubs" -name '*.kt' | sort)
   "${STUBS[@]}" \
   "$REPO/android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidGameIcon.kt" \
   "$HERE/fixtures/game-icon-checks/AndroidGameIconChecks.kt"
-"$JAVA" -cp "$OUT/checks.jar$RUNTIME_CP" io.github.xyz1001.pdsync.android.AndroidGameIconChecks
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT/checks.jar$RUNTIME_CP" io.github.xyz1001.pdsync.android.AndroidGameIconChecks

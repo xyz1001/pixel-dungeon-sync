@@ -1,7 +1,9 @@
 package pdsync.android.app
 
+import pdsync.i18n.CoreMessages
 import java.nio.file.Path
 import pdsync.GameAdapter
+import pdsync.GameCloudIdentity
 import pdsync.Shattered
 
 enum class AndroidMergePolicy { NONE, SHATTERED_896 }
@@ -12,9 +14,9 @@ data class AndroidSaveCapabilities @JvmOverloads constructor(
  val mergePolicy: AndroidMergePolicy = AndroidMergePolicy.NONE
 ) {
  init {
-  require((minimumRestoreVersion == null) == (maximumRestoreVersion == null)) { "Both save compatibility bounds are required." }
-  if (minimumRestoreVersion != null) require(minimumRestoreVersion > 0 && maximumRestoreVersion!! >= minimumRestoreVersion) { "Invalid save compatibility range." }
-  if (mergePolicy == AndroidMergePolicy.SHATTERED_896) require(minimumRestoreVersion != null && 896 in minimumRestoreVersion..maximumRestoreVersion!!) { "Shattered 896 merge requires its verified restore capability." }
+  require((minimumRestoreVersion == null) == (maximumRestoreVersion == null)) { CoreMessages.ANDROID_BOTH_SAVE_COMPATIBILITY_BOUNDS_ARE_REQUIRED.text() }
+  if (minimumRestoreVersion != null) require(minimumRestoreVersion > 0 && maximumRestoreVersion!! >= minimumRestoreVersion) { CoreMessages.ANDROID_INVALID_SAVE_COMPATIBILITY_RANGE.text() }
+  if (mergePolicy == AndroidMergePolicy.SHATTERED_896) require(minimumRestoreVersion != null && 896 in minimumRestoreVersion..maximumRestoreVersion!!) { CoreMessages.ANDROID_SHATTERED_896_MERGE_REQUIRES_ITS_VERIFIED_RESTORE_CAPABILITY.text() }
  }
 }
 
@@ -22,27 +24,27 @@ data class AndroidGameIdentity @JvmOverloads constructor(
  val packageName: String,
  val displayName: String,
  val originalSourceIdentity: String,
- val namespace: String,
  val saveCapabilities: AndroidSaveCapabilities = AndroidSaveCapabilities()
 ) {
+ /** Cloud routing is determined only by the verified application package. */
+ val namespace: String = GameCloudIdentity.namespace(packageName)
  init {
-  require(packageName.length <= 255 && Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+").matches(packageName)) { "The selected APK has no valid application package name." }
-  require(displayName.length in 1..256 && displayName.none { it.isISOControl() }) { "The selected game label is invalid." }
-  require(Regex("[0-9a-f]{64}").matches(originalSourceIdentity)) { "Original APK source identity has not been verified." }
-  require(Regex("[A-Za-z0-9_-]{1,96}").matches(namespace)) { "Cloud game namespace must be a safe path segment." }
+  require(packageName.length <= 255 && Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+").matches(packageName)) { CoreMessages.ANDROID_THE_SELECTED_APK_HAS_NO_VALID_APPLICATION_PACKAGE_NAME.text() }
+  require(displayName.length in 1..256 && displayName.none { it.isISOControl() }) { CoreMessages.ANDROID_THE_SELECTED_GAME_LABEL_IS_INVALID.text() }
+  require(Regex("[0-9a-f]{64}").matches(originalSourceIdentity)) { CoreMessages.ANDROID_ORIGINAL_APK_SOURCE_IDENTITY_HAS_NOT_BEEN_VERIFIED.text() }
  }
  companion object {
-  const val KNOWN_SHATTERED_ORIGIN = "32cd68da7bd2cdb467330cf33ca7c0e9b18eaae94ecf0b4b944313def1732f89"
-  @JvmStatic fun defaultNamespace(originalSourceIdentity: String): String {
-   require(Regex("[0-9a-f]{64}").matches(originalSourceIdentity)) { "Original source identity is invalid." }
-   return if (originalSourceIdentity == KNOWN_SHATTERED_ORIGIN) "shattered" else "android-$originalSourceIdentity"
-  }
+  /** Current state never imports baselines, queues, or recovery metadata from test generations. */
+  const val LOCAL_STATE_GENERATION = "package-current-v1"
+  @JvmStatic fun forPackage(packageName: String, displayName: String, originalSourceIdentity: String): AndroidGameIdentity =
+   AndroidGameIdentity(packageName, displayName, originalSourceIdentity)
  }
 }
 
 class AndroidGameAdapter(private val identity: AndroidGameIdentity): GameAdapter {
  override val id get() = identity.namespace
+ override val packageName get() = identity.packageName
  override fun includes(name: String) = Shattered.includes(name)
  override fun compatible(source: String, target: String) = source == target
- override fun launchCommand(executable: Path): List<String> = error("Android games are launched through Android, not a desktop executable.")
+ override fun launchCommand(executable: Path): List<String> = error(CoreMessages.ANDROID_ANDROID_GAMES_ARE_LAUNCHED_THROUGH_ANDROID_NOT_A_DESKTOP_EXECUTABLE.text())
 }

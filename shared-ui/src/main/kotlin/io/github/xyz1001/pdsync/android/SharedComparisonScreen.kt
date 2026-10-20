@@ -1,15 +1,19 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.LinearProgressIndicator
 import androidx.compose.material.MaterialTheme
@@ -25,53 +29,57 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import pdsync.NoviceCopy
 import pdsync.OnboardingKind
 
-/** One physical Step 4 screen. Rendering does not inspect files or contact the cloud. */
+/** Retained comparison/recovery component. The ordinary setup flow has only two steps. */
 @Composable
-fun SharedComparisonScreen(state: SharedComparisonState, actions: SharedComparisonActions) {
-    SharedConnectionTheme { SharedComparisonContent(state, actions) }
+fun SharedComparisonScreen(
+    state: SharedComparisonState,
+    actions: SharedComparisonActions,
+    appreciation: (@Composable () -> Unit)? = null,
+) {
+    SharedConnectionTheme { SharedComparisonContent(state, actions, appreciation) }
 }
 
 @Composable
-private fun SharedComparisonContent(state: SharedComparisonState, actions: SharedComparisonActions) {
+private fun SharedComparisonContent(
+    state: SharedComparisonState,
+    actions: SharedComparisonActions,
+    appreciation: (@Composable () -> Unit)?,
+) {
     val currentState by rememberUpdatedState(state)
     val currentActions by rememberUpdatedState(actions)
     val interactions = remember { SharedComparisonInteractions({ currentState }, { currentActions }) }
-    SharedAppShell(title = "选择存档", eyebrow = "4 / 4", game = state.game,
+    SharedAppShell(title = SharedMessages.CHOOSE_SAVE.text(), eyebrow = "4 / 4", game = state.game, onboardingStep = 4,
         footer = {
-            if (state.showsBack) SharedActionButton("上一步", interactions::back,
+            if (state.showsBack) SharedActionButton(SharedMessages.BACK_STEP.text(), interactions::back,
                 enabled = state.canInteract && state.activeConfirmation == null, style = SharedButtonStyle.TEXT)
             Spacer(Modifier.weight(1f))
             SharedActionButton(state.primaryLabel, { interactions.performPrimary(state.primary) }, enabled = state.primaryEnabled)
         }) {
         if (state.isSimpleCompletion) {
-            Column(Modifier.fillMaxWidth().heightIn(min = 285.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            Column(Modifier.fillMaxWidth().heightIn(min = if (appreciation == null) 285.dp else 64.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 Text(state.headline, fontSize = 29.sp, lineHeight = 36.sp, fontWeight = FontWeight(650))
-                ComparisonNotice(state)
-                if (state.kind == OnboardingKind.IDENTICAL) ComparisonDetails(state, interactions)
+                if (state.kind != OnboardingKind.IDENTICAL || state.feedbackError) ComparisonNotice(state)
             }
         } else {
-            Text(state.headline, color = if (state.primary == SharedComparisonPrimary.REFRESH) SharedUiColors.muted
-                else MaterialTheme.colors.onSurface, fontSize = 16.sp, lineHeight = 25.6.sp)
-            if (state.offers(SharedProgressChoice.LOCAL) || state.offers(SharedProgressChoice.CLOUD)) {
-                Spacer(Modifier.height(16.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val hasChoices = state.offers(SharedProgressChoice.LOCAL) || state.offers(SharedProgressChoice.CLOUD)
+            if (hasChoices) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (state.offers(SharedProgressChoice.LOCAL)) ComparisonChoiceCard(
-                        title = "使用本机进度", summary = listOf(state.localLabel, state.localDetails)
+                        title = SharedMessages.USE_LOCAL.text(), summary = listOf(state.localLabel, state.localDetails)
                             .filter(String::isNotBlank).joinToString(" · "),
                         selected = state.selectedProgress == SharedProgressChoice.LOCAL,
                         enabled = state.canInteract && state.configured && state.activeConfirmation == null,
                         onClick = { interactions.selectProgress(SharedProgressChoice.LOCAL) },
                     )
                     if (state.offers(SharedProgressChoice.CLOUD)) ComparisonChoiceCard(
-                        title = "使用云端进度", summary = state.remoteChoices.singleOrNull()?.let {
+                        title = SharedMessages.USE_CLOUD.text(), summary = state.remoteChoices.singleOrNull()?.let {
                             listOf(it.label, it.summary).filter(String::isNotBlank).joinToString(" · ")
                         }.orEmpty(),
                         selected = state.selectedProgress == SharedProgressChoice.CLOUD,
@@ -79,17 +87,23 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
                         onClick = { interactions.selectProgress(SharedProgressChoice.CLOUD) },
                     )
                 }
+            } else {
+                Text(state.headline, color = if (state.primary == SharedComparisonPrimary.REFRESH) SharedUiColors.muted
+                    else MaterialTheme.colors.onSurface, fontSize = 16.sp, lineHeight = 25.6.sp)
             }
-            ComparisonNotice(state)
+            if (!hasChoices || state.feedbackError) ComparisonNotice(state)
             if (state.primary in setOf(SharedComparisonPrimary.REFRESH, SharedComparisonPrimary.RETRY_UPLOAD,
                     SharedComparisonPrimary.OPEN_RECOVERY)) ComparisonDetails(state, interactions)
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
+        appreciation?.let { content ->
+            Column(Modifier.fillMaxWidth().padding(top = 20.dp)) { content() }
+        }
     }
     state.confirmationPresentation?.let { presentation ->
         SharedConfirmationDialog(presentation, interactions::confirm, interactions::previewMerge, interactions::cancel) {
             if (state.activeConfirmation?.stage == SharedComparisonConfirmationStage.CONFLICT && (state.remoteChoices.size > 1 || !state.hasSelectedRemote)) {
-                Text("选择云端存档", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(SharedMessages.CHOOSE_CLOUD_SAVE.text(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 state.remoteChoices.forEach { choice ->
                     ComparisonChoiceCard(choice.label, choice.summary, state.selectedId == choice.snapshotId,
                         enabled = state.canInteract && state.configured,
@@ -102,17 +116,23 @@ private fun SharedComparisonContent(state: SharedComparisonState, actions: Share
 
 @Composable
 internal fun ComparisonChoiceCard(title: String, summary: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(14.dp), color = if (selected) Color(0xFFF0F6F1) else MaterialTheme.colors.surface,
-        border = BorderStroke(1.dp, if (selected) MaterialTheme.colors.primary else SharedUiColors.line)) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            RadioButton(selected, onClick = null, enabled = enabled,
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    // M3 .choice tokens; selection remains explicit through the real radio and teal outline.
+    // Hover only changes presentation and never grants an otherwise disabled capability.
+    Surface(Modifier.fillMaxWidth().clickable(interactionSource = interactionSource,
+        indication = LocalIndication.current, enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (enabled && hovered) SharedUiColors.background else MaterialTheme.colors.surface,
+        border = BorderStroke(1.dp, if (selected || enabled && hovered) MaterialTheme.colors.primary else SharedUiColors.line)) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            RadioButton(selected, onClick = null, enabled = enabled, modifier = Modifier.size(18.dp),
                 colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colors.primary,
                     unselectedColor = SharedUiColors.muted))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
-                if (summary.isNotBlank()) Text(summary, fontSize = 12.sp, lineHeight = 19.2.sp, color = SharedUiColors.muted)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, fontSize = 13.sp, lineHeight = 19.5.sp, fontWeight = FontWeight.Bold)
+                if (summary.isNotBlank()) Text(summary, fontSize = 12.sp, lineHeight = 18.sp, color = SharedUiColors.muted)
             }
         }
     }
@@ -121,7 +141,7 @@ internal fun ComparisonChoiceCard(title: String, summary: String, selected: Bool
 @Composable
 private fun ComparisonNotice(state: SharedComparisonState) {
     val notice = state.notice.takeIf(String::isNotBlank)?.let {
-        NoviceCopy.feedback(it, if (state.feedbackError) "操作未完成，请重试。" else "请查看详细信息。")
+        NoviceCopy.feedback(it, if (state.feedbackError) SharedMessages.ACTION_INCOMPLETE.text() else SharedMessages.SEE_DETAILS.text())
     }
     if (notice != null && notice != state.headline) Text(notice, Modifier.padding(top = 12.dp),
         color = if (state.feedbackError) MaterialTheme.colors.error else SharedUiColors.muted,
@@ -135,11 +155,11 @@ private fun ComparisonDetails(state: SharedComparisonState, interactions: Shared
         state.remoteChoices.joinToString("\n") { listOf(it.label, it.summary).filter(String::isNotBlank).joinToString(" · ") },
         state.details).filter(String::isNotBlank).distinct().joinToString("\n\n")
     if (text.isBlank()) return
-    SharedActionButton(if (expanded) "收起详细信息" else "详细信息", { expanded = !expanded },
+    SharedActionButton(if (expanded) SharedMessages.HIDE_DETAILS.text() else SharedMessages.DETAILS.text(), { expanded = !expanded },
         style = SharedButtonStyle.TEXT)
     if (expanded) {
         Text(text, fontSize = 12.sp, lineHeight = 19.2.sp, color = SharedUiColors.muted)
-        if (state.canCopyDiagnostics && state.details.isNotBlank()) SharedActionButton("复制诊断", interactions::copyDiagnostics,
+        if (state.canCopyDiagnostics && state.details.isNotBlank()) SharedActionButton(SharedMessages.COPY_DIAGNOSTICS.text(), interactions::copyDiagnostics,
             style = SharedButtonStyle.TEXT, enabled = state.canInteract)
     }
 }

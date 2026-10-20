@@ -2,10 +2,12 @@ package pdsync
 
 import java.awt.FileDialog
 import java.awt.Frame
+import java.awt.GraphicsEnvironment
 import java.io.File
 import javax.swing.SwingUtilities
 import kotlin.test.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assumptions.assumeFalse
 
 class NativeGameChooserTest {
  @Test fun jarFilterIsCaseInsensitiveAndRejectsOtherFiles() {
@@ -23,6 +25,7 @@ class NativeGameChooserTest {
   assertEquals(File("folder with spaces", "game.JAR").absolutePath, NativeGameChooser.selection("folder with spaces", "game.JAR"))
  }
  @Test fun eachOpeningHasANewOwnedModalNativeDialogAndJarPattern() {
+  assumeFalse(GraphicsEnvironment.isHeadless(), "A real native dialog requires a graphical display")
   SwingUtilities.invokeAndWait {
    val parent = Frame()
    try {

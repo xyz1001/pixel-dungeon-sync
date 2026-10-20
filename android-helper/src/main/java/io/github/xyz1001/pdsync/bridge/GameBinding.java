@@ -52,8 +52,7 @@ public final class GameBinding {
                 try {
                     this.gameVersionCode = Long.parseLong(strValue7);
                     if (embedded) {
-                        if (!gamePackage.equals(str) || MainCallerPolicy.MAIN.equals(str)
-                                || !MainCallerPolicy.MAIN_SIGNER_SHA256.equals(value(map, "MAIN_APP_CERT_SHA256"))) throw invalid();
+                        if (!gamePackage.equals(str) || MainCallerPolicy.MAIN.equals(str)) throw invalid();
                         this.helperPackage = str; // The bridge is a component of the selected game.
                         this.authority = "io.github.xyz1001.pdsync.embedded.g" + originIdentity.substring(0, 32) + ".files";
                         return;

@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
@@ -82,12 +84,12 @@ internal class DesktopDiagnosticExport(
   if (!active.compareAndSet(false, true)) return DiagnosticExportResult.Ignored
   val trace = DiagnosticLog.begin(DiagnosticAction.EXPORT_LOGS, false)
   try {
-   val destination = try { choose(initial, "导出日志") }
+   val destination = try { choose(initial, DesktopMessages.EXPORT_LOGS.text()) }
    catch (failure: CancellationException) { throw failure }
    catch (failure: Exception) {
     trace.failure(DiagnosticStage.EXPORT, failure)
     trace.record(DiagnosticStage.FINISHED, DiagnosticResult.FAILED)
-    return DiagnosticExportResult.Failed("无法打开系统目录选择器，请稍后重试。")
+    return DiagnosticExportResult.Failed(DesktopMessages.CANNOT_OPEN_THE_SYSTEM_FOLDER_PICKER_PLEASE_TRY_AGAIN_LATER.text())
    }
    if (destination == null) {
     trace.record(DiagnosticStage.EXPORT, DiagnosticResult.CANCELED)
@@ -108,7 +110,7 @@ internal class DesktopDiagnosticExport(
    catch (failure: Exception) {
     trace.failure(DiagnosticStage.EXPORT, failure)
     trace.record(DiagnosticStage.FINISHED, DiagnosticResult.FAILED)
-    DiagnosticExportResult.Failed("导出失败，请检查目录权限和剩余空间。")
+    DiagnosticExportResult.Failed(DesktopMessages.EXPORT_FAILED_CHECK_FOLDER_PERMISSIONS_AND_AVAILABLE_SPACE.text())
    }
   } catch (failure: CancellationException) {
    trace.record(DiagnosticStage.EXPORT, DiagnosticResult.CANCELED)

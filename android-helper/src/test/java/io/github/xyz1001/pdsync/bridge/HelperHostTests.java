@@ -179,7 +179,7 @@ public final class HelperHostTests {
     static void embeddedIdentityTests(Path base) throws Exception {
         String game="test.embedded.game", origin="5".repeat(64);
         Map<String,String> metadata=new HashMap<>();
-        String[] values={"embedded-v1",game,origin,"android-"+origin,"6".repeat(64),"19","v19",MainCallerPolicy.MAIN_SIGNER_SHA256,"1"};
+        String[] values={"embedded-v1",game,origin,"android-"+origin,"6".repeat(64),"19","v19","8".repeat(64),"1"};
         for(int i=0;i<values.length;i++) metadata.put(GameBinding.PREFIX+GameBinding.EMBEDDED_METADATA_NAMES[i],values[i]);
         GameBinding binding=new GameBinding(metadata,game);
         check(binding.embedded && binding.helperPackage.equals(game) && binding.sharedUserId.isEmpty(),"embedded runtime has no helper or shared UID requirement");
@@ -206,16 +206,21 @@ public final class HelperHostTests {
         denied(()->binding.saveRoot("relative",own.toString()),"embedded relative data directory rejected");
         denied(()->new GameBinding(metadata,"test.different.game"),"embedded context package must match binding");
         for(String key:GameBinding.EMBEDDED_METADATA_NAMES) {
+            if ("MAIN_APP_CERT_SHA256".equals(key)) continue; // historical metadata is not an access pin
             Map<String,String> missing=new HashMap<>(metadata); missing.remove(GameBinding.PREFIX+key);
             denied(()->new GameBinding(missing,game),"required embedded metadata "+key);
         }
         for(String[] changed:new String[][]{{"BRIDGE_MODE","embedded-v2"},{"BRIDGE_RUNTIME_VERSION","2"},
-                {"MAIN_APP_CERT_SHA256","0".repeat(64)},{"BOUND_GAME_PACKAGE",MainCallerPolicy.MAIN},
+                {"BOUND_GAME_PACKAGE",MainCallerPolicy.MAIN},
                 {"BOUND_NAMESPACE_ID","android-other"},{"BOUND_ORIGIN_IDENTITY","bad"},
                 {"BOUND_SOURCE_APK_SHA256","bad"},{"BOUND_GAME_VERSION_CODE","9223372036854775808"}}) {
             Map<String,String> invalid=new HashMap<>(metadata); invalid.put(GameBinding.PREFIX+changed[0],changed[1]);
             denied(()->new GameBinding(invalid,game),"invalid embedded metadata "+changed[0]);
         }
+        metadata.put(GameBinding.PREFIX+"MAIN_APP_CERT_SHA256", "0".repeat(64));
+        check(new GameBinding(metadata,game).embedded, "historical main certificate is not a gate");
+        metadata.remove(GameBinding.PREFIX+"MAIN_APP_CERT_SHA256");
+        check(new GameBinding(metadata,game).embedded, "main certificate metadata is optional");
         MainCallerPolicy.requireIdentity(MainCallerPolicy.MAIN,10,42,10,new String[]{MainCallerPolicy.MAIN}); assertions++;
         denied(()->MainCallerPolicy.requireIdentity(MainCallerPolicy.MAIN,42,42,42,new String[]{MainCallerPolicy.MAIN}),"own game UID cannot call bridge");
         denied(()->MainCallerPolicy.requireIdentity("evil.pkg",10,42,10,new String[]{MainCallerPolicy.MAIN}),"claimed package cannot override Binder identity");

@@ -1,0 +1,26 @@
+设置中心
+Shattered Pixel Dungeon · 3.3.8
+游戏管理
+Shattered Pixel Dungeon · 3.3.8
+更换游戏
+云端连接
+内置同步服务
+连接设置
+自动备份
+已暂停自动上传
+开启自动备份
+使用引导
+重新查看初次配置步骤向导
+查看向导
+存档目录
+/synthetic/player/Shattered Pixel Dungeon
+更改路径
+返回首页
+
+ACTIONS
+更换游戏; disabled=false; bounds=Rect.fromLTRB(245.0, 145.0, 341.0, 187.0)
+连接设置; disabled=false; bounds=Rect.fromLTRB(245.0, 245.0, 341.0, 287.0)
+开启自动备份; disabled=false; bounds=Rect.fromLTRB(217.0, 336.0, 341.0, 378.0)
+查看向导; disabled=false; bounds=Rect.fromLTRB(245.0, 427.0, 341.0, 469.0)
+更改路径; disabled=false; bounds=Rect.fromLTRB(245.0, 527.0, 341.0, 569.0)
+返回首页; disabled=false; bounds=Rect.fromLTRB(29.0, 648.0, 109.0, 690.0)

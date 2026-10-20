@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -47,25 +49,25 @@ final class LegacyWebDavConnectionFile {
         }
         if (basicFileAttributesAttributes == null) {
             if (exists(file)) {
-                throw new IOException("旧版连接写入未完成，原文件已保留。");
+                throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_01.text());
             }
             return null;
         }
         if (!basicFileAttributesAttributes.isRegularFile() || basicFileAttributesAttributes.size() > 32804) {
-            throw new IOException("旧版连接数据已损坏。");
+            throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_02.text());
         }
         byte[] ciphertext = null;
         try (DataInputStream input = new DataInputStream(Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS))) {
-            if (input.readInt() != 1) throw new IOException("无法识别旧版连接格式。");
+            if (input.readInt() != 1) throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_03.text());
             int ivLength = input.readInt();
-            if (ivLength != 12) throw new IOException("旧版连接数据已损坏。");
+            if (ivLength != 12) throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_02.text());
             byte[] iv = new byte[ivLength];
             input.readFully(iv);
             int length = input.readInt();
-            if (length < 16 || length > 32768) throw new IOException("旧版连接数据已损坏。");
+            if (length < 16 || length > 32768) throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_02.text());
             ciphertext = new byte[length];
             input.readFully(ciphertext);
-            if (input.read() != -1) throw new IOException("旧版连接数据已损坏。");
+            if (input.read() != -1) throw new IOException(AndroidMessages.LEGACY_WEB_DAV_CONNECTION_FILE_02.text());
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, keyReader.read(), new GCMParameterSpec(128, iv));
             cipher.updateAAD(AAD);

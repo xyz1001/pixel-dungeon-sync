@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -21,13 +23,13 @@ final class ManagedAccountPanel {
         ManagedAccountFlow.View view = flow.view();
         if (view.image != null) image(activity, body, view.image);
         if (view.localUsername != null) {
-            label(activity, body, view.entitlementLoaded ? "用户名 " + view.username
-                    : "用户名（未验证） " + view.localUsername);
-            button(activity, body, "复制用户名", () -> flow.copyUsername(view.generation, username -> {
+            label(activity, body, view.entitlementLoaded ? AndroidMessages.MANAGED_ACCOUNT_PANEL_01.text() + view.username
+                    : AndroidMessages.MANAGED_ACCOUNT_PANEL_02.text() + view.localUsername);
+            button(activity, body, AndroidMessages.MANAGED_ACCOUNT_PANEL_03.text(), () -> flow.copyUsername(view.generation, username -> {
                 ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
-                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("用户名", username));
+                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText(AndroidMessages.MANAGED_ACCOUNT_PANEL_04.text(), username));
             }));
-            label(activity, body, "赞赏时请备注用户名");
+            label(activity, body, AndroidMessages.MANUAL_PAYMENT_COPY_01.text());
         }
         label(activity, body, ManagedAccountFlow.expiry(view));
         String accessStatus = ManagedAccountFlow.accessStatus(view);
@@ -37,8 +39,8 @@ final class ManagedAccountPanel {
         LinearLayout actions = new LinearLayout(activity);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         footer.addView(actions);
-        button(activity, actions, "返回", back);
-        button(activity, actions, "刷新", refresh).setEnabled(view.canRefresh);
+        button(activity, actions, AndroidMessages.MANAGED_ACCOUNT_PANEL_05.text(), back);
+        button(activity, actions, AndroidMessages.MANAGED_ACCOUNT_PANEL_06.text(), refresh).setEnabled(view.canRefresh);
     }
 
     private static void image(Activity activity, LinearLayout body, byte[] bytes) {
@@ -47,13 +49,13 @@ final class ManagedAccountPanel {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > 2048 || bounds.outHeight > 2048
                 || (long) bounds.outWidth * bounds.outHeight > 2_000_000) {
-            label(activity, body, "赞赏码无法显示，请刷新。");
+            label(activity, body, AndroidMessages.MANAGED_ACCOUNT_PANEL_07.text());
             return;
         }
         Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        if (bitmap == null) { label(activity, body, "赞赏码无法显示，请刷新。"); return; }
+        if (bitmap == null) { label(activity, body, AndroidMessages.MANAGED_ACCOUNT_PANEL_07.text()); return; }
         ImageView image = new ImageView(activity);
-        image.setContentDescription("赞赏码");
+        image.setContentDescription(AndroidMessages.MANAGED_ACCOUNT_PANEL_08.text());
         image.setImageBitmap(bitmap);
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);

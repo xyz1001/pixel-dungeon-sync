@@ -11,6 +11,8 @@ import java.lang.reflect.Proxy;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
@@ -75,7 +77,8 @@ public final class ManagedAccountClientChecks {
         Entitlement value = client.entitlement();
         check(count.get() == 1, "one requested read");
         check(value.username.equals(USER) && value.source.equals("managed_ledger"), "matched real ledger identity");
-        check(value.expiresMs == 1800000000000L && value.active && value.managed, "typed immutable metadata");
+        check(value.serverExpiresMs == 1800000000000L && value.expiresMs == previousYear(1800000000000L)
+                && !value.active && value.managed, "typed normalized metadata cannot authorize without server time");
         check(!value.toString().contains(USER) && !client.toString().contains(USER), "diagnostics hide account");
         check(!client.toString().contains(PASSWORD) && !client.toString().contains(AUTH), "diagnostics hide credentials");
         for (java.lang.reflect.Field field : Entitlement.class.getDeclaredFields()) {
@@ -83,22 +86,27 @@ public final class ManagedAccountClientChecks {
             check(!field.getName().equals("password"), "result retains no password");
         }
         Entitlement unlimited = success(VALID.replace("1800000000000", "null"));
-        check(unlimited.expiresMs == null && unlimited.active, "null expiration supported without inventing date");
+        check(unlimited.expiresMs == null && unlimited.hasConfirmedExpiry && !unlimited.active,
+                "null expiration is supported but missing server clock cannot authorize");
         Entitlement expired = success(VALID.replace("1800000000000", "1").replace("\"active\":true", "\"active\":false"));
-        check(expired.expiresMs == 1L && !expired.active, "inactive remains ordinary metadata until a synchronization attempt");
-        Entitlement unmanaged = success(VALID.replace("\"managed\":true", "\"managed\":false"));
-        check(!unmanaged.managed && unmanaged.active, "unmanaged account preserves server-reported active status");
-        check(success(VALID.replace("1800000000000", Long.toString(Long.MAX_VALUE))).expiresMs == Long.MAX_VALUE,
-                "expiration integer upper boundary");
-        check(success(VALID.replace("1800000000000", "0")).expiresMs == 0, "expiration zero retained");
+        check(expired.expiresMs == previousYear(1L) && !expired.active,
+                "finite early-epoch expiry is adjusted and remains readable metadata");
+        Entitlement unmanaged = success(VALID.replace("\"managed\":true", "\"managed\":false,\"server_time_ms\":1"));
+        check(!unmanaged.managed && unmanaged.active, "managed flag does not override adjusted eligibility");
+        check(success(VALID.replace("1800000000000", Long.toString(Long.MAX_VALUE))).expiresMs == previousYear(Long.MAX_VALUE),
+                "expiration integer upper boundary safely normalizes");
+        Entitlement zero = success(VALID.replace("1800000000000", "0"));
+        check(zero.serverExpiresMs == 0L && zero.expiresMs == null && zero.hasConfirmedExpiry && !zero.active,
+                "zero stays unlimited but missing server clock cannot authorize");
     }
 
     private static void accountExpiryAndPublicAccess() throws Exception {
         Entitlement active = success(VALID);
-        active.requireSyncAccess();
+        fail(active::requireSyncAccess, FailureKind.INVALID_RESPONSE);
+        success(VALID.replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1")).requireSyncAccess();
         check(active.serverTimeMs == null, "legacy response does not invent a server clock");
         Entitlement inactive = success(VALID.replace("\"active\":true", "\"active\":false"));
-        fail(inactive::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        fail(inactive::requireSyncAccess, FailureKind.INVALID_RESPONSE);
         Entitlement expired = success(VALID.replace("\"active\":true", "\"active\":false")
                 .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1800000000000"));
         check(expired.serverTimeMs == 1800000000000L, "authenticated server clock retained");
@@ -110,10 +118,30 @@ public final class ManagedAccountClientChecks {
         Entitlement noDate = success(VALID.replace("1800000000000", "null")
                 .replace("\"active\":true", "\"active\":false")
                 .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1800000000000"));
-        fail(noDate::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        fail(noDate::requireSyncAccess, FailureKind.INVALID_RESPONSE);
+        check(!noDate.active && !noDate.hasConfirmedExpiry, "legacy null/false remains unknown, not unlimited");
+        Entitlement zeroWithFalseActive = success(VALID.replace("1800000000000", "0")
+                .replace("\"active\":true", "\"active\":false")
+                .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1800000000000"));
+        check(zeroWithFalseActive.active && zeroWithFalseActive.hasConfirmedExpiry,
+                "explicit zero remains unlimited independently of old active flag");
+        zeroWithFalseActive.requireSyncAccess();
         Entitlement notYetExpired = success(VALID.replace("\"active\":true", "\"active\":false")
                 .replace("\"managed\":true", "\"managed\":true,\"server_time_ms\":1"));
-        fail(notYetExpired::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        notYetExpired.requireSyncAccess();
+        check(notYetExpired.active, "old active=false cannot shorten the adjusted expiry");
+        Entitlement disabled = success(VALID.replace("\"managed\":true",
+                "\"managed\":true,\"server_time_ms\":1,\"status\":0"));
+        fail(disabled::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        Entitlement disabledAndExpired = success(VALID.replace("\"managed\":true",
+                "\"managed\":true,\"server_time_ms\":1800000000000,\"status\":0"));
+        fail(disabledAndExpired::requireSyncAccess, FailureKind.ACCOUNT_INACTIVE);
+        Entitlement expiredDespiteOldActive = success(VALID.replace("\"managed\":true",
+                "\"managed\":true,\"server_time_ms\":" + previousYear(1800000000000L)));
+        check(!expiredDespiteOldActive.active, "adjusted exact deadline overrides old active=true");
+        fail(expiredDespiteOldActive::requireSyncAccess, FailureKind.ACCOUNT_EXPIRED);
+        for (String value : new String[] {"null", "-1", "2", "1.0", "\"1\"", "true", "9223372036854775808"})
+            invalid(VALID.replace("\"managed\":true", "\"managed\":true,\"status\":" + value));
         AtomicInteger calls = new AtomicInteger();
         byte[] png = png(1, 1);
         String metadata = appreciationJson(png);
@@ -375,6 +403,9 @@ public final class ManagedAccountClientChecks {
             }
         } finally { System.setOut(oldOut); System.setErr(oldErr); }
         check(logs.size() == 0, "client emits no stdout/stderr diagnostics");
+    }
+    private static long previousYear(long value) {
+        return Instant.ofEpochMilli(value).atZone(ZoneOffset.UTC).minusYears(1).toInstant().toEpochMilli();
     }
     private static void invalid(String json) throws Exception { fail(() -> success(json), FailureKind.INVALID_RESPONSE); }
     private static Entitlement success(String json) throws Exception { return client(r -> json(r, json)).entitlement(); }

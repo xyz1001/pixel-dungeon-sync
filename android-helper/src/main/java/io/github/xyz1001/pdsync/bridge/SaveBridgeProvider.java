@@ -65,16 +65,6 @@ public final class SaveBridgeProvider extends ContentProvider {
     @Override // android.content.ContentProvider
     public boolean onCreate() {
         this.guard = new GameGuard(getContext());
-        try {
-            this.workspaceBase = this.guard.binding().embedded
-                    ? getContext().getNoBackupFilesDir() : getContext().getFilesDir();
-        } catch (BridgeFailure error) {
-            // Keep initialization inert; authenticated calls report the invalid binding.
-            this.workspaceBase = getContext().getNoBackupFilesDir();
-        }
-        this.area = new File(this.workspaceBase, "save-bridge-v1");
-        this.backups = new File(this.area, "backups");
-        this.pending = new File(this.area, "pending.properties");
         return true;
     }
 
@@ -102,11 +92,20 @@ public final class SaveBridgeProvider extends ContentProvider {
                 try {
                     try {
                         this.guard.installedGame();
-                        prepareArea();
+                        if (("authenticate".equals(str) || "authenticateAccess".equals(str))) {
+                            noExtras(bundle);
+                            return authenticateAccess();
+                        }
+                        // Reject unknown methods before any workspace or save access.
+                        if (!"inspect".equals(str) && !"export".equals(str)
+                                && !"restore".equals(str) && !"recover".equals(str))
+                            throw new IllegalArgumentException("Unknown bridge method");
+                        initializeWorkspace();
                         if ("inspect".equals(str)) {
                             noExtras(bundle);
                             return inspect();
                         }
+                        prepareArea();
                         if ("export".equals(str)) {
                             noExtras(bundle);
                             requireNoPending();
@@ -122,10 +121,10 @@ public final class SaveBridgeProvider extends ContentProvider {
                         noExtras(bundle);
                         return recover();
                     } catch (BridgeFailure e) {
-                        return failure(e.code, e.getMessage(), e);
+                        return failure(e.code, e.getMessage(), e, ("authenticate".equals(str) || "authenticateAccess".equals(str)));
                     }
                 } catch (ErrnoException | IOException e2) {
-                    return failure("SAVE_IO_ERROR", "Save transfer failed safely; file operation details are available", e2);
+                    return failure("SAVE_IO_ERROR", "Save transfer failed safely; file operation details are available", e2, ("authenticate".equals(str) || "authenticateAccess".equals(str)));
                 }
             }
         } finally {
@@ -139,7 +138,32 @@ public final class SaveBridgeProvider extends ContentProvider {
         }
     }
 
+    /** No filesystem, game process observation, hash, or workspace initialization. */
+    private Bundle authenticateAccess() throws IOException {
+        Bundle reply = ok();
+        describeBinding(reply);
+        reply.putBoolean("accessAuthenticated", true);
+        reply.putBoolean("authenticated", true);
+        reply.putBoolean("metadataOnly", true);
+        reply.putInt("accessProtocolVersion", 1);
+        return reply;
+    }
+
+    private void initializeWorkspace() throws IOException {
+        if (workspaceBase != null) return;
+        // Build paths from PM data only. Context directory getters may create directories.
+        File data = new File(getContext().getApplicationInfo().dataDir);
+        this.workspaceBase = new File(data, this.guard.binding().embedded ? "no_backup" : "files");
+        this.area = new File(this.workspaceBase, "save-bridge-v1");
+        this.backups = new File(this.area, "backups");
+        this.pending = new File(this.area, "pending.properties");
+    }
+
     private void prepareArea() throws IOException {
+        // Only transfer/recovery operations may create a bridge-private workspace.
+        SafeSaveTree.checkDirectory(this.workspaceBase.getParentFile());
+        if (!Files.exists(this.workspaceBase.toPath(), LinkOption.NOFOLLOW_LINKS))
+            Files.createDirectory(this.workspaceBase.toPath());
         SafeSaveTree.checkDirectory(this.workspaceBase);
         if (!this.backups.isDirectory() && !this.backups.mkdirs()) {
             throw new IOException("Cannot create bridge-private workspace");
@@ -196,18 +220,21 @@ public final class SaveBridgeProvider extends ContentProvider {
             return bundleOk;
         }
         File fileRoot = this.guard.root();
-        SafeSaveTree.checkDirectory(fileRoot.getParentFile());
+        String parentIdentity = verifySaveParent(fileRoot);
         SaveDirectoryPolicy.Content content = SaveDirectoryPolicy.content(fileRoot);
+        if (!parentIdentity.equals(verifySaveParent(fileRoot)))
+            throw new BridgeFailure("UNSAFE_SAVE_PATH", "Game parent directory changed");
         boolean z = content.state != SaveDirectoryPolicy.ContentState.MISSING_DIRECTORY;
         if (z) {
             SafeSaveTree.checkDirectory(fileRoot);
         }
         bundleOk.putBoolean("saveDirectoryPresent", z);
-        bundleOk.putBoolean("firstLaunchNeeded", !z);
+        bundleOk.putBoolean("firstLaunchNeeded", false);
+        bundleOk.putBoolean("missingDirectoryVerified", !z);
         describeContent(bundleOk, content);
-        bundleOk.putBoolean("transferReady", content.transferable());
+        bundleOk.putBoolean("transferReady", !z || content.transferable());
         if (!z) {
-            bundleOk.putString("message", "Ready to launch. Open the game once to create its save directory before syncing");
+            bundleOk.putString("message", "Verified game data directory; no save directory has been created");
             return bundleOk;
         }
         if (!content.transferable()) {
@@ -215,6 +242,27 @@ public final class SaveBridgeProvider extends ContentProvider {
             bundleOk.putString("message", "Game launch is available, but its save layout is not recognized; no empty snapshot will be assumed");
         }
         return bundleOk;
+    }
+
+    private String verifySaveParent(File saveRoot) throws IOException {
+        File parent = saveRoot.getParentFile();
+        StructStat before = SafeSaveTree.checkDirectory(parent);
+        try {
+            // A successful no-follow open plus matching directory fstat proves capability. Stat alone
+            // cannot turn EACCES/EPERM into an empty save on OEM filesystem policies.
+            FileDescriptor descriptor = Os.open(parent.getPath(),
+                    OsConstants.O_RDONLY | OsConstants.O_NONBLOCK | OsConstants.O_NOFOLLOW, 0);
+            try {
+                StructStat opened = Os.fstat(descriptor);
+                if (!SafeSaveTree.identity(before).equals(SafeSaveTree.identity(opened)))
+                    throw new BridgeFailure("UNSAFE_SAVE_PATH", "Game parent directory changed");
+            } finally { Os.close(descriptor); }
+            if (!SafeSaveTree.identity(before).equals(SafeSaveTree.identity(SafeSaveTree.checkDirectory(parent))))
+                throw new BridgeFailure("UNSAFE_SAVE_PATH", "Game parent directory changed");
+        } catch (ErrnoException error) {
+            throw new BridgeFailure("SAVE_UNREADABLE", "Cannot access verified game parent directory", error);
+        }
+        return SafeSaveTree.identity(before);
     }
 
     private File transferRoot() throws IOException {
@@ -231,12 +279,38 @@ public final class SaveBridgeProvider extends ContentProvider {
         }
     }
 
+    private Bundle exportAbsentSave(File workspace, File emptyTree, File saveRoot, String parentIdentity,
+            SaveDirectoryPolicy.Content content) throws IOException {
+        SaveArchive.Inventory empty = new SaveArchive.Inventory(Collections.emptyMap(), 0);
+        File archive = new File(workspace, "export.zip");
+        writeArchive(emptyTree, empty, archive);
+        guard.requireQuiescent();
+        if (!parentIdentity.equals(verifySaveParent(saveRoot)) || SaveDirectoryPolicy.present(saveRoot))
+            throw new BridgeFailure("SAVE_CHANGED", "Game save directory appeared during empty capture");
+        ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(archive, ParcelFileDescriptor.MODE_READ_ONLY);
+        try {
+            if (!archive.delete()) throw new IOException("Cannot unlink exported temporary archive");
+            Bundle reply = describe(empty);
+            describeContent(reply, content);
+            reply.putBoolean("missingDirectoryVerified", true);
+            reply.putParcelable("archive", descriptor);
+            return reply;
+        } catch (IOException | RuntimeException failure) {
+            descriptor.close(); throw failure;
+        }
+    }
+
     private Bundle exportSave() throws IOException, ErrnoException {
         File fileWorkspace = workspace();
         try {
             try {
                 this.stage = FileFailureDetails.Stage.CAPTURE;
                 File fileMkdir = mkdir(new File(fileWorkspace, "tree"));
+                File saveRoot = this.guard.root();
+                String parentIdentity = verifySaveParent(saveRoot);
+                SaveDirectoryPolicy.Content current = SaveDirectoryPolicy.content(saveRoot);
+                if (current.state == SaveDirectoryPolicy.ContentState.MISSING_DIRECTORY)
+                    return exportAbsentSave(fileWorkspace, fileMkdir, saveRoot, parentIdentity, current);
                 SafeSaveTree safeSaveTree = new SafeSaveTree(transferRoot(), this.guard);
                 SafeSaveTree.State stateStable = safeSaveTree.stable(fileMkdir, true);
                 this.stage = FileFailureDetails.Stage.WRITE_BACKUP;
@@ -992,7 +1066,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         return -1;
     }
 
-    private Bundle failure(String str, String str2, Throwable th) {
+    private Bundle failure(String str, String str2, Throwable th, boolean accessOnly) {
         Bundle bundleOk = ok();
         bundleOk.putBoolean("ok", false);
         bundleOk.putBoolean("ready", false);
@@ -1001,7 +1075,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         bundleOk.putBoolean("observationReliable", false);
         bundleOk.putBoolean("gameForeground", false);
         bundleOk.putBoolean("gameProcessPresent", false);
-        bundleOk.putBoolean("recoveryRequired", pendingPresent());
+        bundleOk.putBoolean("recoveryRequired", !accessOnly && pendingPresent());
         FileFailureDetails fileFailureDetails = this.primaryFailure;
         if (fileFailureDetails == null) {
             fileFailureDetails = new FileFailureDetails(this.stage, th);

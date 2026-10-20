@@ -1,0 +1,11 @@
+4 / 4
+选择存档
+上次上传尚未完成，请重试上传。
+详细信息
+上一步
+重试上传
+
+ACTIONS
+详细信息; disabled=false; bounds=Rect.fromLTRB(29.0, 149.0, 109.0, 191.0)
+上一步; disabled=false; bounds=Rect.fromLTRB(29.0, 557.0, 95.0, 599.0)
+重试上传; disabled=false; bounds=Rect.fromLTRB(265.0, 557.0, 361.0, 599.0)

@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -54,14 +56,14 @@ internal class DesktopSharedComparisonAdapter {
  fun state(
   current: DesktopComparisonContext,
   game: SharedGameIdentity? = null,
-  localLabel: String = "本机",
+  localLabel: String = DesktopMessages.LOCAL.text(),
   notice: String = "",
   details: String = "",
   restoreSupported: Boolean = true,
  ): SharedComparisonState {
   val value = current.observed
   val recovery = value?.blockReason in setOf(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, SyncBlockReason.LEGACY_PENDING_UPLOAD)
-  val localDetails = value?.localLatestModifiedAt?.let { "存档修改 ${HistoryPresentation.time(it)}" }.orEmpty()
+  val localDetails = value?.localLatestModifiedAt?.let { DesktopMessages.SAVE_MODIFIED_1_S.text(HistoryPresentation.time(it)) }.orEmpty()
   return SharedComparisonState(
    kind = value?.kind, cloudVerified = value != null && value.kind != OnboardingKind.BLOCKED,
    needsRestoreRecovery = recovery,
@@ -77,7 +79,7 @@ internal class DesktopSharedComparisonAdapter {
     val manifest = remote.entry.manifest
     SharedComparisonRemoteChoice(manifest.id,
      manifest.directoryMetadata?.displayName?.takeIf(String::isNotBlank)
-      ?: "云端 · ${manifest.metadata?.device?.label ?: "设备未知"}",
+      ?: DesktopMessages.CLOUD_1_S.text(manifest.metadata?.device?.label ?: DesktopMessages.UNKNOWN_DEVICE.text()),
      HistoryPresentation.time(manifest.metadata?.fileModifiedAt?.values?.maxOrNull()))
    },
    selectedProgress = selectedProgress, selectedId = selectedId,
@@ -142,7 +144,7 @@ internal class DesktopSharedComparisonAdapter {
   val reviewed = proof.copy(token = ++token)
   dialog = DesktopComparisonDialog(reviewed, SharedComparisonConfirmation(reviewed.token,
    stage = SharedComparisonConfirmationStage.MERGE_REVIEW,
-   message = "合并后存档 ${result.slots} 个 · 新增占用 ${result.addedSlots} 个",
+   message = DesktopMessages.MERGED_SAVE_COUNTS.text(result.slots, result.addedSlots),
    details = result.decisions.joinToString("\n"), canApplyMerge = true))
   return true
  }

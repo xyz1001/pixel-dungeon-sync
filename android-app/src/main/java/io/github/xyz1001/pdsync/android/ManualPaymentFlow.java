@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,9 +44,9 @@ public final class ManualPaymentFlow {
             this.accountScope = nonEmpty(accountScope, "account scope", 1024);
             this.planId = nonEmpty(planId, "plan id", 256);
             if (requestKey != null && !requestKey.matches("[A-Za-z0-9_-]{16,80}"))
-                throw new IllegalArgumentException("Invalid request key");
+                throw new IllegalArgumentException(AndroidMessages.MANUAL_PAYMENT_FLOW_01.text());
             if (orderId != null) nonEmpty(orderId, "order id", 256);
-            if (requestKey == null && orderId == null) throw new IllegalArgumentException("Missing draft identity");
+            if (requestKey == null && orderId == null) throw new IllegalArgumentException(AndroidMessages.MANUAL_PAYMENT_FLOW_02.text());
             this.requestKey = requestKey;
             this.orderId = orderId;
         }
@@ -199,12 +201,12 @@ public final class ManualPaymentFlow {
         davPassed = false;
         if (ticket.action == Action.LOAD_ENTITLEMENT) entitlementLoaded = false;
         if ("UNSUPPORTED_CONTRACT".equals(code)) unsupportedContract = true;
-        if (ticket.action == Action.DAV_TEST) notice = "连接测试未通过";
-        else if ("PAYMENTS_DISABLED".equals(code)) notice = "沙箱赞赏未开启";
-        else if ("AUTHENTICATION_REQUIRED".equals(code) || "FORBIDDEN".equals(code)) notice = "请重新验证账号";
-        else if ("UNSUPPORTED_CONTRACT".equals(code)) notice = "赞赏服务版本不支持";
-        else if ("INVALID_RESPONSE".equals(code)) notice = "服务响应无法确认";
-        else notice = "暂时无法查询，请刷新";
+        if (ticket.action == Action.DAV_TEST) notice = AndroidMessages.MANUAL_PAYMENT_FLOW_03.text();
+        else if ("PAYMENTS_DISABLED".equals(code)) notice = AndroidMessages.MANUAL_PAYMENT_FLOW_04.text();
+        else if ("AUTHENTICATION_REQUIRED".equals(code) || "FORBIDDEN".equals(code)) notice = AndroidMessages.MANUAL_PAYMENT_FLOW_05.text();
+        else if ("UNSUPPORTED_CONTRACT".equals(code)) notice = AndroidMessages.MANUAL_PAYMENT_FLOW_06.text();
+        else if ("INVALID_RESPONSE".equals(code)) notice = AndroidMessages.MANUAL_PAYMENT_FLOW_07.text();
+        else notice = AndroidMessages.MANUAL_PAYMENT_FLOW_08.text();
         return true;
     }
     public synchronized boolean isCurrent(Ticket ticket) {
@@ -232,10 +234,10 @@ public final class ManualPaymentFlow {
         return davEligible() ? Phase.ACTIVE : Phase.SHOWING;
     }
     private String message() {
-        if (!enabled) return "沙箱赞赏未开启";
-        if (current != null) return current.action == Action.DAV_TEST ? "正在测试连接" : "正在查询";
+        if (!enabled) return AndroidMessages.MANUAL_PAYMENT_FLOW_04.text();
+        if (current != null) return current.action == Action.DAV_TEST ? AndroidMessages.MANUAL_PAYMENT_FLOW_09.text() : AndroidMessages.MANUAL_PAYMENT_FLOW_10.text();
         if (notice != null) return notice;
-        return davPassed && davEligible() ? "连接已通过" : "";
+        return davPassed && davEligible() ? AndroidMessages.MANUAL_PAYMENT_FLOW_11.text() : "";
     }
     private void resetPollWindow(long now) {
         pollRequests = 0;

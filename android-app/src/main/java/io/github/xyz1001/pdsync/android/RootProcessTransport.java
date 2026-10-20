@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import io.github.xyz1001.pdsync.root.RootProtocol;
 import java.io.*;
 import java.util.concurrent.*;
@@ -34,8 +36,8 @@ public final class RootProcessTransport implements AutoCloseable {
         if(factory==null || timeoutMillis<0 || timeoutMillis>180000 || ownInstalledApk==null
                 || !ownInstalledApk.startsWith("/data/app/") || !ownInstalledApk.endsWith(".apk")
                 || !ownInstalledApk.matches("/[A-Za-z0-9_./+=@~-]+") || ownInstalledApk.contains("//"))
-            throw new IOException("Invalid fixed root launcher");
-        for(String part:ownInstalledApk.split("/")) if(part.equals(".")||part.equals(".."))throw new IOException("Invalid fixed root launcher");
+            throw new IOException(AndroidMessages.ROOT_PROCESS_TRANSPORT_01.text());
+        for(String part:ownInstalledApk.split("/")) if(part.equals(".")||part.equals(".."))throw new IOException(AndroidMessages.ROOT_PROCESS_TRANSPORT_01.text());
         this.factory=factory;this.timeoutMillis=timeoutMillis;this.commandBudgets=timeoutMillis==0;
         // Only the app's PM supplied APK enters this tightly encoded, fixed launcher.
         // Every target path, package, fingerprint and operation goes through the binary pipe.

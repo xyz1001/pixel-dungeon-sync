@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.CoreSessionMessages;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -20,10 +22,10 @@ final class ManagedAccountFlow {
         final long generation;
         final String username, localUsername, message;
         final Long expiresMs;
-        final boolean busy, entitlementLoaded, active, managed, canRefresh, expired, cachedExpiry;
+        final boolean busy, entitlementLoaded, active, managed, canRefresh, expired, cachedExpiry, expiryConfirmed;
         final byte[] image;
         private View(ManagedAccountFlow flow) {
-            boolean shown = flow.visible && flow.foreground;
+            boolean shown = flow.visible;
             generation = flow.generation;
             username = shown ? flow.username : null;
             localUsername = shown ? flow.expectedUsername : null;
@@ -32,10 +34,11 @@ final class ManagedAccountFlow {
             entitlementLoaded = username != null;
             TrustedEntitlementCache.Record record = shown ? flow.record : null;
             expiresMs = record == null ? null : record.expiresMs;
+            expiryConfirmed = record != null && record.hasConfirmedExpiry;
             cachedExpiry = record != null && !entitlementLoaded;
-            expired = record != null && record.expired(flow.clock.elapsedMs(), flow.clock.bootCount());
+            expired = record != null && flow.expired(record);
             active = flow.active; managed = flow.managed;
-            canRefresh = shown && !busy;
+            canRefresh = shown && flow.foreground && !busy;
             image = flow.image == null ? null : flow.image.clone();
         }
     }
@@ -43,10 +46,12 @@ final class ManagedAccountFlow {
     private final String expectedUsername;
     private final Clock clock;
     private TrustedEntitlementCache.Record record;
+    private boolean currentSessionRecord;
     private long generation;
     private boolean visible = true, foreground;
     private Ticket pending;
-    private String username, message = "请刷新查看。";
+    private String username, message = "";
+    private String imageSha256;
     private boolean active, managed;
     private byte[] image;
 
@@ -70,16 +75,15 @@ final class ManagedAccountFlow {
     synchronized void foreground(boolean value) {
         if (!visible) return;
         foreground = value;
-        if (!value) { invalidate(); clear(); message = "请刷新查看。"; }
     }
     synchronized Ticket refresh() {
         if (!visible || !foreground || pending != null) return null;
-        invalidate(); clear(); message = "";
+        invalidate(); clearEntitlement(); message = "";
         pending = new Ticket(this, generation);
         return pending;
     }
     synchronized boolean accepts(Ticket ticket) {
-        return visible && foreground && ticket != null && ticket.owner == this
+        return visible && ticket != null && ticket.owner == this
                 && ticket == pending && ticket.generation == generation;
     }
 
@@ -91,20 +95,41 @@ final class ManagedAccountFlow {
     /** Only a successful authenticated response can replace trusted account dates. */
     synchronized boolean entitlement(Ticket ticket, String serverUsername, Long expiresMs,
                                      boolean active, boolean managed, Long serverTimeMs) {
+        return entitlement(ticket, serverUsername, expiresMs, active, managed, serverTimeMs, true);
+    }
+
+    synchronized boolean entitlement(Ticket ticket, String serverUsername, Long expiresMs,
+                                     boolean active, boolean managed, Long serverTimeMs, boolean enabled) {
+        return entitlement(ticket, serverUsername, expiresMs, active, managed, serverTimeMs, enabled, true);
+    }
+
+    synchronized boolean entitlement(Ticket ticket, String serverUsername, Long expiresMs,
+                                     boolean active, boolean managed, Long serverTimeMs,
+                                     boolean enabled, boolean hasConfirmedExpiry) {
         if (!accepts(ticket)) return false;
-        if (!expectedUsername.equals(serverUsername) || (expiresMs != null && expiresMs < 0)
-                || (serverTimeMs != null && serverTimeMs < 0)) {
+        // expiresMs is already normalized by the official client and can be before the epoch.
+        if (!expectedUsername.equals(serverUsername) || (serverTimeMs != null && serverTimeMs < 0)) {
             username = null; this.active = this.managed = false;
             pending = null;
-            message = "账号信息无法确认，请重新登录。";
+            message = CoreSessionMessages.UNABLE_TO_VERIFY_ACCOUNT_INFORMATION_SIGN_IN_AGAIN.text();
             return false;
         }
         this.username = serverUsername;
         this.active = active; this.managed = managed;
         this.record = new TrustedEntitlementCache.Record(TrustedEntitlementCache.OFFICIAL_ENDPOINT,
-                serverUsername, expiresMs, active, serverTimeMs, clock.elapsedMs(), clock.bootCount());
+                serverUsername, expiresMs, active, serverTimeMs, clock.elapsedMs(), clock.bootCount(), enabled, hasConfirmedExpiry);
+        currentSessionRecord = true;
         return true;
     }
+
+    /** A known server asset change invalidates only the public image, never account authority. */
+    synchronized boolean metadata(Ticket ticket, String sha256) {
+        if (!accepts(ticket) || sha256 == null || !sha256.matches("[0-9a-f]{64}")) return false;
+        if (!sha256.equals(imageSha256)) image = null;
+        imageSha256 = sha256;
+        return true;
+    }
+    synchronized boolean hasImage(Ticket ticket) { return accepts(ticket) && image != null; }
 
     /** The public image is independent of login, identity proof and private expiry metadata. */
     synchronized boolean image(Ticket ticket, byte[] png) {
@@ -120,7 +145,7 @@ final class ManagedAccountFlow {
     synchronized boolean fail(Ticket ticket, String safeMessage) {
         if (!accepts(ticket)) return false;
         pending = null;
-        message = safeMessage == null || safeMessage.isEmpty() ? "暂时无法读取，请刷新。" : safeMessage;
+        message = safeMessage == null || safeMessage.isEmpty() ? CoreSessionMessages.UNABLE_TO_READ_RIGHT_NOW.text() : safeMessage;
         return true;
     }
 
@@ -132,14 +157,23 @@ final class ManagedAccountFlow {
     }
     synchronized void close() {
         visible = foreground = false;
-        invalidate(); clear(); record = null; message = "";
+        invalidate(); clearEntitlement(); image = null; imageSha256 = null; record = null; currentSessionRecord = false; message = "";
     }
     static String expiry(View view) {
-        if (view.expiresMs == null) return view.entitlementLoaded ? "有效期 未设置" : "有效期 未知";
-        String date = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date(view.expiresMs));
-        return (view.cachedExpiry ? "上次确认有效至 " : "有效至 ") + date;
+        if (view.expiresMs == null) return view.entitlementLoaded && view.expiryConfirmed ? CoreSessionMessages.EXPIRY_NOT_SET.text() : CoreSessionMessages.EXPIRY_UNKNOWN.text();
+        String date = new SimpleDateFormat("yyyy-MM-dd", pdsync.i18n.UiLocale.formattingLocale()).format(new Date(view.expiresMs));
+        return (view.cachedExpiry ? CoreSessionMessages.LAST_CONFIRMED_VALID_UNTIL : CoreSessionMessages.VALID_UNTIL).text(date);
     }
-    static String accessStatus(View view) { return view.expired ? "服务已到期" : ""; }
+    static String accessStatus(View view) { return view.expired ? CoreSessionMessages.SERVICE_EXPIRED.text() : ""; }
+    /** A live response shares this process's monotonic clock even when no boot ID is available. */
+    private boolean expired(TrustedEntitlementCache.Record value) {
+        long now = clock.elapsedMs();
+        int boot = clock.bootCount();
+        if (value.expired(now, boot)) return true;
+        return currentSessionRecord && value.enabled && value.hasConfirmedExpiry && value.expiresMs != null && value.serverTimeMs != null
+                && now >= value.elapsedMs && (value.bootCount < 0 || value.bootCount == boot)
+                && now - value.elapsedMs >= value.expiresMs - value.serverTimeMs;
+    }
     private void invalidate() { generation++; pending = null; }
-    private void clear() { username = null; active = managed = false; image = null; }
+    private void clearEntitlement() { username = null; active = managed = false; }
 }

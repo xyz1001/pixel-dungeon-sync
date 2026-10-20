@@ -1,0 +1,106 @@
+package io.github.xyz1001.pdsync.android;
+import java.util.*;
+
+class MainActivity {
+    enum SyncPage { HOME, SETTINGS }
+    static class SecureConnectionStore { static class Connection {} }
+    static class SyncRuntime {
+        static SecureConnectionStore.Connection account; static String selection = "game-a", namespace = "scope-a";
+        static SecureConnectionStore.Connection currentConnection() { return account; }
+        static String currentSelectionToken(MainActivity a) { return selection; }
+        static String currentNamespace(MainActivity a) { return namespace; }
+    }
+    static class AutoSyncStatusPolicy { static class Record {} }
+    static class AutoSyncService {
+        static AutoSyncStatusPolicy.Record beginManualInspection(MainActivity a) { return new AutoSyncStatusPolicy.Record(); }
+        static void verifiedManualInspection(MainActivity a, AutoSyncStatusPolicy.Record record, AndroidSyncFacade.Inspection inspection) { a.verified++; }
+    }
+    static class Snapshot { String getId() { return "snapshot-a"; } }
+    static class AppendCommit { Snapshot getSnapshot() { return new Snapshot(); } }
+    static class SyncHistory {
+        List<AppendCommit> cloud = new ArrayList<>();
+        List<AppendCommit> getCloud() { return cloud; }
+        String getDefaultSnapshot() { return cloud.isEmpty() ? null : "snapshot-a"; }
+    }
+    interface Hook { void run() throws Exception; }
+    static class AndroidSyncFacade {
+        static class Inspection { String kind = "BOTH_EMPTY"; String getKind() { return kind; } boolean getNeedsRestoreRecovery() { return false; } }
+        Inspection observed = new Inspection(); SyncHistory history = new SyncHistory(); Hook hook = () -> {}, historyHook = () -> {}; int reads;
+        Inspection inspect() throws Exception { reads++; hook.run(); return observed; }
+        SyncHistory historyPresentation(Inspection inspection) throws Exception { historyHook.run(); return history; }
+    }
+    static class SyncInspectionDiagnostics {
+        enum Stage { RUNTIME, INSPECT, HISTORY }
+        static Exception at(Stage stage, Exception error) { return error; }
+    }
+    static class InstallDiagnostics { static Object find(Exception error) { return null; } }
+    static class PreparationDiagnostics { static Object find(Exception error) { return null; } }
+    static class BridgeDiagnostics { static Object find(Exception error) { return null; } }
+    enum DiagnosticStage { VERIFY }
+    enum DiagnosticFailure { RECOVERY_REQUIRED, NONE }
+    static class DiagnosticLog { static void record(Object... arguments) {} }
+    static class AndroidDiagnosticLogging { static Object inspectionResult(String kind, boolean failed) { return null; } }
+    static class StaleArchiveReadException extends Exception { }
+    final HomeArchiveReadState archiveReads = new HomeArchiveReadState();
+    SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
+    SyncPage page = SyncPage.HOME; boolean destroyed, cloudVerified, resumed = true, sharedAppreciationOnly; int published, verified, namespacePreparations;
+    AndroidSyncFacade facade = new AndroidSyncFacade(); AndroidSyncFacade.Inspection inspection;
+    SyncHistory history; Object homeObservationOwner; String selected, explicitHomeSelection;
+    MainActivity() { SyncRuntime.account = connection; SyncRuntime.selection = "game-a"; SyncRuntime.namespace = "scope-a"; }
+    boolean isDestroyed() { return destroyed; }
+    boolean isForegroundHome() { return resumed && !destroyed && page == SyncPage.HOME && !sharedAppreciationOnly; }
+    void publishArchiveReadState() { published++; }
+    Object diagnosticInspectionDetails(AndroidSyncFacade.Inspection inspection) { return null; }
+    AndroidSyncFacade sync() { return facade; }
+    void prepareOfficialHomeNamespace(AndroidSyncFacade facade) { namespacePreparations++; }
+    Object currentHomeContext(int token) { return new Object(); }
+    /* PRODUCTION_METHODS */
+    static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+    static void terminal(MainActivity a) { check(!a.archiveReads.loading(), "terminal read left loading active"); check(a.published == 2, "start and terminal state must publish"); }
+    static void stale(HookWithOwner change) throws Exception {
+        MainActivity a = new MainActivity(); a.facade.hook = () -> change.run(a);
+        try { a.readComparison(); throw new AssertionError("stale read accepted"); } catch (StaleArchiveReadException expected) {}
+        check(a.history == null && a.inspection == null && !a.cloudVerified && a.verified == 0, "stale result polluted new scope");
+        if (!a.archiveReads.loading()) terminal(a); // An overlapping newer read retains its own loading state.
+    }
+    interface HookWithOwner { void run(MainActivity a) throws Exception; }
+    public static void main(String[] args) throws Exception {
+        MainActivity empty = new MainActivity(); empty.readComparison(); terminal(empty);
+        check(empty.namespacePreparations == 1, "ordinary read preserves namespace preparation");
+        MainActivity renewed = new MainActivity(); renewed.readComparison(false); terminal(renewed);
+        check(renewed.namespacePreparations == 0 && renewed.facade.reads == 1 && renewed.cloudVerified, "renewal read must remain read-only");
+        for (int state = 0; state < 2; state++) for (int outcome = 0; outcome < 4; outcome++) {
+            MainActivity hidden = new MainActivity(); final int condition = state, result = outcome;
+            if (result == 1) hidden.facade.observed.kind = "BLOCKED";
+            Hook departure = () -> {
+                if (condition == 0) hidden.resumed = false; else hidden.sharedAppreciationOnly = true;
+                if (result == 2) throw new java.io.IOException("offline while leaving HOME");
+            };
+            if (result == 3) hidden.facade.historyHook = departure; else hidden.facade.hook = departure;
+            try { hidden.readComparison(false); throw new AssertionError("hidden renewal result accepted"); }
+            catch (StaleArchiveReadException expected) {}
+            terminal(hidden);
+            check(hidden.namespacePreparations == 0 && hidden.history == null && hidden.inspection == null
+                    && !hidden.cloudVerified && hidden.verified == 0, "hidden renewal success, blocked, or error polluted HOME");
+        }
+        check(empty.history != null && empty.history.cloud.isEmpty() && empty.cloudVerified && empty.verified == 1, "confirmed empty must be verified, not null");
+        MainActivity success = new MainActivity(); success.facade.history.cloud.add(new AppendCommit()); success.readComparison(); terminal(success);
+        check(success.history == success.facade.history && success.facade.reads == 1 && "snapshot-a".equals(success.selected), "successful history read");
+        MainActivity blocked = new MainActivity(); blocked.facade.observed.kind = "BLOCKED"; blocked.readComparison(); terminal(blocked);
+        check(blocked.history == null && !blocked.cloudVerified && blocked.inspection != null && blocked.verified == 0, "blocked is unknown, not empty");
+        for (Exception failure : List.of(new java.io.IOException("offline"), new InterruptedException("cancelled"))) {
+            MainActivity a = new MainActivity(); a.facade.hook = () -> { throw failure; };
+            try { a.readComparison(); throw new AssertionError("failure swallowed"); } catch (Exception actual) { check(actual == failure, "failure identity"); }
+            terminal(a); check(a.history == null && !a.cloudVerified && a.verified == 0, "failure authorized actions");
+        }
+        stale(a -> a.connection = new SecureConnectionStore.Connection());
+        stale(a -> SyncRuntime.account = new SecureConnectionStore.Connection());
+        stale(a -> SyncRuntime.selection = "game-b");
+        stale(a -> SyncRuntime.namespace = "scope-b");
+        stale(a -> a.page = SyncPage.SETTINGS);
+        stale(a -> { a.destroyed = true; a.archiveReads.close(); });
+        stale(a -> a.archiveReads.invalidate());
+        stale(a -> a.archiveReads.begin());
+        System.out.println("History read terminal and stale-scope checks passed");
+    }
+}

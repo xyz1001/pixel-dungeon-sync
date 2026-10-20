@@ -15,7 +15,7 @@ internal fun controlledRun(duration:Double=2.0,seed:Long=5352470251118,custom:St
 
 class AndroidControlledSessionTest {
  private val root=Path.of("/synthetic/root");private val scope=root.resolve("scope")
- private val identity=AndroidGameIdentity("synthetic.game","Synthetic","a".repeat(64),"synthetic")
+ private val identity=AndroidGameIdentity("synthetic.game","Synthetic","a".repeat(64))
  private val target=AndroidGameTarget(identity,"synthetic",896,"b".repeat(64))
  private val id="12345678-1234-4234-8234-123456789012"
  private val before=mapOf("game1/game.dat" to controlledRun(),"game1/depth1.dat" to byteArrayOf(2))

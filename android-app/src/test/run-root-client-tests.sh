@@ -11,7 +11,7 @@ RUNTIME=${PDSYNC_RUNTIME_LIB:?Set PDSYNC_RUNTIME_LIB}
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-root-client.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 CP="$SDK/platforms/android-36/android.jar:$CORE:$(find "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:):$SDK/build-tools/36.0.0/lib/apksigner.jar"
-"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -encoding UTF-8 -cp "$CP" -d "$OUT" \
+"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 17 -target 17 -encoding UTF-8 -cp "$CP" -d "$OUT" \
   $(find "$REPO/android-app/src/main/java" "$REPO/android-root/src/main/java" -name '*.java' | sort) \
   "$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveArchive.java" \
   "$REPO/android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/SaveDirectoryPolicy.java" \
@@ -19,8 +19,8 @@ CP="$SDK/platforms/android-36/android.jar:$CORE:$(find "$RUNTIME" -maxdepth 1 -n
   "$HERE/java/io/github/xyz1001/pdsync/android/RootClientChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/RootRestoreClientChecks.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/RootAutomaticCapabilityChecks.java"
-"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootClientChecks
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootClientChecks
 
-"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootRestoreClientChecks
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootRestoreClientChecks
 
-"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootAutomaticCapabilityChecks
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.RootAutomaticCapabilityChecks

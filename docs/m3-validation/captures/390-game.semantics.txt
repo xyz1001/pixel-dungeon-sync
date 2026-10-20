@@ -1,0 +1,10 @@
+第 1 步，共 2 步
+选择游戏
+Shattered Pixel Dungeon
+3.3.8
+更换游戏…
+下一步：连接云端
+
+ACTIONS
+更换游戏…; disabled=false; bounds=Rect.fromLTRB(49.0, 202.0, 157.0, 244.0)
+下一步：连接云端; disabled=false; bounds=Rect.fromLTRB(209.0, 557.0, 361.0, 599.0)

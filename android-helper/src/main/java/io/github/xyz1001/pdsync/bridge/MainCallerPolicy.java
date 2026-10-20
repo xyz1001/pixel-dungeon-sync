@@ -7,8 +7,6 @@ import java.util.Locale;
 
 
 final class MainCallerPolicy {
-    // Fixed trusted release/development identity; injected metadata cannot redefine it.
-    static final String MAIN_SIGNER_SHA256 = "bf8cd1a8fba47e4232832a11c92bf55e730d0b37aecc9a7f8d04ea4f89e7c148";
     static final String MAIN = "io.github.xyz1001.pdsync.android";
     static final String PERMISSION = "io.github.xyz1001.pdsync.android.ACCESS_BRIDGE";
 

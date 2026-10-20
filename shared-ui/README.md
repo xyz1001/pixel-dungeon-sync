@@ -4,8 +4,7 @@
 `:desktop:compileKotlin` and `:android-app:compileReleaseKotlin`. The desktop
 source set also runs `src/test/kotlin` as ordinary JVM tests. This deliberately
 uses the existing JVM core and independent JVM/Android compilations, not KMP.
-Connection/appreciation, save-path and comparison/confirmation pages are shared;
-home/history and remaining pages are being migrated incrementally. Do not copy UI source into either platform directory or include Android/desktop
+Game selection, connection/appreciation, home/history, settings, and confirmation UI use this source tree. Setup has two pages: game selection, then service configuration. The save-path component remains only for the existing desktop standalone setting; legacy Android PATH navigation migrates to services. Do not copy UI source into either platform directory or include Android/desktop
 APIs in this directory; platform hosts provide callbacks and persisted settings.
 
 Pinned toolchain: Gradle 8.14.3, Kotlin and Compose compiler plugin 2.2.20,

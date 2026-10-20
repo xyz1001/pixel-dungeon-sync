@@ -17,11 +17,14 @@ public final class PreparationRecoveryTest {
         throw new AssertionError("Accepted unsafe case: " + message);
     }
     static File apk(Path directory, String name, byte[] manifest, byte[] payload) throws Exception {
+        return apk(directory, name, manifest, payload, new byte[]{0, -1, 3, 4});
+    }
+    static File apk(Path directory, String name, byte[] manifest, byte[] payload, byte[] asset) throws Exception {
         File file = directory.resolve(name).toFile();
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(file))) {
             out.putNextEntry(new ZipEntry("AndroidManifest.xml")); out.write(manifest); out.closeEntry();
             out.putNextEntry(new ZipEntry("classes.dex")); out.write(payload); out.closeEntry();
-            out.putNextEntry(new ZipEntry("assets/example.bin")); out.write(new byte[]{0, -1, 3, 4}); out.closeEntry();
+            out.putNextEntry(new ZipEntry("assets/example.bin")); out.write(asset); out.closeEntry();
         }
         return file;
     }
@@ -83,6 +86,17 @@ public final class PreparationRecoveryTest {
     }
     public static void main(String[] args) throws Exception {
         File helper = new File(args[0]); File signedRelease = args.length > 1 && !args[1].isEmpty() ? new File(args[1]) : null;
+        byte[] gameDex;
+        if (args.length > 4 && !args[4].isEmpty()) {
+            gameDex = Files.readAllBytes(new File(args[4]).toPath());
+        } else {
+            try (ZipFile zip = new ZipFile(helper)) {
+                ZipEntry dex = zip.getEntry("classes.dex");
+                if (dex == null) throw new IOException("A real game.dex fixture or helper classes.dex is required");
+                try (InputStream input = zip.getInputStream(dex)) { gameDex = input.readAllBytes(); }
+            }
+        }
+        check(!PayloadInventory.classNames(gameDex).isEmpty(), "host fixture has structurally valid DEX classes");
         Path temporary = Files.createTempDirectory("pdsync-preparation-host-");
         try {
             for (boolean utf8 : new boolean[]{false,true}) for (boolean styled : new boolean[]{false,true}) {
@@ -123,12 +137,16 @@ public final class PreparationRecoveryTest {
             byte[] bound = BinaryManifestPatch.patchHelper(sourceManifest, identity.helperPackage, identity.sharedUid, identity.authority, identity.gamePackage, identity.originIdentity, identity.namespaceId, CERT, 123L, "test 🐉");
             BinaryManifestPatch.ManifestInfo boundInfo = BinaryManifestPatch.inspect(bound);
             check(boundInfo.packageName.equals(identity.helperPackage) && boundInfo.sharedUserId.equals(identity.sharedUid), "helper manifest bound");
-            File source = apk(temporary, "source.apk", sourceManifest, new byte[]{1,2,3});
+            File source = apk(temporary, "source.apk", sourceManifest, gameDex);
+            File invalidDex = apk(temporary, "invalid-dex.apk", sourceManifest, new byte[]{1,2,3});
+            rejects(() -> ApkArchive.validateSource(invalidDex), "truncated arbitrary bytes cannot stand in for a DEX");
+            rejects(() -> LocalApkSigner.sourceSignatures(invalidDex, null, 36), "unsigned classification cannot bypass DEX validation");
             File patchedApk = temporary.resolve("patched.apk").toFile();
             ApkArchive.patchGame(source, patchedApk, shared);
             check(ApkArchive.verifyGamePayload(source, patchedApk, shared) == 2, "game exact protected payload count");
             check(ApkArchive.entryHashes(source).get("classes.dex").equals(ApkArchive.entryHashes(patchedApk).get("classes.dex")), "dex unchanged");
-            File tampered = apk(temporary, "tampered.apk", patchedManifest, new byte[]{1,2,4});
+            File tampered = apk(temporary, "tampered.apk", patchedManifest, gameDex, new byte[]{0, -1, 3, 5});
+            check(ApkArchive.validateSource(tampered).packageName.equals(original.packageName), "payload tamper fixture is otherwise a valid APK/DEX");
             rejects(() -> ApkArchive.verifyGamePayload(source, tampered, shared), "game payload tampering");
             rejects(() -> ApkArchive.verifyGamePayload(source, patchedApk, "different.shared.uid"), "manifest deviation");
             rejects(() -> ApkArchive.patchGame(source, patchedApk, shared), "output overwrite");
@@ -147,7 +165,9 @@ public final class PreparationRecoveryTest {
             InstalledSourceProof proof = InstalledSourceProof.record(original.packageName, original.versionCode, List.of(CERT), List.of(helper));
             proof.validate(List.of(helper));
             check(LocalApkSigner.sourceCertificates(helper, proof, 36).equals(List.of(CERT)), "PM-attested stripped unsigned source accepted");
-            rejects(() -> LocalApkSigner.sourceCertificates(helper, null, 36), "SAF unsigned APK rejected");
+            check(LocalApkSigner.sourceCertificates(helper, null, 36).isEmpty(), "genuine unsigned SAF source has no publisher certificate");
+            check(LocalApkSigner.sourceSignatures(helper, null, 36).kind == LocalApkSigner.SourceSignatures.Kind.UNSIGNED, "SAF source provenance is explicitly unsigned");
+            check(LocalApkSigner.sourceSignatures(helper, proof, 36).kind == LocalApkSigner.SourceSignatures.Kind.INSTALLED_SIGNER, "authenticated installed signer stays distinct from unsigned SAF");
             rejects(() -> proof.validate(List.of(boundApk)), "installed proof cannot transfer to different bytes");
             Properties properties = new Properties(); proof.writeTo(properties);
             InstalledSourceProof.readFrom(properties).validate(List.of(helper)); checks++;
@@ -175,7 +195,8 @@ public final class PreparationRecoveryTest {
             for (int api : new int[]{26,27,28,36}) {
                 check(PreparationPlatform.requireSupportedApi(api) == api, "supported runtime API " + api);
                 check(LocalApkSigner.sourceCertificates(helper, proof, api).equals(List.of(CERT)), "bound PM-attested unsigned source at API " + api);
-                rejects(() -> LocalApkSigner.sourceCertificates(helper, null, api), "unsigned document source rejected at API " + api);
+                check(LocalApkSigner.sourceCertificates(helper, null, api).isEmpty(), "genuine unsigned document source at API " + api);
+                check(LocalApkSigner.sourceSignatures(helper, null, api).kind == LocalApkSigner.SourceSignatures.Kind.UNSIGNED, "unsigned typed provenance at API " + api);
                 rejects(() -> LocalApkSigner.sourceCertificates(boundApk, proof, api), "PM attestation cannot transfer at API " + api);
             }
             rejects(() -> PreparationPlatform.requireSupportedApi(25), "runtime below minimum");

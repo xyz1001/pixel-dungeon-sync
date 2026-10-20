@@ -1,0 +1,18 @@
+第 2 步，共 2 步
+连接云端
+WebDAV 服务器地址
+用户名
+密码凭据
+测试连接
+切换至其他服务类型
+上一步
+完成配置
+
+ACTIONS
+; disabled=false; bounds=Rect.fromLTRB(43.0, 161.0, 347.0, 181.0)
+; disabled=false; bounds=Rect.fromLTRB(43.0, 247.0, 347.0, 267.0)
+; disabled=false; bounds=Rect.fromLTRB(43.0, 333.0, 347.0, 353.0)
+测试连接; disabled=false; bounds=Rect.fromLTRB(29.0, 382.0, 125.0, 424.0)
+切换至其他服务类型; disabled=false; bounds=Rect.fromLTRB(29.0, 440.0, 179.0, 482.0)
+上一步; disabled=false; bounds=Rect.fromLTRB(29.0, 557.0, 95.0, 599.0)
+完成配置; disabled=true; bounds=Rect.fromLTRB(265.0, 557.0, 361.0, 599.0)

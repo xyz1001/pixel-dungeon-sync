@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 /* loaded from: classes.dex */
 public final class InstallationReadiness {
     public final AccessStatus access;
@@ -41,14 +43,14 @@ public final class InstallationReadiness {
 
     private InstallationReadiness(boolean embedded, boolean root, PackageStatus packageStatus, PackageStatus packageStatus2, boolean z, boolean z2, boolean z3, AccessStatus accessStatus) {
         if (packageStatus == null || packageStatus == PackageStatus.NOT_APPLICABLE || packageStatus2 == null || accessStatus == null) {
-            throw new IllegalArgumentException("Readiness states are required");
+            throw new IllegalArgumentException(AndroidMessages.INSTALLATION_READINESS_01.text());
         }
         this.embeddedBridge = embedded;
         this.rootDirect = root;
-        if (embedded && root) throw new IllegalArgumentException("One access mode is required");
+        if (embedded && root) throw new IllegalArgumentException(AndroidMessages.INSTALLATION_READINESS_02.text());
         if (root && packageStatus != PackageStatus.NOT_SELECTED && packageStatus != PackageStatus.NOT_CHECKED
-                && packageStatus != PackageStatus.VERIFIED) throw new IllegalArgumentException("Root requires an existing installed game");
-        if ((embedded || root) != (packageStatus2 == PackageStatus.NOT_APPLICABLE)) throw new IllegalArgumentException("Bridge mode must match package states");
+                && packageStatus != PackageStatus.VERIFIED) throw new IllegalArgumentException(AndroidMessages.INSTALLATION_READINESS_03.text());
+        if ((embedded || root) != (packageStatus2 == PackageStatus.NOT_APPLICABLE)) throw new IllegalArgumentException(AndroidMessages.INSTALLATION_READINESS_04.text());
         this.game = packageStatus;
         this.helper = packageStatus2;
         boolean z4 = z && packageStatus == PackageStatus.VERIFIED && (embedded || root || packageStatus2 == PackageStatus.VERIFIED);
@@ -129,79 +131,79 @@ public final class InstallationReadiness {
 
     public String installationDescription() {
         if (this.game == PackageStatus.NOT_SELECTED) {
-            return "尚未选择游戏。";
+            return AndroidMessages.INSTALLATION_READINESS_05.text();
         }
         if (this.systemRequestActive) {
-            return "系统安装或卸载请求尚未结束，请完成或取消当前系统确认。";
+            return AndroidMessages.INSTALLATION_READINESS_06.text();
         }
         if (this.rootDirect) {
-            return this.identityVerified ? "Root 模式：已核对所选已安装游戏的身份；尚不代表 Root 权限或存档可访问。"
-                    : "Root 模式：所选已安装游戏的身份尚未核对。不会准备、签名、安装或卸载游戏。";
+            return this.identityVerified ? AndroidMessages.INSTALLATION_READINESS_07.text()
+                    : AndroidMessages.INSTALLATION_READINESS_08.text();
         }
         if (this.identityVerified) {
-            return this.embeddedBridge ? "游戏内置存档桥已验证：本机签名、完整 APK、来源绑定与独立 UID 已核对。" : "旧版游戏与助手已核对，仅用于保留的恢复流程。";
+            return this.embeddedBridge ? AndroidMessages.INSTALLATION_READINESS_09.text() : AndroidMessages.INSTALLATION_READINESS_10.text();
         }
         if (this.game == PackageStatus.NOT_CHECKED || this.helper == PackageStatus.NOT_CHECKED) {
-            return "安装状态尚未完成核验，请重新检查状态并查看诊断。";
+            return AndroidMessages.INSTALLATION_READINESS_11.text();
         }
         if (this.embeddedBridge) return this.game == PackageStatus.VERIFIED
-                ? "游戏签名与完整 APK 已核对；内置存档桥身份尚未通过验证，请查看诊断。"
-                : "仅需安装准备好的这一组游戏 APK，内置存档桥会随游戏一并安装。";
-        return (this.game == PackageStatus.VERIFIED && this.helper == PackageStatus.VERIFIED) ? "游戏与助手的签名和 APK 内容已核对；包身份或共享 UID 尚未通过验证，请查看诊断。" : "游戏与助手尚未全部完成安装，请按下方各自的当前状态继续。";
+                ? AndroidMessages.INSTALLATION_READINESS_12.text()
+                : AndroidMessages.INSTALLATION_READINESS_13.text();
+        return (this.game == PackageStatus.VERIFIED && this.helper == PackageStatus.VERIFIED) ? AndroidMessages.INSTALLATION_READINESS_14.text() : AndroidMessages.INSTALLATION_READINESS_15.text();
     }
 
     public String accessDescription() {
         if (this.systemRequestActive) {
-            return "系统请求结束后会重新核验安装和存档访问。";
+            return AndroidMessages.INSTALLATION_READINESS_16.text();
         }
         if (this.rootDirect && this.restorePending) {
-            return "检测到未完成恢复。不能切换游戏或访问方式，请先核对恢复记录。";
+            return AndroidMessages.INSTALLATION_READINESS_17.text();
         }
         if (this.rootDirect && this.access == AccessStatus.NOT_CHECKED) {
-            return "Root 存档访问尚未检查。点击检查、同步或启动时会向 Root 管理器请求实际权限；显示页面或返回应用不会自动请求 Root。";
+            return AndroidMessages.INSTALLATION_READINESS_18.text();
         }
         if (this.rootDirect && this.access == AccessStatus.READY) {
-            return "本次 Root 存档访问检查通过。后续操作仍会重新核验游戏身份与存档状态。";
+            return AndroidMessages.INSTALLATION_READINESS_19.text();
         }
         if (this.rootDirect) {
             switch (this.access) {
-                case FIRST_LAUNCH_NEEDED: return "所选游戏尚无可读取的存档目录；请先正常游玩并退出，再手动检查。";
-                case GAME_BUSY: return "游戏仍运行、存档变化或进程状态不明确。正常退出后再手动检查。";
-                case UNRECOGNIZED_LAYOUT: return "Root 已连接，但尚不能识别存档布局；未把它当成空存档。";
-                case SECURITY_ERROR: return "Root 权限或所选游戏身份尚未通过验证，请查看诊断并重新检查。";
-                case IPC_ERROR: return "尚未完成 Root 请求；可能未安装、被拒绝、超时或回复无效。请查看诊断。";
-                case RECOVERY_NEEDED: return "有未完成恢复或清理，请先核对所选游戏的事务与主程序恢复记录，暂时不要启动游戏。";
-                case CAPABILITY_UNAVAILABLE: return "此设备尚不能安全执行该 Root 文件操作。原生库、原子重命名或文件属性支持未通过检查；没有把它当成授权或恢复成功。请保留游戏与备份并查看诊断。";
-                default: return "Root 存档访问检查未完成，请查看诊断并明确重新检查。";
+                case FIRST_LAUNCH_NEEDED: return AndroidMessages.INSTALLATION_READINESS_20.text();
+                case GAME_BUSY: return AndroidMessages.INSTALLATION_READINESS_21.text();
+                case UNRECOGNIZED_LAYOUT: return AndroidMessages.INSTALLATION_READINESS_22.text();
+                case SECURITY_ERROR: return AndroidMessages.INSTALLATION_READINESS_23.text();
+                case IPC_ERROR: return AndroidMessages.INSTALLATION_READINESS_24.text();
+                case RECOVERY_NEEDED: return AndroidMessages.INSTALLATION_READINESS_25.text();
+                case CAPABILITY_UNAVAILABLE: return AndroidMessages.INSTALLATION_READINESS_26.text();
+                default: return AndroidMessages.INSTALLATION_READINESS_27.text();
             }
         }
         if (!this.identityVerified && this.access == AccessStatus.NOT_CHECKED) {
-            return "通过完整安装与身份核验后，才能检查存档访问。";
+            return AndroidMessages.INSTALLATION_READINESS_28.text();
         }
         if (this.restorePending && this.access == AccessStatus.FIRST_LAUNCH_NEEDED) {
-            return "检测到未完成恢复。请先在设置中检查恢复记录，再启动游戏或检查存档。";
+            return AndroidMessages.INSTALLATION_READINESS_29.text();
         }
         switch (this.access.ordinal()) {
             case 1:
-                return "存档访问已就绪，可以继续检查本机存档。";
+                return AndroidMessages.INSTALLATION_READINESS_30.text();
             case 2:
-                return "游戏尚未生成存档目录。请启动一次游戏，正常退出后返回这里重新检查存档。";
+                return AndroidMessages.INSTALLATION_READINESS_31.text();
             case 3:
-                return "游戏仍在前台、存档仍在写入或运行状态暂不明确。请正常退出游戏，稍后重新检查。";
+                return AndroidMessages.INSTALLATION_READINESS_32.text();
             case 4:
-                return "另一项存档操作尚未结束。请等待完成后重新检查。";
+                return AndroidMessages.INSTALLATION_READINESS_33.text();
             case 5:
-                return "存档目录已存在，但布局尚不能识别。请查看诊断；未把它当作空存档。";
+                return AndroidMessages.INSTALLATION_READINESS_34.text();
             case 6:
-                return "存档桥有未完成的存档恢复。请先在设置中检查恢复记录，暂时不要启动游戏。";
+                return AndroidMessages.INSTALLATION_READINESS_35.text();
             case 7:
-                return "存档桥的身份或访问权限检查未通过，请查看诊断后重新检查。";
+                return AndroidMessages.INSTALLATION_READINESS_36.text();
             case 8:
-                return "尚未完成与存档桥的通信，请重新检查；若仍失败，请查看诊断。";
+                return AndroidMessages.INSTALLATION_READINESS_37.text();
             case 9:
-                return "存档访问检查失败，请查看诊断并重新检查。";
+                return AndroidMessages.INSTALLATION_READINESS_38.text();
             default:
-                return "安装已核对，存档访问尚未完成检查。";
+                return AndroidMessages.INSTALLATION_READINESS_39.text();
         }
     }
 
@@ -212,19 +214,19 @@ public final class InstallationReadiness {
     public static String packageDescription(PackageStatus packageStatus) {
         int iOrdinal = packageStatus.ordinal();
         if (iOrdinal == 2) {
-            return "尚未安装";
+            return AndroidMessages.INSTALLATION_READINESS_40.text();
         }
         if (iOrdinal == 3) {
-            return "需要兼容更新，无需卸载";
+            return AndroidMessages.INSTALLATION_READINESS_41.text();
         }
         if (iOrdinal == 4) {
-            return "当前应用不兼容，替换前需要单独确认卸载";
+            return AndroidMessages.INSTALLATION_READINESS_42.text();
         }
         if (iOrdinal == 5) {
-            return "已安装，签名及完整 APK 内容已核对";
+            return AndroidMessages.INSTALLATION_READINESS_43.text();
         }
-        if (packageStatus == PackageStatus.NOT_APPLICABLE) return "无需独立安装";
-        return "尚未完成核验";
+        if (packageStatus == PackageStatus.NOT_APPLICABLE) return AndroidMessages.INSTALLATION_READINESS_44.text();
+        return AndroidMessages.INSTALLATION_READINESS_45.text();
     }
 
     public static AccessStatus classify(String str) {

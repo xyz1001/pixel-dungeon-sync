@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.json.*
 
 /** Shattered 3.3.8 global Journal schema, not the per-run Notes stored in game.dat.
@@ -15,9 +16,9 @@ internal object JournalMerge {
   "bestiary_classes","bestiary_seen","bestiary_encounters","documents")
 
  fun merge(base: JsonObject?, branches: List<JsonObject>): JsonObject {
-  if(branches.isEmpty())globalFail("journal.dat 缺少合并分支")
+  if(branches.isEmpty())globalFail(CoreMessages.JOURNAL_DAT_HAS_NO_BRANCHES_TO_MERGE.text())
   if((listOfNotNull(base)+branches).any { "catalog_items" in it })
-   globalFail("journal.dat 包含旧版 catalog_items，尚未验证迁移合并")
+   globalFail(CoreMessages.JOURNAL_DAT_CONTAINS_LEGACY_CATALOG_ITEMS_MIGRATION_MERGING_IS_NOT_YET_VERIFIED.text())
   val result=mergeOpaqueFields(base,branches,knownKeys,"journal.dat")
   mergeEntries(base,branches,"catalog","uses",result)
   mergeEntries(base,branches,"bestiary","encounters",result)
@@ -29,14 +30,14 @@ internal object JournalMerge {
   if(bundle==null)return emptyMap()
   val fields=listOf("${prefix}_classes","${prefix}_seen","${prefix}_$counter")
   if(fields.none { it in bundle })return emptyMap()
-  if(fields.any { it !in bundle })globalFail("journal.dat/$prefix 平行数组不完整")
+  if(fields.any { it !in bundle })globalFail(CoreMessages.JOURNAL_DAT_1_S_PARALLEL_ARRAYS_ARE_INCOMPLETE.text(prefix))
   val classes=globalStringSet(bundle[fields[0]],"journal.dat/${fields[0]}").toList()
   if(classes.any { !binaryClass.matches(it) || it=="com.shatteredpixel.shatteredpixeldungeon.items.keys.SkeletonKey" })
-   globalFail("journal.dat/$prefix 存在未经验证的旧版或非法类名")
-  val seen=bundle[fields[1]] as? JsonArray ?: globalFail("journal.dat/${fields[1]} 必须为数组")
-  val counts=bundle[fields[2]] as? JsonArray ?: globalFail("journal.dat/${fields[2]} 必须为数组")
+   globalFail(CoreMessages.JOURNAL_DAT_1_S_CONTAINS_UNVERIFIED_LEGACY_OR_INVALID_CLASS_NAMES.text(prefix))
+  val seen=bundle[fields[1]] as? JsonArray ?: globalFail(CoreMessages.JOURNAL_DAT_1_S_MUST_BE_AN_ARRAY.text(fields[1]))
+  val counts=bundle[fields[2]] as? JsonArray ?: globalFail(CoreMessages.JOURNAL_DAT_1_S_MUST_BE_AN_ARRAY.text(fields[2]))
   if(classes.size!=seen.size || classes.size!=counts.size)
-   globalFail("journal.dat/$prefix 平行数组长度不一致")
+   globalFail(CoreMessages.JOURNAL_DAT_1_S_PARALLEL_ARRAYS_HAVE_DIFFERENT_LENGTHS.text(prefix))
   return classes.mapIndexed { index,cls -> cls to Entry(
    globalBoolean(seen[index],"journal.dat/$prefix/$cls/seen"),
    globalInt(counts[index],"journal.dat/$prefix/$cls/$counter")
@@ -63,7 +64,7 @@ internal object JournalMerge {
 
  private fun objectField(bundle: JsonObject?, field: String, label: String): JsonObject? {
   if(bundle==null || field !in bundle)return null
-  return bundle[field] as? JsonObject ?: globalFail("$label 必须为对象")
+  return bundle[field] as? JsonObject ?: globalFail(CoreMessages.TEXT_1_S_MUST_BE_AN_OBJECT.text(label))
  }
 
  private fun mergeDocuments(base: JsonObject?, branches: List<JsonObject>): JsonObject {
@@ -80,7 +81,7 @@ internal object JournalMerge {
     fun state(obj:JsonObject?):Int {
      if(obj==null || page !in obj)return default
      val value=globalInt(obj[page],"journal.dat/documents/$doc/$page")
-     if(value>2)globalFail("journal.dat/documents/$doc/$page 包含未知页面状态")
+     if(value>2)globalFail(CoreMessages.JOURNAL_DAT_DOCUMENTS_1_S_2_S_CONTAINS_AN_UNKNOWN_PAGE_STATE.text(doc, page))
      return value
     }
     val previous=state(before)

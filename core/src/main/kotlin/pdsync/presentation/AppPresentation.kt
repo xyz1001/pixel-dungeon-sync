@@ -1,16 +1,17 @@
 package pdsync.presentation
 
-/** Shared screen identities and copy recovered from the versionCode 13 Android APK. */
+import pdsync.i18n.CoreMessages
+/** Shared screen identities. PATH and COMPARISON remain readable for legacy navigation and standalone settings. */
 enum class SyncPage { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
 
 object AppPresentation {
- const val DISCOVERY_TITLE = "1 / 4  选择游戏"
- const val PATH_TITLE = "2 / 4  设置存档路径"
- const val CONNECTION_TITLE = "3 / 4  连接云端"
- const val COMPARISON_TITLE = "4 / 4  选择存档"
- const val COMPLETE_TITLE = "4 / 4  配置完成"
- const val HISTORY_TITLE = "完整档案历史"
- const val AUTOMATIC_PAUSED = "自动上传暂停，请先选择上传或恢复。"
- const val CONFLICT_TITLE = "存档发生冲突"
- const val CONFLICT_EXPLANATION = "覆盖：所选快照成为本机和云端的当前版本。合并：保留各局改动，并校验合并徽章、历史和图鉴。同局分叉各占一个槽位；图鉴次数取最大，排行榜去重后保留最高分11条。累计统计缺少完整证据时保守取较大值，可能少计；格式损坏或超出六槽仍停止，原始快照保留。"
+ val DISCOVERY_TITLE get() = CoreMessages.TEXT_1_2_CHOOSE_GAME.text()
+ val PATH_TITLE get() = CoreMessages.SAVE_LOCATION.text()
+ val CONNECTION_TITLE get() = CoreMessages.TEXT_2_2_CONNECT_CLOUD.text()
+ val COMPARISON_TITLE get() = CoreMessages.CHOOSE_SAVE.text()
+ val COMPLETE_TITLE get() = CoreMessages.SETUP_COMPLETE.text()
+ val HISTORY_TITLE get() = CoreMessages.COMPLETE_PROFILE_HISTORY.text()
+ val AUTOMATIC_PAUSED get() = CoreMessages.AUTOMATIC_UPLOAD_IS_PAUSED_CHOOSE_UPLOAD_OR_RESTORE_FIRST.text()
+ val CONFLICT_TITLE get() = CoreMessages.SAVE_CONFLICT.text()
+ val CONFLICT_EXPLANATION get() = CoreMessages.OVERWRITE_THE_SELECTED_SNAPSHOT_BECOMES_THE_CURRENT_LOCAL_AND_CLOUD_VERSION_MERGE_PRE.text()
 }

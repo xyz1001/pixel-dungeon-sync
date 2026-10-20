@@ -1,0 +1,202 @@
+package io.github.xyz1001.pdsync.android;
+
+/** Production callback/drain methods with deterministic account, work, and archive ports. */
+class MainActivity {
+    enum SyncPage { HOME, SETTINGS, CONNECTION }
+    enum DiagnosticAction { INSPECT }
+    static class Text { String text() { return "checking"; } }
+    static final Text CHECKING_SAVES_144 = new Text();
+    static class SecureConnectionStore {
+        static class Connection {
+            String endpoint = "official", username = "user", password = "secret", profile = "default";
+        }
+    }
+    static class SharedConnectionConfig {
+        String endpoint, username, password, profile;
+        SharedConnectionConfig(SecureConnectionStore.Connection source) {
+            endpoint = source.endpoint; username = source.username; password = source.password; profile = source.profile;
+        }
+        String getEndpoint() { return endpoint; }
+        String getUsername() { return username; }
+        String getPassword() { return password; }
+        String getProfile() { return profile; }
+    }
+    static class SyncRuntime {
+        static SecureConnectionStore.Connection account;
+        static String selection, namespace;
+        static boolean unavailable;
+        static SecureConnectionStore.Connection currentConnection() { return account; }
+        static String currentSelectionToken(MainActivity host) throws Exception {
+            if (unavailable) throw new Exception("selection unavailable");
+            return selection;
+        }
+        static String currentNamespace(MainActivity host) throws Exception {
+            if (unavailable) throw new Exception("namespace unavailable");
+            return namespace;
+        }
+    }
+    static class Installer { boolean active; boolean hasActiveRequest() { return active; } }
+    static class Readiness { String statusDescription() { return "not ready"; } }
+    static class Inspection { String getMessage() { return "fresh history"; } }
+    static class StaleArchiveReadException extends Exception {}
+    interface Task { boolean run() throws Exception; }
+    interface Done { void accept(boolean result) throws Exception; }
+    interface Change { void run(MainActivity host); }
+    RenewalArchiveReadState renewalArchiveRead = new RenewalArchiveReadState();
+    SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
+    Object sharedConnectionSession = new Object(), facade = new Object(), preparedOfficialNamespaceFacade = new Object();
+    Object history = new Object(), homeObservationOwner = new Object();
+    Inspection inspection = new Inspection();
+    Installer installer = new Installer();
+    Readiness readinessState = new Readiness();
+    boolean resumed = true, destroyed, sharedAppreciationOnly, busy, cloudVerified = true, available = true, ready = true;
+    SyncPage page = SyncPage.HOME;
+    String notice = "", details = "";
+    int workCalls, reads, preparingReads;
+    Task pendingTask;
+    Done pendingDone;
+    Exception failure;
+    MainActivity() {
+        SyncRuntime.account = connection; SyncRuntime.selection = "game-a"; SyncRuntime.namespace = "space-a";
+        SyncRuntime.unavailable = false;
+    }
+    boolean isDestroyed() { return destroyed; }
+    boolean isOfficialAccount(SecureConnectionStore.Connection account) { return account != null && "official".equals(account.endpoint); }
+    boolean homeAccountAccessAvailable() { return available; }
+    boolean readyForSaves() { return ready; }
+    String comparisonCopy() { return "comparison ready"; }
+    String safeText(String value) { return value; }
+    void work(DiagnosticAction action, String label, Task task, Done done) {
+        check(action == DiagnosticAction.INSPECT, "renewal must only request inspection");
+        workCalls++; pendingTask = task; pendingDone = done;
+    }
+    void readComparison(boolean prepareNamespace) {
+        check(facade == null && preparedOfficialNamespaceFacade == null, "renewal must create a fresh facade");
+        check(history == null && inspection == null && !cloudVerified && homeObservationOwner == null, "clear old observation before read");
+        reads++; if (prepareNamespace) preparingReads++;
+        facade = new Object(); history = new Object(); inspection = new Inspection();
+        homeObservationOwner = new Object(); cloudVerified = true;
+    }
+    void runPending() throws Exception {
+        Task task = pendingTask; Done done = pendingDone; pendingTask = null; pendingDone = null;
+        if (task == null) return;
+        try { done.accept(task.run()); } catch (StaleArchiveReadException stale) { failure = stale; }
+    }
+    SharedConnectionConfig source() { return new SharedConnectionConfig(connection); }
+    void open(boolean homeAvailable) {
+        renewalArchiveRead.open(connection, SyncRuntime.selection, SyncRuntime.namespace, homeAvailable);
+    }
+    void freshActive() { onAccountRefreshStarted(source()); onAccountAccessChanged(source(), true); }
+    /* PRODUCTION_METHODS */
+    static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    static void noRead(MainActivity host, String message) { check(host.reads == 0 && host.workCalls == 0, message); }
+
+    static void settingsTransitAndOneShot() throws Exception {
+        MainActivity host = new MainActivity(); host.page = SyncPage.SETTINGS; host.sharedAppreciationOnly = true;
+        host.open(false); host.freshActive(); noRead(host, "refresh callback must not read while account page is open");
+        host.drainRenewalArchiveRead(); noRead(host, "account overlay cannot read");
+        host.sharedAppreciationOnly = false; host.sharedConnectionSession = null;
+        host.drainRenewalArchiveRead(); noRead(host, "return through settings cannot read");
+        host.page = SyncPage.HOME; host.drainRenewalArchiveRead();
+        check(host.workCalls == 1 && host.reads == 0, "HOME enqueues one worker");
+        host.drainRenewalArchiveRead(); check(host.workCalls == 1, "pending worker must not be duplicated");
+        host.runPending();
+        check(host.reads == 1 && host.preparingReads == 0 && host.cloudVerified, "HOME performs one read-only recovery");
+        check("comparison ready".equals(host.notice) && "fresh history".equals(host.details), "existing comparison feedback is used");
+        host.drainRenewalArchiveRead(); check(host.workCalls == 1, "consumed recovery cannot repeat");
+    }
+
+    static void unavailablePendingFailureAndDedupe() throws Exception {
+        MainActivity host = new MainActivity(); host.open(false);
+        host.drainRenewalArchiveRead(); noRead(host, "unknown account is not success");
+        host.freshActive(); host.onAccountRefreshStarted(host.source());
+        host.drainRenewalArchiveRead(); noRead(host, "pending refresh invalidates queued success");
+        host.onAccountAccessChanged(host.source(), false);
+        host.drainRenewalArchiveRead(); noRead(host, "expired or failed refresh suppresses stale success");
+        host.freshActive(); host.freshActive(); host.drainRenewalArchiveRead(); host.runPending();
+        check(host.reads == 1, "repeated fresh refreshes coalesce");
+        host.freshActive(); host.drainRenewalArchiveRead(); check(host.reads == 1 && host.workCalls == 1, "active result after consume does not reread");
+        MainActivity active = new MainActivity(); active.open(true); active.freshActive(); active.drainRenewalArchiveRead();
+        noRead(active, "active HOME without recovery need must not read");
+    }
+
+    static void foregroundBusyAndReadinessGates() throws Exception {
+        for (int condition = 0; condition < 4; condition++) {
+            MainActivity host = new MainActivity(); host.open(false); host.freshActive();
+            if (condition == 0) host.resumed = false;
+            if (condition == 1) host.busy = true;
+            if (condition == 2) host.installer.active = true;
+            if (condition == 3) host.sharedAppreciationOnly = true;
+            host.drainRenewalArchiveRead(); noRead(host, "unavailable foreground gate " + condition);
+            host.resumed = true; host.busy = false; host.installer.active = false; host.sharedAppreciationOnly = false;
+            host.drainRenewalArchiveRead(); host.runPending();
+            check(host.reads == 1, "gate preserves recovery until HOME is ready " + condition);
+        }
+        MainActivity expired = new MainActivity(); expired.open(false); expired.freshActive(); expired.available = false;
+        expired.drainRenewalArchiveRead(); noRead(expired, "trusted current access must still authorize reading");
+        MainActivity unready = new MainActivity(); unready.open(false); unready.freshActive(); unready.ready = false;
+        unready.drainRenewalArchiveRead(); unready.runPending();
+        check(unready.reads == 0 && "not ready".equals(unready.notice), "readiness failure uses existing feedback without archive read");
+    }
+
+    static void rejectUnrelatedCallbacks() throws Exception {
+        for (int dimension = 0; dimension < 4; dimension++) {
+            MainActivity host = new MainActivity(); host.open(false);
+            SharedConnectionConfig source = host.source();
+            if (dimension == 0) source.endpoint = "other";
+            if (dimension == 1) source.username = "other";
+            if (dimension == 2) source.password = "other";
+            if (dimension == 3) source.profile = "other";
+            host.onAccountRefreshStarted(source); host.onAccountAccessChanged(source, true);
+            host.drainRenewalArchiveRead(); noRead(host, "foreign account callback dimension " + dimension);
+        }
+        for (int condition = 0; condition < 4; condition++) {
+            MainActivity host = new MainActivity(); host.open(false); SharedConnectionConfig source = host.source();
+            if (condition == 0) host.sharedConnectionSession = null;
+            if (condition == 1) host.destroyed = true;
+            if (condition == 2) host.connection.endpoint = "custom";
+            if (condition == 3) SyncRuntime.unavailable = true;
+            host.onAccountAccessChanged(source, true); host.drainRenewalArchiveRead();
+            noRead(host, "closed or unverifiable callback " + condition);
+        }
+    }
+
+    static void rejectChangedScopeBeforeAndDuringWork() throws Exception {
+        Change[] scopeChanges = {
+            host -> host.connection = new SecureConnectionStore.Connection(),
+            host -> SyncRuntime.selection = "game-b",
+            host -> SyncRuntime.namespace = "space-b"
+        };
+        for (Change change : scopeChanges) {
+            MainActivity host = new MainActivity(); host.open(false); host.freshActive(); change.run(host);
+            host.drainRenewalArchiveRead(); noRead(host, "old scope cannot queue a read");
+        }
+        Change[] workerChanges = {
+            host -> host.connection = new SecureConnectionStore.Connection(),
+            host -> SyncRuntime.account = new SecureConnectionStore.Connection(),
+            host -> SyncRuntime.selection = "game-b",
+            host -> SyncRuntime.namespace = "space-b",
+            host -> host.page = SyncPage.SETTINGS,
+            host -> host.resumed = false,
+            host -> host.destroyed = true,
+            host -> host.sharedAppreciationOnly = true
+        };
+        for (Change change : workerChanges) {
+            MainActivity host = new MainActivity(); host.open(false); host.freshActive(); host.drainRenewalArchiveRead();
+            change.run(host); host.runPending();
+            check(host.reads == 0 && host.failure instanceof StaleArchiveReadException, "stale worker cannot inspect");
+        }
+        MainActivity canceled = new MainActivity(); canceled.open(false); canceled.freshActive(); canceled.renewalArchiveRead.clear();
+        canceled.onAccountAccessChanged(canceled.source(), true); canceled.drainRenewalArchiveRead();
+        noRead(canceled, "late callback cannot revive canceled queue");
+    }
+
+    public static void main(String[] args) throws Exception {
+        settingsTransitAndOneShot();
+        unavailablePendingFailureAndDedupe();
+        foregroundBusyAndReadinessGates();
+        rejectUnrelatedCallbacks();
+        rejectChangedScopeBeforeAndDuringWork();
+        System.out.println("Renewal archive read host execution passed");
+    }
+}

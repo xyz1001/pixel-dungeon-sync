@@ -1,0 +1,30 @@
+{
+  "version_code": 80,
+  "version_name": "0.5.59-test",
+  "deployment": "not_deployed",
+  "android": "not_built_or_signed",
+  "windows_execution": "not_verified",
+  "java_host_checks": {
+    "registration_native_login": 2518,
+    "managed_account": 1095
+  },
+  "python_tests": {
+    "managed_service": 163,
+    "manual_orders": 108,
+    "windows_packaging": 8
+  },
+  "junit": {
+    "core": {
+      "tests": 833,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "desktop": {
+      "tests": 566,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  }
+}

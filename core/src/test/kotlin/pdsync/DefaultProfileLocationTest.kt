@@ -22,7 +22,7 @@ class DefaultProfileLocationTest {
   val old = Files.createTempDirectory("old-fixed-other"); old.resolve("rankings.dat").writeText("never read")
   val state = Files.createTempDirectory("fixed-state")
   val config = AppConfig(saveRoot = root.toString())
-  val previous = ProfileSession(config, state, captureQuietMillis = 0); val saved = previous.createSnapshot { true }
+  val previous = ProfileSession(config, desktopAccountStateRoot(state, config), captureQuietMillis = 0); val saved = previous.createSnapshot { true }
   val current = location.open(config.copy(saveRoot = old.toString()), state)
   assertEquals(root.toRealPath(), current.root); assertEquals(previous.directory, current.directory)
   assertEquals(saved.manifest.id, current.history().single().manifest.id)

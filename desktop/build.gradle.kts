@@ -16,11 +16,21 @@ dependencies {
  testImplementation("com.squareup.okhttp3:okhttp:4.12.0")
  testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
 }
-tasks.test { useJUnitPlatform() }
+tasks.test {
+ useJUnitPlatform()
+ // Existing behavioral fixtures are Chinese; localization tests explicitly exercise other locales.
+ systemProperty("user.language", "zh")
+ systemProperty("user.country", "CN")
+}
 compose.desktop { application {
  mainClass = "pdsync.MainKt"
  // Shattered's LWJGL runtime also needs these modules (verified against official 3.3.8).
- nativeDistributions { modules("java.management", "jdk.unsupported") }
+ nativeDistributions {
+  modules("java.management", "jdk.unsupported")
+  windows { iconFile.set(project.file("src/main/resources/icons/pdsync.ico")) }
+  macOS { iconFile.set(project.file("src/main/resources/icons/pdsync.icns")) }
+  linux { iconFile.set(project.file("src/main/resources/icons/pdsync.png")) }
+ }
 } }
 
 // Compose 1.9.3 otherwise strips bin/java from the packaged runtime. This internal

@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import io.github.xyz1001.pdsync.android.InstallationReadiness;
 
 /* loaded from: classes.dex */
@@ -24,12 +26,12 @@ final class HelperActivationPolicy {
         if (game == null || !game.equals(host) || !(game + ":pdsync_bridge").equals(process)
                 || !ACTIVITY.equals(name) || (permission != null && !permission.isEmpty())
                 || !exported || !enabled || !applicationEnabled || activityUid != gameUid)
-            throw new SecurityException("游戏内置存档桥激活入口的身份或进程不匹配，已停止启动。");
+            throw new SecurityException(AndroidMessages.HELPER_ACTIVATION_POLICY_01.text());
     }
 
     static void requireActivity(String str, String str2, String str3, String str4, String str5, boolean z, boolean z2, boolean z3, int i, int i2) {
         if (str == null || !str.equals(str3) || !str.equals(str4) || !"io.github.xyz1001.pdsync.bridge.ActivationActivity".equals(str2) || !"io.github.xyz1001.pdsync.android.ACCESS_BRIDGE".equals(str5) || !z || !z2 || !z3 || i != i2) {
-            throw new SecurityException("存档助手激活页面的身份或权限不匹配，已停止启动。");
+            throw new SecurityException(AndroidMessages.HELPER_ACTIVATION_POLICY_02.text());
         }
     }
 }

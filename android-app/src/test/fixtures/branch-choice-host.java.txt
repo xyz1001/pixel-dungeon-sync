@@ -1,0 +1,266 @@
+package io.github.xyz1001.pdsync.android;
+
+import static pdsync.i18n.AndroidHostMessages.*;
+import java.util.List;
+import java.util.function.Consumer;
+
+/** Deterministic host ports. Only the marked production methods and HomeActionContext are real. */
+public final class MainActivity {
+    enum SyncPage { HOME, CONNECTION, SETTINGS, CONFLICT }
+    enum OnboardingProgress { COMPLETE, INCOMPLETE }
+    enum OnboardingKind { READY, BLOCKED, BRANCHED }
+    enum DiagnosticAction { PUSH, RESOLVE }
+    enum SharedHomeStatusKind { CONFLICT, EXPIRED }
+    interface Task { Object run() throws Exception; }
+    interface SharedBranchChoiceActions {
+        void select(String id); void back(); void refresh();
+        void overwrite(String id); void merge(); void preserveLocal();
+    }
+    static final class SecureConnectionStore { static final class Connection {} }
+    static final class AndroidSyncFacade {
+        static final class Version {
+            final String id;
+            Version(String id) { this.id = id; }
+            String getSnapshotId() { return id; }
+        }
+        static final class Inspection {
+            boolean pending;
+            List<Version> branches = List.of(new Version("branch-a"), new Version("branch-b"));
+            boolean isRetryablePending() { return pending; }
+            List<Version> getRemoteVersions() { return branches; }
+        }
+        static final class OperationResult {}
+        int uploads, resolutions;
+        Inspection dispatchedObservation;
+        String resolvedId;
+        OperationResult upload(Inspection observed) {
+            uploads++; dispatchedObservation = observed; return new OperationResult();
+        }
+        OperationResult resolveConflict(Inspection observed, String id) {
+            resolutions++; dispatchedObservation = observed; resolvedId = id; return new OperationResult();
+        }
+    }
+    static final class SyncHistory {
+        boolean protectedLocal;
+        boolean getCurrentProtected() { return protectedLocal; }
+    }
+    static final class LinearLayout {
+        static final class LayoutParams { LayoutParams(int width, int height) {} }
+        int removed, added;
+        void removeAllViews() { removed++; }
+        void setPadding(int a, int b, int c, int d) {}
+        void setOnApplyWindowInsetsListener(Object listener) {}
+        void addView(Object view, LayoutParams layout) { added++; }
+    }
+    static final class AndroidBranchChoiceComposition {
+        // The separate source contract validates every adapter argument and inactive backdrop.
+        static Object view(MainActivity activity, Object... args) {
+            activity.actions = (SharedBranchChoiceActions) args[args.length - 1];
+            activity.adapterObservation = args[0];
+            activity.adapterHistory = args[1];
+            activity.adapterHomeStatus = (String) args[args.length - 3];
+            activity.adapterHomeStatusKind = (SharedHomeStatusKind) args[args.length - 2];
+            return new Object();
+        }
+    }
+    static final class SyncRuntime {
+        static String currentSelectionToken(MainActivity a) throws Exception {
+            if (a.scopeUnavailable) throw new Exception("Synthetic unavailable scope");
+            return a.selectionToken;
+        }
+        static String currentNamespace(MainActivity a) { return a.namespace; }
+    }
+
+    SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
+    AndroidSyncFacade facade = new AndroidSyncFacade();
+    AndroidSyncFacade.Inspection inspection = new AndroidSyncFacade.Inspection();
+    SyncHistory history = new SyncHistory();
+    LinearLayout root = new LinearLayout();
+    SharedBranchChoiceActions actions;
+    Object adapterObservation, adapterHistory;
+    String adapterHomeStatus;
+    SharedHomeStatusKind adapterHomeStatusKind;
+    SyncPage page = SyncPage.CONFLICT;
+    OnboardingProgress progress = OnboardingProgress.COMPLETE;
+    OnboardingKind observedKind = OnboardingKind.BRANCHED;
+    boolean resumed = true, cloudVerified = true, restoreAllowed = true, uploadAllowed = true;
+    boolean destroyed, busy, sharedAppreciationOnly, recovery, scopeUnavailable, onboardingActive;
+    String selected = "branch-a", selectionToken = "embedded:isolated.game", namespace = "test-only";
+    String explicitHomeSelection = "branch-b", notice = "Synthetic conflict";
+    int sharedHomeRenderToken, historyPage = 2;
+    int navigations, refreshes, renders, operations, merges;
+    SyncPage refreshedPage;
+
+    boolean isDestroyed() { return destroyed; }
+    boolean restoreSupported() { return restoreAllowed; }
+    boolean restoreNeedsAttention() { return recovery; }
+    boolean canHomeUpload() { return uploadAllowed; }
+    // Full HOME status policy is executed separately by the HOME action harness.
+    Object homeContent() { return history; }
+    String homeStatus(Object content) { return "Synthetic HOME status"; }
+    boolean homeAccountExpired() { return false; }
+    SharedHomeStatusKind homeStatusKind(Object content) { return SharedHomeStatusKind.CONFLICT; }
+    OnboardingKind kind() { return observedKind; }
+    Object selectedGameIdentity() { return "isolated.game"; }
+    String visibleNotice() { return notice; }
+    AndroidSyncFacade sync() { return facade; }
+    void requireRestoreSupport() { if (!restoreAllowed) throw new AssertionError("Unsupported restore reached I/O"); }
+    void previewMerge() { merges++; busy = true; }
+    void navigate(SyncPage target) { navigations++; page = target; sharedHomeRenderToken++; root = new LinearLayout(); }
+    void refreshComparison(SyncPage target) { refreshes++; refreshedPage = target; busy = true; }
+    void render() {
+        renders++;
+        // Production render creates a new legacy root on each CONFLICT render.
+        root = new LinearLayout();
+        if (page == SyncPage.CONFLICT) renderConflict();
+    }
+    void operation(DiagnosticAction action, String label, Task task, String success) {
+        // Production work publishes busy before scheduling I/O; this port runs synchronously.
+        busy = true; operations++;
+        try { task.run(); } catch (Exception failure) { throw new AssertionError(failure); }
+    }
+
+    /* PRODUCTION_METHODS */
+
+    static int checks;
+    static void check(boolean value, String message) {
+        checks++;
+        if (!value) throw new AssertionError(message);
+    }
+    static MainActivity fresh() {
+        MainActivity a = new MainActivity();
+        a.renderConflict();
+        check(a.root.removed == 1 && a.root.added == 1, "chooser replaces legacy chrome once");
+        check(a.adapterObservation == a.inspection && a.adapterHistory == a.history,
+                "chooser receives real observation and history");
+        check(a.adapterHomeStatus.equals("Synthetic HOME status")
+                        && a.adapterHomeStatusKind == SharedHomeStatusKind.CONFLICT,
+                "backdrop receives actual home status and status kind");
+        check(a.operations == 0 && a.refreshes == 0 && a.navigations == 0 && a.merges == 0,
+                "drawing chooser has no operation or navigation side effect");
+        return a;
+    }
+    static void invokeAll(SharedBranchChoiceActions actions) {
+        actions.overwrite("branch-a"); actions.merge(); actions.preserveLocal();
+        actions.select("branch-b"); actions.refresh(); actions.back();
+    }
+    static void blocked(Consumer<MainActivity> change, String label) {
+        MainActivity a = fresh(); SharedBranchChoiceActions old = a.actions;
+        change.accept(a);
+        int renders = a.renders, navigation = a.navigations;
+        String selected = a.selected;
+        invokeAll(old);
+        check(a.operations == 0 && a.merges == 0 && a.refreshes == 0 && a.navigations == navigation
+                        && a.renders == renders && java.util.Objects.equals(selected, a.selected),
+                label + ": stale callback dispatched");
+    }
+    static void resolutionBlocked(Consumer<MainActivity> change, String label) {
+        MainActivity a = fresh(); change.accept(a);
+        // Render current evidence, so each gate is exercised independently of stale-owner checks.
+        a.render(); a.actions.overwrite("branch-a"); a.actions.merge();
+        check(a.operations == 0 && a.merges == 0, label + ": resolution dispatched");
+    }
+    static void preserveBlocked(Consumer<MainActivity> change, String label) {
+        MainActivity a = fresh(); change.accept(a); a.render(); a.actions.preserveLocal();
+        check(a.operations == 0 && a.facade.uploads == 0, label + ": preserve dispatched");
+    }
+    static void guards() {
+        blocked(a -> a.root = new LinearLayout(), "replaced root");
+        blocked(a -> a.page = SyncPage.HOME, "returned home");
+        blocked(a -> a.resumed = false, "paused activity");
+        blocked(a -> a.destroyed = true, "destroyed activity");
+        blocked(a -> a.busy = true, "busy activity");
+        blocked(a -> a.sharedAppreciationOnly = true, "appreciation active");
+        blocked(a -> a.inspection = new AndroidSyncFacade.Inspection(), "replaced observation");
+        blocked(a -> a.facade = new AndroidSyncFacade(), "replaced facade");
+        blocked(a -> a.connection = new SecureConnectionStore.Connection(), "replaced account");
+        blocked(a -> a.history = new SyncHistory(), "replaced history");
+        blocked(a -> a.selectionToken = "root:other.game", "changed game backend");
+        blocked(a -> a.namespace = "other-namespace", "changed namespace");
+        blocked(a -> a.scopeUnavailable = true, "unavailable current scope");
+        blocked(a -> a.sharedHomeRenderToken++, "newer render token");
+        MainActivity unavailable = fresh(); unavailable.scopeUnavailable = true; unavailable.render();
+        invokeAll(unavailable.actions);
+        check(unavailable.operations == 0 && unavailable.refreshes == 0 && unavailable.navigations == 0,
+                "unavailable owner scope: callback dispatched");
+    }
+    static void selectionAndCancellation() {
+        MainActivity a = fresh(); SharedBranchChoiceActions old = a.actions;
+        old.select("unknown-branch");
+        check(a.renders == 0 && a.selected.equals("branch-a"), "unknown branch cannot be selected");
+        old.select("branch-b");
+        check(a.renders == 1 && a.selected.equals("branch-b") && a.operations == 0,
+                "select only rerenders observed branch");
+        invokeAll(old);
+        check(a.renders == 1 && a.operations == 0 && a.merges == 0 && a.navigations == 0 && a.refreshes == 0,
+                "callback after selection render is stale");
+        a.actions.overwrite("branch-a"); a.actions.overwrite("unknown-branch");
+        check(a.operations == 0, "overwrite must match selected observed branch");
+        SharedBranchChoiceActions selected = a.actions;
+        selected.overwrite("branch-b"); selected.overwrite("branch-b"); selected.merge(); selected.preserveLocal();
+        check(a.operations == 1 && a.facade.resolutions == 1 && a.facade.uploads == 0 && a.merges == 0,
+                "busy repeated confirmation is dispatched once");
+        check(a.facade.dispatchedObservation == a.inspection && a.facade.resolvedId.equals("branch-b"),
+                "resolve keeps exact observation and selected ID");
+        a = fresh(); a.selected = "unknown-branch"; a.render(); a.actions.overwrite("unknown-branch");
+        check(a.operations == 0, "selected ID must still belong to observed branches");
+        blocked(MainActivity::render, "explicit rerender");
+        a = fresh(); old = a.actions; old.back(); invokeAll(old);
+        check(a.page == SyncPage.HOME && a.navigations == 1 && a.operations == 0 && a.refreshes == 0,
+                "cancel returns home once and invalidates retained callbacks");
+        a = fresh(); a.onboardingActive = true; a.actions.back();
+        check(a.page == SyncPage.CONNECTION && a.navigations == 1 && a.operations == 0,
+                "existing onboarding back route is retained");
+        a = fresh(); old = a.actions; old.refresh(); old.refresh();
+        check(a.refreshes == 1 && a.refreshedPage == SyncPage.HOME && a.operations == 0,
+                "refresh uses existing home read and busy guard");
+    }
+    static void capabilities() {
+        resolutionBlocked(a -> a.inspection = null, "missing observation");
+        resolutionBlocked(a -> a.observedKind = OnboardingKind.READY, "unbranched observation");
+        resolutionBlocked(a -> a.cloudVerified = false, "unverified observation");
+        resolutionBlocked(a -> a.connection = null, "disconnected account");
+        resolutionBlocked(a -> a.restoreAllowed = false, "unsupported restore");
+        resolutionBlocked(a -> a.recovery = true, "unfinished restore");
+        resolutionBlocked(a -> a.inspection.pending = true, "pending upload");
+        MainActivity a = fresh(); a.actions.merge(); a.actions.merge();
+        check(a.merges == 1 && a.operations == 0, "merge routes only to existing preview once while busy");
+        preserveBlocked(b -> b.inspection = null, "preserve missing observation");
+        preserveBlocked(b -> b.observedKind = OnboardingKind.READY, "preserve unbranched observation");
+        preserveBlocked(b -> b.cloudVerified = false, "preserve unverified observation");
+        preserveBlocked(b -> b.connection = null, "preserve disconnected account");
+        preserveBlocked(b -> b.recovery = true, "preserve unfinished restore");
+        preserveBlocked(b -> b.history = null, "preserve missing history");
+        preserveBlocked(b -> b.history.protectedLocal = true, "preserve already protected");
+        a = fresh(); a.restoreAllowed = false; a.inspection.pending = true; a.render();
+        SharedBranchChoiceActions old = a.actions; old.preserveLocal(); old.preserveLocal();
+        check(a.facade.uploads == 1 && a.operations == 1 && a.facade.resolutions == 0 && a.merges == 0,
+                "preserve keeps existing pending-upload retry without requiring restore support");
+        check(a.facade.dispatchedObservation == a.inspection, "preserve keeps exact upload observation");
+    }
+    static void ordinaryUploadRouting() {
+        MainActivity a = fresh(); a.page = SyncPage.HOME; a.observedKind = OnboardingKind.READY;
+        a.requestUpload();
+        check(a.operations == 1 && a.facade.uploads == 1 && a.navigations == 0 && a.refreshes == 0,
+                "ordinary upload stays direct without a chooser or confirmation");
+        a = fresh(); a.page = SyncPage.HOME; a.requestUpload();
+        check(a.operations == 1 && a.facade.uploads == 1 && a.navigations == 0,
+                "existing branched upload dispatch stays unchanged");
+        a = fresh(); a.page = SyncPage.HOME; a.uploadAllowed = false; a.requestUpload(); a.upload();
+        check(a.operations == 0 && a.refreshes == 0, "ordinary upload preserves its existing source gate");
+        a = fresh(); a.page = SyncPage.HOME; a.inspection = null; a.requestUpload();
+        check(a.operations == 0 && a.refreshes == 1 && a.refreshedPage == SyncPage.HOME,
+                "missing upload observation only refreshes home");
+        a = fresh(); a.page = SyncPage.HOME; a.cloudVerified = false; a.requestUpload();
+        check(a.operations == 0 && a.refreshes == 1, "unverified upload observation only refreshes home");
+        a = fresh(); a.page = SyncPage.HOME; a.connection = null; a.requestUpload();
+        check(a.operations == 0 && a.page == SyncPage.CONNECTION, "disconnected upload returns to connection");
+        a = fresh(); a.page = SyncPage.HOME; a.progress = OnboardingProgress.INCOMPLETE; a.requestUpload();
+        check(a.operations == 0 && a.onboardingActive && a.page == SyncPage.CONNECTION,
+                "unfinished configuration keeps existing connection route");
+    }
+    public static void main(String[] args) {
+        guards(); selectionAndCancellation(); capabilities(); ordinaryUploadRouting();
+        System.out.println("branch choice host execution passed: " + checks + " checks");
+    }
+}

@@ -3,10 +3,9 @@ package io.github.xyz1001.pdsync.bridge;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.Signature;
 import android.os.Process;
 
-/** Authenticating a UID and its current certificate is independent of APK permissions. */
+/** Authenticate only the framework caller package and actual Binder UID. */
 final class MainCallerAuthenticator {
     private MainCallerAuthenticator() { }
 
@@ -33,7 +32,7 @@ final class MainCallerAuthenticator {
     }
 
     private static PackageInfo currentMain(Context context) throws PackageManager.NameNotFoundException {
-        return context.getPackageManager().getPackageInfo(MainCallerPolicy.MAIN, AndroidApiCompat.signingFlags());
+        return context.getPackageManager().getPackageInfo(MainCallerPolicy.MAIN, 0);
     }
 
     private static void authenticate(Context context, String callingPackage, int callingUid, PackageInfo main)
@@ -42,16 +41,11 @@ final class MainCallerAuthenticator {
                 main.applicationInfo == null ? -1 : main.applicationInfo.uid,
                 context.getPackageManager().getPackagesForUid(callingUid));
         try {
-            // Fail closed before exposing any provider operation if manifest
-            // binding or the immutable embedded certificate pin was changed.
+            // Source binding is still validated; a client certificate is not an access pin.
             new GameBinding(BridgeMetadata.read(context), context.getPackageName());
         } catch (java.io.IOException error) {
             throw new SecurityException("Cannot authenticate bridge binding", error);
         }
-        Signature[] signers = AndroidApiCompat.currentSigners(main);
-        byte[][] certificates = signers == null ? null : new byte[signers.length][];
-        if (signers != null) for (int i = 0; i < signers.length; i++)
-            certificates[i] = signers[i] == null ? null : signers[i].toByteArray();
-        MainCallerPolicy.requirePinnedSigner(MainCallerPolicy.MAIN_SIGNER_SHA256, certificates);
+
     }
 }

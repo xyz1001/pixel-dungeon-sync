@@ -1,0 +1,17 @@
+第 2 步，共 2 步
+连接云端
+通过云端服务在多设备之间保持进度一致。请选择您的存档同步服务：
+内置同步服务
+开箱即用，新用户享 3 天全功能免费试用，支持多端秒级同步。
+使用内置服务
+自定义 WebDAV
+连接坚果云、Nextcloud 或私有 NAS 等任意兼容 WebDAV 协议的存储。
+配置 WebDAV
+上一步
+完成配置
+
+ACTIONS
+使用内置服务; disabled=false; bounds=Rect.fromLTRB(55.0, 310.0, 335.0, 352.0)
+配置 WebDAV; disabled=false; bounds=Rect.fromLTRB(55.0, 515.0, 335.0, 557.0)
+上一步; disabled=false; bounds=Rect.fromLTRB(29.0, 642.0, 95.0, 684.0)
+完成配置; disabled=true; bounds=Rect.fromLTRB(265.0, 642.0, 361.0, 684.0)

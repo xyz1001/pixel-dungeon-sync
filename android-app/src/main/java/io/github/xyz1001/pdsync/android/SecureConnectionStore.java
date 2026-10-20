@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.content.Context;
 import io.github.xyz1001.pdsync.android.LegacyWebDavConnectionFile;
 import io.github.xyz1001.pdsync.android.WebDavConnectionFile;
@@ -102,7 +104,7 @@ public final class SecureConnectionStore {
         KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
         keyStore.load(null);
         if (!keyStore.containsAlias("pdsync-main-webdav-v1")) {
-            throw new IOException("旧版连接密钥不可用。");
+            throw new IOException(AndroidMessages.SECURE_CONNECTION_STORE_01.text());
         }
         return (SecretKey) keyStore.getKey("pdsync-main-webdav-v1", null);
     }

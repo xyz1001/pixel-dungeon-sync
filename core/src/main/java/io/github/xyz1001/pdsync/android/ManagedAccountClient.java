@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.CoreSessionMessages;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,6 +11,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
@@ -83,22 +87,36 @@ final class ManagedAccountClient {
     static final class Entitlement {
         final String source;
         final String username;
+        /** Raw expires_ms received from the existing official Basic entitlement endpoint. */
+        final Long serverExpiresMs;
+        /** True service deadline, normalized once to serverExpiresMs minus one UTC calendar year. */
         final Long expiresMs;
         final Long serverTimeMs;
         final boolean active;
+        final boolean enabled;
+        /** The original ledger may return null/active=false when its expiry is unconfirmed. */
+        final boolean hasConfirmedExpiry;
         final boolean managed;
-        private Entitlement(String username, Long expiresMs, boolean active, boolean managed, Long serverTimeMs) {
-            this.source = "managed_ledger";
+        private Entitlement(String source, String username, Long serverExpiresMs, Long expiresMs,
+                            boolean enabled, boolean hasConfirmedExpiry, boolean managed, Long serverTimeMs) {
+            this.source = source;
             this.username = username;
+            this.serverExpiresMs = serverExpiresMs;
             this.expiresMs = expiresMs;
             this.serverTimeMs = serverTimeMs;
-            this.active = active;
+            this.enabled = enabled;
+            this.hasConfirmedExpiry = hasConfirmedExpiry;
+            // Finite eligibility uses the adjusted date, never the old server active conclusion.
+            this.active = enabled && hasConfirmedExpiry && serverTimeMs != null
+                    && (expiresMs == null || serverTimeMs < expiresMs);
             this.managed = managed;
         }
         /** Metadata authentication is separate from permission to perform DAV I/O. */
         void requireSyncAccess() throws ManagedAccountException {
-            if (!active) throw failure(expiresMs != null && serverTimeMs != null && serverTimeMs >= expiresMs
-                    ? FailureKind.ACCOUNT_EXPIRED : FailureKind.ACCOUNT_INACTIVE);
+            if (!enabled) throw failure(FailureKind.ACCOUNT_INACTIVE);
+            if (!hasConfirmedExpiry || serverTimeMs == null) throw failure(FailureKind.INVALID_RESPONSE);
+            if (expiresMs != null && serverTimeMs >= expiresMs) throw failure(FailureKind.ACCOUNT_EXPIRED);
+            if (!active) throw failure(FailureKind.ACCOUNT_INACTIVE);
         }
         @Override public String toString() { return "Official entitlement [private fields hidden]"; }
     }
@@ -196,11 +214,24 @@ final class ManagedAccountClient {
         if (!canReadEntitlement()) throw failure(FailureKind.AUTHENTICATION_REQUIRED);
         return execute(request(ENTITLEMENT_URL, true, "application/json"), response -> {
             JsonObject data = data(response);
-            if (!"managed_ledger".equals(string(data, "source", 64))
+            String source = string(data, "source", 64);
+            if (!"managed_ledger".equals(source)
                     || !username.equals(string(data, "username", 64))) throw invalid();
-            Long expires = data.get("expires_ms") == JsonNull.INSTANCE ? null : integer(data, "expires_ms");
+            Long raw = data.get("expires_ms") == JsonNull.INSTANCE ? null : integer(data, "expires_ms");
             Long serverTime = data.containsKey("server_time_ms") ? integer(data, "server_time_ms") : null;
-            return new Entitlement(username, expires, bool(data, "active"), bool(data, "managed"), serverTime);
+            long status = data.containsKey("status") ? integer(data, "status") : 1;
+            if (status != 0 && status != 1) throw invalid();
+            boolean serverActive = bool(data, "active");
+            // Original ledger null/false can mean "not confirmed", not an unlimited account.
+            // Numeric zero is explicit unlimited; null/true retains the old unlimited contract.
+            boolean hasConfirmedExpiry = raw != null || serverActive;
+            // This is the only normalization boundary. Every display and access check consumes
+            // expiresMs directly; zero/null remain unlimited. UTC calendar arithmetic preserves
+            // the time and milliseconds and clamps February 29 to February 28 where necessary.
+            Long expires = raw == null || raw == 0 ? null : Instant.ofEpochMilli(raw)
+                    .atZone(ZoneOffset.UTC).minusYears(1).toInstant().toEpochMilli();
+            return new Entitlement(source, username, raw, expires, status == 1, hasConfirmedExpiry,
+                    bool(data, "managed"), serverTime);
         });
     }
 
@@ -519,22 +550,22 @@ final class ManagedAccountClient {
     private static ManagedAccountException failure(FailureKind kind) { return new ManagedAccountException(kind); }
     private static String messageFor(FailureKind kind) {
         switch (kind) {
-            case INVALID_INPUT: return "官方账号配置无效。";
-            case AUTHENTICATION_REQUIRED: return "无法登录，请检查账号或续期状态。";
-            case ACCOUNT_EXPIRED: return "服务已到期";
-            case ACCOUNT_INACTIVE: return "暂时无法同步，请检查账号或续期状态。";
-            case FORBIDDEN: return "服务未允许读取这项信息。";
-            case NOT_AVAILABLE: return "此项服务暂不可用。";
-            case RATE_LIMITED: return "操作过于频繁，请稍后刷新。";
-            case SERVER_ERROR: return "官方服务暂时异常。";
-            case REQUEST_REJECTED: return "服务未接受这次查询。";
-            case REDIRECT_REJECTED: return "已拒绝服务地址跳转。";
-            case RESPONSE_TOO_LARGE: return "服务返回的信息过大。";
-            case IMAGE_INTEGRITY_ERROR: return "赞赏图片校验未通过。";
-            case TIMEOUT: return "查询超时，请稍后刷新。";
-            case TLS_ERROR: return "无法验证服务安全连接。";
-            case NETWORK_ERROR: return "网络连接中断。";
-            default: return "服务返回的信息无效。";
+            case INVALID_INPUT: return CoreSessionMessages.INVALID_BUILT_IN_ACCOUNT_CONFIGURATION.text();
+            case AUTHENTICATION_REQUIRED: return CoreSessionMessages.UNABLE_TO_SIGN_IN_CHECK_YOUR_ACCOUNT_OR_RENEWAL_STATUS.text();
+            case ACCOUNT_EXPIRED: return CoreSessionMessages.SERVICE_EXPIRED.text();
+            case ACCOUNT_INACTIVE: return CoreSessionMessages.SYNC_IS_UNAVAILABLE_CHECK_YOUR_ACCOUNT_OR_RENEWAL_STATUS.text();
+            case FORBIDDEN: return CoreSessionMessages.THE_SERVICE_DID_NOT_ALLOW_ACCESS_TO_THIS_INFORMATION.text();
+            case NOT_AVAILABLE: return CoreSessionMessages.THIS_SERVICE_IS_CURRENTLY_UNAVAILABLE.text();
+            case RATE_LIMITED: return CoreSessionMessages.TOO_MANY_REQUESTS_REFRESH_LATER.text();
+            case SERVER_ERROR: return CoreSessionMessages.THE_BUILT_IN_SERVICE_IS_TEMPORARILY_UNAVAILABLE.text();
+            case REQUEST_REJECTED: return CoreSessionMessages.THE_SERVICE_REJECTED_THIS_QUERY.text();
+            case REDIRECT_REJECTED: return CoreSessionMessages.THE_SERVICE_REDIRECT_WAS_REJECTED.text();
+            case RESPONSE_TOO_LARGE: return CoreSessionMessages.THE_SERVICE_RESPONSE_IS_TOO_LARGE.text();
+            case IMAGE_INTEGRITY_ERROR: return CoreSessionMessages.THE_SUPPORT_IMAGE_COULD_NOT_BE_VERIFIED.text();
+            case TIMEOUT: return CoreSessionMessages.THE_QUERY_TIMED_OUT_REFRESH_LATER.text();
+            case TLS_ERROR: return CoreSessionMessages.UNABLE_TO_VERIFY_THE_SECURE_CONNECTION_TO_THE_SERVICE.text();
+            case NETWORK_ERROR: return CoreSessionMessages.THE_NETWORK_CONNECTION_WAS_INTERRUPTED.text();
+            default: return CoreSessionMessages.THE_SERVICE_RETURNED_AN_INVALID_RESPONSE.text();
         }
     }
     @Override public String toString() { return "Official account client [private fields hidden]"; }

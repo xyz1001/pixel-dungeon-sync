@@ -1,13 +1,15 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Base64
 
 /** Uses the operating system folder chooser; no dependency download or shell interpolation. */
 internal object NativeFolderChooser {
- internal const val DEFAULT_TITLE = "选择游戏存档目录"
- internal const val UNAVAILABLE = "系统目录选择器不可用，请稍后重试。"
+ internal val DEFAULT_TITLE get() = DesktopMessages.CHOOSE_GAME_SAVE_FOLDER.text()
+ internal val UNAVAILABLE get() = DesktopMessages.SYSTEM_FOLDER_PICKER_UNAVAILABLE_PLEASE_TRY_AGAIN_LATER.text()
 
  suspend fun choose(initial: String, title: String = DEFAULT_TITLE): String? = withContext(Dispatchers.IO) {
   val request = command(initial, title)

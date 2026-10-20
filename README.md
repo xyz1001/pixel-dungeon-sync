@@ -1,6 +1,34 @@
+> code89 / 0.5.68-test：按历史记录生成时间显示和排列存档脉络，最新记录在上，保留88原页冲突弹窗；详见 [CODE89_HISTORY_RECORD_TIME](docs/CODE89_HISTORY_RECORD_TIME.md)。
+
+> code88 / 0.5.67-test：冲突分支选择在主页弹窗显示，普通上传保持原有路径；详见 [CODE88_CONFLICT_DIALOG](docs/CODE88_CONFLICT_DIALOG.md)。
+
+> code87 / 0.5.66-test：主页“存档脉络”右侧新增经授权的刷新按钮，只读重载本机与云端存档；详见 [CODE87_HOME_HISTORY_REFRESH](docs/CODE87_HOME_HISTORY_REFRESH.md)。
+
+> code86 / 0.5.65-test：续期查询确认可用后，返回主页一次性只读加载本地与云端存档；详见 [CODE86_RENEWAL_ARCHIVE_READ](docs/CODE86_RENEWAL_ARCHIVE_READ.md)。
+
+> code85 / 0.5.64-test：赞赏页新增经授权的“刷新 / Refresh”，查询最新期限并更新主页显示；详见 [CODE85_APPRECIATION_REFRESH](docs/CODE85_APPRECIATION_REFRESH.md)。
+
+> code84 / 0.5.63-test：主页到期时在原状态位显示“服务已到期”，并按授权增加赞赏入口；设置/赞赏往返保持状态，续期更新后移除。Android/Desktop共享UI同步，其他同步权限不变。
+
+> code83 / 0.5.62-test：已认证的待续费账号可点击原有“完成配置”进入主页；身份保存仍仅发生在明确点击完成时，远程同步继续独立校验真实期限。
+
+> code82 / 0.5.61-test：保持79原登录，客户端统一将官方服务器有限期限减一个UTC日历年作为真实有效期；无需标记或部署。详见 [期限规则](docs/EXPIRY_GRACE_PROTOCOL.md)。源码内server恢复79，注册/续期保存“实际+一年”为后续待做。本次未上线、未迁移、未加控件提示或清理动作。
+
+> Android code69 / 0.5.48-test：手机页面按内容高度排布，取消600dp卡内撑高；详见 [CODE69_MOBILE_CONTENT_HEIGHT](docs/CODE69_MOBILE_CONTENT_HEIGHT.md)。以下版本记录保留供追溯。
+
+> 当前 Android 测试版：0.5.40-test / code61。安装确认修复、证据边界与签名说明见 [CODE61_SYSTEM_CONFIRMATION](docs/CODE61_SYSTEM_CONFIRMATION.md)。
+
 # 像素地牢存档同步器：存档管理原型
 
 Kotlin/JVM 独立核心 + Compose Desktop。默认使用游戏的系统存档目录，也支持显式选择专用目录，提供四步首次引导、文件设置持久化、存档变化/游戏退出后的自动上传、整个档案的历史快照、备份后恢复、显式冲突选择，以及 WebDAV 追加式分支同步。仅在隔离测试目录中验证；不是可直接托管唯一存档的正式产品。
+
+## code60 · Android 主流程修复（2026-10-18）
+
+版本 `0.5.39-test`（code60）。修复选择应用列表被页面重绘销毁，以及“修改 APK”仅改变模式而不执行所选文件处理的问题，保留 M3 界面。根因、可执行回归和验证边界见 [code60 修复说明](docs/CODE60_ANDROID_FLOW_FIX.md)。本次开发证书已变更，不能直接覆盖 code59。
+
+## code59 · v21-M3 云端版本（2026-10-16）
+
+Android 版本为 `0.5.38-test`（code59）。本次按指定 v21-M3 HTML 改造共享页面与 Android 接入，验证方法、测试结果和剩余差异见 [M3 云端验证](docs/M3_CLOUD_VALIDATION.md)，参考范围见 [M3 对照说明](docs/M3_REFERENCE_CONTRACT.md)。历史验证文档不代表本次 Android 真机结果。源码清单 `SOURCE_MANIFEST.json` 已重新生成。
 
 ## Android / 桌面共享 Compose 构建
 

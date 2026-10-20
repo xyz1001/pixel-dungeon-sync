@@ -155,7 +155,7 @@ public final class RootRestoreClientChecks {
         String fingerprint=DirectoryMetadataKt.contentSha256(Collections.singletonMap("game0/game.dat",hash));
         String empty=DirectoryMetadataKt.contentSha256(Collections.emptyMap());
         FakeExchange exchange=new FakeExchange(selected,fingerprint,1,contents.length);AtomicInteger verifies=new AtomicInteger();
-        AndroidGameIdentity identity=new AndroidGameIdentity(selected.gamePackage,selected.gameLabel,selected.originIdentity,selected.namespaceId);
+        AndroidGameIdentity identity=new AndroidGameIdentity(selected.gamePackage,selected.gameLabel,selected.originIdentity);
         RootGameBridge bridge=new RootGameBridge(selected,identity,g->verifies.incrementAndGet(),exchange,()->true,root.toFile(),true);
         check(bridge.capabilities().restoreSupported&&bridge.capabilities().interruptedBackupRecovery,"real-adapter capability path");
         RootGameBridge readOnly=new RootGameBridge(selected,identity,g->verifies.incrementAndGet(),exchange,()->true,root.toFile(),false);

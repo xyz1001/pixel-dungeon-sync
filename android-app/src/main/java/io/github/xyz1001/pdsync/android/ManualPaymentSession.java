@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -153,7 +155,7 @@ public final class ManualPaymentSession implements AutoCloseable {
                     case LOAD_IMAGE: value = client.paymentImage(ticket.plan); break;
                     case LOAD_ENTITLEMENT: value = client.entitlement(); break;
                     case DAV_TEST: dav.verify(); value = Boolean.TRUE; break;
-                    default: throw new IllegalStateException("Unsupported sandbox action");
+                    default: throw new IllegalStateException(AndroidMessages.MANUAL_PAYMENT_SESSION_01.text());
                 }
                 final Object result = value;
                 ui.post(() -> accepted(epoch, ticket, result));
@@ -181,7 +183,7 @@ public final class ManualPaymentSession implements AutoCloseable {
         switch (ticket.action) {
             case LOAD_PLANS:
                 next = flow.acceptPlans(ticket, (List<ManualOrderClient.Plan>) value);
-                if (view().selectedPlan == null) imageMessage = "赞赏码暂不可用，请刷新。";
+                if (view().selectedPlan == null) imageMessage = AndroidMessages.MANUAL_PAYMENT_SESSION_02.text();
                 break;
             case LOAD_IMAGE:
                 image = ((byte[]) value).clone();
@@ -191,7 +193,7 @@ public final class ManualPaymentSession implements AutoCloseable {
                 break;
             case LOAD_ENTITLEMENT: next = flow.acceptEntitlement(ticket, (ManualOrderClient.Entitlement) value); break;
             case DAV_TEST: flow.acceptDavSuccess(ticket); break;
-            default: throw new IllegalStateException("Unsupported sandbox result");
+            default: throw new IllegalStateException(AndroidMessages.MANUAL_PAYMENT_SESSION_03.text());
         }
         if (next != null) dispatch(next);
         else settle();
@@ -200,7 +202,7 @@ public final class ManualPaymentSession implements AutoCloseable {
         if (!available() || epoch != attachment || !flow.isCurrent(ticket)) return;
         task = null;
         if (ticket.action == ManualPaymentFlow.Action.LOAD_IMAGE) {
-            imageMessage = "赞赏码暂不可用，请刷新。";
+            imageMessage = AndroidMessages.MANUAL_PAYMENT_SESSION_02.text();
             dispatch(flow.imageFinished(ticket));
         } else {
             flow.fail(ticket, message);

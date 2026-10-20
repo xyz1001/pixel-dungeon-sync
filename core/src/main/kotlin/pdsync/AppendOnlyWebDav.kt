@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.CoreValidationMessages
+
 import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -39,10 +41,12 @@ class NamespaceProvisioningException(
  */
 class AppendOnlyWebDav(
  base: String, game: String, profile: String, username: String, password: String,
- client: OkHttpClient = OkHttpClient()
+ client: OkHttpClient = OkHttpClient(),
+ private val beforeRequest: WebDavRequestCheck = WebDavRequestCheck {}
 ): AppendStore {
  private val client = client.newBuilder().retryOnConnectionFailure(false).followRedirects(false)
-  .followSslRedirects(false).callTimeout(30, TimeUnit.SECONDS).build()
+  .followSslRedirects(false).callTimeout(30, TimeUnit.SECONDS)
+  .addNetworkInterceptor { chain -> beforeRequest.check(); chain.proceed(chain.request()) }.build()
  // OkHttp can repeat HTTP 503 + Retry-After:0 even with retryOnConnectionFailure(false).
  // Stop namespace error statuses before its follow-up interceptor can replay a mutation.
  private val namespaceClient = this.client.newBuilder().addNetworkInterceptor { chain ->
@@ -61,14 +65,14 @@ class AppendOnlyWebDav(
  private val auth: String
 
  init {
-  require(game.matches(SEGMENT) && profile.matches(SEGMENT)) { "Invalid game or profile" }
-  require(!username.contains(':') && username.none { it.isISOControl() } && password.none { it.isISOControl() }) { "Invalid credentials" }
+  require(game.matches(SEGMENT) && profile.matches(SEGMENT)) { CoreValidationMessages.INVALID_GAME_OR_PROFILE.text() }
+  require(!username.contains(':') && username.none { it.isISOControl() } && password.none { it.isISOControl() }) { CoreValidationMessages.INVALID_CREDENTIALS.text() }
   // Validate the raw input first: HttpUrl silently normalizes dot segments and backslashes.
   val rawBase = checkedUri(base, false)
-  require(rawBase.isAbsolute && rawBase.rawAuthority != null && "//" !in (rawBase.rawPath ?: "")) { "Invalid WebDAV URL" }
-  val url = try { base.toHttpUrl() } catch (_: IllegalArgumentException) { throw IllegalArgumentException("Invalid WebDAV URL") }
-  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "URL must not contain credentials, query or fragment" }
-  require(url.scheme == "https" || (url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost", "::1"))) { "HTTPS required except exact loopback hosts" }
+  require(rawBase.isAbsolute && rawBase.rawAuthority != null && "//" !in (rawBase.rawPath ?: "")) { CoreValidationMessages.INVALID_WEBDAV_URL.text() }
+  val url = try { base.toHttpUrl() } catch (_: IllegalArgumentException) { throw IllegalArgumentException(CoreValidationMessages.INVALID_WEBDAV_URL.text()) }
+  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { CoreValidationMessages.URL_MUST_NOT_CONTAIN_CREDENTIALS_QUERY_OR_FRAGMENT.text() }
+  require(url.scheme == "https" || (url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost", "::1"))) { CoreValidationMessages.HTTPS_REQUIRED_EXCEPT_EXACT_LOOPBACK_HOSTS.text() }
   baseCollection = url.newBuilder().apply { if (url.pathSegments.last().isNotEmpty()) addPathSegment("") }.build()
   gameCollection = baseCollection.newBuilder().addPathSegment(game).addPathSegment("").build()
   collection = gameCollection.newBuilder().addPathSegment(profile).addPathSegment("").build()
@@ -115,7 +119,7 @@ class AppendOnlyWebDav(
     404 -> CollectionState.MISSING
     207 -> {
      // A Depth:0 proof must be exactly one complete response for this exact collection.
-     require(response.header("Content-Range") == null && response.headers.values("Link").isEmpty()) { "Partial namespace verification" }
+     require(response.header("Content-Range") == null && response.headers.values("Link").isEmpty()) { CoreValidationMessages.PARTIAL_NAMESPACE_VERIFICATION.text() }
      parseCollection(readBounded(response, MAX_LISTING_BYTES), url)
     }
     else -> throw namespaceHttpError(response.code)
@@ -123,6 +127,7 @@ class AppendOnlyWebDav(
   }
  } catch (e: NamespaceProvisioningException) { throw e }
  catch (_: IllegalArgumentException) { throw NamespaceProvisioningException(NamespaceFailureReason.UNSAFE_RESPONSE) }
+ catch (e: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw e }
  catch (_: IOException) { throw NamespaceProvisioningException(NamespaceFailureReason.NETWORK) }
 
  private fun createAndVerifyCollection(url: HttpUrl, shouldContinue: () -> Boolean) {
@@ -134,6 +139,7 @@ class AppendOnlyWebDav(
     if (response.code != 201 && response.code != 405) throw namespaceHttpError(response.code)
    }
   } catch (e: NamespaceProvisioningException) { throw e }
+  catch (e: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw e }
   catch (_: IOException) { /* Resolve an uncertain accepted write with the same bounded readback. */ }
   when (inspectCollection(url, shouldContinue)) {
    CollectionState.COLLECTION -> Unit
@@ -154,38 +160,38 @@ class AppendOnlyWebDav(
   validateMultistatusRoot(root)
   val entries = root.elements()
   require(entries.all { it.isDav("response") || it.isDav("responsedescription") } &&
-   entries.count { it.isDav("response") } == 1 && entries.count { it.isDav("responsedescription") } <= 1) { "Ambiguous namespace response" }
+   entries.count { it.isDav("response") } == 1 && entries.count { it.isDav("responsedescription") } <= 1) { CoreValidationMessages.AMBIGUOUS_NAMESPACE_RESPONSE.text() }
   val children = entries.single { it.isDav("response") }.elements()
-  require(children.all { it.namespaceURI == DAV && it.localName in setOf("href", "status", "propstat", "responsedescription") }) { "Unsupported namespace response" }
-  val href = children.singleOrNull { it.isDav("href") } ?: throw IllegalArgumentException("Missing or ambiguous namespace href")
-  require(href.elements().isEmpty()) { "Malformed namespace href" }
+  require(children.all { it.namespaceURI == DAV && it.localName in setOf("href", "status", "propstat", "responsedescription") }) { CoreValidationMessages.UNSUPPORTED_NAMESPACE_RESPONSE.text() }
+  val href = children.singleOrNull { it.isDav("href") } ?: throw IllegalArgumentException(CoreValidationMessages.MISSING_OR_AMBIGUOUS_NAMESPACE_HREF.text())
+  require(href.elements().isEmpty()) { CoreValidationMessages.MALFORMED_NAMESPACE_HREF.text() }
   val actual = checkedUrl(href.textContent.trim(), false, expected)
-  require(actual.encodedPath == expected.encodedPath || actual.encodedPath == expected.encodedPath.removeSuffix("/")) { "Unexpected namespace href" }
+  require(actual.encodedPath == expected.encodedPath || actual.encodedPath == expected.encodedPath.removeSuffix("/")) { CoreValidationMessages.UNEXPECTED_NAMESPACE_HREF.text() }
   val status = children.filter { it.isDav("status") }
   val properties = children.filter { it.isDav("propstat") }
-  require(status.size <= 1) { "Ambiguous namespace status" }
+  require(status.size <= 1) { CoreValidationMessages.AMBIGUOUS_NAMESPACE_STATUS.text() }
   if (status.isNotEmpty()) {
    val code = parseStatus(status.single())
    // Only a resource-level 404 proves absence. A missing resourcetype property does not.
    if (code == 404 && properties.isEmpty()) return CollectionState.MISSING
    if (code !in 200..299) throw namespaceHttpError(code)
   }
-  require(properties.isNotEmpty()) { "Missing namespace resource type" }
+  require(properties.isNotEmpty()) { CoreValidationMessages.MISSING_NAMESPACE_RESOURCE_TYPE.text() }
   val resourceTypes = mutableListOf<Element>()
   for (propstat in properties) {
    val fields = propstat.elements()
-   require(fields.all { it.namespaceURI == DAV && it.localName in setOf("prop", "status", "responsedescription") }) { "Unsupported namespace properties" }
-   val propStatus = fields.singleOrNull { it.isDav("status") } ?: throw IllegalArgumentException("Missing namespace property status")
+   require(fields.all { it.namespaceURI == DAV && it.localName in setOf("prop", "status", "responsedescription") }) { CoreValidationMessages.UNSUPPORTED_NAMESPACE_PROPERTIES.text() }
+   val propStatus = fields.singleOrNull { it.isDav("status") } ?: throw IllegalArgumentException(CoreValidationMessages.MISSING_NAMESPACE_PROPERTY_STATUS.text())
    val code = parseStatus(propStatus)
    if (code !in 200..299) throw namespaceHttpError(code)
-   val prop = fields.singleOrNull { it.isDav("prop") } ?: throw IllegalArgumentException("Missing namespace properties")
+   val prop = fields.singleOrNull { it.isDav("prop") } ?: throw IllegalArgumentException(CoreValidationMessages.MISSING_NAMESPACE_PROPERTIES.text())
    // Do not infer a collection from a nested or unrelated DAV:collection element.
-   require(prop.elements().all { it.isDav("resourcetype") }) { "Unexpected namespace property" }
+   require(prop.elements().all { it.isDav("resourcetype") }) { CoreValidationMessages.UNEXPECTED_NAMESPACE_PROPERTY.text() }
    resourceTypes += prop.elements()
   }
-  require(resourceTypes.size == 1) { "Missing or ambiguous namespace resource type" }
+  require(resourceTypes.size == 1) { CoreValidationMessages.MISSING_OR_AMBIGUOUS_NAMESPACE_RESOURCE_TYPE.text() }
   val types = resourceTypes.single().elements()
-  require(types.size <= 1 && types.all { it.isDav("collection") && it.elements().isEmpty() }) { "Unsupported namespace resource type" }
+  require(types.size <= 1 && types.all { it.isDav("collection") && it.elements().isEmpty() }) { CoreValidationMessages.UNSUPPORTED_NAMESPACE_RESOURCE_TYPE.text() }
   return if (types.size == 1) CollectionState.COLLECTION else CollectionState.NOT_COLLECTION
  }
 
@@ -201,9 +207,9 @@ class AppendOnlyWebDav(
   return execute(request) { response ->
    if (response.code != 207) throw WebDavException(response.code)
    // Content-Range means this is not a complete response to our Depth:1 request.
-   require(response.header("Content-Range") == null) { "Partial WebDAV listing is unsupported" }
+   require(response.header("Content-Range") == null) { CoreValidationMessages.PARTIAL_WEBDAV_LISTING_IS_UNSUPPORTED.text() }
    val next = nextLink(response, url)
-   require(next == null || next != url.toString()) { "Cyclic WebDAV listing cursor" }
+   require(next == null || next != url.toString()) { CoreValidationMessages.CYCLIC_WEBDAV_LISTING_CURSOR.text() }
    CommitPage(parseListing(readBounded(response, MAX_LISTING_BYTES)), next)
   }
  }
@@ -217,7 +223,7 @@ class AppendOnlyWebDav(
  }
 
  private fun put(url: HttpUrl, bytes: ByteArray, limit: Int, mediaType: String) {
-  require(bytes.size <= limit) { "Upload exceeds size limit" }
+  require(bytes.size <= limit) { CoreValidationMessages.UPLOAD_EXCEEDS_SIZE_LIMIT.text() }
   execute(request(url).put(bytes.toRequestBody(mediaType.toMediaType())).build()) { response ->
    if (response.code !in setOf(200, 201, 204)) throw WebDavException(response.code)
    readBounded(response, MAX_MANIFEST_BYTES)
@@ -226,6 +232,7 @@ class AppendOnlyWebDav(
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
  private fun <T> execute(request: Request, requestClient: OkHttpClient = client, block: (Response) -> T): T {
+  beforeRequest.check()
   val requestStarted = System.nanoTime()
   // Elapsed until response headers (or the observed transport failure), never request data.
   fun context() = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
@@ -242,6 +249,7 @@ class AppendOnlyWebDav(
   throw e
  }
  catch (e: WebDavException) { throw e }
+ catch (error: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw error }
  catch (error: IOException) {
   DiagnosticLog.networkFailure(error, context())
   // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
@@ -272,98 +280,98 @@ class AppendOnlyWebDav(
  }
 
  private fun readBounded(response: Response, limit: Int): ByteArray {
-  val body = response.body ?: throw IOException("WebDAV response body missing")
-  require(body.contentLength() <= limit) { "Remote response exceeds size limit" }
-  return body.byteStream().readUpTo(limit + 1).also { require(it.size <= limit) { "Remote response exceeds size limit" } }
+  val body = response.body ?: throw IOException(CoreValidationMessages.WEBDAV_RESPONSE_BODY_MISSING.text())
+  require(body.contentLength() <= limit) { CoreValidationMessages.REMOTE_RESPONSE_EXCEEDS_SIZE_LIMIT.text() }
+  return body.byteStream().readUpTo(limit + 1).also { require(it.size <= limit) { CoreValidationMessages.REMOTE_RESPONSE_EXCEEDS_SIZE_LIMIT.text() } }
  }
 
  private fun fileUrl(name: String) = collection.newBuilder().addPathSegment(name).build()
  private fun commitName(id: String): String { validateId(id); return "pdsync-v2-commit-$id.json" }
  private fun objectName(id: String): String { validateId(id); return "pdsync-v2-object-$id.zip" }
- private fun validateId(id: String) = require(validCommitId(id)) { "Invalid append-only identifier" }
+ private fun validateId(id: String) = require(validCommitId(id)) { CoreValidationMessages.INVALID_APPEND_ONLY_IDENTIFIER.text() }
 
  /** Validate before HttpUrl can normalize traversal, backslashes or URL credentials away. */
  private fun checkedUri(value: String, allowQuery: Boolean): URI {
-  require(value.isNotEmpty() && value.length <= MAX_HREF_LENGTH && value.none { it.isWhitespace() || it.isISOControl() || it == '\\' }) { "Unsafe WebDAV href" }
-  val uri = try { URI(value) } catch (_: Exception) { throw IllegalArgumentException("Malformed WebDAV href") }
-  require(!uri.isOpaque && uri.rawUserInfo == null && uri.rawFragment == null && (allowQuery || uri.rawQuery == null)) { "Unsafe WebDAV href" }
+  require(value.isNotEmpty() && value.length <= MAX_HREF_LENGTH && value.none { it.isWhitespace() || it.isISOControl() || it == '\\' }) { CoreValidationMessages.UNSAFE_WEBDAV_HREF.text() }
+  val uri = try { URI(value) } catch (_: Exception) { throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_HREF.text()) }
+  require(!uri.isOpaque && uri.rawUserInfo == null && uri.rawFragment == null && (allowQuery || uri.rawQuery == null)) { CoreValidationMessages.UNSAFE_WEBDAV_HREF.text() }
   // Refuse percent-encoded traversal/separators and ambiguous double-encoding, even on siblings.
   val rawPath = uri.rawPath ?: ""
   require(rawPath.split('/').none { raw ->
-   val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException("Malformed WebDAV href") }
+   val decoded = try { java.net.URLDecoder.decode(raw.replace("+", "%2B"), Charsets.UTF_8.name()) } catch (_: Exception) { throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_HREF.text()) }
    decoded == "." || decoded == ".." || decoded.any { it == '/' || it == '\\' || it == '%' || it.isISOControl() }
-  }) { "Unsafe WebDAV href" }
+  }) { CoreValidationMessages.UNSAFE_WEBDAV_HREF.text() }
   return uri
  }
 
  private fun checkedUrl(value: String, allowQuery: Boolean, reference: HttpUrl = collection): HttpUrl {
   checkedUri(value, allowQuery)
-  val result = reference.resolve(value) ?: throw IllegalArgumentException("Malformed WebDAV href")
+  val result = reference.resolve(value) ?: throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_HREF.text())
   require(result.scheme == collection.scheme && result.host == collection.host && result.port == collection.port &&
-   result.username.isEmpty() && result.password.isEmpty() && result.fragment == null) { "Cross-origin or unsafe WebDAV href" }
+   result.username.isEmpty() && result.password.isEmpty() && result.fragment == null) { CoreValidationMessages.CROSS_ORIGIN_OR_UNSAFE_WEBDAV_HREF.text() }
   return result
  }
 
  private fun listingUrl(value: String, reference: HttpUrl = collection): HttpUrl = checkedUrl(value, true, reference).also {
-  require(it.encodedPath == collection.encodedPath) { "WebDAV continuation must use the same collection" }
+  require(it.encodedPath == collection.encodedPath) { CoreValidationMessages.WEBDAV_CONTINUATION_MUST_USE_THE_SAME_COLLECTION.text() }
  }
 
  private fun parseXml(bytes: ByteArray): Document = SafeDavXml.parse(bytes)
 
  private fun validateMultistatusRoot(root: Element) {
-  require(root.isDav("multistatus")) { "Expected DAV multistatus listing" }
+  require(root.isDav("multistatus")) { CoreValidationMessages.EXPECTED_DAV_MULTISTATUS_LISTING.text() }
   require((0 until root.attributes.length).all { index ->
    val attribute = root.attributes.item(index)
    attribute.namespaceURI == XMLConstants.XMLNS_ATTRIBUTE_NS_URI || (attribute.namespaceURI == XMLConstants.XML_NS_URI && attribute.localName == "lang")
-  }) { "Unsupported WebDAV listing attributes" }
+  }) { CoreValidationMessages.UNSUPPORTED_WEBDAV_LISTING_ATTRIBUTES.text() }
  }
 
  private fun parseStatus(status: Element): Int {
-  require(status.elements().isEmpty()) { "Malformed WebDAV status" }
+  require(status.elements().isEmpty()) { CoreValidationMessages.MALFORMED_WEBDAV_STATUS.text() }
   return Regex("HTTP/\\d+(?:\\.\\d+)? ([0-9]{3})(?: .*)?").matchEntire(status.textContent.trim())?.groupValues?.get(1)?.toInt()
-   ?: throw IllegalArgumentException("Malformed WebDAV listing status")
+   ?: throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_LISTING_STATUS.text())
  }
 
  private fun parseListing(bytes: ByteArray): List<String> {
   val root = parseXml(bytes).documentElement
   validateMultistatusRoot(root)
   val entries = root.elements()
-  require(entries.size <= MAX_LISTING_RESPONSES + 1 && entries.count { it.isDav("response") } <= MAX_LISTING_RESPONSES) { "WebDAV listing entry limit exceeded" }
-  require(entries.all { it.isDav("response") || it.isDav("responsedescription") }) { "Unsupported or incomplete WebDAV listing extension" }
+  require(entries.size <= MAX_LISTING_RESPONSES + 1 && entries.count { it.isDav("response") } <= MAX_LISTING_RESPONSES) { CoreValidationMessages.WEBDAV_LISTING_ENTRY_LIMIT_EXCEEDED.text() }
+  require(entries.all { it.isDav("response") || it.isDav("responsedescription") }) { CoreValidationMessages.UNSUPPORTED_OR_INCOMPLETE_WEBDAV_LISTING_EXTENSION.text() }
   val ids = linkedSetOf<String>()
   val paths = mutableSetOf<String>()
   for (entry in entries.filter { it.isDav("response") }) {
    val children = entry.elements()
-   require(children.all { it.namespaceURI == DAV && it.localName in setOf("href", "status", "propstat", "responsedescription") }) { "Unsupported or failed WebDAV listing entry" }
-   val href = children.singleOrNull { it.isDav("href") } ?: throw IllegalArgumentException("Missing or ambiguous WebDAV href")
-   require(href.elements().isEmpty()) { "Malformed WebDAV href" }
+   require(children.all { it.namespaceURI == DAV && it.localName in setOf("href", "status", "propstat", "responsedescription") }) { CoreValidationMessages.UNSUPPORTED_OR_FAILED_WEBDAV_LISTING_ENTRY.text() }
+   val href = children.singleOrNull { it.isDav("href") } ?: throw IllegalArgumentException(CoreValidationMessages.MISSING_OR_AMBIGUOUS_WEBDAV_HREF.text())
+   require(href.elements().isEmpty()) { CoreValidationMessages.MALFORMED_WEBDAV_HREF.text() }
    val url = checkedUrl(href.textContent.trim(), false)
    val path = url.encodedPath
-   require(paths.add(path)) { "Duplicate WebDAV listing entry" }
+   require(paths.add(path)) { CoreValidationMessages.DUPLICATE_WEBDAV_LISTING_ENTRY.text() }
    val own = path == collection.encodedPath || path == collection.encodedPath.removeSuffix("/")
    val relative = if (path.startsWith(collection.encodedPath)) path.removePrefix(collection.encodedPath) else null
-   require(own || (relative != null && relative.isNotEmpty() && '/' !in relative.removeSuffix("/"))) { "WebDAV href is outside the requested collection" }
+   require(own || (relative != null && relative.isNotEmpty() && '/' !in relative.removeSuffix("/"))) { CoreValidationMessages.WEBDAV_HREF_IS_OUTSIDE_THE_REQUESTED_COLLECTION.text() }
    val statuses = children.filter { it.isDav("status") } + children.filter { it.isDav("propstat") }.map { propstat ->
     val properties = propstat.elements()
-    require(properties.all { it.namespaceURI == DAV && it.localName in setOf("prop", "status", "responsedescription") }) { "Failed WebDAV property listing" }
-    properties.singleOrNull { it.isDav("status") } ?: throw IllegalArgumentException("Missing WebDAV property status")
+    require(properties.all { it.namespaceURI == DAV && it.localName in setOf("prop", "status", "responsedescription") }) { CoreValidationMessages.FAILED_WEBDAV_PROPERTY_LISTING.text() }
+    properties.singleOrNull { it.isDav("status") } ?: throw IllegalArgumentException(CoreValidationMessages.MISSING_WEBDAV_PROPERTY_STATUS.text())
    }
-   require(statuses.isNotEmpty()) { "Missing WebDAV listing status" }
+   require(statuses.isNotEmpty()) { CoreValidationMessages.MISSING_WEBDAV_LISTING_STATUS.text() }
    statuses.forEach { status ->
     val code = Regex("HTTP/\\d+(?:\\.\\d+)? ([0-9]{3})(?: .*)?").matchEntire(status.textContent.trim())?.groupValues?.get(1)?.toInt()
-     ?: throw IllegalArgumentException("Malformed WebDAV listing status")
+     ?: throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_LISTING_STATUS.text())
     if (code !in 200..299) throw WebDavException(code)
    }
    if (own) continue
    val name = url.pathSegments.last()
    if (name.startsWith(COMMIT_PREFIX)) {
-    require(!path.endsWith('/') && name.endsWith(".json") && relative == name) { "Malformed append-only commit filename" }
+    require(!path.endsWith('/') && name.endsWith(".json") && relative == name) { CoreValidationMessages.MALFORMED_APPEND_ONLY_COMMIT_FILENAME.text() }
     val id = name.removePrefix(COMMIT_PREFIX).removeSuffix(".json")
     validateId(id)
-    require(entry.getElementsByTagNameNS(DAV, "collection").length == 0) { "Commit is a collection" }
-    require(ids.add(id)) { "Duplicate commit identifier" }
+    require(entry.getElementsByTagNameNS(DAV, "collection").length == 0) { CoreValidationMessages.COMMIT_IS_A_COLLECTION.text() }
+    require(ids.add(id)) { CoreValidationMessages.DUPLICATE_COMMIT_IDENTIFIER.text() }
    } else if (relative!!.startsWith(COMMIT_PREFIX)) {
-    throw IllegalArgumentException("Malformed append-only commit filename")
+    throw IllegalArgumentException(CoreValidationMessages.MALFORMED_APPEND_ONLY_COMMIT_FILENAME.text())
    }
   }
   return ids.sorted()
@@ -371,18 +379,18 @@ class AppendOnlyWebDav(
 
  private fun nextLink(response: Response, reference: HttpUrl): String? {
   val headers = response.headers.values("Link")
-  require(headers.sumOf { it.length } <= MAX_HREF_LENGTH * 4) { "WebDAV pagination header too large" }
+  require(headers.sumOf { it.length } <= MAX_HREF_LENGTH * 4) { CoreValidationMessages.WEBDAV_PAGINATION_HEADER_TOO_LARGE.text() }
   val next = mutableListOf<String>()
   for (header in headers) for (link in splitLinks(header)) {
-   val match = Regex("^\\s*<([^<>]+)>((?:\\s*;.*)?)\\s*$").matchEntire(link) ?: throw IllegalArgumentException("Malformed WebDAV pagination header")
+   val match = Regex("^\\s*<([^<>]+)>((?:\\s*;.*)?)\\s*$").matchEntire(link) ?: throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_PAGINATION_HEADER.text())
    val params = parseLinkParameters(match.groupValues[2])
    val rel = params["rel"]?.split(Regex("\\s+")) ?: emptyList()
    if ("next" in rel) {
-    require("anchor" !in params) { "Anchored WebDAV pagination is unsupported" }
+    require("anchor" !in params) { CoreValidationMessages.ANCHORED_WEBDAV_PAGINATION_IS_UNSUPPORTED.text() }
     next += listingUrl(match.groupValues[1], reference).toString()
    }
   }
-  require(next.size <= 1) { "Ambiguous WebDAV continuation" }
+  require(next.size <= 1) { CoreValidationMessages.AMBIGUOUS_WEBDAV_CONTINUATION.text() }
   return next.singleOrNull()
  }
 
@@ -393,12 +401,12 @@ class AppendOnlyWebDav(
    else when {
     quoted && c == '\\' -> escaped = true
     c == '"' && !angle -> quoted = !quoted
-    c == '<' && !quoted -> { require(!angle) { "Malformed WebDAV pagination header" }; angle = true }
-    c == '>' && !quoted -> { require(angle) { "Malformed WebDAV pagination header" }; angle = false }
+    c == '<' && !quoted -> { require(!angle) { CoreValidationMessages.MALFORMED_WEBDAV_PAGINATION_HEADER.text() }; angle = true }
+    c == '>' && !quoted -> { require(angle) { CoreValidationMessages.MALFORMED_WEBDAV_PAGINATION_HEADER.text() }; angle = false }
     c == ',' && !quoted && !angle -> { parts += value.substring(start, i); start = i + 1 }
    }
   }
-  require(!quoted && !angle && !escaped) { "Malformed WebDAV pagination header" }
+  require(!quoted && !angle && !escaped) { CoreValidationMessages.MALFORMED_WEBDAV_PAGINATION_HEADER.text() }
   parts += value.substring(start)
   return parts
  }
@@ -407,9 +415,9 @@ class AppendOnlyWebDav(
   val result = mutableMapOf<String, String>(); var remaining = value.trim()
   val parameter = Regex("""^;\s*([A-Za-z0-9!#$%&'*+.^_`|~-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9!#$%&'*+.^_`|~:/-]+))\s*""")
   while (remaining.isNotEmpty()) {
-   val match = parameter.find(remaining) ?: throw IllegalArgumentException("Malformed WebDAV pagination parameters")
+   val match = parameter.find(remaining) ?: throw IllegalArgumentException(CoreValidationMessages.MALFORMED_WEBDAV_PAGINATION_PARAMETERS.text())
    val name = match.groupValues[1].lowercase(java.util.Locale.ROOT)
-   require(name !in result) { "Ambiguous WebDAV pagination parameters" }
+   require(name !in result) { CoreValidationMessages.AMBIGUOUS_WEBDAV_PAGINATION_PARAMETERS.text() }
    result[name] = match.groups[2]?.value?.replace(Regex("\\\\(.)"), "$1") ?: match.groupValues[3]
    remaining = remaining.substring(match.range.last + 1)
   }

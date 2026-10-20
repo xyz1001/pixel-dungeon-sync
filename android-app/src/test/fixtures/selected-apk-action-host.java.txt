@@ -1,0 +1,533 @@
+package io.github.xyz1001.pdsync.android;
+
+import static pdsync.i18n.AndroidHostMessages.*;
+import static pdsync.i18n.PrepareMessages.*;
+import java.util.*;
+import pdsync.i18n.*;
+import java.io.*;
+
+/** Test ports, not a replacement Activity implementation. Production methods are inserted below. */
+class MainActivity extends android.app.Activity {
+    static final class PreparationDiagnostics {
+        static final class Metadata {}
+        /* DIAGNOSTIC_METHODS */
+    }
+    static final class NoviceCopy {
+        // Deterministic port for the core allowlist; its bilingual implementation has independent tests.
+        static boolean isComparisonMessage(String value) {
+            pdsync.i18n.UiText[] messages = {
+                CoreMessages.CHECKING_SAVES, CoreMessages.THE_CHECK_IS_NOT_COMPLETE_PLEASE_RETRY,
+                CoreMessages.NEITHER_SIDE_HAS_SAVES_CREATE_SOME_PROGRESS_IN_THE_GAME_FIRST,
+                CoreMessages.THIS_DEVICE_HAS_SAVES_READY_TO_UPLOAD,
+                CoreMessages.THE_CLOUD_HAS_SAVES_READY_TO_RESTORE_TO_THIS_DEVICE,
+                CoreMessages.BOTH_SIDES_HAVE_THE_SAME_SAVES_CONFIRM_TO_CONTINUE,
+                CoreMessages.THE_SAVES_DIFFER_CHOOSE_THE_PROGRESS_YOU_WANT_TO_CONTINUE,
+                CoreMessages.THE_CLOUD_HAS_MULTIPLE_BRANCHES_OF_PROGRESS_CHOOSE_ONE,
+                CoreMessages.CANNOT_COMPARE_RIGHT_NOW_RESOLVE_THE_ISSUE_AND_RETRY
+            };
+            for (pdsync.i18n.UiText message : messages)
+                if (message.chinese().equals(value) || message.english().equals(value)) return true;
+            return false;
+        }
+        static String feedback(String raw, String fallback) { return fallback; }
+    }
+    static final int SYSTEM_INSTALL = 10, ALLOW_INSTALL = 11, EXTERNAL_INSTALL = 12;
+    enum SyncPage { DISCOVERY, HOME, SETTINGS }
+    enum SharedGameSelectionControl { CHOOSE_INSTALLED, CHOOSE_FILE, CHOOSE_ROOT, SWITCH_TO_EMBEDDED, CHECK_ACCESS, LAUNCH_GAME, ACTIVATE_BRIDGE, INITIALIZE_GAME, OPEN_RECOVERY, CONTINUE_INSTALLATION, OPEN_SYSTEM_CONFIRMATION, CANCEL_INSTALLATION, CHECK_EXPIRED_REQUEST, CLEAN_LEGACY_REQUEST, OPEN_INSTALL_SETTINGS, RESCAN, COPY_DIAGNOSTICS, CANCEL_ACCESS_SELECTION, USE_OTHER_INSTALLER, CHECK_EXTERNAL_INSTALL }
+    interface SharedGameSelectionActions { void perform(SharedGameSelectionControl c); void chooseCandidate(String id); void next(); }
+    static final class SharedGameSelectionState { boolean actionEnabled(SharedGameSelectionControl c) { return true; } boolean getNextEnabled() { return false; } }
+    static final class AndroidOnboardingComposition { static void showGameSelection(MainActivity a, SharedGameSelectionState s, SharedGameSelectionActions actions) { a.actions = actions; } }
+    SharedGameSelectionActions actions;
+    Object root, body, footer, scroll, status; SyncPage renderedPage;
+    SharedGameSelectionState gameSelectionState() { return new SharedGameSelectionState(); }
+    void chooseInstalled() {} void pickApks() {} void chooseInlineRoot() {} void requestRootAuthorization() {}
+    void launchSelectedRootGame() {} void activateHelper() {} void launchGameForInitialization() {}
+    void navigate(SyncPage p) {} void beginInlineInstallation() {} void m96x62f97958() {} void m100xdbe735b1() {}
+    void confirmObsoleteLegacyCleanup() {} void m102xc6db8233() {} void m103x3c55a874() {}
+    enum DiagnosticAction { ACCESS_CHECK, PREPARE, INSTALL }
+    enum OnboardingProgress { PENDING }
+    static final class Uri { final String value; Uri(String value) { this.value = value; } static Uri parse(String s) { return new Uri(s); } }
+    static final class Intent {
+        final String action; final Uri uri;
+        Intent(String action, Uri uri) { this.action = action; this.uri = uri; }
+    }
+    enum DiagnosticResult { STARTED, PENDING, FAILED }
+    static final class AndroidDiagnosticLogging { static void confirmationEvent(String p, DiagnosticResult r) {} }
+    static final class RuntimePlatformCompat { static Object systemConfirmationLaunchOptions() { return "visible-only-options"; } }
+    static final class Token { Object getIntentSender() { return this; } }
+    static final class SystemConfirmationToken {
+        static boolean installerPositivelyDisabled(MainActivity activity) { return activity.disabledSystemInstaller; }
+    }
+    static final class ExternalInstallerHandoff {
+        static final class Ticket { }
+        static Intent installIntent(Ticket ticket) { return new Intent("android.intent.action.VIEW", new Uri("content://selected.apk")); }
+    }
+    static final class InstalledBridgeBinding {
+        final String gamePackage;
+        InstalledBridgeBinding(String packageName) { gamePackage = packageName; }
+    }
+    static final class RootGame { String gamePackage; }
+    static final class InstalledBridgeResolver {
+        static InstalledBridgeBinding resolve(MainActivity owner, String packageName) {
+            owner.bridgeChecks++;
+            owner.resolvedPackage = packageName;
+            return owner.bridgeAvailable ? new InstalledBridgeBinding(packageName) : null;
+        }
+    }
+    final class GamePreparationService {
+        enum InstallStrategy { FRESH_INSTALL, REQUIRES_UNINSTALL }
+        static final class PreparedPair {
+            String gamePackage = "selected.game";
+            InstallStrategy gameStrategy = InstallStrategy.FRESH_INSTALL;
+            String gameStrategyReason = "signing certificate differs";
+            List<File> gameApks = List.of(new File("base.apk"));
+            boolean helperOnlyUpgrade, embedded = true;
+            boolean embeddedBridge() { return embedded; }
+        }
+        static final class InstalledGame {
+            final String packageName;
+            InstalledGame(String packageName) { this.packageName = packageName; }
+        }
+        InstalledGame inspectInstalledGame(String packageName) throws IOException {
+            installedInspections++;
+            inspectedPackage = packageName;
+            if (failInspect) throw new IOException("Installed source unavailable");
+            return new InstalledGame(packageName);
+        }
+    }
+    static final class InstallationReadiness { static Object checking(boolean p, boolean a) { return new Object(); } static Object noSelection() { return new Object(); } }
+    static final class SetupSourceResult {
+        final GamePreparationService.InstalledGame candidate; final Exception failure;
+        SetupSourceResult(GamePreparationService.InstalledGame c, Exception e) { candidate = c; failure = e; }
+    }
+    static final class SyncRuntime {
+        static boolean rootMode(MainActivity a) { return a.rootBackend; }
+        static void useEmbeddedBackend(MainActivity a) { a.rootBackend = false; }
+        static void setPreparedGame(MainActivity a, GamePreparationService.PreparedPair p) {}
+        static void setInstalledBridge(MainActivity a, InstalledBridgeBinding b) { a.boundPackage = b.gamePackage; }
+    }
+    static final class Session {
+        MainActivity owner; boolean running, installationAdvancePending, activationAdvancePending, systemUiDeparted, externalCheckPending; long confirmationLaunchAttemptAt;
+        String automaticInstallTarget, modeChoiceError;
+        GameModeChoice<Uri> modeChoice = new GameModeChoice<>();
+        GameModeChoice.Source<Uri> selectedSource;
+        GameModeChoice.Mode accessMode, previousAccessMode;
+        Object pendingGameIdentity, selectedFileIdentity; GameModeChoice.Request<Uri> fileIdentityRequest;
+        GameSetupFlow flow = new GameSetupFlow();
+    }
+    final class Installer {
+        boolean active, confirmation, attempted, external, observation, resultBoundary; int installs, uninstalls, launched, externalPrepares, externalEnds, externalReturns, externalChecks, sourceSelections;
+        int externalRequestCode = EXTERNAL_INSTALL;
+        boolean hasActiveRequest() { return active; }
+        boolean hasConfirmation() { return confirmation; }
+        boolean installationResultBoundary() { return resultBoundary; }
+        boolean confirmationUnavailable() { return false; }
+        boolean automaticConfirmationAttempted() { return attempted; }
+        void markConfirmationAttempt() { attempted = true; }
+        boolean canOfferExternalInstaller() { return !external; }
+        ExternalInstallerHandoff.Ticket prepareExternalInstall() {
+            externalPrepares++; externalRequestCode = 16000 + externalPrepares;
+            active = external = true; observation = confirmation = false; return new ExternalInstallerHandoff.Ticket();
+        }
+        void endExternalInstallWait() { externalEnds++; active = external = false; }
+        void externalLaunchFailed() { externalEnds++; active = external = false; }
+        void selectInstalledSource() { sourceSelections++; }
+        void reconcile() {}
+        void reconcile(boolean returned) {}
+        boolean externalInstallPending() { return external; }
+        boolean externalInstallObservation() { return observation; }
+        void externalActivityReturned(String nonce) throws IOException {
+            if (!external || !requestNonce().equals(nonce)) return;
+            externalReturns++; active = external = false; observation = true;
+        }
+        void supersedeExternalObservation() throws IOException { observation = false; }
+        void checkExternalInstall() { externalChecks++; }
+        boolean hasPendingResult() { return active && !external; }
+        boolean mayContinueAfterUninstall() { return false; }
+        boolean confirmationWasLaunched() { return launched > 0; }
+        void settleClosedSystemRequest() { active = confirmation = false; }
+        String pendingPackage() { return prepared.gamePackage; }
+        void clearAutomaticContinuation() {}
+        String lastResultMessage() { return "Installation canceled"; }
+        String summary() { return external ? "Awaiting external installer" : "No pending install"; }
+        GamePreparationService.PreparedPair freshPair() { return prepared; }
+        String nextPackage(GamePreparationService.PreparedPair pair) { return pair.gamePackage; }
+        String uninstallConsentReceipt(String n, GamePreparationService.PreparedPair p) { return "receipt"; }
+        void requestInstall(String n) { installs++; active = confirmation = true; }
+        void requestUninstall(String n, String r) { uninstalls++; active = true; }
+        String requestNonce() { return "current-nonce"; }
+        int externalActivityRequestCode() { return externalRequestCode; }
+        String state() { return external ? "EXTERNAL_INSTALL" : observation ? "EXTERNAL_RETURNED" : "READY"; }
+        Token confirmationToken() { return new Token(); }
+        void confirmationLaunched() { launched++; }
+        void confirmationLaunchFailed() { launched--; }
+    }
+    static final class InstallNext { GamePreparationService.PreparedPair pair; String name, receipt; boolean uninstall, externalInstaller; }
+    final Session setupSession = new Session(); final Installer installer = new Installer();
+    final GamePreparationService preparation = new GamePreparationService();
+    boolean resumed = true, busy, destroyed, recovery, rootBackend, feedbackError, cloudVerified, onboardingActive;
+    boolean failLaunch, systemReturnPending, activationReturnPending, readinessRefreshPending;
+    boolean disabledSystemInstaller, failChooser, specialHelperInput;
+    boolean sharedAppreciationOnly, gameFilePickerOpen, pauseAfterPrepare, failPrepare, allowInstalls = true;
+    boolean bridgeAvailable, bridgeHandshakeRequired, bridgeReady, failInspect, deferNextWork;
+    int installedInspections, bridgeAuthentications, activationChecks, readinessRefreshes;
+    String inspectedPackage, resolvedPackage, boundPackage, processedPackage, bridgeAccessCode = "NOT_CHECKED";
+    Runnable deferredWork;
+    static final class Handler { void postDelayed(Runnable action, long delay) {} }
+    final Handler setupHandler = new Handler();
+    int sharedGameRenderToken = 0, pendingSystemChecks, prepares, rootCalls, intentLaunches, settingsLaunches, bridgeChecks, chooserLaunches;
+    RootGame rootGame; InstalledBridgeBinding installedBridge;
+    GamePreparationService.InstalledGame selectedInstalledGame;
+    Object readinessState, accessCapabilities, facade, history, inspection, localPreview, selected, explicitHomeSelection;
+    String setupOutcome; Exception setupProbeFailure;
+    String notice, diagnosticReport, details, openedConfirmationNonce = "";
+    SyncPage page = SyncPage.DISCOVERY; OnboardingProgress progress;
+    GamePreparationService.PreparedPair prepared;
+    GamePreparationService.InstallStrategy strategy = GamePreparationService.InstallStrategy.FRESH_INSTALL;
+    List<Uri> processed; Runnable confirmation; String confirmationText;
+    MainActivity() { setupSession.owner = this; }
+    boolean isDestroyed() { return destroyed; }
+    boolean restoreNeedsAttention() { return recovery; }
+    boolean hasAnyRestoreJournal() { return recovery; }
+    Object selectedGameIdentity() { return null; }
+    GameModeChoice.Mode currentAccessMode() { return setupSession.accessMode; }
+    void render() {}
+    void resolveRootSetupSource(GameModeChoice.Request<Uri> r) { rootCalls++; }
+    void retryGameModeChoice(GameModeChoice.Request<Uri> r, Exception e) { setupSession.modeChoice.retry(r); }
+    void resetPathPreview() {}
+    void authenticateInstalledBridge(InstalledBridgeBinding binding) {
+        bridgeAuthentications++;
+        bridgeAccessCode = bridgeHandshakeRequired ? "PURE_HANDSHAKE_REQUIRED" : "READY";
+        bridgeReady = !bridgeHandshakeRequired;
+    }
+    boolean readyForSaves() { return bridgeReady && installedBridge != null; }
+    void maybeActivateSetupComponent() { activationChecks++; }
+    interface Task<T> { T run() throws Exception; }
+    interface Done<T> { void accept(MainActivity owner, T value) throws Exception; }
+    <T> void setupWork(DiagnosticAction action, String text, Task<T> work, Done<T> done) {
+        if (busy || setupSession.running || destroyed) return;
+        busy = setupSession.running = true;
+        Runnable execute = () -> {
+            try {
+                T value = work.run(); busy = setupSession.running = false;
+                if (action == DiagnosticAction.PREPARE && pauseAfterPrepare) resumed = false;
+                done.accept(this, value);
+            } catch (Exception e) {
+                busy = setupSession.running = false; feedbackError = true;
+                if (action == DiagnosticAction.PREPARE) setupSession.modeChoice.offer(setupSession.selectedSource);
+            }
+            drainExternalInstallation();
+        };
+        if (deferNextWork) { deferNextWork = false; deferredWork = execute; }
+        else execute.run();
+    }
+    GamePreparationService.PreparedPair m58lambda$prepare$33$iogithubxyz1001pdsyncandroidMainActivity(List<Uri> list, String pkg, boolean consent) throws Exception {
+        prepares++; processed = list; processedPackage = pkg;
+        if (failPrepare) throw new IOException("broken APK");
+        GamePreparationService.PreparedPair p = new GamePreparationService.PreparedPair(); p.gameStrategy = strategy;
+        if (pkg != null) p.gamePackage = pkg;
+        if (list != null) {
+            p.gameApks = new ArrayList<>();
+            for (int index = 0; index < list.size(); index++) p.gameApks.add(new File(index == 0 ? "base.apk" : "split-" + index + ".apk"));
+        }
+        p.helperOnlyUpgrade = specialHelperInput;
+        return p;
+    }
+    MainActivity getPackageManager() { return this; }
+    boolean canRequestPackageInstalls() { return allowInstalls; }
+    String getPackageName() { return "sync.app"; }
+    void startActivityForResult(Intent i, int code) {
+        if (code == EXTERNAL_INSTALL || (code >= 16000 && code <= 65534)) {
+            require("android.intent.action.VIEW".equals(i.action), "Ordinary APK uses unwrapped ACTION_VIEW, preserving default installer");
+            if (failChooser) throw new IllegalStateException("No external resolver");
+            chooserLaunches++;
+        } else settingsLaunches++;
+    }
+    void reportError(Exception error) { feedbackError = true; }
+    void startIntentSenderForResult(Object sender, int code, Object intent, int a, int b, int c, Object options) {
+        require("visible-only-options".equals(options), "Foreground options passed to platform launch");
+        if (failLaunch) throw new IllegalStateException("launch failed");
+        intentLaunches++;
+    }
+    void refreshReadiness() { readinessRefreshes++; }
+    void confirm(String title, String message, String positive, Runnable action) { confirmation = action; confirmationText = message; }
+    void finishDeferredWork() {
+        Runnable work = deferredWork; deferredWork = null;
+        require(work != null, "There is deferred source work"); work.run();
+    }
+
+    /* PRODUCTION_METHODS */
+
+    static void require(boolean value, String why) { if (!value) throw new AssertionError(why); }
+    static MainActivity selected() {
+        MainActivity a = new MainActivity();
+        a.installedBridge = new InstalledBridgeBinding("previous.game"); // A previously bridged installed game must not substitute the selected file.
+        a.setupSession.modeChoice.offer(GameModeChoice.Source.files(List.of(new Uri("content://chosen/base.apk"), new Uri("content://chosen/split.apk"))));
+        a.renderDiscovery();
+        return a;
+    }
+    static MainActivity selectedSingle() {
+        MainActivity a = new MainActivity(); a.installedBridge = new InstalledBridgeBinding("previous.game");
+        a.setupSession.modeChoice.offer(GameModeChoice.Source.files(List.of(new Uri("content://chosen/base.apk"))));
+        a.renderDiscovery(); return a;
+    }
+    static MainActivity installed() {
+        MainActivity a = new MainActivity();
+        a.setupSession.modeChoice.offer(GameModeChoice.Source.installed("installed.game"));
+        a.renderDiscovery();
+        return a;
+    }
+    static void verifyInstalledApkActions() {
+        MainActivity a = installed();
+        require(a.prepares == 0 && a.installedInspections == 0 && a.bridgeChecks == 0,
+                "Selecting or rendering an installed source must be inert before a mode click");
+        click(a);
+        require(a.installedInspections == 1 && "installed.game".equals(a.inspectedPackage),
+                "Installed APK card inspects the explicitly selected package");
+        require(a.installer.sourceSelections == 1 && a.bridgeChecks == 1
+                        && "installed.game".equals(a.resolvedPackage),
+                "Installed APK card reaches the production bridge decision once");
+        require(a.prepares == 1 && a.processed == null && "installed.game".equals(a.processedPackage),
+                "Installed APK card prepares the selected installed package immediately when bridge is absent");
+        require(a.chooserLaunches == 1 && a.installer.externalPrepares == 1
+                        && a.installer.installs == 0 && a.intentLaunches == 0 && a.confirmation == null,
+                "Installed single APK directly opens the default ACTION_VIEW exactly once");
+        click(a); a.renderDiscovery(); click(a); a.drainPendingSetup();
+        require(a.prepares == 1 && a.bridgeChecks == 1 && a.chooserLaunches == 1,
+                "Rapid installed APK taps and rerender cannot repeat preparation or handoff");
+
+        a.resumed = false; a.renderDiscovery(); a.drainPendingSetup();
+        a.resumed = true; a.systemReturnPending = true; a.renderDiscovery(); a.drainPendingSetup();
+        require(a.prepares == 1 && a.chooserLaunches == 1 && a.installer.externalChecks == 0,
+                "Background and installer return do not replay or implicitly check external installation");
+        int returnedRequestCode = a.installer.externalActivityRequestCode();
+        a.externalInstallResult(returnedRequestCode, 0);
+        require(a.installer.externalReturns == 1 && a.installer.externalChecks == 1
+                        && a.installer.externalEnds == 0 && !a.installer.active && a.installer.observation,
+                "Real canceled Activity result unlocks automatically without ending the external share");
+        a.renderDiscovery(); a.drainPendingSetup();
+        a.resumed = false; a.drainPendingSetup(); a.resumed = true; a.drainPendingSetup();
+        require(a.prepares == 1 && a.chooserLaunches == 1,
+                "Canceled external installation stays canceled across rendering and resume");
+        click(a);
+        require(a.prepares == 2 && a.bridgeChecks == 2 && a.chooserLaunches == 2,
+                "Only a new explicit installed APK click retries canceled installation");
+        a.externalInstallResult(returnedRequestCode, 0);
+        require(a.installer.active && a.installer.external && a.installer.externalReturns == 1,
+                "A stale earlier Activity result cannot unlock the new explicit installation");
+
+        a = installed(); a.deferNextWork = true; click(a);
+        require(a.busy && a.setupSession.running && a.prepares == 0,
+                "Installed source inspection may remain in flight");
+        click(a); a.renderDiscovery(); click(a); a.drainPendingSetup();
+        a.finishDeferredWork();
+        require(a.installedInspections == 1 && a.bridgeChecks == 1 && a.prepares == 1 && a.chooserLaunches == 1,
+                "Rapid taps during installed source inspection dispatch only one work chain");
+
+        a = installed(); a.bridgeAvailable = true; click(a);
+        require(a.bridgeChecks == 1 && a.bridgeAuthentications == 1 && a.readyForSaves()
+                        && "installed.game".equals(a.boundPackage),
+                "An existing installed bridge is authenticated for the selected package");
+        require(a.prepares == 0 && a.chooserLaunches == 0 && a.installer.installs == 0
+                        && a.notice.equals("游戏组件已连接。"),
+                "A valid installed bridge becomes ready without reinjection or installer launch");
+        a.renderDiscovery(); a.drainPendingSetup(); a.resumed = false; a.drainPendingSetup();
+        a.resumed = true; a.drainPendingSetup();
+        require(a.bridgeChecks == 1 && a.bridgeAuthentications == 1 && a.prepares == 0,
+                "Ready bridge is not reauthenticated or reinjected by lifecycle rendering");
+
+        a = installed(); a.bridgeAvailable = true; a.bridgeHandshakeRequired = true; click(a);
+        require(a.bridgeAuthentications == 1 && a.prepares == 1 && a.chooserLaunches == 1,
+                "A bridge requiring a pure handshake follows the production preparation fallback");
+
+        a = installed(); a.pauseAfterPrepare = true; click(a);
+        require(a.prepares == 1 && a.chooserLaunches == 0 && a.setupSession.installationAdvancePending,
+                "Installed source prepared in background defers the default installer");
+        a.renderDiscovery(); a.drainPendingSetup();
+        require(a.chooserLaunches == 0, "Background drain cannot launch installed APK UI");
+        a.resumed = true; a.drainPendingSetup(); a.renderDiscovery(); a.drainPendingSetup();
+        require(a.prepares == 1 && a.chooserLaunches == 1 && !a.setupSession.installationAdvancePending,
+                "Foreground installed-source continuation hands off once without preparing again");
+
+        a = installed(); a.failPrepare = true; click(a);
+        require(a.prepares == 1 && a.chooserLaunches == 0
+                        && a.setupSession.modeChoice.awaiting(a.setupSession.modeChoice.pending()),
+                "Installed source preparation failure preserves an explicit retry choice");
+        a.failPrepare = false; a.renderDiscovery(); a.drainPendingSetup();
+        a.resumed = false; a.drainPendingSetup(); a.resumed = true; a.drainPendingSetup();
+        require(a.prepares == 1 && a.chooserLaunches == 0,
+                "Failed installed source preparation never retries during rendering or resume");
+        click(a);
+        require(a.prepares == 2 && a.chooserLaunches == 1,
+                "Explicit installed APK retry reuses the selected package after preparation failure");
+
+        a = installed(); a.failInspect = true; click(a);
+        require(a.installedInspections == 1 && a.prepares == 0
+                        && a.setupSession.modeChoice.awaiting(a.setupSession.modeChoice.pending()),
+                "Missing installed source remains retryable without preparing another game");
+        a.failInspect = false; a.renderDiscovery(); a.drainPendingSetup();
+        require(a.installedInspections == 1, "Installed source inspection failure cannot auto-retry");
+        click(a);
+        require(a.installedInspections == 2 && a.prepares == 1 && a.chooserLaunches == 1,
+                "Explicit retry can recover installed source inspection");
+
+        a = installed(); GameModeChoice.Request<Uri> canceled = a.setupSession.modeChoice.pending();
+        a.actions.perform(SharedGameSelectionControl.CANCEL_ACCESS_SELECTION);
+        require(a.setupSession.modeChoice.pending() == null, "Cancel clears the pending installed source choice");
+        a.renderDiscovery(); a.drainPendingSetup();
+        a.dispatchInlineAccess(canceled, GameModeChoice.Mode.APK);
+        require(a.installedInspections == 0 && a.bridgeChecks == 0 && a.prepares == 0 && a.chooserLaunches == 0,
+                "Canceled installed source cannot start through a stale choice or lifecycle replay");
+
+        a = installed(); a.deferNextWork = true; click(a); a.setupSession.modeChoice.discard();
+        a.finishDeferredWork(); a.renderDiscovery(); a.drainPendingSetup();
+        require(a.installedInspections == 1 && a.bridgeChecks == 0 && a.prepares == 0 && a.chooserLaunches == 0,
+                "Invalidated installed choice cannot continue after deferred source inspection");
+
+        for (int gate = 0; gate < 6; gate++) {
+            a = installed();
+            if (gate == 0) a.resumed = false;
+            if (gate == 1) a.destroyed = true;
+            if (gate == 2) a.setupSession.owner = new MainActivity();
+            if (gate == 3) a.busy = true;
+            if (gate == 4) a.recovery = true;
+            if (gate == 5) a.page = SyncPage.HOME;
+            click(a);
+            require(a.installedInspections == 0 && a.prepares == 0 && a.chooserLaunches == 0,
+                    "Inactive installed APK action gate " + gate);
+        }
+        System.out.println("installed APK action integration passed");
+    }
+    static void click(MainActivity a) { a.actions.perform(SharedGameSelectionControl.SWITCH_TO_EMBEDDED); }
+    public static void main(String[] args) {
+        MainActivity noticeOwner = selected(); noticeOwner.feedbackError = true;
+        for (PreparationDiagnostics.Stage stage : PreparationDiagnostics.Stage.values()) {
+            PreparationDiagnostics.Failure failure = new PreparationDiagnostics.Failure(stage,
+                    new IOException("/data/private/secret.apk https://example.invalid/?password=secret"), null);
+            String safe = failure.userMessage(); noticeOwner.notice = safe;
+            require(noticeOwner.visibleNotice().equals(safe), "Preserve fixed safe preparation message " + stage);
+            require(!safe.contains("secret"), "No cause detail in visible message");
+            noticeOwner.notice = safe + " /data/private/secret.apk";
+            require(noticeOwner.visibleNotice().equals("操作未完成，请重试。"), "Reject appended details");
+        }
+        for (String unsafe : List.of("/data/private/secret.apk", "准备未完成：secret", "PREP_LOCAL_KEY secret")) {
+            noticeOwner.notice = unsafe;
+            require(noticeOwner.visibleNotice().equals("操作未完成，请重试。"), "Untrusted text still goes through NoviceCopy");
+        }
+        MainActivity a = selected(); List<Uri> exact = a.setupSession.modeChoice.pending().source.apks;
+        click(a);
+        require(a.prepares == 1 && a.processed == exact, "APK card must process exact selected base/splits immediately");
+        require(a.prepared.gameApks.size() == 2 && a.installer.installs == 1 && a.intentLaunches == 1,
+                "Split APK preparation must reach system installer IntentSender");
+        require(a.bridgeChecks == 0 && a.rootCalls == 0, "No installed bridge or Root substitution");
+        click(a); require(a.prepares == 1 && a.intentLaunches == 1, "Active install double tap must not repeat");
+        a.openInstallConfirmation(); require(a.intentLaunches == 1, "Confirmation nonce prevents duplicate launch");
+
+        a = selected(); SharedGameSelectionActions stale = a.actions; a.renderDiscovery();
+        stale.perform(SharedGameSelectionControl.SWITCH_TO_EMBEDDED);
+        require(a.prepares == 0, "Stale Compose callback cannot dispatch");
+        click(a); require(a.intentLaunches == 1, "Current Compose callback still works");
+        a = selected(); a.setupSession.accessMode = GameModeChoice.Mode.APK;
+        a.setupSession.selectedSource = a.setupSession.modeChoice.pending().source;
+        a.setupSession.modeChoice.discard(); click(a);
+        require(a.prepares == 1 && a.intentLaunches == 1, "Explicit APK choice must not be inert when already in APK mode");
+
+        a = selected(); a.pauseAfterPrepare = true; click(a);
+        require(a.prepares == 1 && a.intentLaunches == 0 && a.setupSession.installationAdvancePending, "Background completion must defer system UI");
+        a.resumed = true; a.drainPendingSetup(); require(a.intentLaunches == 1, "Foreground resumes installation");
+
+        a = selected(); a.strategy = GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL; click(a);
+        require(a.confirmation != null && a.confirmationText.contains("签名不同") && a.confirmationText.contains("丢失已有存档"), "Signing conflict and data-loss warning visible");
+        require(a.installer.uninstalls == 0 && a.intentLaunches == 0, "Never uninstall automatically");
+        a.setupSession.flow.select("different.game"); a.confirmation.run();
+        require(a.installer.uninstalls == 0, "Stale uninstall approval cannot affect another target");
+
+        a = selected(); a.strategy = GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL; click(a); a.confirmation.run();
+        require(a.installer.uninstalls == 1, "Only explicit current-target confirmation requests uninstall");
+        a = selected(); a.allowInstalls = false; click(a);
+        require(a.settingsLaunches == 1 && a.intentLaunches == 0, "Missing unknown-source permission opens settings");
+        a.allowInstalls = true; a.continueInstallation(); require(a.intentLaunches == 1, "Permission return resumes install");
+
+        for (int gate = 0; gate < 6; gate++) {
+            a = selected();
+            if (gate == 0) a.resumed = false;
+            if (gate == 1) a.destroyed = true;
+            if (gate == 2) a.setupSession.owner = new MainActivity();
+            if (gate == 3) a.busy = true;
+            if (gate == 4) a.recovery = true;
+            if (gate == 5) a.page = SyncPage.HOME;
+            click(a); require(a.prepares == 0, "Inactive action gate " + gate);
+        }
+        a = selected(); a.failPrepare = true; click(a);
+        require(a.feedbackError && a.setupSession.modeChoice.awaiting(a.setupSession.modeChoice.pending()), "Failed preparation remains retryable");
+        a.failPrepare = false; click(a); require(a.prepares == 2 && a.intentLaunches == 1, "Retry selected source");
+
+        a = selected(); final MainActivity owner = a;
+        GameModeChoice.Request<Uri> request = a.setupSession.modeChoice.pending();
+        android.app.AlertDialog dialog = GameModeChoiceDialog.show(a, a.setupSession.modeChoice, request, () -> owner.resumed,
+                new GameModeChoice.Actions<Uri>() {
+                    public void root(GameModeChoice.Request<Uri> r) { owner.resolveRootSetupSource(r); }
+                    public void apk(GameModeChoice.Request<Uri> r) { owner.chooseApkSetupSource(r); }
+                }, () -> {}, null);
+        dialog.click("修改 APK"); require(a.prepares == 1 && a.intentLaunches == 1, "Legacy real dialog listener also reaches installation");
+        a = selected(); a.failLaunch = true; click(a);
+        require(a.feedbackError && a.openedConfirmationNonce.isEmpty() && a.installer.launched == 0,
+                "Failed launch rolls back both confirmation guards");
+        a.failLaunch = false; a.openInstallConfirmation();
+        require(a.intentLaunches == 0, "Failed automatic launch cannot replay itself");
+        a.retryInstallConfirmation();
+        require(a.intentLaunches == 1 && a.installer.installs == 1, "Retry reuses session, not another install");
+        a.setupSession.confirmationLaunchAttemptAt = -10000;
+        a.retryInstallConfirmation();
+        require(a.intentLaunches == 2 && a.installer.installs == 1, "Explicit retry reopens same retained confirmation");
+        a.retryInstallConfirmation();
+        require(a.intentLaunches == 2, "Repeated immediate retry is throttled");
+        a.setupSession.confirmationLaunchAttemptAt = -10000; a.systemReturnPending = true;
+        a.retryInstallConfirmation();
+        require(a.intentLaunches == 2, "Returned system flow cannot be replayed");
+
+        for (boolean systemDisabled : List.of(false, true)) {
+            for (boolean ownInstallPermission : List.of(false, true)) {
+                a = selectedSingle(); a.disabledSystemInstaller = systemDisabled; a.allowInstalls = ownInstallPermission;
+                a.strategy = GamePreparationService.InstallStrategy.REQUIRES_UNINSTALL;
+                List<Uri> singleSource = a.setupSession.modeChoice.pending().source.apks;
+                click(a);
+                require(a.chooserLaunches == 1 && a.installer.externalPrepares == 1,
+                        "Single APK uses default ACTION_VIEW regardless of system installer enablement");
+                require(a.prepared.gameApks.size() == 1 && a.processed == singleSource,
+                        "Ordinary handoff preserves the explicit selected single APK");
+                require(a.installer.installs == 0 && a.installer.uninstalls == 0 && a.intentLaunches == 0 && a.settingsLaunches == 0,
+                        "Single APK bypasses own session, automatic uninstall and own-source settings");
+                require(a.confirmation == null && a.installer.external,
+                        "New single APK directly opens default installer without a switch prompt");
+            }
+        }
+
+        a = selectedSingle(); a.specialHelperInput = true; click(a);
+        require(a.chooserLaunches == 0 && a.installer.installs == 1 && a.intentLaunches == 1,
+                "Special helper input does not use ordinary single-game APK handoff");
+
+        a = selectedSingle(); a.pauseAfterPrepare = true; click(a);
+        require(a.chooserLaunches == 0 && a.installer.externalPrepares == 0,
+                "Background preparation cannot open default installer");
+        a.resumed = true; a.drainPendingSetup();
+        require(a.chooserLaunches == 1 && a.installer.installs == 0, "Foreground continuation uses default external installer");
+
+        a = selectedSingle(); click(a);
+        // Model a restored older own-session request for a single APK, before explicit switching.
+        a.installer.external = false; a.installer.active = a.installer.confirmation = true;
+        a.installer.installs = 1; a.installer.externalPrepares = 0; a.chooserLaunches = 0;
+        a.actions.perform(SharedGameSelectionControl.USE_OTHER_INSTALLER);
+        require(a.confirmation != null && a.installer.externalPrepares == 0,
+                "Existing own session requires explicit switch confirmation");
+        a.confirmation.run();
+        require(a.chooserLaunches == 1 && a.installer.externalPrepares == 1 && a.installer.installs == 1,
+                "Approved manual switch opens default installer without another own install");
+
+        a = selectedSingle(); a.failChooser = true; click(a);
+        require(a.feedbackError && a.installer.externalEnds == 1 && !a.installer.external,
+                "Default installer launch failure explicitly cleans up external wait and sharing");
+        verifyInstalledApkActions();
+        System.out.println("selected APK action integration passed");
+    }
+}

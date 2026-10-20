@@ -9,18 +9,18 @@ OUT=${PDSYNC_PROVIDER_TEST_OUTPUT:-"$REPO/android-app/build/provider-injection-h
 FIXTURES="$HERE/fixtures/provider-injection"
 mkdir -p "$OUT/classes" "$OUT/fixtures" "$OUT/game-classes" "$OUT/runtime-classes" "$OUT/game-dex" "$OUT/runtime-dex"
 SRC="$REPO/android-app/src/main/java/io/github/xyz1001/pdsync/android/prepare"
-"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 8 -target 8 -bootclasspath "$SDK/platforms/android-26/android.jar" -d "$OUT/classes" "$SRC/"{BinaryManifestPatch,ApkArchive,PayloadInventory,GameSourceIdentity}.java
+"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 8 -target 8 -bootclasspath "$SDK/platforms/android-26/android.jar" -d "$OUT/classes" "$SRC/"{BinaryManifestPatch,ApkArchive,PayloadInventory,GameSourceIdentity}.java
 for kind in game runtime; do
     mapfile -t FILES < <(find "$FIXTURES/$kind" -name '*.java' | sort)
-    "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 8 -target 8 -bootclasspath "$SDK/platforms/android-26/android.jar" -d "$OUT/$kind-classes" "${FILES[@]}"
+    "$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 8 -target 8 -bootclasspath "$SDK/platforms/android-26/android.jar" -d "$OUT/$kind-classes" "${FILES[@]}"
     mapfile -t CLASSES < <(find "$OUT/$kind-classes" -name '*.class' | sort)
-    "$JAVA" -cp "$SDK/build-tools/36.0.0/lib/d8.jar" com.android.tools.r8.D8 --min-api 26 --lib "$SDK/platforms/android-26/android.jar" --output "$OUT/$kind-dex" "${CLASSES[@]}"
+    "$JAVA" -Duser.language=zh -Duser.country=CN -cp "$SDK/build-tools/36.0.0/lib/d8.jar" com.android.tools.r8.D8 --min-api 26 --lib "$SDK/platforms/android-26/android.jar" --output "$OUT/$kind-dex" "${CLASSES[@]}"
 done
 for fixture in "$FIXTURES/"*.xml; do
     "$SDK/build-tools/36.0.0/aapt2" link -I "$SDK/platforms/android-36/android.jar" --manifest "$fixture" -o "$OUT/fixtures/$(basename "$fixture" .xml).apk"
 done
-"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$OUT/classes" -d "$OUT/classes" "$HERE/java/io/github/xyz1001/pdsync/android/prepare/ProviderInjectionTest.java"
-"$JAVA" -cp "$OUT/classes" io.github.xyz1001.pdsync.android.prepare.ProviderInjectionTest "$OUT/fixtures" "$OUT/game-dex/classes.dex" "$OUT/runtime-dex/classes.dex" "$OUT"
+"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 17 -target 17 -cp "$OUT/classes" -d "$OUT/classes" "$HERE/java/io/github/xyz1001/pdsync/android/prepare/ProviderInjectionTest.java"
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT/classes" io.github.xyz1001.pdsync.android.prepare.ProviderInjectionTest "$OUT/fixtures" "$OUT/game-dex/classes.dex" "$OUT/runtime-dex/classes.dex" "$OUT"
 "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$OUT/injected-fixture.apk" --file AndroidManifest.xml > "$OUT/injected-manifest.txt"
 echo "AAPT2 independently parsed injected manifest: $OUT/injected-manifest.txt"
 "$SDK/build-tools/36.0.0/aapt2" dump xmltree "$OUT/fixtures/base.apk" --file AndroidManifest.xml > "$OUT/original-manifest.txt"
@@ -54,11 +54,9 @@ injected = tree(out / 'injected-manifest.txt')
 for key in list(original['attrs']):
     if any(':'+name+'(' in key for name in ('sharedUserId','sharedUserLabel','sharedUserMaxSdkVersion')):
         original['attrs'].pop(key)
-    elif ':targetSandboxVersion(' in key:
-        original['attrs'][key] = '1'
 app = next(n for n in injected['children'] if n['tag']=='application')
 added = [n for n in app['children'] if any('io.github.xyz1001.pdsync.' in value for key,value in n['attrs'].items() if ':name(' in key)]
-assert len(added) == 11, added
+assert len(added) == 12, added
 provider = next(n for n in added if n['tag']=='provider')
 activity = next(n for n in added if n['tag']=='activity')
 assert not provider['children'] and not activity['children']
@@ -101,5 +99,5 @@ unrelated_activity = next(n for n in unrelated_app['children'] if n['tag']=='act
 assert '":other_game"' in next(v for k,v in unrelated_activity['attrs'].items() if ':process(' in k)
 print('Independent AAPT2 process checks passed: original unrelated application and component processes preserved')
 print('Independent AAPT2 SDK-floor checks passed: old/missing minima raised, 26+ never lowered, explicit and implicit targets/maxima retained, split compatible')
-print('Independent AAPT2 tree comparison passed: original application/components/launcher/settings retained; exact new provider/activity/query and nine string bindings')
+print('Independent AAPT2 tree comparison passed: original application/components/launcher/settings retained; exact new provider/activity/query and ten string bindings including pure handshake')
 PY

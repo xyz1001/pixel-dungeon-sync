@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.content.Context;
 import io.github.xyz1001.pdsync.root.RootProtocol;
 import io.github.xyz1001.pdsync.root.RootBinding;
@@ -49,7 +51,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     }
     public RootGameBridge(SelectedRootGame selected, AndroidGameIdentity identity, TargetVerifier verifier,
             RootProcessTransport.Exchange exchange, BooleanSupplier authorized, File stagingDirectory, boolean mutationSupported) {
-        if(selected==null||verifier==null||exchange==null||authorized==null||stagingDirectory==null)throw new IllegalArgumentException("Missing root client dependency");
+        if(selected==null||verifier==null||exchange==null||authorized==null||stagingDirectory==null)throw new IllegalArgumentException(AndroidMessages.ROOT_GAME_BRIDGE_01.text());
         this.supported=new Capabilities(true,mutationSupported,true,mutationSupported);
         this.selected=selected;this.identity=identity;this.verifier=verifier;this.exchange=exchange;
         this.authorized=authorized;this.stagingDirectory=stagingDirectory;
@@ -68,22 +70,22 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     /** Only a foreground explicit user action may call this method. */
     public String probeAuthorization() {
         call(RootProtocol.Command.PROBE,null,true);
-        return "Root 访问探测成功；每次操作仍会重新检查目标、运行状态与文件。尚未完成 Android 实机验收。";
+        return AndroidMessages.ROOT_GAME_BRIDGE_02.text();
     }
     @Override public AndroidGameTarget targetGame() {
         try {
             verifyTarget();
-            AndroidGameIdentity target=identity==null?new AndroidGameIdentity(selected.gamePackage,selected.gameLabel,
-                    selected.originIdentity,selected.namespaceId):identity;
+            AndroidGameIdentity target=identity==null?AndroidGameIdentity.forPackage(selected.gamePackage,selected.gameLabel,
+                    selected.originIdentity):identity;
             return new AndroidGameTarget(target,selected.gameVersionName,selected.gameVersionCode,
-                    selected.installedApkSetSha256,selected.sourceApkSetSha256,false);
+                    selected.installedApkSetSha256,selected.sourceApkSetSha256);
         }catch(Exception failure){throw failure("ROOT_TARGET_CHANGED",failure);}
     }
     @Override public String inspectReady() {
         RootProtocol.Response reply=call(RootProtocol.Command.INSPECT,null,false);
         if(!("EMPTY_DIRECTORY".equals(reply.contentState) || "NO_TRANSFERABLE_FILES".equals(reply.contentState)
                 || "ALLOWLISTED_FILES_PRESENT".equals(reply.contentState)))throw failure("ROOT_SAVE_NOT_READY",null);
-        return "Root 已核对当前目标与存档布局；读写操作仍需稳定性检查。尚未完成 Android 实机验收。";
+        return AndroidMessages.ROOT_GAME_BRIDGE_03.text();
     }
     @Override public Observation observeLifecycle() {
         try {
@@ -169,7 +171,7 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
                         reply.diagnosticStage.name(),reply.diagnosticCategory.name(),reply.errno));
             RootProtocol.Response verified=call(RootProtocol.Command.INSPECT,null,false);
             requireInventory(verified,reply.contentFingerprint,reply.fileCount,reply.contentBytes,"ROOT_RECOVERY_VERIFY_FAILED");
-            return "Root 恢复记录已处理并重新核对（"+reply.fileCount+" 个文件）。";
+            return AndroidMessages.ROOT_RECOVERED_FILES.text(reply.fileCount);
         }catch(BridgeDiagnostics.Failure failure){throw atStage(BridgeDiagnostics.Stage.RECOVERY,failure);}
     }
     private static void requireInventory(RootProtocol.Response reply,String hash,int count,long bytes,String code) {
@@ -228,12 +230,12 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
         return new BridgeDiagnostics.Failure(stage,failure.code,failure.getMessage(),failure.getCause());
     }
     private static BridgeDiagnostics.Failure failure(String code,Throwable cause) {
-        String message=code.contains("COMMITTED_CLEANUP_PENDING")?"存档写入已经完成并核对，但恢复记录清理尚未完成。请继续检查恢复记录，不要重复覆盖或卸载游戏。":
-                code.contains("UNSUPPORTED")?"当前安装或设备尚未提供可验证的安全 Root 恢复能力，未修改游戏存档。":
-                "ROOT_AUTH_REQUIRED".equals(code)?"Root 游戏选择已变化或不可读取，请重新选择。只会在明确操作时向 Root 管理器请求权限。":
-                "ROOT_MISSING_DIRECTORY".equals(code)?"游戏尚未创建存档目录。请启动一次游戏，正常退出后再授权并检查 Root。":
-                ("ROOT_TIMEOUT".equals(code)||"ROOT_RUNNER_TIMEOUT".equals(code))?"Root 请求超时，本次结果尚未确认。若正在恢复，请先检查恢复记录，不要启动游戏或重复覆盖。":
-                "Root 存档访问未完成（"+code+"）。请保留游戏安装，重新检查授权与目标。";
+        String message=code.contains("COMMITTED_CLEANUP_PENDING")?AndroidMessages.ROOT_GAME_BRIDGE_05.text():
+                code.contains("UNSUPPORTED")?AndroidMessages.ROOT_GAME_BRIDGE_06.text():
+                "ROOT_AUTH_REQUIRED".equals(code)?AndroidMessages.ROOT_GAME_BRIDGE_07.text():
+                "ROOT_MISSING_DIRECTORY".equals(code)?AndroidMessages.ROOT_GAME_BRIDGE_08.text():
+                ("ROOT_TIMEOUT".equals(code)||"ROOT_RUNNER_TIMEOUT".equals(code))?AndroidMessages.ROOT_GAME_BRIDGE_09.text():
+                AndroidMessages.ROOT_ACCESS_INCOMPLETE.text(code);
         BridgeDiagnostics.Stage stage = code.startsWith("ROOT_EXPORT_") || code.equals("ROOT_ARCHIVE_INCOMPLETE")
                 ? BridgeDiagnostics.Stage.EXPORT : code.startsWith("ROOT_RESTORE_") ? BridgeDiagnostics.Stage.RESTORE
                 : code.startsWith("ROOT_RECOVERY_") ? BridgeDiagnostics.Stage.RECOVERY

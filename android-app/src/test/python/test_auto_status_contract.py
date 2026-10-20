@@ -9,7 +9,7 @@ SERVICE = (ROOT / 'AutoSyncService.java').read_text()
 
 class AutoStatusContract(unittest.TestCase):
     def test_evidence_is_captured_before_actual_export_and_acknowledged_after_full_comparison(self):
-        read = body(MAIN, 'private void readComparison()')
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
         self.assertLess(read.index('AutoSyncService.beginManualInspection(this)'), read.index('activeFacade.inspect()'))
         blocked = body(read, 'if ("BLOCKED".equals(inspectionInspect.getKind()))')
         self.assertIn('return;', blocked)
@@ -31,7 +31,7 @@ class AutoStatusContract(unittest.TestCase):
         status = body(SERVICE, 'public static String status(')
         self.assertIn('AutoSyncStatusPolicy.visibleResult(current, preferences.getString(CHECKED_IDLE_FAILURE, "")', status)
         self.assertIn('SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context)', status)
-        self.assertIn('return current.result', status)
+        self.assertIn('return StoredAndroidText.render(current.result)', status)
         record = body(SERVICE, 'private static AutoSyncStatusPolicy.Record statusRecord(')
         self.assertIn('preferences.getAll()', record)
         for field in ('"token"', '"state"', '"result"', '"gameSelection"', '"gameNamespace"', '"startedAt"'):
@@ -52,4 +52,4 @@ class AutoStatusContract(unittest.TestCase):
         status = body(SERVICE, 'public static String status(')
         self.assertLess(capture.index('if (!SyncRuntime.rootMode(context)) return null'), capture.index('AutoSyncStatusPolicy.capture('))
         self.assertLess(mark.index('if (!SyncRuntime.rootMode(context)) return;'), mark.index('AutoSyncStatusPolicy.acknowledgment('))
-        self.assertLess(status.index('if (!SyncRuntime.rootMode(context)) return current.result'), status.index('AutoSyncStatusPolicy.visibleResult('))
+        self.assertLess(status.index('if (!SyncRuntime.rootMode(context)) return StoredAndroidText.render(current.result)'), status.index('AutoSyncStatusPolicy.visibleResult('))

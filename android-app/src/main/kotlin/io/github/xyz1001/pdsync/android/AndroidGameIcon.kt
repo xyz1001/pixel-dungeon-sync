@@ -33,9 +33,11 @@ object AndroidGameIcon {
     )
 
     private data class CacheEntry(val key: CacheKey, val image: ImageBitmap?)
-    // Retain only the current selection's small bitmap, including unsuccessful reads.
+    // Retain one small bitmap per source kind, including unsuccessful reads.
+    // Archive decoding never holds the installed-icon monitor used by UI callers.
     // No Activity, PackageManager, Drawable or APK resources survive a call.
     private var cached: CacheEntry? = null
+    @Volatile private var cachedArchive: CacheEntry? = null
 
     @JvmStatic
     @Synchronized
@@ -70,6 +72,18 @@ object AndroidGameIcon {
             null
         }
     }
+
+    /** Exact selected archive only; do not substitute the installed version of the same package. */
+    @JvmStatic
+    fun loadArchive(context: Context, packageName: String, apk: File): ImageBitmap? = try {
+        val archive = ArchiveSource(apk.absolutePath, apk.length(), apk.lastModified())
+        val key = CacheKey(packageName, "archive-only", null, archive, context.resources.configuration.toString())
+        if (cachedArchive?.key == key) cachedArchive?.image else {
+            val image = safely { readArchive(context.packageManager, packageName, apk.absolutePath) }
+            cachedArchive = CacheEntry(key, image)
+            image
+        }
+    } catch (_: Exception) { cachedArchive = null; null } catch (_: OutOfMemoryError) { cachedArchive = null; null }
 
     private fun PackageInfo.source() = InstalledSource(packageName, firstInstallTime, lastUpdateTime,
         applicationInfo?.sourceDir, applicationInfo?.splitSourceDirs?.toList().orEmpty())

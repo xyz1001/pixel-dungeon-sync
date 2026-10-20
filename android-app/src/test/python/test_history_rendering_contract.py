@@ -14,7 +14,7 @@ class HistoryRenderingContractTest(unittest.TestCase):
         self.assertNotIn('class TimelineView', MAIN)
         self.assertNotIn('new TimelineView', MAIN)
         self.assertNotIn('HistoryArrowGeometry', MAIN)
-        self.assertIn('SharedHomeScreen(state, actions)', body(ADAPTER, 'fun showHome('))
+        self.assertIn('SharedHomeScreen(state, actions, naming = naming.naming)', body(ADAPTER, 'fun showHome('))
         self.assertIn('HistoryPresentation.from(it, historyPage)', body(ADAPTER, 'fun showHome('))
 
     def test_shared_edges_use_measured_cards_and_actual_graph_edges(self):
@@ -25,11 +25,16 @@ class HistoryRenderingContractTest(unittest.TestCase):
         self.assertIn('drawLine(color, arrow.start, arrow.tip', HISTORY)
         self.assertNotIn('cubicTo(', HISTORY)
 
-    def test_only_history_has_horizontal_scroll_and_fixed_readable_lane_widths(self):
+    def test_content_match_uses_one_head_without_visible_label(self):
+        self.assertNotIn('reverseHead', HISTORY)
+        self.assertNotIn('Text("内容', HISTORY)
+        self.assertNotIn('val labels =', HISTORY)
+
+    def test_only_history_has_horizontal_scroll_and_responsive_readable_lane_widths(self):
         self.assertIn('Column(Modifier.fillMaxWidth().horizontalScroll(scroll)', HISTORY)
-        self.assertIn('Row(Modifier.width(560.dp)', HISTORY)
-        self.assertIn('Modifier.width(280.dp)', HISTORY)
-        self.assertIn('val cardWidth = 200.dp.roundToPx()', HISTORY)
+        self.assertIn('Row(Modifier.width(canvasWidth)', HISTORY)
+        self.assertIn('Modifier.width(canvasWidth / 2)', HISTORY)
+        self.assertIn('val cardWidth = (canvasWidth / 2 - 32.dp).roundToPx()', HISTORY)
         self.assertIn('public void changeHistoryPage(', body(MAIN, 'private void renderHome()'))
         self.assertNotIn('HorizontalScrollView', MAIN)
 

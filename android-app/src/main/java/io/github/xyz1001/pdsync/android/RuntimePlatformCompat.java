@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android;
 
+import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.Service;
 import android.content.BroadcastReceiver;
@@ -8,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageInstaller;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
 
@@ -28,6 +30,18 @@ final class RuntimePlatformCompat {
         }
     }
 
+    /** A top sibling must never reserve the bottom IME: the content owns that inset. */
+    static void applyToolbarInsets(View view, WindowInsets insets, int side, int top, int bottom) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            Api30.applyToolbarInsets(view, insets, side, top, bottom);
+        } else {
+            int[] edges = {insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), 0};
+            if (Build.VERSION.SDK_INT >= 28) Api28.includeDisplayCutout(insets, edges);
+            view.setPadding(side + edges[0], top + edges[1], side + edges[2], bottom);
+        }
+    }
+
     static void startDataSyncForeground(Service service, int notificationId, Notification notification) {
         if (Build.VERSION.SDK_INT >= 29) Api29.startDataSyncForeground(service, notificationId, notification);
         else service.startForeground(notificationId, notification);
@@ -38,6 +52,15 @@ final class RuntimePlatformCompat {
         // API 26–30 require system confirmation for our ordinary REQUEST_INSTALL_PACKAGES
         // installer. The manifest does not request privileged INSTALL_PACKAGES and contains
         // no device-admin receiver. No silent-install flag or hidden API is used.
+    }
+
+    /** Only for a correlated confirmation launched by the current, resumed Activity.
+     * Sender-side opt-in uses that Activity's visibility; no persistent creator grant is needed.
+     */
+    static Bundle systemConfirmationLaunchOptions() {
+        if (Build.VERSION.SDK_INT >= 36) return Api36.systemConfirmationLaunchOptions();
+        if (Build.VERSION.SDK_INT >= 34) return Api34.systemConfirmationLaunchOptions();
+        return null;
     }
 
     static void registerInternalReceiver(Context context, BroadcastReceiver receiver, IntentFilter filter) {
@@ -67,6 +90,12 @@ final class RuntimePlatformCompat {
     }
 
     private static final class Api30 {
+        static void applyToolbarInsets(View view, WindowInsets insets, int side, int top, int bottom) {
+            android.graphics.Insets edges = insets.getInsets(WindowInsets.Type.systemBars()
+                    | WindowInsets.Type.displayCutout());
+            view.setPadding(side + edges.left, top + edges.top, side + edges.right, bottom);
+        }
+
         static void applyInsets(View view, WindowInsets insets, int side, int top, int bottom) {
             android.graphics.Insets edges = insets.getInsets(WindowInsets.Type.systemBars()
                     | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
@@ -85,4 +114,18 @@ final class RuntimePlatformCompat {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
         }
     }
+    private static final class Api34 {
+        static Bundle systemConfirmationLaunchOptions() {
+            return ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle();
+        }
+    }
+
+    private static final class Api36 {
+        static Bundle systemConfirmationLaunchOptions() {
+            return ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE).toBundle();
+        }
+    }
+
 }

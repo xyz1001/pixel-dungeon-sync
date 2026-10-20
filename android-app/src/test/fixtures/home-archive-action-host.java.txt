@@ -1,0 +1,362 @@
+package io.github.xyz1001.pdsync.android;
+
+import static pdsync.i18n.AndroidHostMessages.*;
+import static pdsync.i18n.PrepareMessages.*;
+
+import java.util.function.Consumer;
+
+/** Host-only ports; production declarations are inserted at the marker below. */
+public final class MainActivity {
+    enum SyncPage { HOME, CONNECTION, SETTINGS, CONFIRM, CONFLICT }
+    enum OnboardingProgress { COMPLETE, INCOMPLETE }
+    enum OnboardingKind { READY, BLOCKED, BRANCHED }
+    enum DiagnosticAction { PUSH, RESTORE }
+    enum SharedHomeOperation { NONE }
+    enum SharedHomeStatusKind { RUNNING, CONFLICT, WARNING, SYNCED, NEUTRAL, EXPIRED }
+    interface Task { Object run() throws Exception; }
+    interface SharedHomeActions {
+        void appreciate(); void settings(); void refreshHistory(); void upload(); void restore(); void launch();
+        void selectSnapshot(String id); void rename(String id); void changeHistoryPage(int page);
+    }
+    static final class AndroidSyncFacade {
+        static final class Inspection {
+            boolean pending;
+            boolean isRetryablePending() { return pending; }
+        }
+        static final class OperationResult { }
+        int uploads;
+        OperationResult upload(Inspection observed) { uploads++; return new OperationResult(); }
+    }
+    static final class SyncHistory {
+        // Already-computed outputs of the separately tested shared policies, not archive inference.
+        final boolean uploadSource, restoreSource;
+        boolean uploadUnnecessary, restoreUnnecessary, protectedLocal = true;
+        SyncHistory(boolean upload, boolean restore) { uploadSource = upload; restoreSource = restore; }
+        boolean getCurrentProtected() { return protectedLocal; }
+        int getLocalNodeCount() { return uploadSource ? 1 : 0; }
+    }
+    static final class SharedHomeArchiveAvailability {
+        final boolean upload, restore;
+        SharedHomeArchiveAvailability(boolean up, boolean down) { upload = up; restore = down; }
+        boolean getUploadSourceAvailable() { return upload; }
+        boolean getRestoreSourceAvailable() { return restore; }
+        static SharedHomeArchiveAvailability from(SyncHistory h, String selected, boolean verified) {
+            return new SharedHomeArchiveAvailability(verified && h != null && h.uploadSource,
+                    verified && h != null && h.restoreSource);
+        }
+    }
+    static final class SharedHomeContent {
+        final boolean upload, restore;
+        SharedHomeContent(boolean up, boolean down) { upload = up; restore = down; }
+        boolean getUploadUnnecessary() { return upload; }
+        boolean getRestoreUnnecessary() { return restore; }
+        static SharedHomeContent from(SyncHistory h, String selected, boolean verified, boolean pending, boolean conflict) {
+            return new SharedHomeContent(verified && h != null && h.uploadUnnecessary,
+                    verified && h != null && h.restoreUnnecessary);
+        }
+    }
+    static final class Readiness { boolean ready = true; boolean canContinue() { return ready; } }
+    static final class AutomaticHistory { boolean inFlight; Object ticket, connection; }
+    static final class SharedHistoryNamingController { void close() {} }
+    static final class HistoryPresentation {
+        static HistoryPresentation from(SyncHistory h, int page) { return new HistoryPresentation(); }
+        int getPages() { return 1; } int getPage() { return 0; }
+    }
+    static final class LinearLayout {
+        static final class LayoutParams { LayoutParams(int w, int h) {} }
+        void removeAllViews() {} void setPadding(int a, int b, int c, int d) {}
+        void setOnApplyWindowInsetsListener(Object listener) {} void addView(Object v, LayoutParams lp) {}
+    }
+    static final class SharedConfirmationState { SharedConfirmationState(Object... args) {} }
+    static final class AndroidOnboardingComposition {
+        static void showHome(MainActivity a, SyncHistory history, int historyPage, Object identity,
+                String status, SharedHomeStatusKind statusKind, boolean foreground, boolean busy, boolean upload, boolean restore,
+                boolean launch, SharedHomeOperation operation, boolean loading, String selected,
+                String explicitSelection, SharedHomeContent content, String notice, boolean error,
+                String details, SharedHomeActions actions, SharedHistoryNamingController naming, boolean canAppreciate, boolean canRefreshHistory) {
+            a.renderedUpload = upload; a.renderedRestore = restore; a.renderedRefresh = canRefreshHistory; a.homeActions = actions;
+            a.renderedStatus = status; a.renderedKind = statusKind; a.renderedAppreciate = canAppreciate; a.renderedNotice = notice;
+        }
+    }
+    static final class AndroidHomeDialogComposition {
+        static Object confirmationView(MainActivity a, SharedConfirmationState state, SyncHistory history,
+                int historyPage, Object identity, String status, SharedHomeStatusKind statusKind, String explicit, Object backdrop,
+                Runnable confirm, Runnable merge, Runnable cancel) {
+            a.confirmClick = confirm; return new Object();
+        }
+    }
+    static final class SyncRuntime {
+        static Object account;
+        static Object currentConnection() { return account; }
+        static String currentSelectionToken(MainActivity a) throws Exception {
+            if (a.scopeUnavailable) throw new Exception("Synthetic unavailable scope");
+            return a.selectionToken;
+        }
+        static String currentNamespace(MainActivity a) { return a.namespace; }
+        static boolean isAutoUploadPaused(MainActivity a) { return false; }
+    }
+
+    static final class Installer { boolean active; boolean hasActiveRequest() { return active; } }
+    final Installer installer = new Installer();
+    boolean expired, official = true, renderedAppreciate;
+    int appreciations;
+    String renderedStatus, renderedNotice;
+    SharedHomeStatusKind renderedKind;
+    // Authenticated cache policy is executed separately by TrustedEntitlementCacheChecks.
+    boolean homeAccountExpired() { return expired && official && connection != null; }
+    boolean accountFresh = true;
+    boolean homeAccountAccessAvailable() { return !official || (accountFresh && !expired); }
+    boolean isOfficialAccount(Object account) { return official && account != null; }
+    void showManagedAccount(Object account) { appreciations++; sharedAppreciationOnly = true; }
+    Object connection = new Object();
+    AndroidSyncFacade facade = new AndroidSyncFacade();
+    AndroidSyncFacade.Inspection inspection = new AndroidSyncFacade.Inspection();
+    SyncHistory history;
+    HomeActionContext homeObservationOwner;
+    final HomeArchiveReadState archiveReads = new HomeArchiveReadState();
+    final AutomaticHistory automaticHistoryState = new AutomaticHistory();
+    final Readiness readinessState = new Readiness();
+    SyncPage page = SyncPage.HOME, renderedPage, confirmationReturn;
+    OnboardingProgress progress = OnboardingProgress.COMPLETE;
+    OnboardingKind observedKind = OnboardingKind.READY;
+    boolean cloudVerified = true, resumed = true, destroyed, busy, sharedAppreciationOnly;
+    boolean restoreAllowed = true, saveAccess = true, recovery, scopeUnavailable, onboardingActive;
+    boolean confirmationDestructive;
+    boolean feedbackError, renderedUpload, renderedRestore, renderedRefresh;
+    String selected = "cloud-snapshot", explicitHomeSelection, gamePackage = "isolated.game";
+    String selectionToken = "embedded:isolated.game", namespace = "test-only";
+    String notice = "", confirmationTitle, confirmationText, confirmationButton;
+    int historyPage, sharedHomeRenderToken, settingsConfirmationToken;
+    int operations, restores, refreshes, manualRefreshes, navigations, renders, confirmations;
+    LinearLayout root = new LinearLayout();
+    Object status, body, footer, scroll, confirmationSettingsBackdrop;
+    SharedHistoryNamingController homeNaming;
+    SharedHomeActions homeActions;
+    Runnable confirmedAction, confirmationMerge, confirmClick;
+
+    boolean isDestroyed() { return destroyed; }
+    boolean readyForSaves() { return readinessState.ready; }
+    boolean canRequestSaveAccess() { return saveAccess; }
+    boolean restoreSupported() { return restoreAllowed; }
+    boolean restoreNeedsAttention() { return recovery; }
+    boolean automaticObservationSupported() { return true; }
+    boolean currentAutomaticHistory(Object t, Object c) { return automaticHistoryState.connection == connection; }
+    boolean allowRestoreAction() { return restoreAllowed; }
+    boolean hasHomeSnapshot(String id) { return history != null && history.restoreSource; }
+    String selectedGamePackage() { return gamePackage; }
+    Object selectedGameIdentity() { return gamePackage; }
+    String automaticStatusBrief() { return ""; }
+    String visibleNotice() { return notice; }
+    String selectedName() { return "synthetic cloud save"; }
+    OnboardingKind kind() { return observedKind; }
+    SharedHomeOperation homeOperation() { return SharedHomeOperation.NONE; }
+    void launchGame() {} void rename(String id) {} void previewMerge() {}
+    void render() { renders++; }
+    void navigate(SyncPage target) { navigations++; page = target; }
+    void refreshComparison(SyncPage target) { refreshes++; }
+    void refreshHomeHistory() { if (canRefreshHomeHistory()) manualRefreshes++; }
+    AndroidSyncFacade sync() { return facade; }
+    void requireRestoreSupport() { if (!restoreAllowed) throw new AssertionError("Unsupported restore reached I/O"); }
+    AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection observed,
+            String snapshot, boolean replace) {
+        restores++; return new AndroidSyncFacade.OperationResult();
+    }
+    void operation(DiagnosticAction action, String label, Task work, String success) {
+        operations++;
+        try { work.run(); } catch (Exception failure) { throw new AssertionError(failure); }
+    }
+    void showConfirmation(String title, String text, String button, Runnable action, Runnable merge) {
+        confirmations++; confirmationReturn = page; page = SyncPage.CONFIRM;
+        confirmationTitle = title; confirmationText = text; confirmationButton = button;
+        confirmedAction = action; confirmationMerge = merge; settingsConfirmationToken++;
+        root = new LinearLayout();
+    }
+    void cancelConfirmation() { settingsConfirmationToken++; confirmedAction = null; page = confirmationReturn; }
+
+    void showDestructiveConfirmation(String title, String text, String button, Runnable action, Runnable merge) { confirmationDestructive = true; showConfirmation(title, text, button, action, merge); }
+    /* PRODUCTION_METHODS */
+
+    static int checks;
+    static void check(boolean value, String message) {
+        checks++;
+        if (!value) throw new AssertionError(message);
+    }
+    static MainActivity fresh(boolean local, boolean remote) {
+        MainActivity a = new MainActivity();
+        SyncRuntime.account = a.connection;
+        a.history = new SyncHistory(local, remote);
+        a.homeObservationOwner = a.currentHomeContext(0);
+        return a;
+    }
+    static void assertGates(MainActivity a, boolean upload, boolean restore, String label) {
+        check(a.canHomeUpload() == upload, label + ": upload enabled");
+        check(a.canHomeRestore() == restore, label + ": restore enabled");
+        a.renderHome();
+        check(a.renderedUpload == upload && a.renderedRestore == restore, label + ": rendered flags differ");
+        check(a.operations == 0 && a.refreshes == 0, label + ": rendering must not perform I/O");
+    }
+    static void assertBlocked(MainActivity a, String label) {
+        assertGates(a, false, false, label);
+        a.requestUpload();
+        check(a.operations == 0 && a.refreshes == 0 && a.navigations == 0,
+                label + ": direct upload request bypass");
+        a.upload();
+        check(a.operations == 0, label + ": direct upload bypass");
+        a.requestRestore();
+        check(a.operations == 0 && a.confirmations == 0 && a.refreshes == 0 && a.navigations == 0,
+                label + ": direct restore bypass");
+        a.homeActions.upload(); a.homeActions.restore();
+        check(a.operations == 0 && a.confirmations == 0, label + ": retained home callback bypass");
+    }
+    static void blocked(Consumer<MainActivity> change, String label) {
+        MainActivity a = fresh(true, true); change.accept(a); assertBlocked(a, label);
+    }
+    static void confirmationBlocked(Consumer<MainActivity> change, String label) {
+        MainActivity a = fresh(true, true); a.history.protectedLocal = false;
+        a.requestRestore();
+        check(a.confirmations == 1 && a.operations == 0, label + ": confirmation must be required");
+        a.renderConfirmation(); Runnable oldClick = a.confirmClick;
+        change.accept(a); oldClick.run();
+        check(a.operations == 0 && a.restores == 0, label + ": stale confirmation dispatched");
+    }
+    static void manualRefreshCallbacks() {
+        MainActivity empty = fresh(false, false); empty.renderHome();
+        check(empty.renderedRefresh, "empty history must retain refresh button eligibility");
+        empty.homeActions.refreshHistory();
+        check(empty.manualRefreshes == 1 && empty.operations == 0 && empty.refreshes == 0,
+                "fresh empty HOME callback dispatches read-only refresh");
+        MainActivity unknown = fresh(false, false); unknown.history = null; unknown.inspection = null;
+        unknown.facade = null; unknown.cloudVerified = false; unknown.homeObservationOwner = null;
+        unknown.renderHome(); unknown.homeActions.refreshHistory();
+        check(unknown.renderedRefresh && unknown.manualRefreshes == 1,
+                "missing history and old inspection cannot disable explicit refresh");
+        @SuppressWarnings("unchecked") Consumer<MainActivity>[] changes = new Consumer[] {
+            (Consumer<MainActivity>) a -> a.renderHome(),
+            (Consumer<MainActivity>) a -> a.connection = new Object(),
+            (Consumer<MainActivity>) a -> a.facade = new AndroidSyncFacade(),
+            (Consumer<MainActivity>) a -> a.history = new SyncHistory(false, false),
+            (Consumer<MainActivity>) a -> a.inspection = new AndroidSyncFacade.Inspection(),
+            (Consumer<MainActivity>) a -> a.selectionToken = "root:other.game",
+            (Consumer<MainActivity>) a -> a.namespace = "other-profile",
+            (Consumer<MainActivity>) a -> a.page = SyncPage.SETTINGS,
+            (Consumer<MainActivity>) a -> a.resumed = false,
+            (Consumer<MainActivity>) a -> a.destroyed = true,
+            (Consumer<MainActivity>) a -> a.sharedAppreciationOnly = true,
+            (Consumer<MainActivity>) a -> a.busy = true,
+            (Consumer<MainActivity>) a -> a.archiveReads.begin(),
+            (Consumer<MainActivity>) a -> a.scopeUnavailable = true
+        };
+        for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity a = fresh(true, true); a.renderHome(); SharedHomeActions old = a.homeActions;
+            changes[condition].accept(a); old.refreshHistory();
+            check(a.manualRefreshes == 0, "stale refresh callback dispatched: " + condition);
+        }
+    }
+
+    public static void main(String[] args) {
+        manualRefreshCallbacks();
+        assertBlocked(fresh(false, false), "both empty");
+        assertGates(fresh(true, false), true, false, "local only");
+        assertGates(fresh(false, true), false, true, "cloud only");
+        assertGates(fresh(true, true), true, true, "both different");
+        blocked(a -> { a.history.uploadUnnecessary = true; a.history.restoreUnnecessary = true; }, "both equal");
+        blocked(a -> { a.official = true; a.expired = true; }, "expired with local and cloud saves");
+        blocked(a -> { a.official = true; a.accountFresh = false; }, "failed refresh with old active and both saves");
+        MainActivity renewed = fresh(true, true); renewed.official = true; renewed.expired = true;
+        assertGates(renewed, false, false, "before renewal with both saves");
+        renewed.expired = false; renewed.accountFresh = true;
+        assertGates(renewed, true, true, "fresh renewal with existing capabilities");
+        renewed.saveAccess = false;
+        assertGates(renewed, false, false, "fresh renewal cannot override device capability");
+        blocked(a -> a.busy = true, "busy");
+        blocked(a -> a.cloudVerified = false, "unverified");
+        blocked(a -> a.archiveReads.begin(), "explicit loading");
+        blocked(a -> { a.automaticHistoryState.inFlight = true; a.automaticHistoryState.connection = a.connection; }, "automatic loading");
+        blocked(a -> a.gamePackage = null, "no game");
+        blocked(a -> a.connection = new Object(), "stale account");
+        blocked(a -> SyncRuntime.account = new Object(), "runtime account changed");
+        blocked(a -> a.facade = new AndroidSyncFacade(), "stale facade");
+        blocked(a -> a.history = new SyncHistory(true, true), "stale history");
+        blocked(a -> a.inspection = new AndroidSyncFacade.Inspection(), "stale inspection");
+        blocked(a -> a.selectionToken = "root:other.game", "stale backend");
+        blocked(a -> a.namespace = "other-profile", "stale namespace");
+        blocked(a -> a.scopeUnavailable = true, "unavailable scope");
+        blocked(a -> a.homeObservationOwner = null, "missing observation owner");
+        blocked(a -> a.connection = null, "no account");
+        blocked(a -> a.facade = null, "no facade");
+        blocked(a -> a.inspection = null, "no inspection");
+        blocked(a -> a.history = null, "no history");
+        blocked(a -> a.progress = OnboardingProgress.INCOMPLETE, "setup incomplete");
+        blocked(a -> a.readinessState.ready = false, "not ready");
+        blocked(a -> a.saveAccess = false, "access denied");
+        blocked(a -> a.recovery = true, "restore recovery pending");
+        blocked(a -> a.observedKind = OnboardingKind.BLOCKED, "blocked inspection");
+        blocked(a -> a.resumed = false, "paused");
+        blocked(a -> a.destroyed = true, "destroyed");
+        blocked(a -> a.sharedAppreciationOnly = true, "appreciation overlay");
+
+        MainActivity a = fresh(true, true); a.restoreAllowed = false;
+        assertGates(a, true, false, "unsupported restore");
+        a.requestRestore(); check(a.operations == 0, "unsupported restore request rejected");
+        a = fresh(true, true); a.inspection.pending = true;
+        assertGates(a, true, false, "pending upload keeps retry upload only");
+
+        a = fresh(true, false); a.requestUpload();
+        check(a.operations == 1 && a.facade.uploads == 1 && a.confirmations == 0, "local-only direct upload dispatches once");
+        a = fresh(false, true); a.requestRestore();
+        check(a.operations == 1 && a.restores == 1, "cloud-only protected restore dispatches once");
+        a = fresh(true, true); a.renderHome(); a.homeActions.upload();
+        check(a.operations == 1 && a.facade.uploads == 1, "current rendered upload callback dispatches");
+        a = fresh(true, true); a.renderHome(); a.homeActions.restore();
+        check(a.operations == 1 && a.restores == 1, "current rendered restore callback dispatches");
+
+        a = fresh(true, true); a.renderHome(); SharedHomeActions old = a.homeActions;
+        a.renderHome(); old.upload(); old.restore();
+        check(a.operations == 0 && a.confirmations == 0, "rerendered callbacks cannot dispatch");
+        a = fresh(true, true); a.renderHome(); old = a.homeActions;
+        a.page = SyncPage.SETTINGS; old.upload(); old.restore(); a.requestUpload(); a.requestRestore();
+        check(a.operations == 0 && a.confirmations == 0, "navigation rejects home callbacks and direct request entries");
+
+        a = fresh(true, true); a.history.protectedLocal = false; a.requestRestore();
+        a.renderConfirmation(); a.confirmClick.run();
+        check(a.operations == 1 && a.restores == 1, "valid confirmation restores selected archive");
+        confirmationBlocked(x -> x.selected = "other-snapshot", "confirmation changed selection");
+        confirmationBlocked(x -> x.inspection = new AndroidSyncFacade.Inspection(), "confirmation changed inspection");
+        confirmationBlocked(x -> x.history = new SyncHistory(true, true), "confirmation changed history");
+        confirmationBlocked(x -> x.connection = new Object(), "confirmation changed account");
+        confirmationBlocked(x -> x.facade = new AndroidSyncFacade(), "confirmation changed facade");
+        confirmationBlocked(x -> x.selectionToken = "root:other.game", "confirmation changed backend");
+        confirmationBlocked(x -> x.namespace = "other", "confirmation changed namespace");
+        confirmationBlocked(x -> x.archiveReads.begin(), "confirmation explicit loading");
+        confirmationBlocked(x -> x.cloudVerified = false, "confirmation unverified");
+        confirmationBlocked(x -> x.busy = true, "confirmation busy");
+        confirmationBlocked(x -> x.resumed = false, "confirmation paused");
+        confirmationBlocked(x -> x.destroyed = true, "confirmation destroyed");
+        confirmationBlocked(x -> x.page = SyncPage.HOME, "confirmation navigated");
+        confirmationBlocked(x -> x.settingsConfirmationToken++, "confirmation superseded token");
+        confirmationBlocked(x -> x.confirmedAction = () -> {}, "confirmation replaced action");
+        confirmationBlocked(MainActivity::cancelConfirmation, "confirmation canceled");
+        a = fresh(true, true); a.expired = true; a.cloudVerified = false;
+        a.notice = pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text(); a.renderHome();
+        check(a.renderedStatus.startsWith(pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text())
+                && a.renderedKind == SharedHomeStatusKind.EXPIRED && a.renderedAppreciate,
+                "expired state replaces pending-check status and exposes appreciation");
+        check(a.renderedNotice.isEmpty() && !a.renderedUpload && !a.renderedRestore,
+                "no duplicate expired notice and sync actions stay disabled");
+        a.homeActions.appreciate();
+        check(a.appreciations == 1 && a.operations == 0, "appreciation only navigates existing panel");
+        a.sharedAppreciationOnly = false; a.notice = ""; a.renderHome();
+        check(a.renderedKind == SharedHomeStatusKind.EXPIRED && a.renderedAppreciate,
+                "returning from appreciation retains status and action");
+        old = a.homeActions; a.expired = false; old.appreciate();
+        check(a.appreciations == 1, "renewal rejects stale expired callback");
+        a.renderHome(); check(!a.renderedAppreciate && a.renderedKind != SharedHomeStatusKind.EXPIRED,
+                "renewal removes expired status and action");
+        a = fresh(true, true); a.expired = true; a.renderHome(); old = a.homeActions;
+        a.page = SyncPage.SETTINGS; old.appreciate();
+        check(a.appreciations == 0, "navigation rejects stale appreciation callback");
+        a.page = SyncPage.HOME; a.renderHome(); old = a.homeActions; a.connection = new Object(); old.appreciate();
+        check(a.appreciations == 0, "account switch rejects stale appreciation callback");
+        System.out.println("home archive action execution passed: " + checks + " checks");
+    }
+}

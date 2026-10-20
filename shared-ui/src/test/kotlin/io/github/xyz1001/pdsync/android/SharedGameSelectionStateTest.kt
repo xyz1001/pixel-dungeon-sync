@@ -94,4 +94,62 @@ class SharedGameSelectionStateTest {
         assertFalse(original.actionEnabled(SharedGameSelectionControl.COPY_DIAGNOSTICS))
         assertTrue(original.copy(canCopyDiagnostics = true).actionEnabled(SharedGameSelectionControl.COPY_DIAGNOSTICS))
     }
+
+    @Test fun accessPresentationNeverInventsAuthorizationOrInstallationSuccess() {
+        for (mode in SharedGameAccessMode.entries) for (status in SharedGameAccessStatus.entries) {
+            val observed = ready().copy(canContinue = false, access = SharedGameAccessState(mode, status))
+            assertFalse(observed.nextEnabled, "A $mode/$status badge must not bypass the host prerequisite")
+            assertFalse(observed.actionEnabled(SharedGameSelectionControl.CONTINUE_INSTALLATION))
+            assertFalse(observed.actionEnabled(SharedGameSelectionControl.CHOOSE_ROOT))
+        }
+    }
+
+    @Test fun modeCardRetryAndCancelOnlyDispatchLiveHostCapabilities() {
+        val actions = Actions()
+        var state = ready().copy(canContinue = false, access = SharedGameAccessState(SharedGameAccessMode.NONE, SharedGameAccessStatus.UNCHECKED),
+            rows = listOf(SharedGameSelectionRow(SharedGameSelectionControl.SWITCH_TO_EMBEDDED, "修改 APK 模式")))
+        val events = SharedGameSelectionInteractions({ state }, { actions })
+        events.perform(SharedGameSelectionControl.SWITCH_TO_EMBEDDED)
+        assertEquals(listOf("SWITCH_TO_EMBEDDED"), actions.calls)
+        assertFalse(state.nextEnabled)
+        events.perform(SharedGameSelectionControl.CONTINUE_INSTALLATION)
+        assertEquals(1, actions.calls.size)
+        state = state.copy(access = SharedGameAccessState(SharedGameAccessMode.APK, SharedGameAccessStatus.FAILED), rows = listOf(
+            SharedGameSelectionRow(SharedGameSelectionControl.SWITCH_TO_EMBEDDED, "修改 APK 模式"),
+            SharedGameSelectionRow(SharedGameSelectionControl.CANCEL_ACCESS_SELECTION, "取消本次选择")))
+        events.perform(SharedGameSelectionControl.SWITCH_TO_EMBEDDED)
+        state = state.copy(busy = true)
+        events.perform(SharedGameSelectionControl.CANCEL_ACCESS_SELECTION)
+        events.perform(SharedGameSelectionControl.SWITCH_TO_EMBEDDED)
+        assertEquals(listOf("SWITCH_TO_EMBEDDED", "SWITCH_TO_EMBEDDED"), actions.calls)
+        state = state.copy(busy = false, pageActive = false)
+        events.perform(SharedGameSelectionControl.CANCEL_ACCESS_SELECTION)
+        assertEquals(2, actions.calls.size)
+    }
+
+    @Test fun otherInstallerCapabilitiesRequireLiveHostRowsAndNeverGrantSuccess() {
+        val controls = listOf(SharedGameSelectionControl.USE_OTHER_INSTALLER, SharedGameSelectionControl.CHECK_EXTERNAL_INSTALL,
+            SharedGameSelectionControl.CANCEL_INSTALLATION)
+        val actions = Actions()
+        val awaiting = ready().copy(canContinue = false,
+            access = SharedGameAccessState(SharedGameAccessMode.APK, SharedGameAccessStatus.WORKING),
+            rows = controls.map { SharedGameSelectionRow(it, it.name) })
+        var state = awaiting
+        val events = SharedGameSelectionInteractions({ state }, { actions })
+        controls.forEach(events::perform)
+        events.next()
+        assertEquals(controls.map { it.name }, actions.calls)
+        assertEquals(awaiting, state, "External installer callbacks do not change installation or readiness observations")
+        for (blocked in listOf(awaiting.copy(busy = true), awaiting.copy(pageActive = false),
+            awaiting.copy(rows = emptyList()), awaiting.copy(rows = awaiting.rows.map { it.copy(enabled = false) }))) {
+            state = blocked
+            controls.forEach(events::perform)
+            assertEquals(controls.map { it.name }, actions.calls)
+        }
+        state = awaiting
+        events.dispose()
+        controls.forEach(events::perform)
+        assertEquals(controls.map { it.name }, actions.calls)
+        assertFalse(state.nextEnabled)
+    }
 }

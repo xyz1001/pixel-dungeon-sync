@@ -115,7 +115,50 @@ public final class RootTargetResolverChecks {
             Fixture f=new Fixture();f.info.applicationInfo.splitSourceDirs=new String[]{SPLIT};
             PackageTrust.contents.put(SPLIT,new byte[]{5});reject(f::select);
         });
+        test("unsigned retained provenance keeps namespace and no fabricated signer",()-> {
+            Fixture f=new Fixture(); GamePreparationService.PreparedPair receipt=f.receipt();
+            receipt.sourceProvenance=GameSourceIdentity.Provenance.UNSIGNED;
+            receipt.sourceSignerCertificateSha256=Collections.emptyList(); receipt.originIdentity=GameSourceIdentity.unsigned(GAME).originIdentity;
+            SelectedRootGame selected=f.select(); check(selected.retainedProvenance,"retained unsigned");
+            check(selected.sourceSignerCertificateSha256.isEmpty(),"unknown signer stays empty");
+            check(selected.originIdentity.equals(receipt.originIdentity),"unsigned namespace retained");
+            roundTrip(selected);
+        });
+        test("inherited receipt preserves prior origin with unknown original signer",()-> {
+            Fixture f=new Fixture(); GamePreparationService.PreparedPair receipt=f.receipt();
+            receipt.sourceProvenance=GameSourceIdentity.Provenance.INHERITED_EMBEDDED;
+            receipt.sourceSignerCertificateSha256=Collections.emptyList();
+            SelectedRootGame selected=f.select(); check(selected.originIdentity.equals(receipt.originIdentity),"origin retained");
+            check(selected.sourceSignerCertificateSha256.isEmpty(),"no fake signer"); roundTrip(selected);
+        });
+        test("recognized bridge without receipt preserves source namespace",()-> {
+            Fixture f=new Fixture(); f.markers();
+            String origin="d".repeat(64);String signer=PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest(new byte[]{1,2,3}));
+            InstalledBridgeResolver.binding=new InstalledBridgeBinding(GAME,"Game","3.3.8",896,origin,"android-"+origin,
+                    "b".repeat(64),"io.github.xyz1001.pdsync.embedded.g"+origin.substring(0,32)+".files","1","1",signer,
+                    10042,"/data/user/0/"+GAME,100,200,Collections.singletonList(APK));
+            SelectedRootGame selected=f.select();check(selected.sourceProvenance==GameSourceIdentity.Provenance.INHERITED_EMBEDDED,"explicit inherited");
+            check(selected.originIdentity.equals(origin),"no receipt namespace remains");roundTrip(selected);
+        });
+        test("v1 selection restores without namespace migration",()-> {
+            Fixture f=new Fixture();SelectedRootGame selected=f.select();
+            java.nio.file.Path dir=java.nio.file.Files.createTempDirectory("root-provenance-v1-");
+            try { RootSelectionStore store=new RootSelectionStore(dir.toFile());store.save(selected);
+                java.nio.file.Path path=dir.resolve("root-selection-v1.properties");Properties values=new Properties();
+                try(java.io.InputStream in=java.nio.file.Files.newInputStream(path)){values.load(in);}
+                values.setProperty("version","1");values.remove("sourceProvenance");values.remove("originIdentity");
+                try(java.io.OutputStream out=java.nio.file.Files.newOutputStream(path)){values.store(out,"legacy");}
+                check(store.load().matches(selected),"v1 identity survives");store.clear();
+            } finally {java.nio.file.Files.delete(dir);}
+        });
         System.out.println("RootTargetResolverChecks: "+checks+" behavior checks passed");
+    }
+    static void roundTrip(SelectedRootGame selected)throws Exception {
+        java.nio.file.Path dir=java.nio.file.Files.createTempDirectory("root-provenance-");
+        try {RootSelectionStore store=new RootSelectionStore(dir.toFile());store.save(selected);
+            check(store.load().matches(selected),"typed provenance round trip");
+            check(store.load().namespaceId.equals(selected.namespaceId),"same namespace");store.clear();}
+        finally {java.nio.file.Files.delete(dir);}
     }
     static void actualSource(SelectedRootGame selected)throws Exception {
         check(!selected.retainedProvenance,"No fabricated original provenance");
@@ -137,7 +180,7 @@ public final class RootTargetResolverChecks {
         final RootTargetResolver resolver;
         Fixture() {
             android.os.Build.VERSION.SDK_INT=36;android.os.Process.uid=10001;
-            GamePreparationService.retained=null;GamePreparationService.reloadFailure=null;
+            GamePreparationService.retained=null;GamePreparationService.reloadFailure=null;InstalledBridgeResolver.binding=null;
             PackageTrust.contents.clear();PackageTrust.contents.put(APK,"installed game".getBytes(StandardCharsets.UTF_8));
             info.packageName=GAME;info.applicationInfo=new ApplicationInfo();info.applicationInfo.packageName=GAME;
             info.applicationInfo.enabled=true;info.applicationInfo.uid=10042;info.applicationInfo.dataDir="/data/user/0/"+GAME;
@@ -163,7 +206,7 @@ public final class RootTargetResolverChecks {
             GamePreparationService.PreparedPair result=new GamePreparationService.PreparedPair();
             result.bridgeMode="embedded-v1";result.gamePackage=GAME;result.gameVersionCode=896;
             result.signingCertificateSha256=PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest(new byte[]{1,2,3}));
-            result.sourceSignerCertificateSha256=Collections.singletonList(ORIGINAL);result.sourceApkSetSha256="b".repeat(64);
+            result.sourceSignerCertificateSha256=Collections.singletonList(ORIGINAL);result.originIdentity=new GameSourceIdentity(GAME,result.sourceSignerCertificateSha256).originIdentity;result.sourceApkSetSha256="b".repeat(64);
             String staged="/data/app/prepared/base.apk";PackageTrust.contents.put(staged,PackageTrust.contents.get(APK).clone());
             result.gameApks=Collections.singletonList(PackageTrust.apk(staged));
             GamePreparationService.retained=result;return result;

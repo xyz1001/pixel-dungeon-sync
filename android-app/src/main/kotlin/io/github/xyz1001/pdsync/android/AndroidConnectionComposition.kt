@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.AndroidHostMessages.*
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -9,12 +11,11 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.ui.Modifier
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import java.io.IOException
@@ -33,9 +34,23 @@ object AndroidConnectionComposition {
     /** No Activity is retained here. Only the controller's detachable host points at the current UI. */
     class Session internal constructor(
         val controller: SharedConnectionController,
+        val imageExport: AppreciationImageExport,
+        private val app: Context,
         private val io: ExecutorService,
+        private val ports: AndroidConnectionPorts,
     ) : AutoCloseable {
+        fun completedConnection(config: SharedConnectionConfig): SecureConnectionStore.Connection? =
+            ports.completedConnection(config)
+
+        fun requestImageSave(): Boolean = imageExport.request(
+            controller.currentAppreciationPng(), controller.currentAppreciationScope())
+
+        fun selectedImageDestination(uri: android.net.Uri?) {
+            imageExport.selected(uri?.let { AndroidAppreciationImageDestination(app, it) })
+        }
+
         override fun close() {
+            imageExport.close()
             controller.detach()
             controller.close()
             io.shutdownNow()
@@ -48,16 +63,54 @@ object AndroidConnectionComposition {
         val io = Executors.newSingleThreadExecutor()
         val handler = Handler(Looper.getMainLooper())
         val ui = Executor { task -> handler.post(task) }
-        return Session(SharedConnectionController(origin, fromStored(existing), profile,
-            AndroidConnectionPorts(context.applicationContext), io, ui), io)
+        val ports = AndroidConnectionPorts(context.applicationContext)
+        return Session(SharedConnectionController(origin, fromStored(existing), profile, ports, io, ui),
+            AppreciationImageExport(io, ui), context.applicationContext, io, ports)
+    }
+
+    internal data class ImageSaveUi(
+        val onSaveImage: (() -> Unit)?,
+        val busy: Boolean,
+        val message: String,
+    )
+
+    /** Setup and settings keep this launcher at a stable, unconditional composition position. */
+    @Composable
+    internal fun rememberImageSave(session: Session?): ImageSaveUi {
+        // A retained session owns the exact requested PNG through the picker and rotation.
+        // Process death loses those pending bytes and safely ignores a returned destination.
+        val saveImage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {
+            session?.selectedImageDestination(it)
+        }
+        val export = session?.imageExport?.state
+        val image = session?.controller?.state?.appreciation?.image
+        val source = session?.controller?.currentAppreciationScope()
+        val png = remember(session, image, source) { session?.controller?.currentAppreciationPng() }
+        return ImageSaveUi(
+            onSaveImage = session?.let { owner ->
+                {
+                    if (owner.requestImageSave()) {
+                        try { saveImage.launch("appreciation.png") }
+                        catch (_: RuntimeException) { owner.imageExport.launchFailed() }
+                    }
+                }
+            },
+            busy = export?.busy == true,
+            message = session?.imageExport?.messageFor(source, png).orEmpty(),
+        )
     }
 
     @JvmStatic
     fun show(activity: ComponentActivity, session: Session, game: SharedGameIdentity?) {
         activity.setContent {
+            val imageSave = rememberImageSave(session)
             // Android target 36 is edge-to-edge. Keep system bars/IME handling out of desktop UI.
-            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                SharedConnectionScreen(session.controller, game)
+            AndroidAppViewport {
+                SharedConnectionScreen(session.controller, game,
+                    onSaveImage = imageSave.onSaveImage,
+                    imageSaveBusy = imageSave.busy,
+                    imageSaveMessage = imageSave.message,
+                )
             }
         }
     }
@@ -78,6 +131,31 @@ object AndroidConnectionComposition {
 /** Application-context-only, typed adapter. It never chooses a game, source, namespace, or baseline. */
 internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts {
     private val app = context.applicationContext
+    // Captured metadata only. It never opens Root or reads save files.
+    private val entrySelection = runCatching { SyncRuntime.currentSelectionToken(app) }.getOrNull()
+    private val entryNamespace = runCatching { SyncRuntime.currentNamespace(app) }.getOrNull()
+    private val entryConnection = SyncRuntime.currentConnection()
+    @Volatile private var completed: SecureConnectionStore.Connection? = null
+
+    private fun currentSelection(): Boolean = runCatching {
+        entrySelection != null && entryNamespace != null &&
+            entrySelection == SyncRuntime.currentSelectionToken(app) &&
+            entryNamespace == SyncRuntime.currentNamespace(app)
+    }.getOrDefault(false)
+
+    private fun requireEntryContext() {
+        check(currentSelection() && SyncRuntime.currentConnection() === entryConnection) { SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text() }
+    }
+
+    /** A delayed callback cannot activate a different game's or account's completion. */
+    fun completedConnection(config: SharedConnectionConfig): SecureConnectionStore.Connection? = runCatching {
+        val candidate = completed ?: return@runCatching null
+        candidate.takeIf {
+            currentSelection() && SyncRuntime.currentConnection() === candidate &&
+                AndroidConnectionComposition.fromStored(candidate) == config &&
+                SyncRuntime.onboardingProgress(app, candidate) == OnboardingProgress.COMPLETE
+        }
+    }.getOrNull()
 
     /** Durable credential equality is only permission to start fresh verification on Next. */
     override fun isSavedConnection(config: SharedConnectionConfig): Boolean = runCatching {
@@ -95,22 +173,37 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()
+            requireEntryContext()
             val success = SyncRuntime.facade(app, candidate).connect().isSuccess
+            requireEntryContext()
             if (!success) throw IOException("Connection probe failed")
             success
         }
     }
 
-    /** The shared controller invokes this only for explicit Next/Save with current DAV proof. */
-    override fun saveAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
+    /** Custom WebDAV still requires the controller's current, real DAV proof. */
+    override fun saveAndActivate(config: SharedConnectionConfig) = persistAndActivate(config)
+
+    /** Built-in activation uses current authenticated account access, without claiming DAV was tested. */
+    override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) {
+        require(config.official && config.endpoint == TrustedEntitlementCache.OFFICIAL_ENDPOINT)
+        persistAndActivate(config)
+    }
+
+    private fun persistAndActivate(config: SharedConnectionConfig) = diagnostic(DiagnosticStage.WORK) {
         synchronized(SyncRuntime.OPERATION_LOCK) {
             val candidate = AndroidConnectionComposition.toStored(config)
             candidate.validate()
-            // Failed authentication, Back, cancellation and test-only paths never reach persistence.
+            requireEntryContext()
+            // Fail closed if saving credentials or the final completion marker fails.
+            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.PENDING)
             if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)
+            requireEntryContext()
+            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.COMPLETE)
+            requireEntryContext()
             AutoSyncService.cancelForConnectionChange(app)
             SyncRuntime.setConnection(candidate)
-            SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.PENDING)
+            completed = candidate
         }
     }
 
@@ -138,7 +231,7 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
 
     override fun copyUsername(username: String) {
         (app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
-            ?.setPrimaryClip(ClipData.newPlainText("用户名", username))
+            ?.setPrimaryClip(ClipData.newPlainText(USERNAME.text(), username))
     }
 
     override fun decodeImage(bytes: ByteArray): ImageBitmap? =

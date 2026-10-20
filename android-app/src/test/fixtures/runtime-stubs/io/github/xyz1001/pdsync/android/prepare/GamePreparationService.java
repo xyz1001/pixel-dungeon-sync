@@ -21,6 +21,7 @@ public final class GamePreparationService {
   public int validationCount;
   public long gameVersionCode;
   public List<String> sourceSignerCertificateSha256;
+  public GameSourceIdentity.Provenance sourceProvenance = GameSourceIdentity.Provenance.VERIFIED_SIGNER;
   public String bridgeMode, bridgeHostPackage, runtimeDexName, runtimeDexSha256, bridgeRuntimeVersion, mainAppCertSha256, namespaceId;
   public boolean embeddedBridge() { return "embedded-v1".equals(bridgeMode); }
   public String gamePackage, helperPackage, sharedUid, authority, originIdentity, sourceApkSetSha256, signingCertificateSha256;

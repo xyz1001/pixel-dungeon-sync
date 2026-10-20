@@ -22,8 +22,8 @@ class SharedHistoryGeometryTest {
         val layout = sharedHistoryCanvasLayout(view, nodes.associate { it.id to
             SharedHistoryNodeMeasurement(if (it.id == "base") 240f else 100f, 24f) })
         assertEquals(560f, layout.width)
-        assertEquals(208f + 208f + 336f, layout.height)
-        assertEquals(200f, layout.cards.getValue("new").width)
+        assertEquals(158f + 158f + 298f, layout.height)
+        assertEquals(248f, layout.cards.getValue("new").width)
         val base = layout.cards.getValue("base")
         val local = layout.cards.getValue("local-baseline")
         assertEquals(base.center.y, local.center.y, "equal-time unequal-height cards share a measured center line")
@@ -46,6 +46,20 @@ class SharedHistoryGeometryTest {
         }
     }
 
+    @Test fun inlineEditorExpandsOnlyItsMeasuredRowWithoutMovingAnyEdgeIntoACard() {
+        val nodes = listOf(node("cloud", 0, 0), node("copy", 1, 0), node("older", 0, 1))
+        val view = HistoryPresentation(nodes, listOf(HistoryEdge("older", "cloud")), 0, 1, 2, 2, false)
+        val closed = nodes.associate { it.id to SharedHistoryNodeMeasurement(92f, 22f) }
+        val before = sharedHistoryCanvasLayout(view, closed)
+        val after = sharedHistoryCanvasLayout(view, closed + ("copy" to SharedHistoryNodeMeasurement(92f, 88f)))
+        assertEquals(before.cards.getValue("cloud"), after.cards.getValue("cloud"))
+        assertEquals(before.cards.getValue("copy"), after.cards.getValue("copy"))
+        assertEquals(66f, after.cards.getValue("older").top - before.cards.getValue("older").top)
+        assertEquals(66f, after.height - before.height)
+        assertTrue(after.renameActions.getValue("copy").bottom < after.cards.getValue("older").top)
+        assertFalse(after.cards.getValue("cloud").contains(after.arrows.single().tip))
+    }
+
     @Test fun steepCrossLaneArrowsKeepEntireHeadOutsideTargetAndNeverInventMissingEndpoints() {
         val cards = mapOf("a" to Rect(40f, 24f, 240f, 124f), "b" to Rect(320f, 1500f, 520f, 1700f))
         for (edge in listOf(HistoryEdge("a", "b"), HistoryEdge("b", "a"))) {
@@ -55,6 +69,20 @@ class SharedHistoryGeometryTest {
             assertFalse(target.contains(arrow.headRight))
         }
         assertNull(sharedHistoryArrow(HistoryEdge("a", "missing"), cards))
+    }
+
+    @Test fun contentMatchHasOneLeftFacingHeadAndTransferDirectionsRemainUnchanged() {
+        val cards = mapOf("cloud" to Rect(20f, 12f, 260f, 112f), "local" to Rect(300f, 12f, 540f, 112f))
+        val match = assertNotNull(sharedHistoryArrow(HistoryEdge("local", "cloud", sameContent = true), cards))
+        assertEquals(Offset(300f, 62f), match.start)
+        assertEquals(Offset(265f, 62f), match.tip)
+        assertTrue(match.headLeft.x > match.tip.x && match.headRight.x > match.tip.x)
+        val restore = assertNotNull(sharedHistoryArrow(HistoryEdge("cloud", "local"), cards))
+        assertEquals(Offset(260f, 62f), restore.start); assertEquals(Offset(295f, 62f), restore.tip)
+        assertTrue(restore.headLeft.x < restore.tip.x && restore.headRight.x < restore.tip.x)
+        val upload = assertNotNull(sharedHistoryArrow(HistoryEdge("local", "cloud"), cards))
+        assertTrue(upload.tip.x < upload.start.x)
+        assertTrue(upload.headLeft.x > upload.tip.x && upload.headRight.x > upload.tip.x)
     }
 
     private fun node(id: String, column: Int, row: Int) =

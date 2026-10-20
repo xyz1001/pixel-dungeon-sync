@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import io.github.xyz1001.pdsync.android.SharedConnectionConfig
@@ -16,7 +18,10 @@ internal class DesktopConnectionAdapter(
  currentPassword: String,
  private val configFile: ConfigFile,
  private val privateCache: Path,
- private val setupFactory: (AppConfig) -> ConnectionSetup = { ConnectionSetup(it) }
+ private val setupFactory: (AppConfig) -> ConnectionSetup = { config ->
+  val guard = DesktopSyncAccess().beginOperation(config, config.password.orEmpty())
+  ConnectionSetup(config, beforeRequest = WebDavRequestCheck { guard() })
+ }
 ) : SharedConnectionPorts, AutoCloseable {
  private val lock = Any()
  private val original = initial ?: newConnectionConfig()
@@ -47,11 +52,12 @@ internal class DesktopConnectionAdapter(
  /** This is the existing production DAV connect/provision path, never an invented success. */
  override fun testConnection(config: SharedConnectionConfig): Boolean {
   val candidate = synchronized(lock) {
-   check(!closed && !running && applied == null) { "连接页面已关闭或正在处理，请稍候。" }
+   check(!closed && !running && applied == null) { DesktopMessages.THE_CONNECTION_PAGE_IS_CLOSED_OR_BUSY_PLEASE_WAIT.text() }
    pending?.cancel()
    pending = null
    verified = null
-   val next = configurationFor(config)
+   // This is still an in-memory draft. Only the explicit completion action persists it.
+   val next = configurationFor(config).copy(password = config.password).copy(onboardingProgress = OnboardingProgress.COMPLETE)
    setupFactory(next).also {
     it.update(next, config.password)
     pending = it
@@ -61,7 +67,7 @@ internal class DesktopConnectionAdapter(
   try {
    val result = candidate.connect()
    return synchronized(lock) {
-    check(!closed && pending === candidate) { "连接已取消。" }
+    check(!closed && pending === candidate) { DesktopMessages.CONNECTION_CANCELLED.text() }
     when (result) {
      is ConnectionTestResult.Success -> { verified = config; true }
      is ConnectionTestResult.Failure -> throw IOException(result.message)
@@ -72,13 +78,26 @@ internal class DesktopConnectionAdapter(
   }
  }
 
- /** Only the shared controller's explicit Next/Save action reaches this local-file write. */
+ /** Only the shared controller's explicit Complete/Save action writes the completed configuration. */
  override fun saveAndActivate(config: SharedConnectionConfig) = synchronized(lock) {
-  check(!closed && !running && applied == null && sameConnection(verified, config)) { "请先成功测试当前配置，再保存。" }
-  val candidate = checkNotNull(pending) { "请先成功测试当前配置，再保存。" }
+  check(!closed && !running && applied == null && sameConnection(verified, config)) { DesktopMessages.TEST_THE_CURRENT_CONFIGURATION_SUCCESSFULLY_BEFORE_SAVING.text() }
+  val candidate = checkNotNull(pending) { DesktopMessages.TEST_THE_CURRENT_CONFIGURATION_SUCCESSFULLY_BEFORE_SAVING.text() }
   applied = candidate.applyFilePassword(configFile)
   verified = null
   pending = null
+ }
+
+ /** Built-in account activation deliberately does not create or reuse a DAV test result. */
+ override fun saveAuthenticatedOfficial(config: SharedConnectionConfig) = synchronized(lock) {
+  check(!closed && !running && applied == null) { DesktopMessages.THE_CONNECTION_PAGE_IS_CLOSED_OR_BUSY_PLEASE_WAIT.text() }
+  require(config.official && isDesktopOfficialRoot(config.endpoint)) { DesktopMessages.THE_BUILT_IN_SERVICE_ADDRESS_IS_INVALID.text() }
+  val candidate = configurationFor(config).validated().copy(saveRoot = "", rememberPassword = false,
+   password = config.password, onboardingProgress = OnboardingProgress.COMPLETE)
+  configFile.save(candidate)
+  pending?.cancel()
+  pending = null
+  verified = null
+  applied = AppliedConnection(candidate, config.password)
  }
 
  override fun cacheDirectory(): Path = SafePaths.checked(privateCache)
@@ -104,8 +123,8 @@ internal class DesktopConnectionAdapter(
  }
 
  private fun configurationFor(config: SharedConnectionConfig): AppConfig {
-  require(config.profile == original.profile) { "同步档案不能在连接设置中改变。" }
-  require(!config.official || isDesktopOfficialRoot(config.endpoint)) { "官方服务地址无效。" }
+  require(config.profile == original.profile) { DesktopMessages.THE_SYNC_PROFILE_CANNOT_BE_CHANGED_IN_CONNECTION_SETTINGS.text() }
+  require(!config.official || isDesktopOfficialRoot(config.endpoint)) { DesktopMessages.THE_BUILT_IN_SERVICE_ADDRESS_IS_INVALID.text() }
   val endpoint = if (config.official) DESKTOP_OFFICIAL_ROOT else config.endpoint
   val provider = if (config.official) "official" else "custom"
   val identityChanged = endpoint.trimEnd('/') != original.endpoint.trimEnd('/') ||
@@ -136,51 +155,3 @@ internal fun desktopConnectionConfig(config: AppConfig, password: String): Share
 private fun sameConnection(a: SharedConnectionConfig?, b: SharedConnectionConfig): Boolean = a != null &&
  a.endpoint == b.endpoint && a.username == b.username && a.password == b.password &&
  a.profile == b.profile && a.official == b.official
-
-/** Event-driven connection-page visibility. A focus change invalidates proof, not the form. */
-internal class DesktopConnectionVisibility(private val foreground: (Boolean) -> Unit) : AutoCloseable {
- private var previous: Boolean? = null
- private var closed = false
- fun update(showing: Boolean, focused: Boolean, iconified: Boolean) {
-  if (closed) return
-  val next = showing && focused && !iconified
-  if (previous != next) { previous = next; foreground(next) }
- }
- override fun close() {
-  if (closed) return
-  closed = true
-  if (previous != false) foreground(false)
-  previous = false
- }
-}
-
-/** Native events avoid polling and leave the application's existing background sync untouched. */
-internal fun observeDesktopConnectionWindow(window: java.awt.Window, foreground: (Boolean) -> Unit): AutoCloseable {
- val visibility = DesktopConnectionVisibility(foreground)
- fun update() = visibility.update(window.isShowing, window.isFocused,
-  window is java.awt.Frame && (window.extendedState and java.awt.Frame.ICONIFIED) != 0)
- val windowEvents = object : java.awt.event.WindowAdapter() {
-  override fun windowGainedFocus(event: java.awt.event.WindowEvent) = update()
-  override fun windowLostFocus(event: java.awt.event.WindowEvent) = update()
-  override fun windowIconified(event: java.awt.event.WindowEvent) = update()
-  override fun windowDeiconified(event: java.awt.event.WindowEvent) = update()
-  override fun windowClosed(event: java.awt.event.WindowEvent) = update()
-  override fun windowStateChanged(event: java.awt.event.WindowEvent) = update()
- }
- val componentEvents = object : java.awt.event.ComponentAdapter() {
-  override fun componentShown(event: java.awt.event.ComponentEvent) = update()
-  override fun componentHidden(event: java.awt.event.ComponentEvent) = update()
- }
- window.addWindowListener(windowEvents)
- window.addWindowFocusListener(windowEvents)
- if (window is java.awt.Frame) window.addWindowStateListener(windowEvents)
- window.addComponentListener(componentEvents)
- update()
- return AutoCloseable {
-  window.removeWindowListener(windowEvents)
-  window.removeWindowFocusListener(windowEvents)
-  if (window is java.awt.Frame) window.removeWindowStateListener(windowEvents)
-  window.removeComponentListener(componentEvents)
-  visibility.close()
- }
-}

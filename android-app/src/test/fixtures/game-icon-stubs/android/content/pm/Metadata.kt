@@ -4,6 +4,8 @@ import android.content.res.Resources
 import android.graphics.drawable.Drawable
 
 class ApplicationInfo {
+    var nonLocalizedLabel: CharSequence? = null
+    var labelRes: Int = 0
     var icon: Int = 1
     var sourceDir: String? = null
     var publicSourceDir: String? = null
@@ -11,6 +13,7 @@ class ApplicationInfo {
 }
 
 class PackageInfo(val packageName: String) {
+    var versionName: String? = null
     var firstInstallTime: Long = 1
     var lastUpdateTime: Long = 1
     var applicationInfo: ApplicationInfo? = ApplicationInfo()

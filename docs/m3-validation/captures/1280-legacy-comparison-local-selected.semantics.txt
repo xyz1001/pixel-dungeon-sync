@@ -1,0 +1,11 @@
+4 / 4
+选择存档
+使用本机进度
+本机
+上一步
+完成
+
+ACTIONS
+使用本机进度 | 本机; disabled=false; bounds=Rect.fromLTRB(241.0, 152.0, 1039.0, 216.0)
+上一步; disabled=false; bounds=Rect.fromLTRB(241.0, 567.0, 307.0, 609.0)
+完成; disabled=false; bounds=Rect.fromLTRB(971.0, 567.0, 1039.0, 609.0)

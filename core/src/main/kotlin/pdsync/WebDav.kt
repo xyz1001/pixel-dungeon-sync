@@ -1,4 +1,6 @@
 package pdsync
+
+import pdsync.i18n.CoreValidationMessages
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -14,8 +16,8 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
  private val profileId = profile
  private fun validate(m: Manifest) { require(m.schema == 1 && m.game == gameId && m.profile == profileId); require(m.id.matches(Regex("[0-9a-fA-F-]{36}"))); require(m.parent == null || m.parent.matches(Regex("[0-9a-fA-F-]{36}"))) }
  private val baseUrl = base.toHttpUrl().let { url ->
-  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "URL must not contain credentials, query or fragment" }
-  require(url.scheme == "https" || (url.scheme == "http" && url.host in setOf("127.0.0.1","localhost","::1"))) { "HTTPS required except exact loopback hosts" }
+  require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { CoreValidationMessages.URL_MUST_NOT_CONTAIN_CREDENTIALS_QUERY_OR_FRAGMENT.text() }
+  require(url.scheme == "https" || (url.scheme == "http" && url.host in setOf("127.0.0.1","localhost","::1"))) { CoreValidationMessages.HTTPS_REQUIRED_EXCEPT_EXACT_LOOPBACK_HOSTS.text() }
   url.toString().trimEnd('/') + "/$game/$profile/"
  }
  private val auth = Credentials.basic(username,password)
@@ -37,9 +39,9 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
     if(!r.isSuccessful) throw WebDavException(r.code)
     val limit = if(path.endsWith(".zip")) MAX_SNAPSHOT_BYTES else MAX_MANIFEST_BYTES
     val body = r.body
-    require(body == null || body.contentLength() <= limit) { "Remote response too large" }
+    require(body == null || body.contentLength() <= limit) { CoreValidationMessages.REMOTE_RESPONSE_TOO_LARGE.text() }
     val data = body?.byteStream()?.readUpTo(limit + 1) ?: byteArrayOf()
-    require(data.size <= limit) { "Remote response too large" }
+    require(data.size <= limit) { CoreValidationMessages.REMOTE_RESPONSE_TOO_LARGE.text() }
     return data to r.header("ETag")
    }
   } catch(error: IOException) {
@@ -52,7 +54,7 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
   try { call(path,"PUT",bytes,mapOf("If-None-Match" to "*")) }
   catch(e: WebDavException) {
    if(e.statusCode != 412) throw e
-   require(call(path).first.contentEquals(bytes)) { "Existing immutable object differs" }
+   require(call(path).first.contentEquals(bytes)) { CoreValidationMessages.EXISTING_IMMUTABLE_OBJECT_DIFFERS.text() }
   }
  }
  override fun head(): RemoteHead? = try { val (bytes,etag) = call("head.json"); RemoteHead(json.decodeFromString<Manifest>(bytes.decodeToString()).also { validate(it) },etag) } catch(e: java.nio.file.NoSuchFileException) { null }
@@ -62,12 +64,12 @@ class WebDav(base: String, game: String, profile: String, username: String, pass
   immutablePut("${snapshot.manifest.id}.zip",snapshot.zip)
   immutablePut("${snapshot.manifest.id}.json",metadata)
  }
- override fun download(manifest: Manifest): Snapshot { validate(manifest); val stored = json.decodeFromString<Manifest>(call("${manifest.id}.json").first.decodeToString()); require(stored == manifest) { "Uploaded manifest mismatch" }; return Snapshot(manifest,call("${manifest.id}.zip").first) }
+ override fun download(manifest: Manifest): Snapshot { validate(manifest); val stored = json.decodeFromString<Manifest>(call("${manifest.id}.json").first.decodeToString()); require(stored == manifest) { CoreValidationMessages.UPLOADED_MANIFEST_MISMATCH.text() }; return Snapshot(manifest,call("${manifest.id}.zip").first) }
  override fun publish(manifest: Manifest, expected: RemoteHead?) {
   validate(manifest)
   val headers = if(expected == null) mapOf("If-None-Match" to "*") else {
    val e = expected.etag
-   require(e != null && e.length >= 2 && e.first() == '"' && e.last() == '"' && e.substring(1,e.length-1).all { it.code == 0x21 || it.code in 0x23..0x7e || it.code in 0x80..0xff }) { "Strong ETag required; publishing disabled" }
+   require(e != null && e.length >= 2 && e.first() == '"' && e.last() == '"' && e.substring(1,e.length-1).all { it.code == 0x21 || it.code in 0x23..0x7e || it.code in 0x80..0xff }) { CoreValidationMessages.STRONG_ETAG_REQUIRED_PUBLISHING_DISABLED.text() }
    mapOf("If-Match" to e)
   }
   call("head.json","PUT",json.encodeToString(manifest).encodeToByteArray(),headers)

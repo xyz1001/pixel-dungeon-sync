@@ -124,7 +124,7 @@ class DesktopConnectionAdapterTest {
   assertEquals("bob", saved.username)
   assertEquals("", saved.password)
   assertEquals("keep-existing-profile", saved.profile)
-  assertEquals(OnboardingProgress.PENDING, saved.onboardingProgress)
+  assertEquals(OnboardingProgress.COMPLETE, saved.onboardingProgress)
  }
 
  @Test fun failedNewAttemptInvalidatesPreviouslySuccessfulProof() {
@@ -216,7 +216,7 @@ class DesktopConnectionAdapterTest {
   assertEquals(initial.selectedSaveRoot, saved.selectedSaveRoot)
   assertEquals(initial.targetGame, saved.targetGame)
   assertEquals(initial.autoUploadPaused, saved.autoUploadPaused)
-  assertEquals(OnboardingProgress.PENDING, saved.onboardingProgress)
+  assertEquals(OnboardingProgress.COMPLETE, saved.onboardingProgress)
  }
 
  @Test fun persistedPasswordDoesNotResurrectAnExplicitlyClearedSessionPassword() {
@@ -264,6 +264,81 @@ class DesktopConnectionAdapterTest {
   val legacy = adapter(assertNotNull(file.load()))
   assertFalse(legacy.initialConnection!!.official)
   assertFalse(legacy.isSavedConnection(legacy.initialConnection!!))
+ }
+
+ @Test fun builtInActivationPersistsWithoutRunningOrFakingDavProbe() {
+  val initial = original()
+  file.save(initial)
+  var probes = 0
+  val port = adapter(initial) { probes++; error("Built-in activation must not test DAV") }
+  val dto = connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true)
+  port.saveAuthenticatedOfficial(dto)
+  assertEquals(0, probes)
+  val saved = assertNotNull(file.load())
+  assertEquals("official", saved.connectionProvider)
+  assertEquals(DESKTOP_OFFICIAL_ROOT.removeSuffix("/"), saved.endpoint)
+  assertEquals("fixture-secret", saved.password)
+  assertEquals(initial.profile, saved.profile)
+  assertEquals(initial.selectedSaveRoot, saved.selectedSaveRoot)
+  assertEquals(initial.targetGame, saved.targetGame)
+  assertEquals(initial.autoUploadPaused, saved.autoUploadPaused)
+  assertEquals(OnboardingProgress.COMPLETE, saved.onboardingProgress)
+  assertEquals("fixture-secret", assertNotNull(port.appliedConnection).password)
+  assertFailsWith<IllegalStateException> { port.saveAuthenticatedOfficial(dto) }
+ }
+
+ @Test fun builtInActivationRejectsCustomProviderAlteredRootAndProfile() {
+  val port = adapter()
+  for (dto in listOf(connection(), connection(endpoint = "https://other.invalid/", official = true),
+   connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true).copy(profile = "different"))) {
+   assertFailsWith<IllegalArgumentException> { port.saveAuthenticatedOfficial(dto) }
+  }
+  assertNull(port.appliedConnection)
+  assertFalse(path.exists())
+  assertFailsWith<IllegalStateException> { port.saveAndActivate(connection()) }
+ }
+
+ @Test fun customCompletionPersistsOnlyConfigurationAndNeverCreatesOrReplacesSyncState() {
+  val syncState = temp.resolve("manager/append-v2")
+  syncState.createDirectories()
+  val baseline = syncState.resolve("baseline.txt").apply { writeText("existing-baseline-must-stay") }
+  val pending = syncState.resolve("pending.json").apply { writeText("existing-pending-must-stay") }
+  var probes = 0
+  val initial = original().copy(onboardingProgress = OnboardingProgress.PENDING)
+  file.save(initial)
+  val port = adapter(initial) { probes++; null }
+  val dto = connection()
+  assertTrue(port.testConnection(dto))
+  assertEquals(OnboardingProgress.PENDING, file.load()!!.onboardingProgress)
+  val before = java.nio.file.Files.walk(temp).use { paths ->
+   paths.filter { java.nio.file.Files.isRegularFile(it) }.toList().associate { it to it.readText() }
+  }
+  port.saveAndActivate(dto)
+  assertEquals(1, probes, "Configuration completion must not run another DAV operation")
+  assertEquals(OnboardingProgress.COMPLETE, file.load()!!.onboardingProgress)
+  val after = java.nio.file.Files.walk(temp).use { paths ->
+   paths.filter { java.nio.file.Files.isRegularFile(it) }.toList().associate { it to it.readText() }
+  }
+  assertEquals(before.keys, after.keys)
+  assertEquals(setOf(path), after.keys.filter { before[it] != after[it] }.toSet())
+  assertEquals("existing-baseline-must-stay", baseline.readText())
+  assertEquals("existing-pending-must-stay", pending.readText())
+ }
+
+ @Test fun officialCompletionWritesOnlyConfigAndLeavesAbsentBaselineAbsent() {
+  val initial = original().copy(onboardingProgress = OnboardingProgress.PENDING)
+  var probes = 0
+  val port = adapter(initial) { probes++; error("Account activation is not a DAV operation") }
+  port.saveAuthenticatedOfficial(connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true))
+  assertEquals(0, probes)
+  val saved = assertNotNull(file.load())
+  assertEquals(OnboardingProgress.COMPLETE, saved.onboardingProgress)
+  assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(saved.onboardingProgress, true, false))
+  val written = java.nio.file.Files.walk(temp).use { paths ->
+   paths.filter { java.nio.file.Files.isRegularFile(it) }.toList().toSet()
+  }
+  assertEquals(setOf(path), written)
+  assertFalse(temp.resolve("manager").exists())
  }
 
 }

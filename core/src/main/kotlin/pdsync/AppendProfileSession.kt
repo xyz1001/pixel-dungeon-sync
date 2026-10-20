@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.CoreSessionMessages
+
 import java.nio.file.Path
 import kotlin.io.path.*
 import kotlinx.serialization.encodeToString
@@ -51,7 +53,7 @@ class AppendProfileSession(
   return json.decodeFromString<Map<String,String>>(text).also { values -> require(values.size<=MAX_COMMITS);values.forEach { (id,name)->require(validCommitId(id)&&name==sanitizeSnapshotName(name)) } }
  }
  fun renameHistory(snapshotId:String,name:String) = local.locked {
-  require(repository.cachedGraph().commits.values.any { it.snapshot.id==snapshotId }) { "历史记录不存在" }
+  require(repository.cachedGraph().commits.values.any { it.snapshot.id==snapshotId }) { CoreSessionMessages.HISTORY_ENTRY_NOT_FOUND.text() }
   SafePaths.atomicWrite(aliasesPath,json.encodeToString(aliases()+(snapshotId to sanitizeSnapshotName(name))).encodeToByteArray())
  }
  fun syncHistory(): SyncHistory = local.locked {
@@ -63,14 +65,14 @@ class AppendProfileSession(
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
  fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult = local.locked {
-  local.guard(stopped);noLegacyPending();appliedOnly();require(repository.pending()==null){"请先处理待上传操作"}
-  val graph=discover(store);val chosen=graph.commits.values.single { it.snapshot.id==snapshotId }
+  local.guard(stopped);noLegacyPending();appliedOnly();require(repository.pending()==null){CoreSessionMessages.RESOLVE_THE_PENDING_UPLOAD_FIRST.text()}
+  val graph=discover(store);val chosen=requireNotNull(graph.snapshotCommit(snapshotId)) { CoreSessionMessages.THE_SELECTED_CLOUD_SNAPSHOT_NO_LONGER_EXISTS_RELOAD_HISTORY.text() }
   val before=currentFiles()
-  require(expectedBefore==null || before==expectedBefore) { "确认后本机存档已变化，请重新比较" }
-  require(allowUniqueReplacement || before.isEmpty() || graph.commits.values.any { it.snapshot.files==before }) { "本机有独有进度，请明确选择覆盖或合并" }
-  val snapshot=repository.download(store,chosen);local.remember(snapshot,"选择云端历史",repository.observedAt(chosen.id));local.checkRestore(snapshotId)
+  require(expectedBefore==null || before==expectedBefore) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_CONFIRMATION_COMPARE_AGAIN.text() }
+  require(allowUniqueReplacement || before.isEmpty() || graph.commits.values.any { it.snapshot.files==before }) { CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNIQUE_PROGRESS_EXPLICITLY_CHOOSE_OVERWRITE_OR_MERGE.text() }
+  val snapshot=repository.download(store,chosen);local.remember(snapshot,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),repository.observedAt(chosen.id));local.checkRestore(snapshotId)
   var restored:RestoreResult?=null
-  prepareAndApply(snapshot,listOfNotNull(repository.baseline()),"restore","恢复云端历史 · 待上传") { plan ->
+  prepareAndApply(snapshot,listOfNotNull(repository.baseline()),"restore",CoreSessionMessages.RESTORE_CLOUD_HISTORY_PENDING_UPLOAD.text()) { plan ->
    restored=local.restore(this.snapshot(plan),stopped,before)
   }
   requireNotNull(restored)
@@ -80,13 +82,13 @@ class AppendProfileSession(
   * local work relative to the existing baseline, so a later upload still detects remote siblings. */
  fun restoreSelectedReadOnly(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,stopped:()->Boolean):RestoreResult = local.locked {
   var graph=revalidateComparison(comparison,store,stopped)
-  val selected=graph.commits.values.singleOrNull { it.snapshot.id==snapshotId }
+  val selected=graph.snapshotCommit(snapshotId)
   val chosen=if(selected!=null)repository.download(store,selected) else local.loadSnapshot(snapshotId)
   Snapshots.verify(chosen,adapter);local.checkRestore(chosen)
   require(allowUniqueReplacement || comparison.localFiles.isEmpty() || graph.commits.values.any {it.snapshot.files==comparison.localFiles}) {
-   "本机有独有进度，请明确确认覆盖；恢复前原始数据会保存在本机备份中"
+   CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNIQUE_PROGRESS_CONFIRM_OVERWRITE_EXPLICITLY_THE_ORIGINAL.text()
   }
-  if(selected!=null)local.remember(chosen,"只读下载 · 已校验选择",repository.observedAt(selected.id))
+  if(selected!=null)local.remember(chosen,CoreSessionMessages.READ_ONLY_DOWNLOAD_SELECTION_VERIFIED.text(),repository.observedAt(selected.id))
   // A legacy snapshot without portable identity must not erase a still-proven local run identity.
   // Only exact complete-run bytes, checked against both before and after, can retain that proof.
   val prior=(local.directoryMetadata.read() as? SidecarRead.Valid)?.value
@@ -127,7 +129,7 @@ class AppendProfileSession(
  fun confirmRunIdentity(slot: String, expectedFiles: Map<String,String>, sameRun: Boolean, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
   local.guard(stopped)
   val captured=local.capture(stopped,null)
-  require(captured.manifest.files==expectedFiles) { "确认期间内容发生变化，请重新检查" }
+  require(captured.manifest.files==expectedFiles) { CoreSessionMessages.CONTENT_CHANGED_DURING_CONFIRMATION_CHECK_AGAIN.text() }
   local.directoryMetadata.confirmRun(slot,expectedFiles,sameRun)
  }
  private fun markDirectorySynced(commit: AppendCommit,direction:String="restore") {
@@ -140,6 +142,10 @@ class AppendProfileSession(
   * observation is discarded by the UI generation/busy check; mutation rechecks all gates under lock. */
  fun observedFiles(): Map<String, String> = currentFiles()
  fun retryablePending(): Boolean = !needsApply() && local.legacyPending() == null && repository.pending() != null
+ /** The frozen plan is verified by pending(); a marker alone never proves an upload source. */
+ fun retryablePendingSourceAvailable(): Boolean = local.locked {
+  !needsApply() && local.legacyPending() == null && repository.pending()?.commit?.snapshot?.files?.isNotEmpty() == true
+ }
  fun inspectConflict(store: AppendStore, stopped: () -> Boolean): AppendConflict? = local.locked {
   local.guard(stopped)
   val graph = discover(store)
@@ -154,20 +160,21 @@ class AppendProfileSession(
  }
  fun validateRoot() = local.validateRoot()
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = local.locked {
-  local.remember(local.capture(stopped, null), "本地快照")
+  local.remember(local.capture(stopped, null), CoreSessionMessages.LOCAL_SNAPSHOT.text())
  }
  fun hasPending(): Boolean = local.locked { repository.pending() != null || local.legacyPending() != null || needsApply() }
  fun baseline(): String? = local.locked { repository.baseline() }
  private fun needsApply() = SafePaths.checked(applyMarker).exists()
  private fun appliedOnly() {
-  require(!needsApply()) { "上次恢复未确认完成，原快照和备份仍保留。请先明确归档该操作，再重新选择恢复；不会直接上传未完成的恢复。" }
+  require(!needsApply()) { CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_ITS_SNAPSHOT_AND.text() }
  }
  private fun noLegacyPending() {
-  require(local.legacyPending() == null) { "旧版待上传快照仍保留。请先明确归档，再使用新的远端档案；不会将旧版重试直接上传为新版。" }
+  require(local.legacyPending() == null) { CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_BEFORE.text() }
  }
  private fun discover(store: AppendStore): CommitGraph = repository.discover(store).also {
   it.requireSettled()
-  repository.baseline()?.let { baseline -> require(baseline in it.commits) { "同步基线缺失或无法验证；未创建新的根提交" } }
+  it.commits.values.snapshotRepresentatives(it.tips)
+  repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
  }
  private fun currentFiles(): Map<String, String> = Snapshots.capture(root, adapter, config.profile, "自动识别", null).manifest.files
  private fun snapshot(plan: UploadPlan) = Snapshot(plan.commit.snapshot, plan.zip)
@@ -177,21 +184,21 @@ class AppendProfileSession(
   val branches = graph.tips.sorted().map { id ->
    val commit = graph.commits.getValue(id)
    val snapshot = repository.download(store, commit)
-   local.remember(snapshot, "冲突 · 已观察分支 ${id.take(8)}", repository.observedAt(id))
+   local.remember(snapshot, CoreSessionMessages.CONFLICT_OBSERVED_BRANCH.text(id.take(8)), repository.observedAt(id))
    AppendBranch(commit, snapshot)
   }
   // Record the real current files, not an older frozen upload. A subsequent choice must recheck.
   val current = currentFiles()
   local.guard(stopped)
-  require(currentFiles() == current) { "读取冲突期间存档发生变化，请退出游戏后重试" }
+  require(currentFiles() == current) { CoreSessionMessages.SAVES_CHANGED_WHILE_READING_CONFLICTS_EXIT_THE_GAME_AND_TRY.text() }
   return AppendConflict(graph.tips, branches, current, repository.baseline())
  }
  private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
-  preserve(plan, "追加同步 · ${plan.commit.kind}")
+  preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
   repository.publish(store, plan)
   val graph = discover(store)
-  require(plan.commit.id in graph.commits) { "刚发布的提交尚未完整可见；原操作保留，请重试" }
-  local.remember(snapshot(plan), "追加同步 · ${plan.commit.kind}", repository.observedAt(plan.commit.id))
+  require(plan.commit.id in graph.commits) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
+  local.remember(snapshot(plan), CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind), repository.observedAt(plan.commit.id))
   repository.setBaseline(plan.commit.id, graph)
   markDirectorySynced(plan.commit,"upload")
   repository.clearPending()
@@ -219,13 +226,14 @@ class AppendProfileSession(
   publish(plan, store, stopped)
  }
 
- /** Read every observed tip. A listing is an observation, never a promise of a global latest save. */
+ /** Verify every observed tip, presenting exact duplicate snapshots once. The graph retains all
+  * commit IDs and tips; a listing is never a promise of a global latest save. */
  fun readRemote(store: AppendStore): List<AppendRemoteEntry> = local.locked {
   val graph = discover(store)
   graph.tips.sorted().map { id ->
    val commit = graph.commits.getValue(id)
-   AppendRemoteEntry(commit, local.remember(repository.download(store, commit), "云端已观察分支 ${id.take(8)}", repository.observedAt(id)))
-  }
+   AppendRemoteEntry(commit, local.remember(repository.download(store, commit), CoreSessionMessages.OBSERVED_CLOUD_BRANCH.text(id.take(8)), repository.observedAt(id)))
+  }.distinctBy { it.entry.manifest.id }
  }
 
  /** Ordinary fast-forward is allowed only for a clean baseline or a genuinely empty new target. */
@@ -234,22 +242,22 @@ class AppendProfileSession(
  }
  private fun restoreRemoteLocked(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
-  require(repository.pending() == null) { "请先重试或明确归档待上传操作" }
+  require(repository.pending() == null) { CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text() }
   val graph = discover(store)
-  require(graph.tips.size == 1) { "云端存在多个分支，不能作为普通恢复。请明确选择并发布冲突解决。" }
+  require(graph.tips.size == 1) { CoreSessionMessages.THE_CLOUD_HAS_MULTIPLE_BRANCHES_A_NORMAL_RESTORE_IS_UNAVAILABLE.text() }
   val commit = graph.commits.getValue(graph.tips.single())
-  require(commit.snapshot.id == snapshotId) { "已观察分支发生变化；没有恢复，请重新读取云端" }
+  require(commit.snapshot.id == snapshotId) { CoreSessionMessages.THE_OBSERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED_RELOAD_THE_CLOUD.text() }
   val before = currentFiles()
   val baseline = repository.baseline()
-  if (baseline == null) require(before.isEmpty()) { "本地已有未同步进度，不能直接覆盖。请先同步保留本地分支，再明确选择冲突快照。" }
+  if (baseline == null) require(before.isEmpty()) { CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNSYNCED_PROGRESS_AND_CANNOT_BE_OVERWRITTEN_DIRECTLY.text() }
   else {
-   require(before == graph.commits.getValue(baseline).snapshot.files) { "本地进度已变化，不能直接覆盖。请先同步保留本地分支。" }
-   require(graph.descendsFrom(commit.id, baseline)) { "所选分支不是当前基线的后续，需明确解决冲突" }
+   require(before == graph.commits.getValue(baseline).snapshot.files) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_AND_CANNOT_BE_OVERWRITTEN_DIRECTLY_SYNC_TO.text() }
+   require(graph.descendsFrom(commit.id, baseline)) { CoreSessionMessages.THE_SELECTED_BRANCH_DOES_NOT_DESCEND_FROM_THE_CURRENT_BASELINE.text() }
   }
   val chosen = repository.download(store, commit)
-  local.remember(chosen, "已校验云端恢复快照", repository.observedAt(commit.id))
+  local.remember(chosen, CoreSessionMessages.CLOUD_RESTORE_SNAPSHOT_VERIFIED.text(), repository.observedAt(commit.id))
   local.checkRestore(chosen.manifest.id)
-  require(currentFiles() == before) { "验证期间本地存档发生变化，未恢复" }
+  require(currentFiles() == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_VERIFICATION_NOTHING_WAS_RESTORED.text() }
   SafePaths.atomicWrite(applyMarker, "remote-restore".encodeToByteArray())
   // Keep the restart gate on any uncertain apply or baseline-write failure, even after rollback.
   val restored = local.restore(chosen, stopped,before)
@@ -272,7 +280,7 @@ class AppendProfileSession(
    return plan
   } catch (failure: Exception) {
    // A failed apply may include failed rollback. Keep the gate until explicit archive/review.
-   plan?.let { preserve(it, "未完成的本地恢复 · 已归档") }
+   plan?.let { preserve(it, CoreSessionMessages.INCOMPLETE_LOCAL_RESTORE_ARCHIVED.text()) }
    repository.clearPending()
    throw failure
   }
@@ -281,10 +289,10 @@ class AppendProfileSession(
  /** A history restore is new work parented at the actual baseline, not a rewind to the old ID. */
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
-  require(repository.pending() == null) { "请先重试或明确归档待上传操作" }
+  require(repository.pending() == null) { CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text() }
   local.checkRestore(id)
   var restored: RestoreResult? = null
-  prepareAndApply(local.loadSnapshot(id), listOfNotNull(repository.baseline()), "restore", "历史恢复 · 待追加发布") { plan ->
+  prepareAndApply(local.loadSnapshot(id), listOfNotNull(repository.baseline()), "restore", CoreSessionMessages.HISTORY_RESTORE_PENDING_PUBLICATION.text()) { plan ->
    restored = local.restore(snapshot(plan), stopped)
   }
   requireNotNull(restored)
@@ -311,7 +319,7 @@ class AppendProfileSession(
  }
  /** Preflight before publishing a unique local branch; then retain both sources in the merge DAG. */
  fun mergeCurrent(store:AppendStore,stopped:()->Boolean):AppendPushResult = local.locked {
-  val graph=discover(store);require(graph.tips.isNotEmpty()) { "没有可合并的云端分支" }
+  val graph=discover(store);require(graph.tips.isNotEmpty()) { CoreSessionMessages.NO_CLOUD_BRANCHES_ARE_AVAILABLE_TO_MERGE.text() }
   val observed=AppendConflict(graph.tips,emptyList(),currentFiles())
   mergeCurrentLocked(observed,store,stopped)
  }
@@ -319,7 +327,7 @@ class AppendProfileSession(
   val preview=buildMerge(observed,store,stopped)
   local.checkRestore(preview.snapshot)
   val captured=local.capture(stopped,null)
-  require(captured.manifest.files==observed.observedLocalFiles) { "预检后本机内容变化，请重新比较" }
+  require(captured.manifest.files==observed.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_AFTER_THE_PREFLIGHT_CHECK_COMPARE_AGAIN.text() }
   val localPlan=repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
   val expectedTips=(observed.observedTips-localPlan.commit.parents.toSet())+localPlan.commit.id
   val uploaded=publish(localPlan,store,stopped)
@@ -336,18 +344,18 @@ class AppendProfileSession(
  }
  private fun buildMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult {
   local.guard(stopped);noLegacyPending();appliedOnly()
-  require(repository.pending()==null) { "请先处理待上传操作" }
+  require(repository.pending()==null) { CoreSessionMessages.RESOLVE_THE_PENDING_UPLOAD_FIRST.text() }
   val graph=discover(store)
-  require(graph.tips==conflict.observedTips && graph.tips.isNotEmpty()) { "冲突分支已变化，请重新检查" }
-  require(currentFiles()==conflict.observedLocalFiles) { "本机内容已变化，请重新检查" }
-  val baseline=repository.baseline() ?: throw RunMergeException("缺少共同基线，不能推断单局身份")
+  require(graph.tips==conflict.observedTips && graph.tips.isNotEmpty()) { CoreSessionMessages.CONFLICT_BRANCHES_CHANGED_CHECK_AGAIN.text() }
+  require(currentFiles()==conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_CHECK_AGAIN.text() }
+  val baseline=repository.baseline() ?: throw RunMergeException(CoreSessionMessages.NO_COMMON_BASELINE_EXISTS_RUN_IDENTITIES_CANNOT_BE_INFERRED.text())
   val children=graph.tips+baseline
   val common=graph.commits.keys.filter { ancestor -> children.all { graph.descendsFrom(it,ancestor) } }
   val nearest=common.filter { candidate -> common.none { it!=candidate&&graph.descendsFrom(it,candidate) } }
-  if(nearest.size!=1)throw RunMergeException("没有唯一可验证的共同祖先")
+  if(nearest.size!=1)throw RunMergeException(CoreSessionMessages.NO_UNIQUE_VERIFIABLE_COMMON_ANCESTOR_EXISTS.text())
   val base=repository.download(store,graph.commits.getValue(nearest.single()))
   val current=local.capture(stopped,null,persistDirectoryMetadata=false)
-  require(current.manifest.files==conflict.observedLocalFiles) { "采集期间内容发生变化，未合并" }
+  require(current.manifest.files==conflict.observedLocalFiles) { CoreSessionMessages.CONTENT_CHANGED_DURING_CAPTURE_NOTHING_WAS_MERGED.text() }
   val branches=graph.tips.sorted().map { id ->
    val commit=graph.commits.getValue(id)
    val downloaded=repository.download(store,commit)
@@ -356,22 +364,22 @@ class AppendProfileSession(
   }.toMutableList()
   if(branches.none { it===current })branches.add(0,current) else { branches.remove(current);branches.add(0,current) }
   val operation=local.operationMetadata()
-  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException("尚未选择已验证游戏"),SnapshotCaptureContext(operation.device,operation.preparedAt),adapter)
+  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException(CoreSessionMessages.NO_VERIFIED_GAME_SELECTED.text()),SnapshotCaptureContext(operation.device,operation.preparedAt),adapter)
  }
  fun merge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   mergeLocked(conflict,store,stopped)
  }
  private fun mergeLocked(conflict:AppendConflict,store:AppendStore,stopped:()->Boolean):AppendPushResult {
-  require(conflict.observedTips.size>=2) { "冲突分支已变化，请重新检查" }
+  require(conflict.observedTips.size>=2) { CoreSessionMessages.CONFLICT_BRANCHES_CHANGED_CHECK_AGAIN.text() }
   val result=buildMerge(conflict,store,stopped)
   // Capacity/identity/global/version checks have all completed before an apply marker or writes.
-  local.remember(result.snapshot,"逐局合并 · 已完成预检")
+  local.remember(result.snapshot,CoreSessionMessages.PER_RUN_MERGE_PREFLIGHT_COMPLETE.text())
   local.checkRestore(result.snapshot.manifest.id)
   val latest=discover(store)
   if(latest.tips!=conflict.observedTips)return AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
-  require(currentFiles()==conflict.observedLocalFiles) { "预检后本机内容发生变化，未合并" }
-  val plan=prepareAndApply(result.snapshot,latest.tips.sorted(),"resolution","逐局合并 · ${result.slots} 个槽位") { plan ->
-   require(currentFiles()==conflict.observedLocalFiles) { "合并前本机内容发生变化，未覆盖" }
+  require(currentFiles()==conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_AFTER_PREFLIGHT_NOTHING_WAS_MERGED.text() }
+  val plan=prepareAndApply(result.snapshot,latest.tips.sorted(),"resolution",CoreSessionMessages.PER_RUN_MERGE_SLOTS.text(result.slots)) { plan ->
+   require(currentFiles()==conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_MERGING_NOTHING_WAS_OVERWRITTEN.text() }
    local.restore(snapshot(plan),stopped,conflict.observedLocalFiles)
   }
   // A network failure after verified local apply leaves this exact plan pending for retry.
@@ -380,19 +388,19 @@ class AppendProfileSession(
  }
  private fun resolveLocked(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()
-  require(repository.pending() == null) { "请先重试或明确归档待上传操作" }
+  require(repository.pending() == null) { CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text() }
   val graph = discover(store)
   if (graph.tips != conflict.observedTips) return AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
-  require(graph.tips.size >= 2) { "冲突分支已变化，请重新读取云端" }
-  require(currentFiles() == conflict.observedLocalFiles) { "选择期间本地进度已变化；未覆盖。请重新同步保留当前分支。" }
-  val branch = conflict.branches.single { it.snapshot.manifest.id == chosenSnapshotId }
-  require(branch.commit.id in graph.tips && graph.commits[branch.commit.id] == branch.commit) { "选择不属于已观察分支" }
+  require(graph.tips.size >= 2) { CoreSessionMessages.CONFLICT_BRANCHES_CHANGED_RELOAD_THE_CLOUD.text() }
+  require(currentFiles() == conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_DURING_SELECTION_NOTHING_WAS_OVERWRITTEN_SYNC_AGAIN.text() }
+  val branch = requireNotNull(conflict.snapshotBranch(chosenSnapshotId)) { CoreSessionMessages.THE_SELECTED_SNAPSHOT_IS_NOT_IN_AN_OBSERVED_BRANCH.text() }
+  require(branch.commit.id in graph.tips && graph.commits[branch.commit.id] == branch.commit) { CoreSessionMessages.THE_SELECTION_IS_NOT_IN_AN_OBSERVED_BRANCH.text() }
   // Re-download exact immutable bytes and preserve all branches before preparing a resolution.
-  conflict.branches.forEach { local.remember(repository.download(store, it.commit), "冲突 · 原始分支", repository.observedAt(it.commit.id)) }
+  conflict.branches.forEach { local.remember(repository.download(store, it.commit), CoreSessionMessages.CONFLICT_ORIGINAL_BRANCH.text(), repository.observedAt(it.commit.id)) }
   val chosen = repository.download(store, branch.commit)
   if (currentFiles() != chosen.manifest.files) local.checkRestore(chosen.manifest.id)
-  val plan = prepareAndApply(chosen, graph.tips.sorted(), "resolution", "冲突解决 · 明确选择 ${branch.commit.id.take(8)}") { plan ->
-   require(currentFiles() == conflict.observedLocalFiles) { "验证期间本地进度已变化，未覆盖" }
+  val plan = prepareAndApply(chosen, graph.tips.sorted(), "resolution", CoreSessionMessages.CONFLICT_RESOLUTION_EXPLICITLY_SELECTED.text(branch.commit.id.take(8))) { plan ->
+   require(currentFiles() == conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_DURING_VERIFICATION_NOTHING_WAS_OVERWRITTEN.text() }
    if (currentFiles() != chosen.manifest.files) local.restore(snapshot(plan), stopped,conflict.observedLocalFiles)
   }
   // Apply precedes publication. Failed network work can only retry this exact chosen snapshot.
@@ -408,15 +416,15 @@ class AppendProfileSession(
    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
    val fingerprint = stability.awaitStable()
    val baseline = repository.baseline()
-   if (needsApply()) return@locked blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, "上次恢复尚未确认完成，请先明确归档并检查保留的快照与备份。", fingerprint, baseline)
-   if (local.legacyPending() != null) return@locked blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, "旧版待上传快照仍保留，请先明确归档；不会作为新版操作上传。", fingerprint, baseline)
+   if (needsApply()) return@locked blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_EXPLICITLY_ARCHIVE_IT.text(), fingerprint, baseline)
+   if (local.legacyPending() != null) return@locked blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_FIRST.text(), fingerprint, baseline)
    val pending = repository.pending()
    // A failed/missing page or object must not become an apparently empty cloud.
    val graph = discover(store)
    val entries = graph.tips.sorted().map { id ->
     val commit = graph.commits.getValue(id)
-    AppendRemoteEntry(commit, local.remember(repository.download(store, commit), "首次比较 · 已校验云端分支 ${id.take(8)}", repository.observedAt(id)))
-   }
+    AppendRemoteEntry(commit, local.remember(repository.download(store, commit), CoreSessionMessages.INITIAL_COMPARISON_CLOUD_BRANCH_VERIFIED.text(id.take(8)), repository.observedAt(id)))
+   }.distinctBy { it.entry.manifest.id }
    stability.requireUnchanged(fingerprint)
    val lineage = when {
     baseline == null -> OnboardingLineage.NONE
@@ -435,24 +443,25 @@ class AppendProfileSession(
     else -> OnboardingKind.DIFFERENT
    }
    OnboardingComparison(kind, fingerprint.files, baseline, lineage, entries, graph.tips,
-    blocker = if (pending == null) null else "已有冻结的待上传操作；重试会使用原快照，不会重新采集当前存档。",
+    blocker = if (pending == null) null else CoreSessionMessages.A_FROZEN_UPLOAD_IS_PENDING_RETRYING_USES_ITS_ORIGINAL_SNAPSHOT.text(),
     blockReason = if (pending == null) null else SyncBlockReason.PENDING_UPLOAD,
     canAdoptRemote = kind == OnboardingKind.IDENTICAL && lineage in setOf(OnboardingLineage.NONE, OnboardingLineage.SAME_TIP, OnboardingLineage.ANCESTOR_OF_TIP),
     retryablePending = pending != null, pendingCommitId = pending?.commit?.id,
     owner = comparisonOwner, fingerprint = fingerprint, graph = graph, pendingCommit = pending?.commit)
   }
  } catch (failure: Exception) {
+  if (failure is io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) throw failure
   if (failure is InterruptedException) Thread.currentThread().interrupt()
   val reason = SyncBlockReason.fromFailure(failure)
   val message = when (reason) {
-   SyncBlockReason.SAVE_NOT_STABLE -> "游戏正在运行、状态未知或存档仍在变化；比较已停止，请退出游戏并等待存档稳定后重试。"
-   SyncBlockReason.LEGACY_REMOTE_PROTOCOL -> "发现旧版云端协议；已停止比较，不会当作空云端或自动迁移。"
-   SyncBlockReason.REMOTE_INCOMPLETE -> "云端存在缺失、未完整上传或无法验证的提交；比较已停止，请稍后重试。"
-   SyncBlockReason.REMOTE_INTEGRITY_FAILED -> "云端不可变历史校验失败；比较已停止，双方存档均未覆盖。"
-   SyncBlockReason.TARGET_CHANGED -> "所选游戏、安装版本或来源绑定已变化；请重新选择游戏并比较。"
-   SyncBlockReason.UNSUPPORTED_SAVE_FORMAT -> "存档格式不受支持或无法读取；未视为空存档，请检查所选游戏。"
-   SyncBlockReason.INTERRUPTED -> "比较被中断；未确认上传成功，请重新检查。"
-   else -> "无法完成本地与完整云端历史的安全比较；请检查连接、目录和同步记录后重试。"
+   SyncBlockReason.SAVE_NOT_STABLE -> CoreSessionMessages.THE_GAME_IS_RUNNING_ITS_STATE_IS_UNKNOWN_OR_SAVES.text()
+   SyncBlockReason.LEGACY_REMOTE_PROTOCOL -> CoreSessionMessages.A_LEGACY_CLOUD_PROTOCOL_WAS_FOUND_COMPARISON_STOPPED_IT_WAS.text()
+   SyncBlockReason.REMOTE_INCOMPLETE -> CoreSessionMessages.CLOUD_COMMITS_ARE_MISSING_INCOMPLETE_OR_UNVERIFIABLE_COMPARISON_STOPPED_TRY.text()
+   SyncBlockReason.REMOTE_INTEGRITY_FAILED -> CoreSessionMessages.IMMUTABLE_CLOUD_HISTORY_FAILED_VERIFICATION_COMPARISON_STOPPED_NEITHER_SIDE_WAS.text()
+   SyncBlockReason.TARGET_CHANGED -> CoreSessionMessages.THE_SELECTED_GAME_INSTALLED_VERSION_OR_SOURCE_BINDING_CHANGED_SELECT.text()
+   SyncBlockReason.UNSUPPORTED_SAVE_FORMAT -> CoreSessionMessages.SAVES_ARE_UNREADABLE_OR_USE_AN_UNSUPPORTED_FORMAT_THEY_WERE.text()
+   SyncBlockReason.INTERRUPTED -> CoreSessionMessages.COMPARISON_WAS_INTERRUPTED_UPLOAD_SUCCESS_IS_UNCONFIRMED_CHECK_AGAIN.text()
+   else -> CoreSessionMessages.UNABLE_TO_SAFELY_COMPARE_LOCAL_SAVES_WITH_COMPLETE_CLOUD_HISTORY.text()
   }
   blockedComparison(reason, message)
  }
@@ -464,18 +473,18 @@ class AppendProfileSession(
  /** Never trust UI-visible collections or an old comparison without repeating every safety gate. */
  private fun revalidateComparison(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean,
   allowPending: Boolean = false): CommitGraph {
-  require(comparison.owner === comparisonOwner) { "比较不属于当前档案，请重新比较" }
-  require(comparison.kind != OnboardingKind.BLOCKED || (allowPending && comparison.retryablePending)) { "请先完成安全比较或处理被阻止的操作" }
+  require(comparison.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  require(comparison.kind != OnboardingKind.BLOCKED || (allowPending && comparison.retryablePending)) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
   local.guard(stopped); noLegacyPending(); appliedOnly(); local.validateRoot()
-  val expected = requireNotNull(comparison.fingerprint) { "比较未完成，请重试" }
+  val expected = requireNotNull(comparison.fingerprint) { CoreSessionMessages.COMPARISON_IS_INCOMPLETE_TRY_AGAIN.text() }
   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
-  require(stability.awaitStable() == expected) { "比较后本地存档发生变化；未使用旧选择，请重新比较" }
-  require(repository.baseline() == comparison.baselineId) { "比较后同步基线已变化，请重新比较" }
+  require(stability.awaitStable() == expected) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
+  require(repository.baseline() == comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val pending = repository.pending()
-  require(pending?.commit == comparison.pendingCommit) { "待上传操作已变化，请重新比较" }
-  require(allowPending || pending == null) { "请先重试或明确归档待上传操作" }
+  require(pending?.commit == comparison.pendingCommit) { CoreSessionMessages.THE_PENDING_UPLOAD_CHANGED_COMPARE_AGAIN.text() }
+  require(allowPending || pending == null) { CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text() }
   val graph = discover(store)
-  require(graph == comparison.graph) { "比较后云端分支已变化；未使用旧选择，请重新比较" }
+  require(graph == comparison.graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
   stability.requireUnchanged(expected)
   return graph
  }
@@ -486,7 +495,7 @@ class AppendProfileSession(
   revalidateComparison(comparison, store, stopped)
   require(comparison.kind == OnboardingKind.BOTH_EMPTY ||
    (comparison.kind == OnboardingKind.IDENTICAL && comparison.baselineLineage == OnboardingLineage.SAME_TIP)) {
-   "当前比较仍需明确选择上传、恢复或云端关联"
+   CoreSessionMessages.EXPLICITLY_CHOOSE_UPLOAD_RESTORE_OR_LINK_TO_CLOUD_FOR_THIS.text()
   }
  }
 
@@ -496,7 +505,7 @@ class AppendProfileSession(
   revalidateComparison(comparison, store, stopped)
   require(comparison.kind == OnboardingKind.DIFFERENT && comparison.baselineLineage == OnboardingLineage.SAME_TIP &&
    comparison.baselineId != null && comparison.observedTips.singleOrNull() == comparison.baselineId) {
-   "当前比较不是同一已验证云端基线上的本地进度，请重新比较并明确选择"
+   CoreSessionMessages.THIS_COMPARISON_DOES_NOT_REPRESENT_LOCAL_PROGRESS_ON_THE_SAME.text()
   }
  }
 
@@ -512,12 +521,12 @@ class AppendProfileSession(
  /** Explicit association of equal bytes with an exact verified tip, never hash-based ancestry. */
  fun adoptOnboardingRemote(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendCommit = local.locked {
   var graph = revalidateComparison(comparison, store, stopped)
-  require(comparison.kind == OnboardingKind.IDENTICAL && comparison.canAdoptRemote) { "不能自动关联无共同历史的分支，请明确保留并选择分支" }
+  require(comparison.kind == OnboardingKind.IDENTICAL && comparison.canAdoptRemote) { CoreSessionMessages.BRANCHES_WITHOUT_SHARED_HISTORY_CANNOT_BE_LINKED_AUTOMATICALLY_EXPLICITLY_PRESERVE.text() }
   require(graph.tips.size == 1)
   val commit = graph.commits.getValue(graph.tips.single())
   require(commit.snapshot.files == comparison.localFiles)
-  comparison.baselineId?.let { require(graph.descendsFrom(commit.id, it)) { "云端分支不是当前基线的后续；不能直接关联" } }
-  local.remember(repository.download(store, commit), "明确采用云端关联", repository.observedAt(commit.id))
+  comparison.baselineId?.let { require(graph.descendsFrom(commit.id, it)) { CoreSessionMessages.THE_CLOUD_BRANCH_DOES_NOT_DESCEND_FROM_THE_CURRENT_BASELINE.text() } }
+  local.remember(repository.download(store, commit), CoreSessionMessages.EXPLICITLY_LINKED_TO_CLOUD.text(), repository.observedAt(commit.id))
   // No game bytes are written or loaded. Restore-only target/version checks would incorrectly
   // reject equal global-record-only saves; future restores still use the unchanged version gate.
   graph = revalidateComparison(comparison, store, stopped)
@@ -539,9 +548,9 @@ class AppendProfileSession(
  fun onboardingUpload(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   revalidateComparison(comparison, store, stopped, allowPending = true)
   val plan = repository.pending() ?: run {
-   require(comparison.localFiles.isNotEmpty()) { "本地没有存档，不能上传空快照" }
+   require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }
    val captured = local.capture(stopped, null)
-   require(captured.manifest.files == comparison.localFiles) { "比较后本地存档发生变化，请重新比较" }
+   require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
   }
@@ -555,10 +564,10 @@ class AppendProfileSession(
   */
  fun onboardingRestore(comparison: OnboardingComparison, snapshotId: String, store: AppendStore, stopped: () -> Boolean): OnboardingRestoreResult = local.locked {
   var graph = revalidateComparison(comparison, store, stopped)
-  val selected = graph.tips.map(graph.commits::getValue).singleOrNull { it.snapshot.id == snapshotId }
-   ?: throw IllegalArgumentException("所选快照不属于已比较的云端分支，请重新比较")
+  val selected = graph.snapshotCommit(snapshotId)?.takeIf { it.id in graph.tips }
+   ?: throw IllegalArgumentException(CoreSessionMessages.THE_SELECTED_SNAPSHOT_IS_NOT_IN_A_COMPARED_CLOUD_BRANCH.text())
   val chosen = repository.download(store, selected)
-  local.remember(chosen, "首次恢复 · 已校验选择", repository.observedAt(selected.id))
+  local.remember(chosen, CoreSessionMessages.INITIAL_RESTORE_SELECTION_VERIFIED.text(), repository.observedAt(selected.id))
   if (chosen.manifest.files != comparison.localFiles) local.checkRestore(snapshotId)
   graph = revalidateComparison(comparison, store, stopped)
   val before = comparison.localFiles
@@ -567,7 +576,7 @@ class AppendProfileSession(
   var preservedLocalCommit: AppendCommit? = null
   if (preserveLocal) {
    val captured = local.capture(stopped, null)
-   require(captured.manifest.files == before) { "比较后本地存档发生变化，未恢复" }
+   require(captured.manifest.files == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    val plan = repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
    val expectedTips = (graph.tips - plan.commit.parents.toSet()) + plan.commit.id
@@ -579,20 +588,20 @@ class AppendProfileSession(
   }
   if (graph.tips.size > 1) {
    val conflict = preserveConflict(graph, store, stopped)
-   require(conflict.observedLocalFiles == before) { "选择期间本地存档发生变化，未恢复" }
+   require(conflict.observedLocalFiles == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_SELECTION_NOTHING_WAS_RESTORED.text() }
    if (selected.id !in graph.tips) {
     // Only this call's verified local preservation may replace the originally selected baseline
     // tip. Ordinary conflict resolution must still reject historical, non-tip selections.
-    val preserved = requireNotNull(preservedLocalCommit) { "所选分支已变化，请重新比较" }
+    val preserved = requireNotNull(preservedLocalCommit) { CoreSessionMessages.THE_SELECTED_BRANCH_CHANGED_COMPARE_AGAIN.text() }
     require(selected.id == comparison.baselineId && selected.id in comparison.observedTips &&
      comparison.graph?.commits?.get(selected.id) == selected && preserved.parents == listOf(selected.id) &&
-     preserved.snapshot.files == before && repository.baseline() == preserved.id) { "所选分支不属于本次保留操作" }
+     preserved.snapshot.files == before && repository.baseline() == preserved.id) { CoreSessionMessages.THE_SELECTED_BRANCH_DOES_NOT_BELONG_TO_THIS_PRESERVATION_OPERATION.text() }
     val expectedTips = (comparison.observedTips - selected.id) + preserved.id
     require(graph.tips == expectedTips && graph.commits[selected.id] == selected && graph.commits[preserved.id] == preserved) {
-     "所选历史或本次保留分支已变化，未恢复"
+     CoreSessionMessages.THE_SELECTED_HISTORY_OR_PRESERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED.text()
     }
     val verified = repository.download(store, selected)
-    require(verified.manifest == chosen.manifest && verified.zip.contentEquals(chosen.zip)) { "所选快照内容已变化，未恢复" }
+    require(verified.manifest == chosen.manifest && verified.zip.contentEquals(chosen.zip)) { CoreSessionMessages.THE_SELECTED_SNAPSHOT_CONTENT_CHANGED_NOTHING_WAS_RESTORED.text() }
     local.checkRestore(chosen)
     val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
     val fingerprint = requireNotNull(comparison.fingerprint)
@@ -601,8 +610,8 @@ class AppendProfileSession(
     // it must never become an extra resolution parent or cause a local overwrite here.
     val latest = discover(store)
     if (latest.tips != expectedTips) return@locked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(latest, store, stopped)))
-    require(latest.commits[selected.id] == selected && latest.commits[preserved.id] == preserved) { "所选历史或本次保留分支已变化，未恢复" }
-    val plan = prepareAndApply(chosen, latest.tips.sorted(), "resolution", "首次恢复 · 保留本地后明确选择原基线") { plan ->
+    require(latest.commits[selected.id] == selected && latest.commits[preserved.id] == preserved) { CoreSessionMessages.THE_SELECTED_HISTORY_OR_PRESERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED.text() }
+    val plan = prepareAndApply(chosen, latest.tips.sorted(), "resolution", CoreSessionMessages.INITIAL_RESTORE_PRESERVED_LOCAL_SAVES_AND_SELECTED_THE_ORIGINAL_BASELINE.text()) { plan ->
      stability.requireUnchanged(fingerprint)
      local.restore(snapshot(plan), stopped, before)
     }
@@ -617,12 +626,12 @@ class AppendProfileSession(
   // the explicit older-snapshot choice as a new restore commit, never rewind the baseline. An
   // empty dirty target also creates only a nonempty chosen restore, never an empty local upload.
   val expectedGraph = graph
-  require(graph.commits[selected.id] == selected) { "所选历史已变化，未恢复" }
+  require(graph.commits[selected.id] == selected) { CoreSessionMessages.THE_SELECTED_HISTORY_CHANGED_NOTHING_WAS_RESTORED.text() }
   val parent = repository.baseline() ?: graph.tips.single()
   val currentFingerprint = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).awaitStable()
-  require(currentFingerprint.files == before) { "选择期间本地存档发生变化，未恢复" }
-  require(discover(store) == expectedGraph) { "云端分支已变化，请重新比较" }
-  val plan = prepareAndApply(chosen, listOf(parent), "restore", "首次恢复 · 保留本地后明确选择云端") { plan ->
+  require(currentFingerprint.files == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_SELECTION_NOTHING_WAS_RESTORED.text() }
+  require(discover(store) == expectedGraph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
+  val plan = prepareAndApply(chosen, listOf(parent), "restore", CoreSessionMessages.INITIAL_RESTORE_PRESERVED_LOCAL_SAVES_AND_SELECTED_CLOUD_SAVES.text()) { plan ->
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(currentFingerprint)
    if (before != chosen.manifest.files) local.restore(snapshot(plan), stopped)
   }
@@ -631,7 +640,7 @@ class AppendProfileSession(
 
  /** Explicit confirmation removes retry markers only, after every original is kept in history. */
  fun archivePending() = local.locked {
-  repository.pending()?.let { preserve(it, "已归档追加上传操作") }
+  repository.pending()?.let { preserve(it, CoreSessionMessages.APPEND_ONLY_UPLOAD_ARCHIVED.text()) }
   local.archiveLegacyPending()
   repository.clearPending()
   SafePaths.checked(applyMarker).deleteIfExists()

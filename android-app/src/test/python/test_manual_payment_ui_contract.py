@@ -19,12 +19,12 @@ class ManualPaymentUiContract(unittest.TestCase):
         for forbidden in ("sandboxPaymentSession", "showSandboxPaymentPreview", "ManualPaymentPanel",
                           "new ManualPaymentSession(", "ManualPaymentSession.AuthenticatedIdentity"):
             self.assertNotIn(forbidden, MAIN)
-        for page in ("renderDiscovery", "renderSharedSavePath", "renderSharedComparison", "renderHome"):
+        for page in ("renderDiscovery", "renderSharedSavePath", "renderHome"):
             self.assertNotIn("ManualPayment", body(MAIN, "private void " + page + "()"))
         self.assertIn("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())", MAIN)
 
     def test_minimal_read_only_appreciation_page(self):
-        self.assertIn('"沙箱"', PANEL)
+        self.assertIn('AndroidMessages.MANUAL_PAYMENT_PANEL_02.text()', PANEL)
         self.assertIn("session.paymentImage()", PANEL)
         self.assertIn("ManualPaymentCopy.expiry(view.entitlement)", PANEL)
         self.assertIn("ManualPaymentCopy.usernameRemark()", PANEL)
@@ -36,7 +36,7 @@ class ManualPaymentUiContract(unittest.TestCase):
         for source in (PANEL, COPY, FLOW, SESSION):
             for forbidden in ("我已赞赏", "待审核", "申报", "等待人工确认", "已续期"):
                 self.assertNotIn(forbidden, source)
-        for control in ('"测试连接"', '"刷新"', '"下一步"', "backLabel, back", "session.canContinue()"):
+        for control in ('AndroidMessages.MANUAL_PAYMENT_PANEL_03.text()', 'AndroidMessages.MANAGED_ACCOUNT_PANEL_06.text()', 'AndroidMessages.MANUAL_PAYMENT_PANEL_04.text()', "backLabel, back", "session.canContinue()"):
             self.assertIn(control, PANEL)
         self.assertNotIn("password", PANEL.lower())
         self.assertIn("new Date(entitlement.expiresMs)", COPY)
@@ -61,11 +61,11 @@ class ManualPaymentUiContract(unittest.TestCase):
     def test_username_display_and_explicit_clipboard_use_typed_current_identity(self):
         self.assertIn("String username = session.authenticatedUsername()", PANEL)
         self.assertIn("if (username != null)", PANEL)
-        self.assertIn('"用户名 " + username', PANEL)
-        self.assertIn('"复制用户名", session.usernameCopyAction(', PANEL)
-        self.assertIn('clipboard.setPrimaryClip(ClipData.newPlainText("用户名", currentUsername))', PANEL)
+        self.assertIn('AndroidMessages.MANAGED_ACCOUNT_PANEL_01.text() + username', PANEL)
+        self.assertIn('AndroidMessages.MANAGED_ACCOUNT_PANEL_03.text(), session.usernameCopyAction(', PANEL)
+        self.assertIn('clipboard.setPrimaryClip(ClipData.newPlainText(AndroidMessages.MANAGED_ACCOUNT_PANEL_04.text(), currentUsername))', PANEL)
         self.assertIn("ManualPaymentCopy.usernameRemark()", PANEL)
-        self.assertEqual(COPY.count('"赞赏时请备注用户名"'), 1)
+        self.assertEqual(COPY.count('AndroidMessages.MANUAL_PAYMENT_COPY_01.text()'), 1)
         for forbidden in ("EditText", "getPrimaryClip", "setTextIsSelectable", "getIntent", "动态", "必须备注", "微信输入", "setPrimaryClip("):
             if forbidden == "setPrimaryClip(":
                 self.assertEqual(PANEL.count(forbidden), 1)

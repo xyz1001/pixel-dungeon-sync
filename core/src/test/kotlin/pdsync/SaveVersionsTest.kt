@@ -8,6 +8,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.io.path.writeBytes
 import kotlin.test.*
+import pdsync.i18n.CoreMessages
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -74,7 +75,7 @@ class SaveVersionsTest {
 
  @Test fun rejectsDuplicateTopLevelVersionsIncludingEscapes() {
   listOf("""{"version":922,"version":922}""", """{"version":922,"ver\u0073ion":900}""").forEach {
-   assertContains(assertFailsWith<IllegalArgumentException> { detect(it) }.message.orEmpty(), "Duplicate")
+   assertContains(assertFailsWith<IllegalArgumentException> { detect(it) }.message.orEmpty(), CoreMessages.DUPLICATE_TOP_LEVEL_VERSION.text())
   }
   assertEquals(922, detect("""{"ver\u0073ion":922,"nested":{"version":700}}""").runs["game1"])
  }

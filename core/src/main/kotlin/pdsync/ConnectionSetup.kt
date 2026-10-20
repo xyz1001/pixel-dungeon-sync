@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import java.io.IOException
 
 /** Only fresh setup uses this automatic namespace; persisted/injected profiles remain unchanged. */
@@ -34,7 +35,8 @@ sealed interface ConnectionTestResult {
 class ConnectionSetup(
  initial: AppConfig? = null,
  private val game: String = "shattered",
- private val probe: ((ConnectionDraft) -> RemoteHead?)? = null
+ private val probe: ((ConnectionDraft) -> RemoteHead?)? = null,
+ private val beforeRequest: WebDavRequestCheck = WebDavRequestCheck {}
 ) {
  private val original = (initial ?: newConnectionConfig()).copy(saveRoot = "", version = null)
  private val lock = Any()
@@ -50,8 +52,8 @@ class ConnectionSetup(
  val lastTest: ConnectionTestResult? get() = synchronized(lock) { result }
 
  fun update(config: AppConfig, password: String) = synchronized(lock) {
-  check(!closed) { "设置窗口已关闭，请重新打开" }
-  check(!running) { "正在测试连接，请稍候" }
+  check(!closed) { CoreMessages.SETTINGS_WAS_CLOSED_PLEASE_REOPEN_IT.text() }
+  check(!running) { CoreMessages.TESTING_THE_CONNECTION_PLEASE_WAIT.text() }
   val next = ConnectionDraft(config.copy(saveRoot = "", version = null), password)
   if (next != current) {
    current = next; revision++; testedRevision = null; result = null
@@ -68,8 +70,8 @@ class ConnectionSetup(
   val draft: ConnectionDraft
   val ticket: Long
   synchronized(lock) {
-   check(!closed) { "设置窗口已关闭，请重新打开" }
-   check(!running) { "正在测试连接，请稍候" }
+   check(!closed) { CoreMessages.SETTINGS_WAS_CLOSED_PLEASE_REOPEN_IT.text() }
+   check(!running) { CoreMessages.TESTING_THE_CONNECTION_PLEASE_WAIT.text() }
    running = true; testedRevision = null; result = null
    draft = current; ticket = revision
   }
@@ -79,15 +81,15 @@ class ConnectionSetup(
    require(game.matches(Regex("[A-Za-z0-9_-]+")))
    require(!validated.config.username.contains(':'))
    val hasRemote = if (probe != null) probe.invoke(validated) != null else {
-    val store = AppendOnlyWebDav(validated.config.endpoint, game, validated.config.profile, validated.config.username, validated.password)
+    val store = AppendOnlyWebDav(validated.config.endpoint, game, validated.config.profile, validated.config.username, validated.password, beforeRequest = beforeRequest)
     if (createNamespace) store.ensureNamespace(stillCurrent)
-    check(stillCurrent()) { "连接已取消" }
+    check(stillCurrent()) { CoreMessages.CONNECTION_CANCELED.text() }
     if (store.legacyPresent()) throw LegacyProtocolException()
     val cursors = mutableSetOf<String>(); val ids = mutableSetOf<String>()
     var cursor: String? = null; var pages = 0; var listed = 0
     do {
      require(++pages <= MAX_COMMITS)
-     check(stillCurrent()) { "连接已取消" }
+     check(stillCurrent()) { CoreMessages.CONNECTION_CANCELED.text() }
      val page = store.listCommits(cursor)
      listed += page.ids.size; require(listed <= MAX_COMMITS)
      ids.addAll(page.ids); require(ids.size <= MAX_COMMITS)
@@ -99,30 +101,32 @@ class ConnectionSetup(
    ConnectionTestResult.Success(hasRemote = hasRemote)
   } catch (e: NamespaceProvisioningException) {
    ConnectionTestResult.Failure(when (e.reason) {
-    NamespaceFailureReason.ROOT_MISSING -> "这个地址下没有可用的 WebDAV 根目录（HTTP 404），请检查服务地址。不会创建上层目录。"
-    NamespaceFailureReason.NOT_COLLECTION -> "服务地址或同步路径被同名文件占用，不能用作同步文件夹。请检查 WebDAV 地址。"
-    NamespaceFailureReason.AUTHENTICATION -> "认证失败（HTTP 401），请检查用户名和密码。"
-    NamespaceFailureReason.FORBIDDEN -> "账号没有访问或创建同步目录的权限（HTTP 403），请检查 WebDAV 权限。"
-    NamespaceFailureReason.PARENT_MISSING -> "服务器找不到同步文件夹的父目录（HTTP 409），请检查服务地址及目录状态后重试。"
-    NamespaceFailureReason.HTTP_ERROR -> "服务器未接受目录创建或验证（HTTP ${e.statusCode}），请检查 WebDAV 服务后重试。"
-    NamespaceFailureReason.UNSAFE_RESPONSE -> "服务器返回的目录验证信息无效，已停止创建。请检查 WebDAV 地址及服务兼容性。"
-    NamespaceFailureReason.VERIFICATION_FAILED -> "尚不能确认同步文件夹已经创建。请重试；不会覆盖同名文件或上传存档。"
-    NamespaceFailureReason.NETWORK -> "连接中断，无法确认同步目录状态。请检查网络后重试；已创建的空文件夹会保留。"
-    NamespaceFailureReason.CANCELLED -> "连接已取消。已创建的空同步文件夹会保留。"
+    NamespaceFailureReason.ROOT_MISSING -> CoreMessages.NO_USABLE_WEBDAV_ROOT_EXISTS_AT_THIS_ADDRESS_HTTP_404_CHECK_THE_SERVICE_ADDRESS_PAREN.text()
+    NamespaceFailureReason.NOT_COLLECTION -> CoreMessages.THE_SERVICE_ADDRESS_OR_SYNC_PATH_IS_OCCUPIED_BY_A_FILE_AND_CANNOT_BE_USED_AS_A_SYNC_F.text()
+    NamespaceFailureReason.AUTHENTICATION -> CoreMessages.AUTHENTICATION_FAILED_HTTP_401_CHECK_YOUR_USERNAME_AND_PASSWORD.text()
+    NamespaceFailureReason.FORBIDDEN -> CoreMessages.THIS_ACCOUNT_CANNOT_ACCESS_OR_CREATE_THE_SYNC_DIRECTORY_HTTP_403_CHECK_WEBDAV_PERMISS.text()
+    NamespaceFailureReason.PARENT_MISSING -> CoreMessages.THE_SERVER_CANNOT_FIND_THE_SYNC_FOLDER_S_PARENT_DIRECTORY_HTTP_409_CHECK_THE_SERVICE.text()
+    NamespaceFailureReason.HTTP_ERROR -> CoreMessages.THE_SERVER_REJECTED_DIRECTORY_CREATION_OR_VERIFICATION_HTTP_1_S_CHECK_THE_WEBDAV_SERV.text(e.statusCode)
+    NamespaceFailureReason.UNSAFE_RESPONSE -> CoreMessages.THE_SERVER_RETURNED_INVALID_DIRECTORY_VERIFICATION_INFORMATION_CREATION_STOPPED_CHECK.text()
+    NamespaceFailureReason.VERIFICATION_FAILED -> CoreMessages.THE_SYNC_FOLDER_COULD_NOT_YET_BE_CONFIRMED_RETRY_EXISTING_FILES_WILL_NOT_BE_OVERWRITT.text()
+    NamespaceFailureReason.NETWORK -> CoreMessages.CONNECTION_INTERRUPTED_THE_SYNC_DIRECTORY_S_STATE_COULD_NOT_BE_CONFIRMED_CHECK_YOUR_N.text()
+    NamespaceFailureReason.CANCELLED -> CoreMessages.CONNECTION_CANCELED_ANY_EMPTY_SYNC_FOLDERS_ALREADY_CREATED_ARE_RETAINED.text()
    }, e.statusCode)
   } catch (_: LegacyProtocolException) {
-   ConnectionTestResult.Failure("发现旧版 head.json，请停用旧客户端后明确安排迁移。未上传或改写存档；本次可能已创建的空应用目录会保留。")
+   ConnectionTestResult.Failure(CoreMessages.LEGACY_HEAD_JSON_DETECTED_STOP_USING_THE_OLD_CLIENT_AND_EXPLICITLY_ARRANGE_MIGRATION.text())
   } catch (e: WebDavException) {
    ConnectionTestResult.Failure(when (e.statusCode) {
-    401 -> "认证失败（HTTP 401），请检查用户名和密码。"
-    403 -> "服务拒绝访问（HTTP 403），请检查账号权限或重新输入密码。"
-    else -> "连接测试失败（HTTP ${e.statusCode}），请检查 WebDAV 地址及服务状态。"
+    401 -> CoreMessages.AUTHENTICATION_FAILED_HTTP_401_CHECK_YOUR_USERNAME_AND_PASSWORD.text()
+    403 -> CoreMessages.ACCESS_DENIED_HTTP_403_CHECK_ACCOUNT_PERMISSIONS_OR_RE_ENTER_YOUR_PASSWORD.text()
+    else -> CoreMessages.CONNECTION_TEST_FAILED_HTTP_1_S_CHECK_THE_WEBDAV_ADDRESS_AND_SERVICE_STATUS.text(e.statusCode)
    }, e.statusCode)
+  } catch (e: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) {
+   ConnectionTestResult.Failure(e.message ?: CoreMessages.CANNOT_CONNECT_TO_WEBDAV_CHECK_YOUR_NETWORK_ADDRESS_CERTIFICATE_AND_SERVICE_STATUS_TH.text())
   } catch (_: IOException) {
-   ConnectionTestResult.Failure("无法连接 WebDAV：请检查网络、地址、证书及服务状态后重试。")
+   ConnectionTestResult.Failure(CoreMessages.CANNOT_CONNECT_TO_WEBDAV_CHECK_YOUR_NETWORK_ADDRESS_CERTIFICATE_AND_SERVICE_STATUS_TH.text())
   } catch (_: Exception) {
    // Do not echo arbitrary URL/parser/transport exceptions that might contain entered secrets.
-   ConnectionTestResult.Failure("服务地址、账号或云端目录列表无效。请检查 WebDAV 地址，使用 HTTPS（仅本机允许 HTTP）；用户名不能含冒号。")
+   ConnectionTestResult.Failure(CoreMessages.INVALID_SERVICE_ADDRESS_ACCOUNT_OR_CLOUD_DIRECTORY_LISTING_CHECK_THE_WEBDAV_ADDRESS_A.text())
   } catch (e: Throwable) {
    synchronized(lock) { running = false }
    throw e
@@ -139,8 +143,8 @@ class ConnectionSetup(
  }
 
  fun apply(configFile: ConfigFile, rememberPasswordStored: Boolean = draft.config.rememberPassword, filePassword: String? = null): AppliedConnection = synchronized(lock) {
-  check(!closed && !running && testedRevision == revision && result is ConnectionTestResult.Success) { "请先成功测试当前配置，再保存" }
-  require(!rememberPasswordStored || current.config.rememberPassword) { "未请求保存密码" }
+  check(!closed && !running && testedRevision == revision && result is ConnectionTestResult.Success) { CoreMessages.SUCCESSFULLY_TEST_THE_CURRENT_SETTINGS_BEFORE_SAVING.text() }
+  require(!rememberPasswordStored || current.config.rememberPassword) { CoreMessages.PASSWORD_SAVING_WAS_NOT_REQUESTED.text() }
   val safe = current.config.validated().copy(saveRoot = "", rememberPassword = rememberPasswordStored, password = filePassword)
   // Failed persistence leaves the tested draft available for retry, without claiming it was applied.
   configFile.save(safe)

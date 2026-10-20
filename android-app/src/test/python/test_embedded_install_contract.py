@@ -30,7 +30,8 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         prepare = body(MAIN, 'GamePreparationService.PreparedPair m58lambda$prepare$33')
         self.assertIn('getAssets().open("bridge-runtime.dex")', prepare)
         self.assertIn('prepareSelectedApks(list, z, runtimeDex)', prepare)
-        self.assertIn('原游戏代码和资源逐项保留', discovery)
+        self.assertIn('SELECT_AN_INSTALLED_APP_41.text()', discovery)
+        self.assertIn('SELECT_AN_APK_FILE_42.text()', discovery)
         self.assertNotIn('只修改共享 UID', discovery)
         self.assertNotIn('更新存档助手', discovery)
 
@@ -50,20 +51,23 @@ class EmbeddedInstallContractTest(unittest.TestCase):
     def test_installer_uses_accepted_writes_without_reading_session_storage(self):
         request = body(INSTALL, 'public void requestInstall(')
         self.assertNotIn('.openRead(', request)
-        self.assertIn('InstallSessionWriter.inspect(apks)', request)
+        self.assertIn('InstallSessionWriter.Snapshot source=validatedOutputs', request)
+        self.assertIn('InstallSessionWriter.inspect(pair.gameApks)', body(INSTALL, 'private void rememberOutputs('))
         self.assertIn('InstallSessionWriter.write(source,', request)
         self.assertIn('session.openWrite(name,0,length)', request)
         self.assertIn('session.fsync(output)', request)
-        self.assertIn('InstallSessionWriter.verifySources(source)', request)
-        self.assertLess(request.index('freshPair()'), request.index('InstallSessionWriter.inspect(apks)'))
-        self.assertLess(request.index('InstallSessionWriter.write(source,'), request.index('preparation.validatePrepared(pair)'))
-        self.assertLess(request.index('InstallSessionWriter.verifySources(source)'), request.index('session.commit('))
+        self.assertNotIn('InstallSessionWriter.verifySources(source)', request)
+        self.assertEqual(2, request.count('ValidatedPreparationCache.requireUnchanged(pair)'))
+        self.assertLess(request.index('freshPair()'), request.index('InstallSessionWriter.write(source,'))
+        self.assertLess(request.index('InstallSessionWriter.write(source,'), request.rindex('ValidatedPreparationCache.requireUnchanged(pair)'))
+        self.assertLess(request.rindex('ValidatedPreparationCache.requireUnchanged(pair)'), request.index('session.commit('))
         self.assertLess(request.index('InstallSessionWriter.requireNames('), request.index('session.commit('))
         self.assertIn('installer!=null && sessionId>=0', request)
         self.assertIn('installer.abandonSession(sessionId)', request)
         self.assertNotIn('getMySessions', request)
-        self.assertIn('PackageTrust.signer(packageInfoInstalled)', body(INSTALL, 'public void reconcile()'))
-        self.assertIn('PackageTrust.apkSetSha256(PackageTrust.installedApks(packageInfoInstalled))', body(INSTALL, 'public void reconcile()'))
+        result = body(INSTALL, 'private void reconcileRequest()')
+        self.assertIn('InstalledBridgeResolver.resolve(context, strPendingPackage)', result)
+        self.assertNotIn('PackageTrust.apkSetSha256(', result)
 
     def test_installer_diagnostics_are_copyable_plain_text_and_stage_specific(self):
         request = body(INSTALL, 'public void requestInstall(')
@@ -78,32 +82,32 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         self.assertIn('this.diagnosticReport = InstallDiagnostics.report(installFailure)', capture)
         self.assertIn('installFailure.userMessage()', body(MAIN, 'private String safeError('))
 
-    def test_single_real_readiness_state_never_fakes_helper_verification(self):
+    def test_single_real_readiness_state_uses_pure_installed_handshake(self):
         readiness = body(MAIN, 'private void readInstallationReadiness()')
-        self.assertIn('InstallationReadiness.embedded(gameStatus, targetVerified,', readiness)
-        self.assertNotIn('helperStatus', readiness)
-        self.assertIn('bridge.targetGame()', readiness)
-        self.assertLess(readiness.index('bridge.targetGame()'), readiness.index('targetVerified = true'))
-        self.assertIn('bridge.inspectReady()', readiness)
+        self.assertIn('InstalledBridgeResolver.resolve', readiness)
+        self.assertIn('authenticateInstalledBridge(this.installedBridge)', readiness)
+        handshake = body(MAIN, 'private void authenticateInstalledBridge(')
+        self.assertIn('.authenticateAccess()', handshake)
+        self.assertNotIn('.inspectReady()', handshake)
+        self.assertIn('this.readinessState.withAccessCode(this.bridgeAccessCode)', handshake)
 
-    def test_uninstall_requires_fresh_preparation_identity_and_explicit_loss_warning(self):
+    def test_uninstall_consent_uses_prevalidated_session_and_actual_reason(self):
         request = body(INSTALL, 'public void requestUninstall(')
-        self.assertLess(request.index('freshPair()'), request.index('.uninstall('))
-        self.assertLess(request.index('uninstallConsentReceipt('), request.index('.uninstall('))
-        self.assertLess(request.index('hasUnresolvedRestore('), request.index('.uninstall('))
-        self.assertIn('不可逆地永久删除全部本地存档和战绩', INSTALL)
-        self.assertIn('APK 备份不是存档备份', INSTALL)
+        for guard in ('ValidatedPreparationCache.requireUnchanged', 'approvedUninstallReceipt.equals(str2)',
+                      'targetStamp(str).equals(approvedTargetStamp)', 'hasUnresolvedRestore('):
+            self.assertLess(request.index(guard), request.index('.uninstall('))
+        for expensive in ('freshPair()', 'validatePrepared(', 'apkSetSha256(', 'identity(str)'):
+            self.assertNotIn(expensive, request)
         consent = body(INSTALL, 'public String uninstallConsentReceipt(')
-        self.assertIn('validatePrepared(pair)', consent)
-        self.assertIn('PackageTrust.apkSetSha256(pair.gameApks)', consent)
         self.assertIn('identity(packageName)', consent)
-        self.assertIn('InstallCoordinator.LOSS_WARNING', method('m39x9de049ed'))
+        self.assertIn('rememberOutputs(pair)', consent)
+        self.assertIn('InstallUiCopy.uninstallWarning(next.pair.gameStrategyReason)', method('m39x9de049ed'))
 
     def test_resumed_uninstall_token_rechecks_original_and_prepared_contents(self):
         resume = body(INSTALL, 'public PendingIntent confirmationToken()')
-        for guard in ('freshPair()', 'isGame(', 'identity(pendingPackage())', 'uninstallPreparedApkSet', 'uninstallOrigin', 'hasUnresolvedRestore('):
+        for guard in ('freshPair()', 'isGame(', 'targetStamp(pendingPackage())', 'uninstallPreparedApkSet', 'uninstallOrigin', 'hasUnresolvedRestore('):
             self.assertIn(guard, resume)
-        self.assertLess(resume.index('uninstallPreparedApkSet'), resume.index('SystemConfirmationToken.find'))
+        self.assertLess(resume.index('uninstallPreparedApkSet'), resume.index('return pendingIntentFind'))
 
     def test_uncertain_commit_and_uninstall_cancellation_are_not_replayed(self):
         request = body(INSTALL, 'public void requestInstall(')
@@ -112,7 +116,7 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         cancellation = body(INSTALL, 'public void cancelSession()')
         self.assertLess(cancellation.index('"uninstall"'), cancellation.index('abandonSession('))
         self.assertIn('throw new IOException', cancellation)
-        self.assertIn('系统确认尚未结束，不能当作原应用已保留', cancellation)
+        self.assertIn('AndroidMessages.INSTALL_COORDINATOR_72.text()', cancellation)
 
     def test_expired_legacy_cleanup_does_not_require_installable_embedded_pair(self):
         cleanup = body(INSTALL, 'public void acknowledgeExpiredRequest(')
@@ -140,14 +144,18 @@ class EmbeddedInstallContractTest(unittest.TestCase):
         self.assertIn('.remove("operation")', reset)
         self.assertNotIn('gameRemoved', reset)
         ui = body(MAIN, 'private void confirmObsoleteLegacyCleanup()')
-        self.assertIn('先在 Android 旧安装／卸载对话框点击取消并关闭', ui)
+        self.assertIn('FIRST_TAP_CANCEL_AND_CLOSE_THE_62.text()', ui)
         self.assertIn('cancelObsoleteLegacyRequest(true)', ui)
         discovery = body(MAIN, 'private SharedGameSelectionState gameSelectionState()')
-        self.assertIn('this.installer.hasConfirmation() && !obsolete', discovery)
+        self.assertIn('if (active && this.installer.hasConfirmation())', discovery)
+        self.assertIn('OPEN_SYSTEM_CONFIRMATION', discovery)
 
     def test_runtime_binding_rechecked_after_successful_reply(self):
         exchange = body(CLIENT, 'private Bundle exchange(')
-        self.assertEqual(2, exchange.count('PackageTrust.requireBridgeForExchange('))
+        self.assertEqual(2, exchange.count('requireTrust("authenticate".equals(operation))'))
+        gate = body(CLIENT, 'private boolean requireTrust(')
+        for required in ('InstalledBridgeResolver.requireUnchanged', 'PackageTrust.requireBridgeForExchange', 'PackageTrust.requireBridgeForAccess'):
+            self.assertIn(required, gate)
         for field in ('bridgeMode', 'bridgeRuntimeVersion', 'providerPackage'):
             self.assertIn(field, exchange)
         self.assertIn('REPLY_IDENTITY_MISMATCH', exchange)

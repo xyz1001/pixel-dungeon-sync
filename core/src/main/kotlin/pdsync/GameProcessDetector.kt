@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.attribute.BasicFileAttributes
@@ -123,12 +124,12 @@ class GameProcessDetector(
  fun isStopped(): Boolean = status() == GameProcessStatus.Stopped
 
  @Synchronized fun status(): GameProcessStatus {
-  if (platform == GameProcessPlatform.UNSUPPORTED) return GameProcessStatus.Unknown("当前系统不支持自动进程检查")
-  if (target == null || !target.trusted) return GameProcessStatus.Unknown("请先选择可识别版本的 Shattered 游戏 JAR")
+  if (platform == GameProcessPlatform.UNSUPPORTED) return GameProcessStatus.Unknown(CoreMessages.AUTOMATIC_PROCESS_CHECKS_ARE_NOT_SUPPORTED_ON_THIS_SYSTEM.text())
+  if (target == null || !target.trusted) return GameProcessStatus.Unknown(CoreMessages.FIRST_SELECT_A_SHATTERED_GAME_JAR_WITH_A_RECOGNIZABLE_VERSION.text())
   val targetPath = resolvePath(target.path, null, platform)
-   ?: return GameProcessStatus.Unknown("无法确认所选游戏 JAR 的路径")
+   ?: return GameProcessStatus.Unknown(CoreMessages.CANNOT_VERIFY_THE_SELECTED_GAME_JAR_S_PATH.text())
   val observations = try { listOf(inventory.snapshot(), inventory.snapshot()) }
-   catch (_: Exception) { return GameProcessStatus.Unknown("无法完整读取游戏进程状态") }
+   catch (_: Exception) { return GameProcessStatus.Unknown(CoreMessages.CANNOT_FULLY_READ_GAME_PROCESS_STATUS.text()) }
   val running = linkedSetOf<Long>()
   var uncertain = observations.any { !it.complete }
   val relevant = mutableListOf<Map<Long, Pair<String?, Match>>>()
@@ -163,7 +164,7 @@ class GameProcessDetector(
    associated.keys.retainAll(alive)
   }
   if (running.isNotEmpty()) return GameProcessStatus.Running(running)
-  if (uncertain || relevant[0] != relevant[1]) return GameProcessStatus.Unknown("无法确认游戏已退出：部分进程或启动参数不可见，请关闭游戏后重试")
+  if (uncertain || relevant[0] != relevant[1]) return GameProcessStatus.Unknown(CoreMessages.CANNOT_CONFIRM_THAT_THE_GAME_HAS_EXITED_SOME_PROCESSES_OR_LAUNCH_ARGUMENTS_ARE_HIDDEN.text())
   return GameProcessStatus.Stopped
  }
 

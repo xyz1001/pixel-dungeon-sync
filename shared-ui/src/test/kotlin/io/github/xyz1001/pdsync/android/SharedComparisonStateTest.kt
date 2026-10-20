@@ -74,7 +74,7 @@ class SharedComparisonStateTest {
             assertEquals(SharedComparisonPrimary.FINISH, state.primary)
             assertFalse(state.showsBack)
             assertNull(state.activeConfirmation)
-            assertEquals("两边进度相同", state.headline)
+            assertEquals("进度已同步", state.headline)
             val host = Host(state)
             SharedComparisonPrimary.entries.forEach(host.interactions::performPrimary)
             host.interactions.back()

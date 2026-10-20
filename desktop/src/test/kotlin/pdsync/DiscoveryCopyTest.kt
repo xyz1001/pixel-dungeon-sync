@@ -41,7 +41,7 @@ class DiscoveryCopyTest {
  }
  @Test fun absentAndUnsafeDirectoriesRemainDistinct() {
   for (reason in listOf("未找到默认存档目录。", "无法安全检查默认存档目录：拒绝符号链接")) {
-   val message = DiscoveryCopy.directory(DefaultSaveDiscovery("fixture", false, reason))
+   val message = DiscoveryCopy.directory(DefaultSaveDiscovery("fixture", false, reason, if (reason == "未找到默认存档目录。") DefaultSaveDiscoveryReason.MISSING else DefaultSaveDiscoveryReason.UNAVAILABLE))
    assertEquals(if (reason == "未找到默认存档目录。") "本机存档：目录尚未创建" else "本机存档：暂无法检查", message)
   }
  }

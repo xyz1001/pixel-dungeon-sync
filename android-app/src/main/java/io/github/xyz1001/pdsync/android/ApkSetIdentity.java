@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -16,12 +18,12 @@ public final class ApkSetIdentity {
 
     public static String digest(List<String> list) {
         if (list == null || list.isEmpty()) {
-            throw new IllegalArgumentException("Empty APK set");
+            throw new IllegalArgumentException(AndroidMessages.APK_SET_IDENTITY_01.text());
         }
         ArrayList<String> arrayList = new ArrayList(list);
         for (String str : arrayList) {
             if (str == null || !str.matches("[0-9a-f]{64}")) {
-                throw new IllegalArgumentException("Invalid APK digest");
+                throw new IllegalArgumentException(AndroidMessages.APK_SET_IDENTITY_02.text());
             }
         }
         Collections.sort(arrayList);

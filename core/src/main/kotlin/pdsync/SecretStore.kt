@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -18,14 +19,15 @@ interface SecureCredentialStore {
  fun delete(endpoint: String, username: String): SecretWriteResult
 }
 
-enum class SecretStoreFailure(val message: String) {
- UNAVAILABLE("系统安全凭据服务不可用；密码仅供本次会话使用，未写入普通配置。"),
- LOCKED("系统凭据库已锁定或拒绝访问。请在系统中解锁后重试；密码未写入普通配置。"),
- TIMEOUT("系统凭据服务未及时响应，无法确认操作结果。请解锁凭据库后重试。"),
- INVALID_INPUT("服务地址或账号无效，未访问系统凭据库。"),
- PASSWORD_TOO_LONG("密码超过安全存储支持的 1024 字节；仅供本次会话使用。"),
- INVALID_SECRET("已保存的凭据格式无效，未使用它。请重新输入密码。"),
- FAILED("系统凭据操作失败，无法确认操作结果；未将密码写入普通配置。")
+enum class SecretStoreFailure(private val label: pdsync.i18n.UiText) {
+ UNAVAILABLE(CoreMessages.THE_SYSTEM_SECURE_CREDENTIAL_SERVICE_IS_UNAVAILABLE_YOUR_PASSWORD_IS_USED_ONLY_FOR_TH),
+ LOCKED(CoreMessages.THE_SYSTEM_CREDENTIAL_STORE_IS_LOCKED_OR_ACCESS_WAS_DENIED_UNLOCK_IT_IN_YOUR_SYSTEM_A),
+ TIMEOUT(CoreMessages.THE_SYSTEM_CREDENTIAL_SERVICE_DID_NOT_RESPOND_IN_TIME_THE_OPERATION_RESULT_IS_UNKNOWN),
+ INVALID_INPUT(CoreMessages.INVALID_SERVICE_ADDRESS_OR_ACCOUNT_THE_SYSTEM_CREDENTIAL_STORE_WAS_NOT_ACCESSED),
+ PASSWORD_TOO_LONG(CoreMessages.YOUR_PASSWORD_EXCEEDS_SECURE_STORAGE_S_1024_BYTE_LIMIT_AND_IS_USED_ONLY_FOR_THIS_SESS),
+ INVALID_SECRET(CoreMessages.THE_SAVED_CREDENTIAL_HAS_AN_INVALID_FORMAT_AND_WAS_NOT_USED_ENTER_YOUR_PASSWORD_AGAIN),
+ FAILED(CoreMessages.THE_SYSTEM_CREDENTIAL_OPERATION_FAILED_AND_ITS_RESULT_IS_UNKNOWN_YOUR_PASSWORD_WAS_NO);
+ val message: String get() = label.text()
 }
 
 sealed interface SecretReadResult {

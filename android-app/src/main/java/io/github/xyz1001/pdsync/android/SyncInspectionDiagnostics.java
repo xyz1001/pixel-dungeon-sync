@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -11,23 +13,23 @@ public final class SyncInspectionDiagnostics {
     private SyncInspectionDiagnostics() {}
 
     public enum Stage {
-        RUNTIME("runtime", "初始化同步运行时"),
-        INSPECT("inspect", "读取并比较存档"),
-        HISTORY("history", "生成存档历史");
+        RUNTIME("runtime", AndroidMessages.SYNC_INSPECTION_DIAGNOSTICS_01),
+        INSPECT("inspect", AndroidMessages.SYNC_INSPECTION_DIAGNOSTICS_02),
+        HISTORY("history", AndroidMessages.SYNC_INSPECTION_DIAGNOSTICS_03);
 
-        final String label, description;
-        Stage(String label, String description) { this.label = label; this.description = description; }
+        final String label;
+        final pdsync.i18n.UiText description;
+        Stage(String label, pdsync.i18n.UiText description) { this.label = label; this.description = description; }
     }
 
     public static final class Failure extends IOException {
         final Stage stage;
         private Failure(Stage stage, Exception cause) {
-            super("Sync inspection stage: " + stage.label, cause);
+            super(AndroidMessages.SYNC_INSPECTION_DIAGNOSTICS_04.text() + stage.label, cause);
             this.stage = stage;
         }
         public String userMessage() {
-            return "同步检查未完成：" + stage.description + "（" + stage.label
-                    + "）失败。请复制脱敏诊断查看具体原因。";
+            return AndroidMessages.SYNC_INSPECTION_FAILED.text(stage.description.text(), stage.label);
         }
     }
 

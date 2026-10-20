@@ -1,5 +1,6 @@
 package io.github.xyz1001.pdsync.android
 
+import pdsync.i18n.SharedMessages
 import pdsync.NoviceCopy
 import pdsync.OnboardingKind
 
@@ -17,7 +18,7 @@ data class SharedComparisonState(
     val configured: Boolean = false,
     val busy: Boolean = false,
     val game: SharedGameIdentity? = null,
-    val localLabel: String = "本机",
+    val localLabel: String = SharedMessages.LOCAL.text(),
     val localDetails: String = "",
     val localFileCount: Int? = null,
     val remoteChoices: List<SharedComparisonRemoteChoice> = emptyList(),
@@ -130,25 +131,25 @@ internal fun SharedComparisonState.offers(choice: SharedProgressChoice): Boolean
 
 internal val SharedComparisonState.headline: String
     get() = when {
-        needsRestoreRecovery -> "上次恢复尚未完成，请先检查。"
-        retryablePending -> "上次上传尚未完成，请重试上传。"
-        !hasObservation -> if (busy) "正在检查存档…" else "尚未完成检查，请重试。"
-        completion == SharedComparisonCompletion.EMPTY -> if (feedbackError) "配置尚未完成" else "配置完成"
-        isSimpleCompletion && kind == OnboardingKind.IDENTICAL -> "两边进度相同"
-        kind == OnboardingKind.IDENTICAL -> "尚未完成检查，请重试。"
-        kind == OnboardingKind.LOCAL_ONLY -> "本机有存档"
-        kind == OnboardingKind.REMOTE_ONLY -> "云端有存档"
-        kind == OnboardingKind.DIFFERENT && canKeepLocalProgress -> "选择要继续的进度"
-        else -> "本机与云端进度不同"
+        needsRestoreRecovery -> SharedMessages.UNFINISHED_RESTORE.text()
+        retryablePending -> SharedMessages.UNFINISHED_UPLOAD.text()
+        !hasObservation -> if (busy) SharedMessages.CHECKING_SAVES.text() else SharedMessages.CHECK_INCOMPLETE.text()
+        completion == SharedComparisonCompletion.EMPTY -> if (feedbackError) SharedMessages.SETUP_INCOMPLETE.text() else SharedMessages.SETUP_COMPLETE.text()
+        isSimpleCompletion && kind == OnboardingKind.IDENTICAL -> SharedMessages.PROGRESS_SYNCED.text()
+        kind == OnboardingKind.IDENTICAL -> SharedMessages.CHECK_INCOMPLETE.text()
+        kind == OnboardingKind.LOCAL_ONLY -> SharedMessages.LOCAL_HAS_SAVE.text()
+        kind == OnboardingKind.REMOTE_ONLY -> SharedMessages.CLOUD_HAS_SAVE.text()
+        kind == OnboardingKind.DIFFERENT && canKeepLocalProgress -> SharedMessages.CHOOSE_PROGRESS.text()
+        else -> SharedMessages.PROGRESS_DIFFERS.text()
     }
 
 internal val SharedComparisonState.primaryLabel: String
     get() = when (primary) {
-        SharedComparisonPrimary.FINISH -> "完成"
-        SharedComparisonPrimary.HANDLE_CONFLICT -> "处理冲突"
-        SharedComparisonPrimary.REFRESH -> "重新检查"
-        SharedComparisonPrimary.RETRY_UPLOAD -> "重试上传"
-        SharedComparisonPrimary.OPEN_RECOVERY -> "检查恢复"
+        SharedComparisonPrimary.FINISH -> SharedMessages.FINISH.text()
+        SharedComparisonPrimary.HANDLE_CONFLICT -> SharedMessages.HANDLE_CONFLICT.text()
+        SharedComparisonPrimary.REFRESH -> SharedMessages.RECHECK.text()
+        SharedComparisonPrimary.RETRY_UPLOAD -> SharedMessages.RETRY_UPLOAD.text()
+        SharedComparisonPrimary.OPEN_RECOVERY -> SharedMessages.CHECK_RECOVERY.text()
     }
 
 internal val SharedComparisonState.confirmationPresentation: SharedConfirmationState?
@@ -157,14 +158,15 @@ internal val SharedComparisonState.confirmationPresentation: SharedConfirmationS
         val writesAllowed = canInteract && configured && restoreSupported && hasUsableObservation
         SharedConfirmationState(
             token = confirmation.token,
-            title = if (review) "确认合并" else "如何处理冲突？",
+            title = if (review) SharedMessages.CONFIRM_MERGE.text() else SharedMessages.CONFLICT_TITLE.text(),
             message = confirmation.message,
-            confirmLabel = if (review) "合并并上传" else "覆盖本机",
+            confirmLabel = if (review) SharedMessages.MERGE_UPLOAD.text() else SharedMessages.OVERWRITE_LOCAL.text(),
             confirmEnabled = writesAllowed && if (review) confirmation.canApplyMerge else hasSelectedRemote,
-            secondaryLabel = if (!review && confirmation.canPreviewMerge) "合并" else null,
+            secondaryLabel = if (!review && confirmation.canPreviewMerge) SharedMessages.MERGE.text() else null,
             secondaryEnabled = writesAllowed && confirmation.canPreviewMerge,
             busy = busy || !pageActive,
             details = confirmation.details,
+            destructive = !review,
         )
     }
 

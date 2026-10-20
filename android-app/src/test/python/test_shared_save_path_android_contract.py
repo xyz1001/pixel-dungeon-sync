@@ -1,7 +1,7 @@
-"""Android Step 2 source wiring; no claim of device/lifecycle execution.
+"""Standalone legacy preview safety; no claim of device/lifecycle execution.
 
 Production request lifecycle is executed by PathPreviewStateChecks and shared UI by JVM tests.
-These assertions cover the platform seam and retain the existing save-access proof.
+The wizard does not mount this screen. Its private preview helpers retain save-access proof.
 """
 import unittest
 from pathlib import Path
@@ -14,18 +14,21 @@ SCREEN = (REPO / "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/Sha
 
 
 class SharedSavePathAndroidContract(unittest.TestCase):
-    def test_actual_shared_screen_routes_before_all_native_views(self):
+    def test_removed_setup_step_is_not_mounted_by_render(self):
         route = body(MAIN, "public void render()")
-        shared = body(route, "if (this.page == SyncPage.PATH)")
-        self.assertIn("renderSharedSavePath()", shared)
-        self.assertIn("return;", shared)
-        self.assertLess(route.index(shared), route.index("ScrollView scrollView"))
-        self.assertNotIn("private void renderPath()", MAIN)
+        self.assertIn("AndroidUiFlowPolicy.currentPage(this.page)", route)
+        for removed in ("renderSharedSavePath()", "schedulePathPreviewEntry()", "previewPath("):
+            self.assertNotIn(removed, route)
+        forward = body(MAIN, "void m103x3c55a874()")
+        self.assertNotIn("SyncPage.PATH", forward)
+        self.assertNotIn("previewPath(", forward)
+        self.assertIn("renderSharedConnection()", route)
+        # This standalone, read-only adapter remains usable without becoming a setup route.
         self.assertIn("activity.setContent", ADAPTER)
         self.assertIn("SharedSavePathScreen(state, actions, game)", ADAPTER)
-        self.assertIn("Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding())", ADAPTER)
-        for native in ("renderDiscovery()", "renderHome()"):
-            self.assertIn(native, route)
+        self.assertIn("AndroidAppViewport {", ADAPTER)
+        for renderer in ("renderDiscovery()", "renderHome()"):
+            self.assertIn(renderer, route)
 
     def test_android_is_read_only_and_uses_resolved_path_and_actual_summary(self):
         for capability in ("editable = false", "canChooseDirectory = false", "canUseDefault = false"):
@@ -74,7 +77,14 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         for lifecycle in ("protected void onPause()", "protected void onDestroy()"):
             self.assertIn("invalidatePathPreview()", body(MAIN, lifecycle))
         self.assertIn("removeCallbacks(this.pathPreviewEntry)", body(MAIN, "private void cancelPathPreviewEntry()"))
-        for forbidden in ("LaunchedEffect", "SideEffect", "previewPath", "requestRootAuthorization"):
+        # The settings-only modal may request initial text focus, but no composable starts a
+        # save read or authorization. The display-only path screen remains effect-free.
+        standalone = SCREEN.split("/** Settings-only editor.")[0]
+        for forbidden in ("LaunchedEffect(", "SideEffect(", "previewPath", "requestRootAuthorization"):
+            self.assertNotIn(forbidden, ADAPTER + standalone)
+        self.assertEqual(1, SCREEN.count("LaunchedEffect("))
+        self.assertIn("LaunchedEffect(Unit) { if (state.editable && !state.busy) focusRequester.requestFocus() }", SCREEN)
+        for forbidden in ("previewPath", "requestRootAuthorization", "SaveSummary.read", "Files.", ".inspect("):
             self.assertNotIn(forbidden, ADAPTER + SCREEN)
 
     def test_callbacks_require_current_render_foreground_page_and_real_preview(self):
@@ -84,10 +94,10 @@ class SharedSavePathAndroidContract(unittest.TestCase):
             self.assertIn(condition, guard)
         render = body(MAIN, "private void renderSharedSavePath()")
         self.assertIn("++this.sharedPathRenderToken", render)
-        self.assertEqual(render.count("isCurrentPathAction(renderToken)"), 5)
+        self.assertEqual(render.count("isCurrentPathAction(renderToken)"), 4)
         self.assertIn("requestPathNext()", render)
         self.assertIn("selectedGameIdentity()", render)
-        for callback in ("m108xe2dc5156()", "m109x58567797()", "requestPathNext()", "launchGameForInitialization()", "copyDiagnostic()"):
+        for callback in ("m108xe2dc5156()", "m109x58567797()", "requestPathNext()", "launchGameForInitialization()"):
             self.assertIn(callback, render)
 
     def test_existing_root_proof_private_export_and_global_lock_remain(self):
@@ -175,20 +185,17 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         self.assertIn("this.pathPreviewState.failed() && !readyForSaves()", next_action)
         self.assertIn("m108xe2dc5156()", next_action)
         readiness = body(MAIN, "void m108xe2dc5156()")
-        self.assertIn("requestRootAuthorization()", readiness)
+        self.assertIn("else if (this.rootGame != null) previewPath(false)", readiness)
         self.assertIn("refreshReadiness()", readiness)
 
-    def test_diagnostics_stay_optional_and_use_existing_copy_callback(self):
+    def test_android_diagnostics_are_only_global_export(self):
         render = body(MAIN, "private void renderSharedSavePath()")
-        self.assertIn("pathNotice, this.details", render)
-        self.assertIn("!this.diagnosticReport.isEmpty()", render)
-        self.assertIn("copyDiagnostic()", render)
+        self.assertIn('pathNotice, ""', render)
+        self.assertNotIn('!this.diagnosticReport.isEmpty()', render)
+        self.assertNotIn('copyDiagnostic()', render)
+        self.assertIn('wizardDiagnosticExport', MAIN)
+        # Shared optional details remain available to desktop; Android passes empty/false.
         self.assertIn("canCopyDiagnostics = canCopyDiagnostics", ADAPTER)
-        expanded = body(SCREEN, "if (detailsExpanded) {")
-        self.assertIn("Text(details,", expanded)
-        self.assertIn("state.details", SCREEN)
-        self.assertIn("SharedSavePathControl.COPY_DIAGNOSTICS", expanded)
-        self.assertNotIn("COPY_DIAGNOSTICS", SCREEN.replace(expanded, ""))
 
 
 if __name__ == "__main__":

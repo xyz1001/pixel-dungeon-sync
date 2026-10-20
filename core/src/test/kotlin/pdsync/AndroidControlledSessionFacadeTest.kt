@@ -13,7 +13,7 @@ import kotlin.test.*
 /** Exercises the same separate activity/service facades used by Android with gzip game bundles. */
 class AndroidControlledSessionFacadeTest {
  @TempDir lateinit var temp:Path
- private val identity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic","a".repeat(64),"test")
+ private val identity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic","a".repeat(64))
  private val connection=AndroidConnection("https://dav.example.test/","user","synthetic","test")
  private var ticks=0L
  private val sessions=AndroidControlledSessions {ticks}

@@ -12,7 +12,7 @@ if [[ ! -f "$CORE" ]]; then
 fi
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/pdsync-game-access.XXXXXXXX")
 trap 'rm -rf "$OUT"' EXIT
-"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$CORE" -d "$OUT" \
+"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 17 -target 17 -cp "$CORE" -d "$OUT" \
   "$SRC/GameAccessBackend.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/GameAccessBackendChecks.java"
-"$JAVA" -cp "$OUT:$CORE" io.github.xyz1001.pdsync.android.GameAccessBackendChecks
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT:$CORE" io.github.xyz1001.pdsync.android.GameAccessBackendChecks

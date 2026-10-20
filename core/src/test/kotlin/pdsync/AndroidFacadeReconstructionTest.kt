@@ -24,7 +24,7 @@ class AndroidFacadeReconstructionTest {
     @TempDir lateinit var temp: Path
     private var sequence = 0
     private val identity = AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon", "Synthetic Shattered",
-        "a".repeat(64), "android-test", AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896))
+        "a".repeat(64), AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896))
     private val connection = AndroidConnection("https://dav.example.test/synthetic/", "synthetic", "test-only", "hero")
     private fun gzip(text: String): ByteArray = ByteArrayOutputStream().also { bytes ->
         GZIPOutputStream(bytes).use { it.write(text.encodeToByteArray()) }
@@ -94,7 +94,7 @@ class AndroidFacadeReconstructionTest {
         val attr = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
         root.relativize(path).toString() to "${attr.fileKey()}:${attr.lastModifiedTime()}:${attr.size()}:${if (attr.isRegularFile) hash(path.readBytes()) else "directory"}"
     } }
-    private fun journal(root: Path): Path = root.resolve("restore-journals/${identity.originalSourceIdentity}.json")
+    private fun journal(root: Path): Path = root.resolve("restore-journals/${AndroidGameIdentity.LOCAL_STATE_GENERATION}/${identity.originalSourceIdentity}.json")
     private fun publish(bridge: FakeBridge, store: MemoryAppendStore): Rig = rig(bridge, store).also {
         assertEquals("UPLOADED", it.facade.autoUpload().status)
     }
@@ -209,6 +209,39 @@ class AndroidFacadeReconstructionTest {
         bridge.failRestore = false; migrated.recoverRestore()
         assertFalse(migrated.hasUnresolvedRestore())
         assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
+    }
+
+    @Test fun freshBuiltInSetupPreparesMissingNamespaceThenPerformsRealComparisonWithoutUpload() {
+        val bridge = FakeBridge()
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            val directories = mutableSetOf("/")
+            server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+                    val path = requireNotNull(request.path)
+                    return when (request.method) {
+                        "PROPFIND" -> if (path !in directories) okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                            else okhttp3.mockwebserver.MockResponse().setResponseCode(207).setBody(
+                                """<d:multistatus xmlns:d="DAV:"><d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>""")
+                        "MKCOL" -> { directories += path; okhttp3.mockwebserver.MockResponse().setResponseCode(201) }
+                        "GET" -> okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                        else -> okhttp3.mockwebserver.MockResponse().setResponseCode(405)
+                    }
+                }
+            }
+            server.start()
+            val actualConnection = AndroidConnection(server.url("/").toString(), "", "", "hero")
+            val facade = AndroidSyncFacade(temp.resolve("fresh-built-in"), actualConnection, bridge, identity)
+            assertTrue(facade.connect().isSuccess)
+            val comparison = facade.inspect()
+            assertEquals("LOCAL_ONLY", comparison.kind)
+            assertEquals(2, comparison.localFileCount)
+            assertTrue(comparison.remoteVersions.isEmpty())
+            val requests = List(server.requestCount) { server.takeRequest() }
+            assertEquals(listOf("/${identity.namespace}/", "/${identity.namespace}/hero/"),
+                requests.filter { it.method == "MKCOL" }.map { it.path })
+            assertTrue(requests.all { it.method in setOf("PROPFIND", "MKCOL", "GET") })
+            assertEquals(0, bridge.restores)
+        }
     }
 
     @Test fun freshEmptyMirrorWithThreeLocalSlotsAndEmptyDavComparesWithoutAnyPut() {
@@ -485,7 +518,7 @@ class AndroidFacadeReconstructionTest {
         bridge.target = bridge.target.copy(apkSha256 = "e".repeat(64)); bridge.failRestore = false
         val reopened = rig(bridge, store, rig.root).facade; val restores = bridge.restores
         assertFails { reopened.recoverRestore() }; assertTrue(reopened.hasUnresolvedRestore()); assertEquals(restores, bridge.restores)
-        val other = identity.copy(originalSourceIdentity = "f".repeat(64), namespace = "other-game")
+        val other = identity.copy(originalSourceIdentity = "f".repeat(64), packageName = "org.example.other")
         bridge.target = bridge.target.copy(identity = other)
         val switched = rig(bridge, store, rig.root, other).facade
         assertTrue(switched.inspect().needsRestoreRecovery); assertFails { switched.discardInterruptedRestore() }

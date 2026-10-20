@@ -5,6 +5,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import pdsync.i18n.CoreMessages
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
@@ -172,7 +173,7 @@ class InstalledGameDiscoveryTest {
   java.io.RandomAccessFile(file.toFile(), "rw").use { it.setLength(ShatteredInstallationDiscovery.MAX_INPUT_BYTES.toLong() + 1) }
   val result = ShatteredInstallationDiscovery(context(), listOf(root(temp))).discover()
   assertNull(result.candidates.single().target); assertTrue(result.incomplete)
-  assertContains(result.candidates.single().reason, "input limit")
+  assertContains(result.candidates.single().reason, CoreMessages.TARGET_JAR_EXCEEDS_THE_1_S_BYTE_INPUT_LIMIT.text(ShatteredInstallationDiscovery.MAX_INPUT_BYTES))
  }
 
  @Test fun stricterTargetBudgetChecksDeclaredExpandedSizeBeforeDecompression() {

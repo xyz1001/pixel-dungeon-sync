@@ -1,25 +1,28 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 /** Closed, credential-free reasons for UI and automatic-sync decisions. */
-enum class SyncBlockReason(val safeMessage: String) {
- RESTORE_RECOVERY_REQUIRED("An interrupted restore needs verification or recovery."),
- LEGACY_PENDING_UPLOAD("A legacy pending snapshot needs an explicit decision."),
- PENDING_UPLOAD("A frozen pending upload needs an explicit decision."),
- SAVE_NOT_STABLE("The game state or save files are not stable enough to sync."),
- LEGACY_REMOTE_PROTOCOL("The cloud uses the legacy sync protocol."),
- REMOTE_INCOMPLETE("Cloud history contains missing, incomplete or unverifiable data."),
- REMOTE_INTEGRITY_FAILED("Immutable cloud history failed integrity verification."),
- UNSUPPORTED_SAVE_FORMAT("The save format is unsupported or unreadable."),
- TARGET_CHANGED("The selected game, installed build or source binding changed."),
- TARGET_UNVERIFIED("The selected game or helper identity could not be verified."),
- BRIDGE_UNAVAILABLE("The game helper could not complete the requested operation."),
- FIRST_LAUNCH_NEEDED("Launch the selected game once and exit normally before syncing."),
- COMPARISON_FAILED("A safe comparison could not be completed."),
- BASELINE_UNVERIFIED("The sync baseline could not be related to the observed cloud history."),
- REMOTE_ONLY("Cloud saves exist but this device has no local save to upload."),
- HISTORY_CONFLICT("Local and cloud histories require an explicit choice."),
- INTERRUPTED("The sync check was interrupted."),
- UPLOAD_NOT_CONFIRMED("The upload is not confirmed; any frozen snapshot remains available for retry.");
+enum class SyncBlockReason(private val label: pdsync.i18n.UiText) {
+ RESTORE_RECOVERY_REQUIRED(CoreMessages.VALIDATION_AN_INTERRUPTED_RESTORE_NEEDS_VERIFICATION_OR_RECOVERY),
+ LEGACY_PENDING_UPLOAD(CoreMessages.VALIDATION_A_LEGACY_PENDING_SNAPSHOT_NEEDS_AN_EXPLICIT_DECISION),
+ PENDING_UPLOAD(CoreMessages.VALIDATION_A_FROZEN_PENDING_UPLOAD_NEEDS_AN_EXPLICIT_DECISION),
+ SAVE_NOT_STABLE(CoreMessages.VALIDATION_THE_GAME_STATE_OR_SAVE_FILES_ARE_NOT_STABLE_ENOUGH_TO_SYNC),
+ LEGACY_REMOTE_PROTOCOL(CoreMessages.VALIDATION_THE_CLOUD_USES_THE_LEGACY_SYNC_PROTOCOL),
+ REMOTE_INCOMPLETE(CoreMessages.VALIDATION_CLOUD_HISTORY_CONTAINS_MISSING_INCOMPLETE_OR_UNVERIFIABLE_DATA),
+ REMOTE_INTEGRITY_FAILED(CoreMessages.VALIDATION_IMMUTABLE_CLOUD_HISTORY_FAILED_INTEGRITY_VERIFICATION),
+ UNSUPPORTED_SAVE_FORMAT(CoreMessages.VALIDATION_THE_SAVE_FORMAT_IS_UNSUPPORTED_OR_UNREADABLE),
+ TARGET_CHANGED(CoreMessages.VALIDATION_THE_SELECTED_GAME_INSTALLED_BUILD_OR_SOURCE_BINDING_CHANGED),
+ TARGET_UNVERIFIED(CoreMessages.VALIDATION_THE_SELECTED_GAME_OR_HELPER_IDENTITY_COULD_NOT_BE_VERIFIED),
+ BRIDGE_UNAVAILABLE(CoreMessages.VALIDATION_THE_GAME_HELPER_COULD_NOT_COMPLETE_THE_REQUESTED_OPERATION),
+ FIRST_LAUNCH_NEEDED(CoreMessages.VALIDATION_LAUNCH_THE_SELECTED_GAME_ONCE_AND_EXIT_NORMALLY_BEFORE_SYNCING),
+ COMPARISON_FAILED(CoreMessages.VALIDATION_A_SAFE_COMPARISON_COULD_NOT_BE_COMPLETED),
+ BASELINE_UNVERIFIED(CoreMessages.VALIDATION_THE_SYNC_BASELINE_COULD_NOT_BE_RELATED_TO_THE_OBSERVED_CLOUD_HISTORY),
+ REMOTE_ONLY(CoreMessages.VALIDATION_CLOUD_SAVES_EXIST_BUT_THIS_DEVICE_HAS_NO_LOCAL_SAVE_TO_UPLOAD),
+ HISTORY_CONFLICT(CoreMessages.VALIDATION_LOCAL_AND_CLOUD_HISTORIES_REQUIRE_AN_EXPLICIT_CHOICE),
+ INTERRUPTED(CoreMessages.VALIDATION_THE_SYNC_CHECK_WAS_INTERRUPTED),
+ UPLOAD_NOT_CONFIRMED(CoreMessages.VALIDATION_THE_UPLOAD_IS_NOT_CONFIRMED_ANY_FROZEN_SNAPSHOT_REMAINS_AVAILABLE_FOR_RETRY);
+
+ val safeMessage: String get() = label.text()
 
  companion object {
   fun fromFailure(failure: Exception): SyncBlockReason = when (failure) {

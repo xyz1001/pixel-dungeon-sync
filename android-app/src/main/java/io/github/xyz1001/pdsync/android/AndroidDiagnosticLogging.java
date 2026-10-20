@@ -10,7 +10,7 @@ import pdsync.DiagnosticResult;
 import pdsync.DiagnosticStage;
 import pdsync.DiagnosticTrace;
 
-/** Only closed diagnostic enums cross this adapter. No UI details or app identifiers are logged. */
+/** Only closed enums and bounded preparation facts cross this adapter; no raw exception messages. */
 final class AndroidDiagnosticLogging {
     private static boolean configured;
     static synchronized void configure(Context context) {
@@ -57,6 +57,8 @@ final class AndroidDiagnosticLogging {
         }
     }
     static DiagnosticFailure classify(Throwable error) {
+        if (io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics.find(error) != null)
+            return DiagnosticFailure.VALIDATION;
         String code = BridgeDiagnostics.code(error);
         if (code != null) return bridgeFailure(code);
         SyncInspectionDiagnostics.Failure inspection = SyncInspectionDiagnostics.find(error);
@@ -71,22 +73,23 @@ final class AndroidDiagnosticLogging {
         switch (code) {
             case "ROOT_BUSY": case "ROOT_UNRELIABLE": case "ROOT_CHANGED": case "GAME_FOREGROUND":
             case "GAME_RUNNING": case "SAVE_NOT_QUIET": case "PROCESS_STATE_UNKNOWN": case "SAVE_CHANGED":
-            case "GAME_SAVE_RACE": case "SYNC_BUSY": case "OPERATION_BUSY": return DiagnosticFailure.BUSY;
+            case "ACCESS_WORKERS_BUSY": case "GAME_SAVE_RACE": case "SYNC_BUSY": case "OPERATION_BUSY": return DiagnosticFailure.BUSY;
             case "ROOT_RECOVERY_REQUIRED": case "RECOVERY_REQUIRED": case "ROOT_RESTORE_CONFLICT":
             case "ROOT_RECOVERY_CONFLICT": case "ROOT_RESTORE_COMMITTED_CLEANUP_PENDING":
             case "ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING": case "RESTORE_COMMITTED_CLEANUP_PENDING":
             case "RESTORE_ROLLED_BACK": return DiagnosticFailure.RECOVERY_REQUIRED;
-            case "ROOT_AUTH_REQUIRED": case "ROOT_DENIED_OR_EXITED": case "ROOT_NOT_ROOT":
+            case "ACCESS_AUTHENTICATION_FAILED": case "ROOT_AUTH_REQUIRED": case "ROOT_DENIED_OR_EXITED": case "ROOT_NOT_ROOT":
             case "ROOT_UNSAFE_PATH": case "PROVIDER_ACQUIRE_SECURITY_REJECTED":
             case "IPC_SECURITY_REJECTED": return DiagnosticFailure.AUTHORIZATION;
             case "ROOT_TARGET_CHANGED": case "ROOT_BINDING_MISMATCH": case "GAME_BINDING_MISMATCH":
             case "GAME_SIGNER_MISMATCH": case "PACKAGE_TRUST_FAILED": case "TARGET_IDENTITY_FAILED":
             case "INVALID_GAME_BINDING": case "REPLY_IDENTITY_MISMATCH":
             case "UID_MISMATCH": case "UNEXPECTED_SHARED_UID": return DiagnosticFailure.IDENTITY_MISMATCH;
-            case "ROOT_TIMEOUT": case "ROOT_RUNNER_TIMEOUT": return DiagnosticFailure.TIMEOUT;
-            case "ROOT_CANCELLED": case "INTERRUPTED": return DiagnosticFailure.CANCELED;
+            case "ACCESS_HANDSHAKE_TIMEOUT": case "ROOT_TIMEOUT": case "ROOT_RUNNER_TIMEOUT": return DiagnosticFailure.TIMEOUT;
+            case "ACCESS_HANDSHAKE_CANCELED": case "ROOT_CANCELLED": case "INTERRUPTED": return DiagnosticFailure.CANCELED;
             case "ROOT_UNAVAILABLE": case "PROVIDER_ACQUIRE_NULL": case "PROVIDER_ACQUIRE_FAILED":
             case "NO_PROVIDER_REPLY": case "IPC_CALL_FAILED": return DiagnosticFailure.UNAVAILABLE;
+            case "PURE_HANDSHAKE_REQUIRED": case "UNKNOWN_METHOD": case "UNSUPPORTED_METHOD":
             case "ROOT_ATTRIBUTES_UNSUPPORTED": case "ROOT_MUTATION_UNAVAILABLE":
             case "ROOT_RESTORE_UNSUPPORTED": case "ROOT_RECOVERY_UNSUPPORTED": return DiagnosticFailure.CAPABILITY_UNAVAILABLE;
             case "ROOT_MISSING_DIRECTORY": case "FIRST_LAUNCH_NEEDED": return DiagnosticFailure.FIRST_LAUNCH_NEEDED;
@@ -118,6 +121,9 @@ final class AndroidDiagnosticLogging {
     }
     static DiagnosticDetails.Builder failureDetailsBuilder(Throwable error) {
         DiagnosticDetails.Builder builder = DiagnosticDetails.builder();
+        if (io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics.find(error) != null)
+            builder.failureSource("PREPARATION").preparationEvidence(
+                    io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics.details(error));
         BridgeDiagnostics.Failure bridge = BridgeDiagnostics.find(error);
         if (bridge != null) {
             builder.readinessCode(bridge.code).bridgeStage(bridge.stage.name()).failureSource(bridge.stage.name());
@@ -172,6 +178,11 @@ final class AndroidDiagnosticLogging {
             case "BLOCKED": return DiagnosticResult.REJECTED;
             default: return DiagnosticResult.FAILED;
         }
+    }
+    static void confirmationEvent(String phase, DiagnosticResult result) {
+        DiagnosticLog.begin(DiagnosticAction.INSTALL, false).record(DiagnosticStage.INSTALLATION, result,
+                result == DiagnosticResult.FAILED ? DiagnosticFailure.OTHER : DiagnosticFailure.NONE,
+                DiagnosticDetails.builder().failureSource("INSTALLATION").installationPhase(phase).build());
     }
     static void installerResult(int status) {
         DiagnosticLog.begin(DiagnosticAction.INSTALL, false).record(DiagnosticStage.INSTALLATION,

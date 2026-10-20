@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -63,7 +65,7 @@ public final class AutoSyncService extends Service {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         try {
             if (!SyncRuntime.automaticAllowed(context, SyncRuntime.connection(context))) {
-                throw new IllegalStateException("自动上传暂停，请先完成存档选择。");
+                throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_01.text());
             }
             String strSelectionToken = SyncRuntime.currentSelectionToken(context);
             String strCurrentNamespace = SyncRuntime.currentNamespace(context);
@@ -74,15 +76,15 @@ public final class AutoSyncService extends Service {
             if (isActive(sharedPreferences) && !sharedPreferences.getString("token", "").isEmpty()) {
                 String string = sharedPreferences.getString("token", "");
                 if (controlledToken != null && !controlledToken.equals(string))
-                    throw new IllegalStateException("上一轮退出监听尚未结束，本次身份连续性不作推断。");
+                    throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_02.text());
                 startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string));
                 armTrace.record(DiagnosticStage.GUARD, DiagnosticResult.SUCCEEDED);
                 armTrace.record(DiagnosticStage.FINISHED, DiagnosticResult.SUCCEEDED);
                 return string;
             }
             String string2 = controlledToken == null ? UUID.randomUUID().toString() : controlledToken;
-            if (!sharedPreferences.edit().putString("token", string2).putString("state", "ARMED").putLong("startedAt", System.currentTimeMillis()).putString("gameSelection", strSelectionToken).putString("gameNamespace", strCurrentNamespace).putString("connectionScope", connectionScope).putBoolean("departed", false).putBoolean("foregroundSeen", false).putString("result", "等待本次游戏退出后检查自动上传。").commit()) {
-                throw new IllegalStateException("无法保存自动同步会话，本次不会后台上传。");
+            if (!sharedPreferences.edit().putString("token", string2).putString("state", "ARMED").putLong("startedAt", System.currentTimeMillis()).putString("gameSelection", strSelectionToken).putString("gameNamespace", strCurrentNamespace).putString("connectionScope", connectionScope).putBoolean("departed", false).putBoolean("foregroundSeen", false).putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_03.text())).commit()) {
+                throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_04.text());
             }
             startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.ARM").putExtra("token", string2));
             armTrace.record(DiagnosticStage.GUARD, DiagnosticResult.SUCCEEDED);
@@ -91,7 +93,7 @@ public final class AutoSyncService extends Service {
         } catch (Exception e) {
             AndroidDiagnosticLogging.failure(armTrace, DiagnosticStage.GUARD, e);
             AndroidDiagnosticLogging.failure(armTrace, DiagnosticStage.FINISHED, e);
-            throw new IllegalStateException("自动上传尚未就绪，请先完成游戏与云端存档配置。", e);
+            throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_05.text(), e);
         }
     }
 
@@ -99,7 +101,7 @@ public final class AutoSyncService extends Service {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         if (isActive(sharedPreferences)) {
             cancelEvidence(context, sharedPreferences.getString("token", ""));
-            sharedPreferences.edit().putString("state", "CANCELLED").putString("result", "连接设置已变更，旧连接的本次监听已停止。此前已提交的上传仍可能完成；下次启动游戏使用新设置。").commit();
+            sharedPreferences.edit().putString("state", "CANCELLED").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_06.text())).commit();
             context.stopService(new Intent(context, (Class<?>) AutoSyncService.class));
             notifyHistoryChanged(context);
         }
@@ -115,7 +117,7 @@ public final class AutoSyncService extends Service {
     public static void knownReturn(Context context) {
         SharedPreferences sharedPreferences = context.getSharedPreferences("auto-sync-session-v1", 0);
         if (isActive(sharedPreferences) && System.currentTimeMillis() - sharedPreferences.getLong("startedAt", 0L) > 21600000) {
-            sharedPreferences.edit().putString("state", "EXPIRED").putString("result", "上次监听已超出 Android 数据同步会话时限，请手动检查或重新启动游戏。").commit();
+            sharedPreferences.edit().putString("state", "EXPIRED").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_07.text())).commit();
             notifyHistoryChanged(context);
         } else if (isActive(sharedPreferences) && sharedPreferences.getBoolean("departed", false)) {
             startMonitoring(context, sharedPreferences, new Intent(context, (Class<?>) AutoSyncService.class).setAction("pdsync.RETURN").putExtra("token", sharedPreferences.getString("token", "")));
@@ -126,7 +128,7 @@ public final class AutoSyncService extends Service {
         try {
             context.startForegroundService(intent);
         } catch (RuntimeException e) {
-            sharedPreferences.edit().putString("state", "BLOCKED").putString("result", "系统没有允许本次后台同步，请返回首页手动检查。").commit();
+            sharedPreferences.edit().putString("state", "BLOCKED").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_08.text())).commit();
             notifyHistoryChanged(context);
             throw e;
         }
@@ -145,7 +147,7 @@ public final class AutoSyncService extends Service {
         java.util.Map<String, ?> values = preferences.getAll();
         Object started = values.get("startedAt");
         return new AutoSyncStatusPolicy.Record(statusString(values, "token", ""),
-                statusString(values, "state", ""), statusString(values, "result", "从本应用启动游戏后，正常退出且没有冲突时自动上传。"),
+                statusString(values, "state", ""), statusString(values, "result", AndroidMessages.AUTO_SYNC_SERVICE_09.text()),
                 statusString(values, "gameSelection", ""), statusString(values, "gameNamespace", ""),
                 started instanceof Long ? (Long) started : 0L, statusString(values, "connectionScope", ""));
     }
@@ -205,10 +207,23 @@ public final class AutoSyncService extends Service {
             if (!current.token.isEmpty() && (!current.gameSelection.equals(SyncRuntime.currentSelectionToken(context))
                     || !current.namespace.equals(SyncRuntime.currentNamespace(context))
                     || !current.connectionScope.equals(SyncRuntime.connectionScope(context, SyncRuntime.connection(context))))) return "";
-            if (!SyncRuntime.rootMode(context)) return current.result;
-            return AutoSyncStatusPolicy.visibleResult(current, preferences.getString(CHECKED_IDLE_FAILURE, ""),
-                    SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context));
+            if (!SyncRuntime.rootMode(context)) return StoredAndroidText.render(current.result);
+            return StoredAndroidText.render(AutoSyncStatusPolicy.visibleResult(current, preferences.getString(CHECKED_IDLE_FAILURE, ""),
+                    SyncRuntime.currentSelectionToken(context), SyncRuntime.currentNamespace(context)));
         } catch (Exception unavailable) { return ""; }
+    }
+
+    /** Stable compact status classification; never infer operational state from translated prose. */
+    public static String resultKind(Context context) {
+        if (status(context).isEmpty()) return "IDLE";
+        AutoSyncStatusPolicy.Record record = statusRecord(context.getSharedPreferences(PREFS, 0));
+        if (StoredAndroidText.is(record.result, AndroidMessages.AUTO_SYNC_SERVICE_09)) return "IDLE";
+        if (StoredAndroidText.is(record.result, AndroidMessages.AUTO_SYNC_SERVICE_30)) return "UPLOADED_CONFLICT";
+        if (StoredAndroidText.is(record.result, AndroidMessages.AUTO_SYNC_SERVICE_27)) return "UPLOADED_NEWER_CLOUD";
+        if ("SKIPPED_CONFLICT".equals(record.state)) return "HISTORY_CONFLICT";
+        if ("UPLOADED".equals(record.state) || "UNCHANGED".equals(record.state)) return "SUCCESS";
+        if ("ARMED".equals(record.state) || "PLAYING".equals(record.state) || "SYNCING".equals(record.state)) return "IDLE";
+        return "INCOMPLETE";
     }
 
     @Override // android.app.Service
@@ -216,11 +231,22 @@ public final class AutoSyncService extends Service {
         super.onCreate();
         AndroidDiagnosticLogging.configure(this);
         this.prefs = getSharedPreferences("auto-sync-session-v1", 0);
-        ((NotificationManager) getSystemService(NotificationManager.class)).createNotificationChannel(new NotificationChannel("game-exit-sync", "退出游戏后同步", 2));
+        ((NotificationManager) getSystemService(NotificationManager.class)).createNotificationChannel(new NotificationChannel("game-exit-sync", AndroidMessages.AUTO_SYNC_SERVICE_10.text(), NotificationManager.IMPORTANCE_LOW));
+    }
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        DiagnosticApplication.updateLocale(configuration);
+        ((NotificationManager) getSystemService(NotificationManager.class)).createNotificationChannel(
+                new NotificationChannel(CHANNEL, AndroidMessages.AUTO_SYNC_SERVICE_10.text(), NotificationManager.IMPORTANCE_LOW));
+        if (!stopped && prefs != null && isActive(prefs)) {
+            ((NotificationManager) getSystemService(NotificationManager.class)).notify(NOTIFICATION,
+                    notification(StoredAndroidText.render(prefs.getString("result", ""))));
+        }
     }
 
     private Notification notification(String str) {
-        return new Notification.Builder(this, "game-exit-sync").setSmallIcon(17301628).setContentTitle("像素地牢 · 退出后同步").setContentText(str).setStyle(new Notification.BigTextStyle().bigText(str)).setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), 201326592)).setOngoing(true).addAction(new Notification.Action.Builder((Icon) null, "停止本次监听", PendingIntent.getService(this, 1, new Intent(this, (Class<?>) AutoSyncService.class).setAction("pdsync.STOP"), 201326592)).build()).build();
+        return new Notification.Builder(this, "game-exit-sync").setSmallIcon(17301628).setContentTitle(AndroidMessages.AUTO_SYNC_SERVICE_11.text()).setContentText(str).setStyle(new Notification.BigTextStyle().bigText(str)).setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), 201326592)).setOngoing(true).addAction(new Notification.Action.Builder((Icon) null, AndroidMessages.AUTO_SYNC_SERVICE_12.text(), PendingIntent.getService(this, 1, new Intent(this, (Class<?>) AutoSyncService.class).setAction("pdsync.STOP"), 201326592)).build()).build();
     }
 
     @Override // android.app.Service
@@ -230,10 +256,7 @@ public final class AutoSyncService extends Service {
             return 2;
         }
         if ("pdsync.STOP".equals(intent.getAction())) {
-            StringBuilder sb = new StringBuilder("已停止本次退出同步监听。");
-            sb.append(this.publicationAttemptInProgress ? "已提交的上传仍可能完成，请检查原连接。" : "");
-            sb.append("下次从本应用启动游戏会重新开启。");
-            finish("CANCELLED", sb.toString());
+            finish("CANCELLED", (this.publicationAttemptInProgress ? AndroidMessages.AUTO_STOPPED_PENDING : AndroidMessages.AUTO_STOPPED).text());
             return 2;
         }
         String stringExtra = intent.getStringExtra("token");
@@ -242,7 +265,7 @@ public final class AutoSyncService extends Service {
             return 2;
         }
         try {
-            RuntimePlatformCompat.startDataSyncForeground(this, 7301, notification("等待游戏退出或进入后台；有冲突会跳过上传。"));
+            RuntimePlatformCompat.startDataSyncForeground(this, 7301, notification(AndroidMessages.AUTO_SYNC_SERVICE_16.text()));
             if ("pdsync.RETURN".equals(intent.getAction())) {
                 this.returned = true;
             }
@@ -263,7 +286,7 @@ public final class AutoSyncService extends Service {
             return 2;
         } catch (RuntimeException unused) {
             automaticFailure(DiagnosticStage.RUNTIME, unused);
-            finish("BLOCKED", "系统不允许本次后台同步。请返回首页手动检查；游戏仍可正常使用。");
+            finish("BLOCKED", AndroidMessages.AUTO_SYNC_SERVICE_17.text());
             return 2;
         }
     }
@@ -275,16 +298,18 @@ public final class AutoSyncService extends Service {
             this.selectedGameToken = SyncRuntime.currentSelectionToken(this);
             this.selectedNamespace = SyncRuntime.currentNamespace(this);
             if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.connectionScope(this, this.connection).equals(this.prefs.getString("connectionScope", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
-                throw new IllegalStateException("Game selection changed");
+                throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_18.text());
             }
             this.bridge = SyncRuntime.backend(this);
             if (!this.bridge.capabilities().lifecycleObservation)
-                throw new IllegalStateException("Selected access backend cannot observe lifecycle");
+                throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_19.text());
             this.facade = SyncRuntime.facade(this, this.connection);
             poll();
         } catch (Exception unused) {
             automaticFailure(DiagnosticStage.GUARD, unused);
-            finish("BLOCKED", "本次自动同步未开始：WebDAV 连接或未完成恢复需要检查。请返回首页处理。");
+            finish("BLOCKED", unused instanceof ManagedAccountClient.ManagedAccountException
+                    || unused instanceof OfficialSyncAccess.AccessException
+                    ? unused.getMessage() : AndroidMessages.AUTO_SYNC_SERVICE_20.text());
         }
     }
 
@@ -293,7 +318,7 @@ public final class AutoSyncService extends Service {
         try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(automaticTrace())) {
         if (AutoSyncPolicy.mayPublish(this.stopped, isActive(this.prefs), this.token, this.prefs.getString("token", ""))) {
             if (!currentGameAndPolicy()) {
-                finish("PAUSED", "游戏、云端档案或自动上传设置已变化，本次监听已停止。");
+                finish("PAUSED", AndroidMessages.AUTO_SYNC_SERVICE_21.text());
                 return;
             }
             if (this.returned) {
@@ -316,7 +341,7 @@ public final class AutoSyncService extends Service {
             if (stepObserve == AutoSyncPolicy.Step.STOP_UNOBSERVED) {
                 this.lastDiagnosticFailure = DiagnosticFailure.NOT_READY;
                 automaticTrace().record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED, DiagnosticFailure.NOT_READY);
-                finish("BLOCKED", "未观察到本次游戏前台活动，未猜测退出事件。请从本应用重新启动游戏或手动检查存档。");
+                finish("BLOCKED", AndroidMessages.AUTO_SYNC_SERVICE_22.text());
                 return;
             }
             if (stepObserve == AutoSyncPolicy.Step.UPLOAD) {
@@ -326,7 +351,7 @@ public final class AutoSyncService extends Service {
             if (observationObserveLifecycle.reliable && observationObserveLifecycle.foreground) {
                 if (!"PLAYING".equals(this.prefs.getString("state", "")))
                     automaticTrace().record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
-                this.prefs.edit().putBoolean("foregroundSeen", true).putString("state", "PLAYING").putString("result", "游戏进行中，退出后将检查无冲突上传。").commit();
+                this.prefs.edit().putBoolean("foregroundSeen", true).putString("state", "PLAYING").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_23.text())).commit();
             }
             schedule(1500L);
         }
@@ -360,17 +385,20 @@ public final class AutoSyncService extends Service {
             return;
         }
         automaticTrace().record(DiagnosticStage.WORK, DiagnosticResult.STARTED);
-        this.prefs.edit().putString("state", "SYNCING").putString("result", "已观察到退出／后台，正在检查稳定存档与冲突。").commit();
-        ((NotificationManager) getSystemService(NotificationManager.class)).notify(7301, notification("正在检查稳定存档；只有无冲突时才上传。"));
+        this.prefs.edit().putString("state", "SYNCING").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_24.text())).commit();
+        ((NotificationManager) getSystemService(NotificationManager.class)).notify(7301, notification(AndroidMessages.AUTO_SYNC_SERVICE_25.text()));
         try {
             synchronized (SyncRuntime.OPERATION_LOCK) {
                 if (AutoSyncPolicy.mayPublish(this.stopped, isActive(this.prefs), this.token, this.prefs.getString("token", ""))) {
                     if (!currentGameAndPolicy()) {
-                        finish("PAUSED", "当前配置不允许自动上传，本次已跳过。");
+                        finish("PAUSED", AndroidMessages.AUTO_SYNC_SERVICE_26.text());
                         return;
                     }
                     this.publicationAttemptInProgress = true;
                     try {
+                        // The listener can outlive the actual service deadline. Recheck immediately
+                        // before automatic I/O even when its facade was created while active.
+                        SyncRuntime.requireOfficialSyncAccess(this, this.connection, this.facade);
                         AndroidSyncFacade.AutoUploadResult autoUploadResultAutoUpload = this.facade.autoUpload();
                         String status = autoUploadResultAutoUpload.getStatus();
                         this.lastDiagnosticFailure = AndroidDiagnosticLogging.automaticFailure(autoUploadResultAutoUpload.getReasonCode());
@@ -379,19 +407,19 @@ public final class AutoSyncService extends Service {
                                 DiagnosticDetails.builder().syncBlockReason(autoUploadResultAutoUpload.getReasonCode())
                                         .failureSource("SYNC_COMPARE").build());
                         if (status.equals("UPLOADED")) {
-                            finish("UPLOADED", autoUploadResultAutoUpload.getNeedsUserChoice() ? "本机版本已上传，但云端随后又有新版本。请检查后再恢复，未自动选择赢家。" : "退出后自动上传成功。");
+                            finish("UPLOADED", autoUploadResultAutoUpload.getNeedsUserChoice() ? AndroidMessages.AUTO_SYNC_SERVICE_27.text() : AndroidMessages.AUTO_SYNC_SERVICE_28.text());
                             return;
                         }
                         if (status.equals("UNCHANGED")) {
-                            finish("UNCHANGED", "本机与云端一致或没有新存档，无需上传。");
+                            finish("UNCHANGED", AndroidMessages.AUTO_SYNC_SERVICE_29.text());
                             return;
                         }
                         if (status.equals("SKIPPED_CONFLICT")) {
-                            finish("SKIPPED_CONFLICT", autoUploadResultAutoUpload.getSnapshotId() != null ? "同步期间出现并发分支，已保留分支并停止后续自动同步。请在首页手动处理。" : AutoSyncMessages.blocked(autoUploadResultAutoUpload.getReasonCode()));
+                            finish("SKIPPED_CONFLICT", autoUploadResultAutoUpload.getSnapshotId() != null ? AndroidMessages.AUTO_SYNC_SERVICE_30.text() : "pdsync.auto.blocked:" + AutoSyncMessages.knownCode(autoUploadResultAutoUpload.getReasonCode()));
                         } else if (status.equals("SKIPPED_UNCERTAIN")) {
-                            finish("SKIPPED_UNCERTAIN", AutoSyncMessages.blocked(autoUploadResultAutoUpload.getReasonCode()));
+                            finish("SKIPPED_UNCERTAIN", "pdsync.auto.blocked:" + AutoSyncMessages.knownCode(autoUploadResultAutoUpload.getReasonCode()));
                         } else {
-                            retryTransient(AutoSyncMessages.blocked(autoUploadResultAutoUpload.getReasonCode()));
+                            retryTransient("pdsync.auto.blocked:" + AutoSyncMessages.knownCode(autoUploadResultAutoUpload.getReasonCode()));
                         }
                     } finally {
                         this.publicationAttemptInProgress = false;
@@ -400,7 +428,12 @@ public final class AutoSyncService extends Service {
             }
         } catch (Exception unused) {
             automaticFailure(DiagnosticStage.WORK, unused);
-            retryTransient("本次自动同步未完成。存档未被当作上传成功，请在首页检查后重试。");
+            if (unused instanceof OfficialSyncAccess.AccessException
+                    || (unused instanceof ManagedAccountClient.ManagedAccountException
+                    && (((ManagedAccountClient.ManagedAccountException) unused).kind == ManagedAccountClient.FailureKind.ACCOUNT_EXPIRED
+                    || ((ManagedAccountClient.ManagedAccountException) unused).kind == ManagedAccountClient.FailureKind.ACCOUNT_INACTIVE))) {
+                finish("BLOCKED", unused.getMessage());
+            } else retryTransient(AndroidMessages.AUTO_SYNC_SERVICE_31.text());
         }
     }
 
@@ -439,7 +472,7 @@ public final class AutoSyncService extends Service {
         String str3 = this.token;
         boolean published = false;
         if (str3 == null || str3.equals(this.prefs.getString("token", ""))) {
-            published = this.prefs.edit().putString("state", str).putString("result", str2).commit();
+            published = this.prefs.edit().putString("state", str).putString("result", StoredAndroidText.store(str2)).commit();
         }
         this.executor.shutdownNow();
         stopForeground(1);
@@ -448,10 +481,7 @@ public final class AutoSyncService extends Service {
     }
 
     public void onTimeout(int i, int i2) {
-        StringBuilder sb = new StringBuilder("Android 的后台数据同步时限已到，本次监听已停止。");
-        sb.append(this.publicationAttemptInProgress ? "已提交的上传仍可能完成，请检查状态。" : "");
-        sb.append("可从首页检查或下次启动游戏时重新开启。");
-        finish("TIMEOUT", sb.toString());
+        finish("TIMEOUT", (this.publicationAttemptInProgress ? AndroidMessages.AUTO_TIMED_OUT_PENDING : AndroidMessages.AUTO_TIMED_OUT).text());
     }
 
     private static void cancelEvidence(Context context, String token) {

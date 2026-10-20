@@ -14,7 +14,8 @@ class AutoHistoryRefreshContract(unittest.TestCase):
         receiver = body(MAIN, 'public void onReceive(')
         self.assertIn('AutoSyncService.HISTORY_CHANGED.equals(intent.getAction())', receiver)
         self.assertIn('drainAutomaticHistoryRefresh()', receiver)
-        self.assertIn('requestReadinessRefresh()', receiver)
+        self.assertIn('drainPendingSetup()', receiver)
+        self.assertNotIn('requestReadinessRefresh()', receiver)
 
     def test_session_is_bound_at_arm_and_in_flight(self):
         arm = body(SERVICE, 'public static String arm(Context context, String controlledToken)')
@@ -54,10 +55,10 @@ class AutoHistoryRefreshContract(unittest.TestCase):
         available = body(MAIN, 'private boolean hasAutomaticHistoryRefresh()')
         self.assertIn('AutoSyncService.historyRefreshPending(this, record)', available)
         retention = body(MAIN, 'public Object onRetainCustomNonConfigurationInstance()')
-        self.assertIn('this.automaticHistoryState.outcome == null && !this.automaticHistoryState.inFlight', ' '.join(retention.split()))
+        self.assertIn('return new RetainedConnectionUi(this)', retention)
         restore = body(MAIN, 'private void restoreConnectionUi(')
         self.assertIn('this.automaticHistoryState = retained.automaticHistory', restore)
-        self.assertIn('retained.page == SyncPage.CONFIRM ? SyncPage.HOME : retained.page', restore)
+        self.assertIn('AndroidUiFlowPolicy.restoredPage(retained.page)', restore)
         remember = body(MAIN, 'private void rememberCurrentAutomaticHistory()')
         self.assertIn('this.busy ||', remember)
         self.assertIn('currentAutomaticHistory(state.ticket, state.connection)', remember)
@@ -69,13 +70,15 @@ class AutoHistoryRefreshContract(unittest.TestCase):
 
     def test_home_navigation_and_work_drain_without_polling(self):
         navigation = body(MAIN, 'private void navigate(SyncPage syncPage)')
-        self.assertIn('if (syncPage == SyncPage.HOME) drainAutomaticHistoryRefresh()', navigation)
+        home = body(navigation, 'if (syncPage == SyncPage.HOME)')
+        self.assertIn('drainAutomaticHistoryRefresh()', home)
         for signature in ('void m148lambda$work$0', 'void m149lambda$work$1'):
             self.assertIn('drainAutomaticHistoryRefresh()', body(MAIN, signature))
-        self.assertIn('requestReadinessRefresh()', body(MAIN, 'protected void onResume()'))
+        self.assertNotIn('requestReadinessRefresh()', body(MAIN, 'protected void onResume()'))
+        self.assertIn('AutoSyncService.knownReturn(this)', body(MAIN, 'protected void onResume()'))
         readiness = body(MAIN, 'public void refreshReadiness()')
         self.assertIn('this.automaticHistoryState.outcome.applied = false', readiness)
-        self.assertIn('}, true)', readiness)
+        self.assertIn('setupWork(DiagnosticAction.ACCESS_CHECK', readiness)
         for signature in ('private void renderHome()', 'private void renderSettings()'):
             self.assertNotIn('drainAutomaticHistoryRefresh()', body(MAIN, signature))
 

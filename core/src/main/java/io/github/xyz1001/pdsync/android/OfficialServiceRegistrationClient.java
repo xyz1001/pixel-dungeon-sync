@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.CoreSessionMessages;
+
 import pdsync.DiagnosticLog;
 import pdsync.DiagnosticDetails;
 import pdsync.DiagnosticHttpMethod;
@@ -492,33 +494,33 @@ final class OfficialServiceRegistrationClient {
         String message;
         switch (kind) {
             case REGISTRATION_USERNAME_INVALID:
-                message = "用户名需3–32位，仅含小写字母或数字，可用数字开头或纯数字。"; break;
+                message = CoreSessionMessages.USE_3_32_LOWERCASE_LETTERS_OR_DIGITS_A_USERNAME_MAY.text(); break;
             case LOGIN_USERNAME_INVALID:
-                message = "用户名需1–64位字母、数字、_、.或-，且不能以.或-开头。"; break;
-            case REGISTRATION_PASSWORD_LENGTH: message = "注册密码需6–128个字符。"; break;
-            case LOGIN_PASSWORD_LENGTH: message = "密码不能为空，且不能超过512字节。"; break;
-            case PASSWORD_CHARACTERS_INVALID: message = "密码不能包含控制字符或无效字符。"; break;
-            case REGISTRATION_PASSWORD_PREFIX: message = "密码不能以$或{开头。"; break;
-            case PASSWORD_REJECTED: message = "服务未接受密码格式，请检查密码的长度和字符。"; break;
-            case REQUEST_FORMAT_REJECTED: message = "服务不支持这次请求的格式。"; break;
-            case INVALID_CREDENTIALS: message = "无法登录，请检查账号或续期状态。"; break;
-            case USERNAME_TAKEN: message = "账号已被使用，请登录或更换账号。"; break;
+                message = CoreSessionMessages.USE_1_64_LETTERS_DIGITS_OR_DO_NOT_START_WITH.text(); break;
+            case REGISTRATION_PASSWORD_LENGTH: message = CoreSessionMessages.REGISTRATION_PASSWORDS_MUST_CONTAIN_6_128_CHARACTERS.text(); break;
+            case LOGIN_PASSWORD_LENGTH: message = CoreSessionMessages.THE_PASSWORD_CANNOT_BE_EMPTY_OR_EXCEED_512_BYTES.text(); break;
+            case PASSWORD_CHARACTERS_INVALID: message = CoreSessionMessages.THE_PASSWORD_CANNOT_CONTAIN_CONTROL_OR_INVALID_CHARACTERS.text(); break;
+            case REGISTRATION_PASSWORD_PREFIX: message = CoreSessionMessages.THE_PASSWORD_CANNOT_START_WITH_OR.text(); break;
+            case PASSWORD_REJECTED: message = CoreSessionMessages.THE_SERVICE_REJECTED_THE_PASSWORD_FORMAT_CHECK_ITS_LENGTH_AND.text(); break;
+            case REQUEST_FORMAT_REJECTED: message = CoreSessionMessages.THE_SERVICE_DOES_NOT_SUPPORT_THIS_REQUEST_FORMAT.text(); break;
+            case INVALID_CREDENTIALS: message = CoreSessionMessages.UNABLE_TO_SIGN_IN_CHECK_YOUR_ACCOUNT_OR_RENEWAL_STATUS.text(); break;
+            case USERNAME_TAKEN: message = CoreSessionMessages.THIS_ACCOUNT_IS_ALREADY_IN_USE_SIGN_IN_OR_CHOOSE.text(); break;
             case REGISTRATION_RETRY_REQUIRED:
-                return "注册尚未完成，请稍后用相同账号和密码重试注册。";
-            case REQUEST_TOO_LARGE: message = "提交的信息过大。"; break;
-            case UNSUPPORTED_MEDIA_TYPE: message = "服务不支持这次请求的格式。"; break;
-            case RATE_LIMITED: message = "操作过于频繁，服务暂时限制了请求。"; break;
-            case UPSTREAM_ERROR: message = "服务暂时无法连接存储。"; break;
-            case SERVER_ERROR: message = "服务暂时异常。"; break;
-            case REQUEST_REJECTED: message = "服务未接受这次请求。"; break;
-            case REDIRECT_REJECTED: message = "服务地址发生了跳转。"; break;
-            case INVALID_RESPONSE: message = "服务返回的信息无效。"; break;
-            case RESPONSE_TOO_LARGE: message = "服务返回的信息过大。"; break;
-            case TIMEOUT: message = "请求超时。"; break;
-            case NETWORK_ERROR: message = "网络连接中断。"; break;
-            case TLS_ERROR: message = "无法验证服务安全连接。"; break;
-            default: message = "无法完成这次请求。"; break;
+                return CoreSessionMessages.REGISTRATION_IS_INCOMPLETE_RETRY_LATER_WITH_THE_SAME_USERNAME_AND.text();
+            case REQUEST_TOO_LARGE: message = CoreSessionMessages.THE_SUBMITTED_INFORMATION_IS_TOO_LARGE.text(); break;
+            case UNSUPPORTED_MEDIA_TYPE: message = CoreSessionMessages.THE_SERVICE_DOES_NOT_SUPPORT_THIS_REQUEST_FORMAT.text(); break;
+            case RATE_LIMITED: message = CoreSessionMessages.TOO_MANY_REQUESTS_THE_SERVICE_HAS_TEMPORARILY_LIMITED_ACCESS.text(); break;
+            case UPSTREAM_ERROR: message = CoreSessionMessages.THE_SERVICE_CANNOT_CONNECT_TO_STORAGE_RIGHT_NOW.text(); break;
+            case SERVER_ERROR: message = CoreSessionMessages.THE_SERVICE_IS_TEMPORARILY_UNAVAILABLE.text(); break;
+            case REQUEST_REJECTED: message = CoreSessionMessages.THE_SERVICE_REJECTED_THIS_REQUEST.text(); break;
+            case REDIRECT_REJECTED: message = CoreSessionMessages.THE_SERVICE_ADDRESS_REDIRECTED.text(); break;
+            case INVALID_RESPONSE: message = CoreSessionMessages.THE_SERVICE_RETURNED_AN_INVALID_RESPONSE.text(); break;
+            case RESPONSE_TOO_LARGE: message = CoreSessionMessages.THE_SERVICE_RESPONSE_IS_TOO_LARGE.text(); break;
+            case TIMEOUT: message = CoreSessionMessages.THE_REQUEST_TIMED_OUT.text(); break;
+            case NETWORK_ERROR: message = CoreSessionMessages.THE_NETWORK_CONNECTION_WAS_INTERRUPTED.text(); break;
+            case TLS_ERROR: message = CoreSessionMessages.UNABLE_TO_VERIFY_THE_SECURE_CONNECTION_TO_THE_SERVICE.text(); break;
+            default: message = CoreSessionMessages.UNABLE_TO_COMPLETE_THIS_REQUEST.text(); break;
         }
-        return message + (accountMayHaveBeenCreated ? "注册结果未确认，请用相同账号和密码登录。" : "");
+        return message + (accountMayHaveBeenCreated ? CoreSessionMessages.REGISTRATION_COULD_NOT_BE_CONFIRMED_SIGN_IN_WITH_THE_SAME.text() : "");
     }
 }

@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 sealed interface SavedConnectionResult {
  class Connected(val connection: AppliedConnection): SavedConnectionResult
  class Retry(val connection: AppliedConnection, val message: String): SavedConnectionResult
@@ -8,7 +9,7 @@ sealed interface SavedConnectionResult {
 
 /** Load only the file password. Never import a legacy OS credential. Reconnection is read-only. */
 fun restoreSavedConnection(config: AppConfig): SavedConnectionResult {
- val secret = config.password ?: return SavedConnectionResult.NeedsInput("请补填密码并连接，之后会自动记住。")
+ val secret = config.password ?: return SavedConnectionResult.NeedsInput(CoreMessages.ENTER_YOUR_PASSWORD_AND_CONNECT_IT_WILL_THEN_BE_REMEMBERED_AUTOMATICALLY.text())
  val checker = ConnectionSetup(config)
  return try {
   checker.update(config, secret)

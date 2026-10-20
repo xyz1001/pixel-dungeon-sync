@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,6 +10,7 @@ import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,14 +32,56 @@ import javax.swing.SwingUtilities
 private val workspace = applicationWorkspace()
 private typealias Action = OperationAction
 private enum class SettingsMode { FULL, UNLOCK }
-private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, COMPARISON, CONFLICT, CONFIRM }
-private enum class SetupAction { UPLOAD, RESTORE, ADOPT, MERGE }
+private enum class Page { HOME, SETTINGS, DISCOVERY, PATH, CONNECTION, CONFLICT, CONFIRM }
 private data class OperationResult(val message: String, val conflict: AppendConflict? = null, val appliedFiles: Map<String, String>? = null, val automaticSkipped: Boolean = false)
-private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?)
+private data class LoadedProfile(val session: AppendProfileSession, val history: List<HistoryEntry>, val pending: Boolean, val saves: SaveVersions?, val target: TargetGame?, val targetError: String?, val device: DeviceIdentity, val baselineFiles: Map<String, String>?, val pendingSourceAvailable: Boolean)
 private val green = Color(0xFF326650)
 private val muted = Color(0xFF657069)
 
-fun main() = runSyncApplication()
+/** Retained modal callbacks and compatibility results belong to one observed account/session. */
+internal data class DesktopConflictDialogOwner(
+ val generation: Long,
+ val session: AppendProfileSession?,
+ val config: AppConfig?,
+ val conflict: AppendConflict?,
+) {
+ fun matches(current: DesktopConflictDialogOwner, pageActive: Boolean): Boolean =
+  pageActive && session != null && conflict != null && generation == current.generation &&
+   session === current.session && config == current.config && conflict === current.conflict
+}
+
+/** A failed/canceled read can never be represented by the null that enables overwrite. */
+internal fun desktopConflictCompatibilityIssue(check: () -> Unit): String? = try {
+ check()
+ null
+} catch (failure: CancellationException) {
+ throw failure
+} catch (failure: Exception) {
+ failure.message?.takeIf(String::isNotBlank) ?: DesktopMessages.NOT_VERIFIED.text()
+}
+
+/** Game selection carries the configured/default path forward without reading or creating it. */
+internal fun desktopSetupDraftForGame(draft: AppConfig, targetGame: String, currentPath: String): AppConfig =
+ draft.copy(targetGame = targetGame,
+  selectedSaveRoot = draft.selectedSaveRoot?.takeIf(String::isNotBlank) ?: currentPath.takeIf(String::isNotBlank),
+  onboardingProgress = OnboardingProgress.PENDING)
+
+/** Explicitly completed configuration remains on HOME even if local files later become unavailable. */
+internal fun desktopCompletedSetup(config: AppConfig?): Boolean =
+ config?.onboardingProgress == OnboardingProgress.COMPLETE
+
+/** HOME prepares only the retained target directory; this does not establish sync ancestry. */
+internal fun desktopPrepareSelectedDirectory(config: AppConfig, location: DefaultProfileLocation): Path {
+ val root = location.requireSelected(config.selectedSaveRoot ?: location.resolve().toString(), true)
+ inspectSelectedSaveDirectory(root)
+ return root
+}
+
+/** Desktop uses the JVM's system locale at startup; restart after changing the OS language. */
+fun main() {
+ pdsync.i18n.UiLocale.useSystemLocale()
+ runSyncApplication()
+}
 
 /** Each application keeps only its selected target's process association; every check enumerates afresh. */
 private fun productionProcessCheck(): (TargetGame?) -> GameProcessStatus {
@@ -52,14 +97,14 @@ private fun productionProcessCheck(): (TargetGame?) -> GameProcessStatus {
 /** Production always uses fresh process detection. Dependency injection is only used by test code. */
 internal fun runSyncApplication(
  processStatus: (TargetGame?) -> GameProcessStatus = productionProcessCheck(),
- title: String = "像素地牢 · 存档同步"
+ title: String = DesktopMessages.PIXEL_DUNGEON_SAVE_SYNC.text()
 ) = application {
  remember { configureDesktopDiagnostics(workspace.resolve(".local")) }
  var busy by remember { mutableStateOf(false) }
  var closeBlocked by remember { mutableStateOf(false) }
  var connectingAtStartup by remember { mutableStateOf(true) }
  var appClosed by remember { mutableStateOf(false) }
- Window(onCloseRequest = { if (busy || connectingAtStartup) closeBlocked = true else { appClosed = true; exitApplication() } }, title = title, state = rememberWindowState(width = 1120.dp, height = 800.dp)) {
+ Window(onCloseRequest = { if (busy || connectingAtStartup) closeBlocked = true else { appClosed = true; exitApplication() } }, title = title, icon = painterResource("icons/pdsync.png"), state = rememberWindowState(width = 1120.dp, height = 800.dp)) {
   LaunchedEffect(Unit) { window.minimumSize = java.awt.Dimension(760, 640) }
   DisposableEffect(Unit) { onDispose { appClosed = true } }
   if (System.getenv("PDSYNC_SMOKE") == "1") LaunchedEffect(Unit) {
@@ -77,19 +122,19 @@ internal fun runSyncApplication(
   val pathNavigation = remember { DesktopSavePathNavigation() }
   var password by remember { mutableStateOf("") }
   var connected by remember { mutableStateOf(false) }
+  val syncAccess = remember { DesktopSyncAccess() }
+  var serviceExpired by remember { mutableStateOf(false) }
+  var entitlementRetryAt by remember { mutableStateOf(0L) }
   var connectionNotice by remember { mutableStateOf<String?>(null) }
   var page by remember { mutableStateOf(if (config == null) Page.DISCOVERY else Page.HOME) }
   var pageGeneration by remember { mutableStateOf(0L) }
   var connectionReturnPage by remember { mutableStateOf(Page.HOME) }
+  var connectionAppreciationOnly by remember { mutableStateOf(false) }
   var onboardingActive by remember { mutableStateOf(config == null || config?.onboardingProgress in setOf(OnboardingProgress.PENDING, OnboardingProgress.DEFERRED)) }
   var setupDraft by remember { mutableStateOf(config ?: newConnectionConfig().copy(targetGame = runCatching { setupSelection.load() }.getOrNull().orEmpty())) }
   var discovery by remember { mutableStateOf<InstallationDiscoveryResult?>(null) }
   var discoveredTarget by remember { mutableStateOf<TargetGame?>(null) }
   var discoveryNotice by remember { mutableStateOf<String?>(null) }
-  var comparison by remember { mutableStateOf<OnboardingComparison?>(null) }
-  var comparisonNotice by remember { mutableStateOf<String?>(null) }
-  val comparisonAdapter = remember { DesktopSharedComparisonAdapter() }
-  var comparisonCheckedAt by remember { mutableStateOf<String?>(null) }
   var remoteInspectionReady by remember { mutableStateOf(false) }
   var settingsMode by remember { mutableStateOf(SettingsMode.FULL) }
   var session by remember { mutableStateOf<AppendProfileSession?>(null) }
@@ -102,14 +147,20 @@ internal fun runSyncApplication(
   var historyName by remember { mutableStateOf("") }
   var selected by remember { mutableStateOf<String?>(null) }
   var selectedByUser by remember { mutableStateOf(false) }
+  var homeSelectionGeneration by remember { mutableStateOf(0L) }
   var homeHistoryPage by remember { mutableStateOf(0) }
   var homeProfile by remember { mutableStateOf<AppConfig?>(null) }
+  var localHistoryVerified by remember { mutableStateOf(false) }
+  val archiveReads = remember { DesktopArchiveReads() }
+  val renewalReads = remember { DesktopRenewalHistoryReads() }
   var homeOperation by remember { mutableStateOf(SharedHomeOperation.NONE) }
   var remoteTips by remember { mutableStateOf(emptySet<String>()) }
   var conflictSelection by remember { mutableStateOf<String?>(null) }
   var pending by remember { mutableStateOf(false) }
+  var pendingUploadSourceAvailable by remember { mutableStateOf(false) }
   var conflict by remember { mutableStateOf<AppendConflict?>(null) }
   var directoryEditor by remember { mutableStateOf<DirectorySnapshotMetadata?>(null) }
+  var directoryInline by remember { mutableStateOf(false) }
   var directoryName by remember { mutableStateOf("") }
   var directoryNotice by remember { mutableStateOf<String?>(null) }
   var confirm by remember { mutableStateOf<OperationTrace?>(null) }
@@ -118,33 +169,33 @@ internal fun runSyncApplication(
   val diagnosticExport = remember { DesktopDiagnosticExport() }
   var diagnosticExportNotice by remember { mutableStateOf<String?>(null) }
   var confirmationNotice by remember { mutableStateOf<String?>(null) }
-  var restoreIssue by remember { mutableStateOf<String?>("请选择快照") }
-  var conflictRestoreIssue by remember { mutableStateOf<String?>("尚未校验") }
+  var restoreIssue by remember { mutableStateOf<String?>(DesktopMessages.SELECT_A_SNAPSHOT.text()) }
+  var conflictRestoreIssue by remember { mutableStateOf<String?>(DesktopMessages.NOT_VERIFIED.text()) }
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
-  var status by remember { mutableStateOf("正在检查默认存档位置…") }
-  var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown("请在设置中选择官方游戏 JAR")) }
+  var status by remember { mutableStateOf(DesktopMessages.CHECKING_THE_DEFAULT_SAVE_LOCATION.text()) }
+  var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown(DesktopMessages.SELECT_THE_OFFICIAL_GAME_JAR_IN_SETTINGS.text())) }
   val gameLauncher = remember { GameLauncher(processStatus) }
   var launchingGame by remember { mutableStateOf(false) }
   var launchNotice by remember { mutableStateOf<String?>(null) }
-  var automaticStatus by remember { mutableStateOf("正在建立本地观察基线…") }
+  var automaticStatus by remember { mutableStateOf(DesktopMessages.ESTABLISHING_A_LOCAL_OBSERVATION_BASELINE.text()) }
   var automatic by remember { mutableStateOf(AutomaticUpload()) }
   val observationDiagnostics = remember { DiagnosticObservationFailures() }
   var remoteReadAt by remember { mutableStateOf(0L) }
   var device by remember { mutableStateOf<DeviceIdentity?>(null) }
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
-  val selection = history.firstOrNull { it.manifest.id == selected } ?: graphHistory?.graph?.commits?.values?.firstOrNull { it.snapshot.id==selected }?.let { HistoryEntry(it.snapshot,"","云端历史") }
+  val selection = history.firstOrNull { it.manifest.id == selected } ?: graphHistory?.graph?.commits?.values?.firstOrNull { it.snapshot.id==selected }?.let { HistoryEntry(it.snapshot,"",DesktopMessages.CLOUD_HISTORY.text()) }
 
   val iconTarget = (if (onboardingActive) discoveredTarget ?: targetInfo else targetInfo)?.takeIf { it.trusted }
   val selectedGameIcon = rememberDesktopGameIcon(iconTarget)
-  fun gameIdentity(target: TargetGame) = SharedGameIdentity("Shattered Pixel Dungeon", target.displayVersion,
+  fun gameIdentity(target: TargetGame) = SharedGameIdentity(DesktopMessages.SHATTERED_PIXEL_DUNGEON.text(), target.displayVersion,
    selectedGameIcon.takeIf { target == iconTarget })
 
   fun homeState() = DesktopSharedHomeAdapter.state(DesktopHomeContext(
    config = config, hasSession = session != null,
    pageActive = page == Page.HOME && directoryEditor == null && renameSnapshot == null,
    busy = busy, connectingAtStartup = connectingAtStartup, appClosed = appClosed,
-   connected = connected, gameStatus = gameStatus, launchingGame = launchingGame,
+   connected = connected, serviceExpired = serviceExpired, gameStatus = gameStatus, launchingGame = launchingGame,
    pendingUpload = pending, hasConflict = conflict != null, remoteTips = remoteTips,
    selectedId = selected, selectedByUser = selectedByUser, restoreIssue = restoreIssue,
    history = graphHistory, historyPage = homeHistoryPage,
@@ -153,28 +204,43 @@ internal fun runSyncApplication(
    connectionNotice = connectionNotice, locationIssue = locationIssue,
    launchNotice = launchNotice, deviceLabel = device?.label,
    historyOwner = homeProfile, historyVerified = remoteInspectionReady,
+   localHistoryVerified = localHistoryVerified, pendingUploadSourceAvailable = pendingUploadSourceAvailable,
+   archiveLoading = archiveReads.loading,
+   historyRefreshAccessKnown = syncAccess.hasKnownAccess(config) && renewalReads.allowsManualRefresh(config),
   ))
+  fun conflictOwner() = DesktopConflictDialogOwner(pageGeneration, session, config, conflict)
   fun reconcileHomeSelection(retainExplicit: Boolean = true) {
    val next = desktopHomeSelection(graphHistory, selected, selectedByUser && retainExplicit)
-   if (next.snapshotId != selected) restoreIssue = "正在校验实际版本…"
+   if (next.snapshotId != selected) restoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
    selected = next.snapshotId; selectedByUser = next.explicit
   }
 
-  fun comparisonContext() = DesktopComparisonContext(pageGeneration, session, comparison, config,
-   page == Page.COMPARISON && onboardingActive && !appClosed, busy || connectingAtStartup, connected)
-  fun comparisonState() = comparisonAdapter.state(comparisonContext(),
-   game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let { gameIdentity(it) },
-   localLabel = "本机 · ${device?.label ?: "设备未知"}", notice = comparisonNotice.orEmpty(),
-   restoreSupported = targetInfo?.trusted == true)
   fun navigate(next: Page) {
-   comparisonAdapter.invalidate()
    if (next == Page.CONNECTION && page != Page.CONNECTION) {
-    connectionReturnPage = if (page == Page.SETTINGS) Page.SETTINGS else if (onboardingActive) Page.PATH else Page.HOME
+    connectionReturnPage = if (page == Page.SETTINGS) Page.SETTINGS else if (onboardingActive) Page.DISCOVERY else Page.HOME
    }
+   if (next != Page.CONNECTION) connectionAppreciationOnly = false
    pathAdapter.pageChanged(next == Page.PATH)
+   archiveReads.invalidate()
    pageGeneration++; page = next; closeBlocked = false
   }
   suspend fun reconnectSaved(saved: AppConfig) {
+   val savedPassword = saved.password
+   if (OfficialSyncAccess.isOfficialEndpoint(saved.endpoint) && savedPassword != null) {
+    password = savedPassword
+    try {
+     withContext(Dispatchers.IO) { syncAccess.beginOperation(saved, savedPassword) }
+     connected = true; connectionNotice = null
+     return
+    } catch (failure: CancellationException) { throw failure }
+    catch (failure: Exception) {
+     serviceExpired = syncAccess.isExpired(saved)
+     connected = serviceExpired // Expiry does not discard the authenticated account or credentials.
+     connectionNotice = failure.message
+     return
+    }
+   }
+
    when (val restored = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.CONNECT, result = { if (it is SavedConnectionResult.Connected) DiagnosticResult.SUCCEEDED else DiagnosticResult.FAILED }) { restoreSavedConnection(saved) } }) {
     is SavedConnectionResult.Connected -> { password = restored.connection.password; connected = true; connectionNotice = null }
     is SavedConnectionResult.Retry -> { password = restored.connection.password; settingsMode = SettingsMode.UNLOCK; connectionNotice = restored.message }
@@ -183,27 +249,46 @@ internal fun runSyncApplication(
   }
   fun openConnection(mode: SettingsMode) {
    if (busy || connectingAtStartup || appClosed) return
+   connectionAppreciationOnly = false
    settingsMode = mode; if (config?.onboardingProgress != OnboardingProgress.COMPLETE) { onboardingActive = true; setupDraft = config ?: setupDraft }; navigate(Page.CONNECTION)
+  }
+  fun openHomeAppreciation() {
+   if (!desktopHomeAppreciationAllowed(config, homeState()) || !syncAccess.isExpired(config)) return
+   connectionAppreciationOnly = true
+   navigate(Page.CONNECTION)
+   connectionReturnPage = Page.HOME
   }
   fun requestConfirmation(action: Action) {
    if (busy || connectingAtStartup || appClosed) return
+   if (!desktopHomeTransferAllowed(action, homeState())) return
    confirmationFiles=graphHistory?.currentFiles
    confirm = operationEvents.begin(action); confirmationNotice = null; navigate(Page.CONFIRM)
   }
-  suspend fun refreshProfile(value: AppConfig?) {
+  suspend fun refreshProfile(value: AppConfig?, prepareSelectedDirectory: Boolean = false,
+                             canPublish: () -> Boolean = { true }) {
    val sameProfile = sameDesktopHomeProfile(homeProfile, value)
+   val generation = pageGeneration
+   val readPage = page
+   fun current() = !appClosed && page == readPage && pageGeneration == generation && config == value && canPublish()
+   if (!current()) return
+   val read = archiveReads.begin()
+   localHistoryVerified = false; remoteInspectionReady = false; pendingUploadSourceAvailable = false
    try {
     val data = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT) {
-     if(value==null)location.requireDirectory() else location.selected(value)
+     if (value == null) location.requireDirectory()
+     else if (prepareSelectedDirectory) desktopPrepareSelectedDirectory(value, location)
+     else location.selected(value)
      if (value == null) null else {
       val manager = location.open(value, workspace.resolve(".local/manager"))
       val target = runCatching { manager.targetInfo() }
-      LoadedProfile(manager, manager.history(), manager.hasPending(), manager.currentVersions(), target.getOrNull(), target.exceptionOrNull()?.message, manager.deviceIdentity(), manager.baselineFiles())
+      LoadedProfile(manager, manager.history(), manager.hasPending(), manager.currentVersions(), target.getOrNull(), target.exceptionOrNull()?.message, manager.deviceIdentity(), manager.baselineFiles(), manager.retryablePendingSourceAvailable())
      }
     } }
-    if (appClosed) return
+    val loadedHistory = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { data?.session?.syncHistory() } }
+    if (!current()) return
     locationIssue = null; session = data?.session; history = data?.history ?: emptyList(); pending = data?.pending ?: false
-    graphHistory=withContext(Dispatchers.IO){diagnosticWork(DiagnosticAction.HISTORY) { data?.session?.syncHistory() }}
+    graphHistory = loadedHistory
+    localHistoryVerified = loadedHistory != null; pendingUploadSourceAvailable = data?.pendingSourceAvailable == true
     saveInfo = data?.saves; targetInfo = data?.target; targetError = data?.targetError
     // Preserve an explicit still-valid target on ordinary refresh. A different account/profile
     // starts from its sole verified tip; publication order never chooses a branch.
@@ -211,19 +296,41 @@ internal fun runSyncApplication(
     if (!sameProfile) homeHistoryPage = 0
     homeProfile = value; remoteTips = emptySet(); conflictSelection = null; conflict = null
     device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
-    status = if (value == null) "存档内容待检查。" else "正在检查存档变化。"
+    status = if (value == null) DesktopMessages.SAVE_CONTENTS_HAVE_NOT_BEEN_CHECKED.text() else DesktopMessages.CHECKING_FOR_SAVE_CHANGES.text()
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
-    if (appClosed) return
+    if (!current()) return
     session = null; history = emptyList(); graphHistory = null; saveInfo = null; targetInfo = null; pending = false
+    localHistoryVerified = false; remoteInspectionReady = false; pendingUploadSourceAvailable = false
     if (!sameProfile) { selected = null; selectedByUser = false; homeHistoryPage = 0; homeProfile = null }
-    locationIssue = e.message; status = e.message ?: "无法读取默认存档目录"
-   }
+    locationIssue = e.message; status = e.message ?: DesktopMessages.CANNOT_READ_THE_DEFAULT_SAVE_FOLDER.text()
+   } finally { archiveReads.end(read) }
   }
-  fun loadProfile(value: AppConfig?) {
+  fun loadProfile(value: AppConfig?, prepareOfficialNamespace: Boolean = false,
+                  prepareSelectedDirectory: Boolean = false) {
    if (busy || connectingAtStartup || appClosed) return
+   val generation = pageGeneration
+   val secret = password
+   fun current() = !appClosed && page == Page.HOME && pageGeneration == generation && config == value
    busy = true
-   scope.launch { try { refreshProfile(value) } finally { busy = false } }
+   scope.launch {
+    try {
+     refreshProfile(value, prepareSelectedDirectory && current())
+     // Service configuration has already returned HOME. Prepare only this app's empty DAV folders before
+     // HOME's first remote-history read; this is neither a DAV test nor a sync decision.
+     val manager = session
+     if (prepareOfficialNamespace && current() && manager != null && value != null &&
+         value.connectionProvider == "official" && isDesktopOfficialRoot(value.endpoint)) {
+      withContext(Dispatchers.IO) {
+       syncAccess.store(value, manager.adapter.id, secret)
+        .ensureNamespace { current() && session === manager }
+      }
+     }
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) {
+     if (current()) status = DesktopMessages.CLOUD_TEMPORARILY_UNAVAILABLE.text()
+    } finally { busy = false }
+   }
   }
   fun selectTargetGame() {
    if (busy || connectingAtStartup) return
@@ -243,16 +350,16 @@ internal fun runSyncApplication(
       config = next; setupDraft = next; discoveredTarget = checked; onboardingActive = true; updated = next
      }
     } catch (e: CancellationException) { throw e }
-    catch (e: Exception) { status = "目标游戏未保存：${e.message ?: "请检查配置文件写入权限"}" }
+    catch (e: Exception) { status = DesktopMessages.TARGET_GAME_NOT_SAVED_1_S.text(e.message ?: DesktopMessages.CHECK_WRITE_PERMISSIONS_FOR_THE_CONFIGURATION_FILE.text()) }
     finally { busy = false }
-    // Reload only after releasing the shared guard. This never reopens connection settings.
-    updated?.let { loadProfile(it); navigate(Page.DISCOVERY) }
+    // Recheck the selected game without reading saves before the service step.
+    updated?.let { navigate(Page.DISCOVERY) }
    }
   }
   fun launchGame() {
    if (busy || connectingAtStartup || appClosed || launchingGame) return
    val saved = config ?: return
-   busy = true; launchingGame = true; launchNotice = "正在启动游戏…"
+   busy = true; launchingGame = true; launchNotice = DesktopMessages.STARTING_GAME.text()
    scope.launch {
     try {
      val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.LAUNCH, result = {
@@ -267,7 +374,7 @@ internal fun runSyncApplication(
       }
      }
     } catch (e: CancellationException) { throw e }
-    catch (_: Exception) { launchNotice = "启动失败，请重试。" }
+    catch (_: Exception) { launchNotice = DesktopMessages.LAUNCH_FAILED_PLEASE_TRY_AGAIN.text() }
     finally { launchingGame = false; busy = false }
    }
   }
@@ -277,7 +384,7 @@ internal fun runSyncApplication(
    scope.launch {
     try {
      when (val result = diagnosticExport.export(System.getProperty("user.home"))) {
-      is DiagnosticExportResult.Saved -> diagnosticExportNotice = "日志已导出：${result.filename}"
+      is DiagnosticExportResult.Saved -> diagnosticExportNotice = DesktopMessages.LOGS_EXPORTED_1_S.text(result.filename)
       is DiagnosticExportResult.Failed -> diagnosticExportNotice = result.message
       DiagnosticExportResult.Canceled, DiagnosticExportResult.Ignored -> Unit
      }
@@ -285,16 +392,23 @@ internal fun runSyncApplication(
    }
   }
   fun authenticationFailed(e: Exception) {
+   serviceExpired = syncAccess.isExpired(config)
+   if (serviceExpired) {
+    status = pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text()
+    connectionNotice = status
+    return
+   }
    if (e is WebDavException && e.statusCode in setOf(401, 403)) {
+    renewalReads.reset()
     connected = false; password = ""; settingsMode = SettingsMode.UNLOCK; navigate(Page.CONNECTION)
-    connectionNotice = if (e.statusCode == 401) "认证失败（HTTP 401），请检查用户名和密码。" else "服务拒绝访问（HTTP 403），请检查账号权限或重新输入密码。"
-    status = "云端验证已失效，请重新输入密码。本地快照与待上传内容已保留。"
+    connectionNotice = if (e.statusCode == 401) DesktopMessages.AUTHENTICATION_FAILED_HTTP_401_CHECK_YOUR_USERNAME_AND_PASSWORD.text() else DesktopMessages.ACCESS_DENIED_HTTP_403_CHECK_ACCOUNT_PERMISSIONS_OR_RE_ENTER_YOUR_PASSWORD.text()
+    status = DesktopMessages.CLOUD_AUTHENTICATION_HAS_EXPIRED_RE_ENTER_YOUR_PASSWORD_LOCAL_SNAPSHOTS_AND.text()
    }
   }
   fun cancelConfirmation(trace: OperationTrace) {
    if (busy || connectingAtStartup) return
    trace.record(OperationEvent.CONFIRMATION_CANCELED)
-   status = if (trace.action == Action.PUSH && pending) "已取消上传，待上传快照仍保留。" else "已取消本次操作。"
+   status = if (trace.action == Action.PUSH && pending) DesktopMessages.UPLOAD_CANCELLED_THE_PENDING_SNAPSHOT_HAS_BEEN_PRESERVED.text() else DesktopMessages.OPERATION_CANCELLED.text()
    confirm = null; confirmationNotice = null; navigate(Page.HOME)
   }
   fun execute(trace: OperationTrace, isAutomatic: Boolean = false) {
@@ -310,24 +424,31 @@ internal fun runSyncApplication(
    if (rejected != null) {
     trace.record(OperationEvent.GUARD_REJECTED, guard = rejected)
     confirmationNotice = when (rejected) {
-     OperationGuard.CLOSED -> "操作未开始：窗口已关闭，请重新打开。"
-     OperationGuard.STARTUP -> "操作未开始：正在读取存档与连接状态，请稍后重试。"
-     OperationGuard.BUSY -> "操作未开始：请等待当前操作完成。"
-     OperationGuard.NO_SESSION -> "操作未开始：存档尚未就绪，请返回主页重新检查存档。"
+     OperationGuard.CLOSED -> DesktopMessages.OPERATION_NOT_STARTED_THE_WINDOW_IS_CLOSED_PLEASE_REOPEN_IT.text()
+     OperationGuard.STARTUP -> DesktopMessages.OPERATION_NOT_STARTED_READING_SAVES_AND_CONNECTION_STATUS_PLEASE_TRY_AGAIN.text()
+     OperationGuard.BUSY -> DesktopMessages.OPERATION_NOT_STARTED_WAIT_FOR_THE_CURRENT_OPERATION_TO_FINISH.text()
+     OperationGuard.NO_SESSION, OperationGuard.NO_SOURCE -> DesktopMessages.OPERATION_NOT_STARTED_SAVES_ARE_NOT_READY_RETURN_TO_HOME_AND_CHECK_SAVES_AG.text()
     }
     return
    }
+   // Automatic work owns its fresh compare-and-skip policy; this gate protects manual entry.
+   if (!isAutomatic && (action == Action.PUSH && !connected || !desktopHomeTransferAllowed(action, homeState()))) {
+    trace.record(OperationEvent.GUARD_REJECTED, guard = OperationGuard.NO_SOURCE)
+    return
+   }
    val manager = requireNotNull(session)
-   val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val account = config?.username ?: ""; val secret = password
+   val operationConfig = config
+   val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val secret = password
    val allowUniqueReplacement=confirm===trace
    val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
    busy = true; homeOperation = desktopHomeOperation(action); confirm = null; confirmationNotice = null; navigate(Page.HOME)
+   localHistoryVerified = false; remoteInspectionReady = false; pendingUploadSourceAvailable = false
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
-    Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> "正在校验并备份当前档案，然后恢复…"
-    Action.MERGE -> "正在检查单局身份、徽章、历史和图鉴…"
-    Action.PUSH -> "正在保留快照并校验云端…"
-    else -> "正在处理…"
+    Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> DesktopMessages.VERIFYING_AND_BACKING_UP_THE_CURRENT_PROFILE_BEFORE_RESTORING.text()
+    Action.MERGE -> DesktopMessages.CHECKING_RUN_IDENTITIES_BADGES_HISTORY_AND_THE_CATALOG.text()
+    Action.PUSH -> DesktopMessages.PRESERVING_THE_SNAPSHOT_AND_VERIFYING_THE_CLOUD.text()
+    else -> DesktopMessages.PROCESSING.text()
    }
    var terminalFailure: OperationFailure? = null
    trace.record(OperationEvent.OPERATION_QUEUED)
@@ -347,29 +468,36 @@ internal fun runSyncApplication(
        if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
        SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
       }
-      fun store() = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)
+      val remoteStore by lazy { syncAccess.store(manager.config, manager.adapter.id, secret) }
+      fun store() = remoteStore
+      // Explicit manual upload may retry failed initial app-folder preparation.
+      // Background history reads and automatic upload never provision folders.
+      if (action == Action.PUSH && !isAutomatic && manager.config.connectionProvider == "official" &&
+          isDesktopOfficialRoot(manager.config.endpoint)) {
+       store().ensureNamespace { !appClosed && session === manager && config == operationConfig }
+      }
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
-       is AppendPushResult.Success -> OperationResult("追加提交已回读校验。" + (if (result.localDirty) "当前本地还有未上传变化；下一次同步会另建提交。" else "所选进度已成为本机同步基线。") + (if (result.remoteAhead) "另有已观察后续分支，可读取查看。" else ""))
-       is AppendPushResult.Diverged -> OperationResult("发现 ${result.conflict.branches.size} 个进度分支，全部快照均已保留。请明确选择。", result.conflict)
+       is AppendPushResult.Success -> OperationResult(DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text() + (if (result.localDirty) DesktopMessages.LOCAL_CHANGES_REMAIN_UNUPLOADED_THE_NEXT_SYNC_WILL_CREATE_A_SEPARATE_COMMIT.text() else DesktopMessages.THE_SELECTED_PROGRESS_IS_NOW_THIS_DEVICE_S_SYNC_BASELINE.text()) + (if (result.remoteAhead) DesktopMessages.ADDITIONAL_LATER_BRANCHES_HAVE_BEEN_OBSERVED_AND_CAN_BE_VIEWED.text() else ""))
+       is AppendPushResult.Diverged -> OperationResult(DesktopMessages.FOUND_1_S_PROGRESS_BRANCHES_ALL_SNAPSHOTS_HAVE_BEEN_PRESERVED_PLEASE_CHOOSE.text(result.conflict.branches.size), result.conflict)
       }
       val completed = when (action) {
-       Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult("本地快照已保存，可随时从历史中恢复。") }
+       Action.CAPTURE -> manager.createSnapshot(stopped).let { OperationResult(DesktopMessages.LOCAL_SNAPSHOT_SAVED_YOU_CAN_RESTORE_IT_FROM_HISTORY_AT_ANY_TIME.text()) }
        Action.PUSH -> if (!isAutomatic) pushed(manager.push(store(), stopped)) else when (val automaticResult = manager.automaticPush(store(), stopped)) {
         is AutomaticPushResult.Published -> pushed(automaticResult.result)
         is AutomaticPushResult.Skipped -> OperationResult(
-         if (automaticResult.comparison.kind in setOf(OnboardingKind.BOTH_EMPTY, OnboardingKind.IDENTICAL)) "本次没有需要自动上传的变化。"
-         else "自动上传已跳过：${automaticResult.comparison.blocker ?: "请检查本机与云端进度后明确选择。"}",
+         if (automaticResult.comparison.kind in setOf(OnboardingKind.BOTH_EMPTY, OnboardingKind.IDENTICAL)) DesktopMessages.THERE_ARE_NO_CHANGES_TO_UPLOAD_AUTOMATICALLY_THIS_TIME.text()
+         else DesktopMessages.AUTOMATIC_UPLOAD_SKIPPED_1_S.text(automaticResult.comparison.blocker ?: DesktopMessages.CHECK_LOCAL_AND_CLOUD_PROGRESS_THEN_CHOOSE_EXPLICITLY.text()),
          automaticSkipped = true)
        }
-       Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult("云端存档已恢复。恢复前备份已加入历史。", appliedFiles = it.restored.files) }
-       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult("恢复完成，备份已加入历史。恢复提交已冻结，将自动上传；暂停时可点击上传。", appliedFiles = it.restored.files) }
-       Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult("所选云端历史已恢复，原始历史保留。恢复结果待上传。",appliedFiles=it.restored.files)}
+       Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult(DesktopMessages.CLOUD_SAVE_RESTORED_A_PRE_RESTORE_BACKUP_WAS_ADDED_TO_HISTORY.text(), appliedFiles = it.restored.files) }
+       Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult(DesktopMessages.RESTORE_COMPLETE_A_BACKUP_WAS_ADDED_TO_HISTORY_THE_RESTORE_COMMIT_IS_FROZEN.text(), appliedFiles = it.restored.files) }
+       Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult(DesktopMessages.SELECTED_CLOUD_HISTORY_RESTORED_ORIGINAL_HISTORY_PRESERVED_THE_RESULT_IS_AW.text(),appliedFiles=it.restored.files)}
        Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped)).copy(appliedFiles = divergence.branches.single { it.snapshot.manifest.id == branchChoice }.snapshot.manifest.files)
        Action.MERGE -> pushed(manager.merge(requireNotNull(divergence),store(),stopped)).let { result ->
         if(result.conflict==null) result.copy(appliedFiles=manager.observedFiles()) else result
        }
        Action.MERGE_CURRENT -> pushed(manager.mergeCurrent(store(),stopped)).let {result->if(result.conflict==null)result.copy(appliedFiles=manager.observedFiles()) else result}
-       Action.ARCHIVE -> { manager.archivePending(); OperationResult("待上传快照已归档。下次同步将重新采集当前存档。") }
+       Action.ARCHIVE -> { manager.archivePending(); OperationResult(DesktopMessages.PENDING_SNAPSHOT_ARCHIVED_THE_NEXT_SYNC_WILL_CAPTURE_THE_CURRENT_SAVES_AGAI.text()) }
       }
       trace.outcome(when { completed.automaticSkipped -> DiagnosticResult.SKIPPED; completed.conflict != null -> DiagnosticResult.CONFLICT; else -> DiagnosticResult.SUCCEEDED })
       trace.record(OperationEvent.WORK_SUCCEEDED)
@@ -390,30 +518,38 @@ internal fun runSyncApplication(
       val files = withContext(Dispatchers.IO) { runCatching { manager.observedFiles() }.getOrNull() }
       if (files != null) automatic.applied(files, now) else automatic.retryAllowed()
      }
-     if (result.conflict != null) automaticStatus = "存在多个存档分支，自动上传已暂停，点击恢复选择。"
+     if (result.conflict != null) automaticStatus = DesktopMessages.MULTIPLE_SAVE_BRANCHES_EXIST_AUTOMATIC_UPLOAD_PAUSED_CLICK_RESTORE_TO_CHOOS.text()
      if (result.conflict != null && !isAutomatic) navigate(Page.CONFLICT)
     } catch (e: CancellationException) {
      terminalFailure = OperationFailure.CANCELED
      if (action == Action.PUSH) automatic.failed(monotonicMillis(), false)
      trace.record(OperationEvent.OPERATION_CANCELED, failure = terminalFailure)
-     status = "本次操作已中断，已保存的历史与备份保留。请核对待上传状态后重试。"
+     status = DesktopMessages.OPERATION_INTERRUPTED_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED_CHECK_PENDING.text()
      throw e
     } catch (e: Exception) {
      terminalFailure = operationFailure(e)
      if (action == Action.PUSH) automatic.failed(monotonicMillis(), terminalFailure == OperationFailure.NETWORK || e is SaveNotStableException)
      trace.record(OperationEvent.WORK_FAILED, failure = terminalFailure)
      status = if(action==Action.MERGE && withContext(Dispatchers.IO) { manager.retryablePending() })
-      "本机合并已完成，云端上传未完成。请点击上传重试同一份合并结果；原始历史与备份保留。"
-     else "操作未完成：${e.message}。已保存的历史与备份保留。"
+      DesktopMessages.LOCAL_MERGE_COMPLETE_BUT_CLOUD_UPLOAD_IS_INCOMPLETE_CLICK_UPLOAD_TO_RETRY_T.text()
+     else DesktopMessages.OPERATION_INCOMPLETE_1_S_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED.text(e.message)
      authenticationFailed(e)
     }
     finally {
      try {
       trace.record(OperationEvent.HISTORY_REFRESH_STARTED)
-      val data = withContext(Dispatchers.IO) { trace.withDiagnostics { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) } }
-      history = data.first; pending = data.second; saveInfo = data.third
-      graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
-      reconcileHomeSelection()
+      val generation = pageGeneration
+      val (data, loadedGraph, pendingSource) = archiveReads.reading {
+       withContext(Dispatchers.IO) {
+        Triple(trace.withDiagnostics { Triple(manager.history(), manager.hasPending(), runCatching { manager.currentVersions() }.getOrNull()) },
+         manager.syncHistory(), manager.retryablePendingSourceAvailable())
+       }
+      }
+      if (!appClosed && page == Page.HOME && pageGeneration == generation && config == operationConfig && session === manager) {
+       history = data.first; pending = data.second; saveInfo = data.third; graphHistory = loadedGraph
+       localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource
+       reconcileHomeSelection()
+      }
       trace.record(OperationEvent.HISTORY_REFRESH_SUCCEEDED)
      } catch (e: CancellationException) {
       if (terminalFailure == null) terminalFailure = OperationFailure.CANCELED
@@ -422,7 +558,7 @@ internal fun runSyncApplication(
       val refreshFailure = operationFailure(e)
       if (terminalFailure == null) terminalFailure = refreshFailure
       trace.record(OperationEvent.HISTORY_REFRESH_FAILED, failure = refreshFailure)
-      status += " 历史刷新失败：${e.message}"
+      status += DesktopMessages.HISTORY_REFRESH_FAILED_1_S.text(e.message)
      }
      homeOperation = SharedHomeOperation.NONE; busy = false
     }
@@ -430,10 +566,11 @@ internal fun runSyncApplication(
     trace.record(OperationEvent.OPERATION_FINISHED, failure = terminalFailure ?: cause?.let(::operationFailure))
    }
   }
-  fun editDirectory(change: ((AppendProfileSession, () -> Boolean) -> DirectorySnapshotMetadata)? = null) {
+  fun editDirectory(inline: Boolean = false, change: ((AppendProfileSession, () -> Boolean) -> DirectorySnapshotMetadata)? = null) {
    if(busy || connectingAtStartup || appClosed) return
    val manager=session ?: return
    busy=true;directoryNotice=null
+   if (change == null) directoryInline = inline
    scope.launch {
     try {
      val metadata=withContext(Dispatchers.IO) {
@@ -443,32 +580,72 @@ internal fun runSyncApplication(
      }
      directoryEditor=metadata;directoryName=metadata.displayName
      graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
-     directoryNotice=if(change==null)null else "已保存。点击上传可同步名称和已确认身份。"
-    } catch(e:Exception) { directoryNotice=e.message;status="无法更新存档信息：${e.message}" }
+     directoryNotice=if(change==null)null else DesktopMessages.SAVED_CLICK_UPLOAD_TO_SYNC_THE_NAME_AND_CONFIRMED_IDENTITIES.text()
+     if (change != null && directoryInline) directoryEditor = null
+    } catch(e:Exception) { directoryNotice=e.message;status=DesktopMessages.CANNOT_UPDATE_SAVE_INFORMATION_1_S.text(e.message) }
     finally { busy=false }
    }
   }
-  fun readRemote() {
-   if (busy || connectingAtStartup || appClosed || !connected) return
-   val manager = session ?: return; val account = config?.username ?: ""; val secret = password
-   busy = true; remoteReadAt = monotonicMillis(); remoteInspectionReady = false; status = "正在读取并校验云端快照…"
+  fun readRemote(renewal: DesktopRenewalHistoryReads.Request? = null, refreshLocal: Boolean = false) {
+   if (busy || connectingAtStartup || appClosed || !connected || serviceExpired || page != Page.HOME) return
+   if (refreshLocal && !homeState().refreshHistoryEnabled) return
+   val manualRefresh = if (refreshLocal) renewalReads.manualRequest(config) ?: return else null
+   // An explicit read also consumes a queued recovery for this same account, exactly once.
+   val recovery = renewal ?: if (refreshLocal) renewalReads.takeForHome(config, home = true, ready = true) else null
+   val reopenLocal = recovery != null || refreshLocal
+   val previousManager = session
+   if (previousManager == null && !reopenLocal) return
+   val secret = password
+   val generation = pageGeneration; val readConfig = config
+   val selectionGeneration = homeSelectionGeneration
+   var readManager = previousManager
+   fun currentPage() = !appClosed && page == Page.HOME && pageGeneration == generation &&
+    config == readConfig && password == secret && homeSelectionGeneration == selectionGeneration &&
+    (recovery == null || renewalReads.isCurrent(recovery, config)) &&
+    (manualRefresh == null || renewalReads.isManualCurrent(manualRefresh, config))
+   busy = true; remoteReadAt = monotonicMillis(); remoteInspectionReady = false; localHistoryVerified = false
+   pendingUploadSourceAvailable = false; status = DesktopMessages.READING_AND_VERIFYING_CLOUD_SNAPSHOTS.text()
+   if (reopenLocal) automatic.skipped()
    scope.launch {
+    val read = archiveReads.begin()
     try {
-     val entries = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { manager.readRemote(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, account, secret)) } }
+     if (!currentPage()) return@launch
+     if (reopenLocal) {
+      // Reopen local history even if an earlier inspection failed or its session was unavailable.
+      // Manual refresh and renewal recovery never prepare directories or transfer saves.
+      refreshProfile(readConfig, canPublish = ::currentPage)
+      if (!currentPage()) return@launch
+      automatic.skipped()
+      if (!localHistoryVerified) return@launch
+      // refreshProfile resets this timer; a failed explicit/recovery read must not immediately replay.
+      remoteReadAt = monotonicMillis()
+     }
+     val manager = if (reopenLocal) session else previousManager
+     if (manager == null) return@launch
+     readManager = manager
+     fun current() = currentPage() && config == readConfig && session === manager
+     if (!current() || serviceExpired) return@launch
+     val entries = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.HISTORY) { manager.readRemote(syncAccess.store(manager.config, manager.adapter.id, secret)) } }
+     val loadedHistory = withContext(Dispatchers.IO) { manager.history() }
+     val loadedGraph = withContext(Dispatchers.IO) { manager.syncHistory() }
+     val pendingSource = withContext(Dispatchers.IO) { manager.retryablePendingSourceAvailable() }
+     if (!current()) return@launch
      remoteTips = entries.map { it.entry.manifest.id }.toSet(); remoteInspectionReady = true
      remoteObserved = entries.mapNotNull { remote -> manager.observedAt(remote.commit.id)?.let { remote.entry.manifest.id to it } }.toMap()
-     history = withContext(Dispatchers.IO) { manager.history() }
-     graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
+     history = loadedHistory; graphHistory = loadedGraph
+     localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource
      reconcileHomeSelection()
-     status = if (entries.isEmpty()) "此次未发现云端记录。" else "已读取云端记录。"
-    } catch (e: Exception) { status = "读取云端失败：${e.message}"; authenticationFailed(e) }
-    finally { busy = false }
+     status = if (entries.isEmpty()) DesktopMessages.NO_CLOUD_RECORDS_FOUND_THIS_TIME.text() else ""
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { if (currentPage() && session === readManager) { status = DesktopMessages.FAILED_TO_READ_CLOUD_1_S.text(e.message); authenticationFailed(e) } }
+    finally { archiveReads.end(read); busy = false }
    }
   }
+  fun hasRemoteBranches() = remoteTips.size > 1 || (graphHistory?.graph?.tips?.size ?: 0) > 1
   fun openRestore() {
-   if (busy || connectingAtStartup || appClosed) return
+   if (!homeState().restoreEnabled) return
    if (conflict != null && (selected==null || conflict!!.branches.any {it.snapshot.manifest.id==selected})) { navigate(Page.CONFLICT); return }
-   if (remoteTips.size > 1 && (selected==null || selected in remoteTips)) {
+   if (hasRemoteBranches() && (selected==null || selected in remoteTips)) {
     val manager = session ?: return
     busy = true
     scope.launch {
@@ -478,11 +655,11 @@ internal fun runSyncApplication(
        val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
        require(stopped()) { processMessage(gameLauncher.status(target)) }
        SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
-       manager.inspectConflict(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, config?.username ?: "", password), stopped)
+       manager.inspectConflict(syncAccess.store(manager.config, manager.adapter.id, password), stopped)
       }
       conflict = found; conflictSelection = null
-      if (found != null) navigate(Page.CONFLICT) else status = "云端分支已变化，请等待刷新后重新选择。"
-     } catch (e: Exception) { status = "暂不能选择恢复：${e.message}"; authenticationFailed(e) }
+      if (found != null) navigate(Page.CONFLICT) else status = DesktopMessages.CLOUD_BRANCHES_CHANGED_WAIT_FOR_REFRESH_THEN_SELECT_AGAIN.text()
+     } catch (e: Exception) { status = DesktopMessages.CANNOT_SELECT_RESTORE_YET_1_S.text(e.message); authenticationFailed(e) }
      finally { busy = false }
     }
    } else if(graphHistory?.graph?.commits?.values?.any {it.snapshot.id==selected}==true) {
@@ -502,7 +679,7 @@ internal fun runSyncApplication(
      val next = value.copy(autoUploadPaused = paused)
      withContext(Dispatchers.IO) { configFile.save(next) }
      config = next; automatic.retryAllowed()
-    } catch (e: Exception) { status = "设置未保存：${e.message}" }
+    } catch (e: Exception) { status = DesktopMessages.SETTINGS_NOT_SAVED_1_S.text(e.message) }
     finally { busy = false }
    }
   }
@@ -518,7 +695,7 @@ internal fun runSyncApplication(
    busy = true
    scope.launch {
     try { scanDiscovery() }
-    catch (e: Exception) { discoveryNotice = "扫描未完成：${e.message}" }
+    catch (e: Exception) { discoveryNotice = DesktopMessages.SCAN_INCOMPLETE_1_S.text(e.message) }
     finally { busy = false }
    }
   }
@@ -533,45 +710,11 @@ internal fun runSyncApplication(
        val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
        require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
       }
-      require(verified.trusted) { "无法识别所选游戏版本：${verified.reason}" }
+      require(verified.trusted) { DesktopMessages.SELECTED_GAME_VERSION_NOT_RECOGNIZED_1_S.text(verified.reason) }
       withContext(Dispatchers.IO) { setupSelection.save(verified.path) }
       discoveredTarget = verified; discoveryNotice = null
      }
-    } catch (e: Exception) { discoveryNotice = "未更改游戏选择：${e.message}" }
-    finally { busy = false }
-   }
-  }
-  suspend fun finishOnboarding(progress: OnboardingProgress, message: String) {
-   val next = requireNotNull(config).copy(onboardingProgress = progress)
-   withContext(Dispatchers.IO) { configFile.save(next) }
-   config = next; setupDraft = next; onboardingActive = false; comparisonAdapter.invalidate()
-   status = message
-   automaticStatus = if (progress == OnboardingProgress.COMPLETE) "首次检查已完成，正在观察存档变化。" else "首次存档选择尚未完成，自动上传保持暂停。点击上传或恢复继续检查。"
-   navigate(Page.HOME)
-  }
-  fun inspectOnboarding() {
-   if (busy || connectingAtStartup || appClosed) return
-   if (!connected) { onboardingActive = true; openConnection(SettingsMode.UNLOCK); return }
-   onboardingActive = true; comparison = null; comparisonNotice = null; comparisonAdapter.observed(null)
-   navigate(Page.COMPARISON); busy = true
-   val generation = pageGeneration
-   val inspectedConfig = config
-   scope.launch {
-    try {
-     refreshProfile(config)
-     val manager = session ?: error(locationIssue ?: "默认存档尚未就绪")
-     val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.INSPECT, result = { if (it.kind == OnboardingKind.BLOCKED) DiagnosticResult.REJECTED else DiagnosticResult.SUCCEEDED }) {
-      val target = manager.targetInfo()
-      manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
-       gameLauncher.status(target) is GameProcessStatus.Stopped
-      }
-     } }
-     if (appClosed || page != Page.COMPARISON || pageGeneration != generation || config != inspectedConfig || session !== manager) return@launch
-     comparison = result; comparisonCheckedAt = java.time.Instant.now().toString(); comparisonAdapter.observed(result)
-     remoteTips = result.remoteEntries.map { it.entry.manifest.id }.toSet()
-     history = withContext(Dispatchers.IO) { manager.history() }
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) { comparisonNotice = "暂不能比较：${e.message}。未上传或覆盖存档。"; authenticationFailed(e) }
+    } catch (e: Exception) { discoveryNotice = DesktopMessages.GAME_SELECTION_UNCHANGED_1_S.text(e.message) }
     finally { busy = false }
    }
   }
@@ -583,17 +726,17 @@ internal fun runSyncApplication(
     var proceed = false
     try {
      withContext(Dispatchers.IO) {
-      require(ShatteredInstallationDiscovery().validateJar(Path.of(target.path)).target == target && target.trusted) { "游戏文件已变化，请重新选择" }
+      require(ShatteredInstallationDiscovery().validateJar(Path.of(target.path)).target == target && target.trusted) { DesktopMessages.GAME_FILE_CHANGED_PLEASE_SELECT_IT_AGAIN.text() }
      }
-     val next = setupDraft.copy(targetGame = target.path, onboardingProgress = OnboardingProgress.PENDING)
+     val next = desktopSetupDraftForGame(setupDraft, target.path, pathAdapter.state.path)
      withContext(Dispatchers.IO) { setupSelection.save(target.path) }
      if (config != null) { withContext(Dispatchers.IO) { configFile.save(next) }; config = next }
      setupDraft = next; onboardingActive = true; proceed = true
-    } catch (e: Exception) { discoveryNotice = "尚不能继续：${e.message}" }
+    } catch (e: Exception) { discoveryNotice = DesktopMessages.CANNOT_CONTINUE_YET_1_S.text(e.message) }
     finally { busy = false }
     if (proceed) {
-     pathNavigation.beginSetup()
-     navigate(Page.PATH)
+     settingsMode = SettingsMode.FULL
+     navigate(Page.CONNECTION)
     }
    }
   }
@@ -626,168 +769,6 @@ internal fun runSyncApplication(
     if(proceed && current()){settingsMode=SettingsMode.FULL;navigate(Page.CONNECTION)}
    }
   }
-  fun postponeOnboarding(emptyDecision: Boolean = false) {
-   val proof = comparisonAdapter.capture(comparisonContext()) ?: return
-   if (!emptyDecision || proof.observed.kind != OnboardingKind.BOTH_EMPTY ||
-    comparisonState().completion != SharedComparisonCompletion.EMPTY) return
-   busy = true; comparisonAdapter.invalidate()
-   scope.launch {
-    try {
-     val manager = proof.session
-     val fresh = withContext(Dispatchers.IO) {
-      val target = manager.targetInfo()
-      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
-      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
-      // Revalidate the user's exact empty observation before accepting a fresh empty result.
-      manager.confirmOnboardingReady(proof.observed, store, stopped)
-      manager.compareOnboarding(store, stopped).also {
-       require(it.kind == OnboardingKind.BOTH_EMPTY) { "存档状态已变化，请重新查看并选择" }
-       manager.confirmOnboardingReady(it, store, stopped)
-      }
-     }
-     if (!comparisonAdapter.matches(comparisonContext(), proof, requireIdle = false)) return@launch
-     comparison = fresh; comparisonAdapter.observed(fresh)
-     remoteInspectionReady = true; automatic.applied(emptyMap(), monotonicMillis())
-     finishOnboarding(OnboardingProgress.COMPLETE, "配置完成。")
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) {
-     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "选择未保存：${e.message}"
-     authenticationFailed(e)
-    } finally { busy = false }
-   }
-  }
-  fun completeObservedComparison(mode: SharedComparisonCompletion) {
-   if (mode !in setOf(SharedComparisonCompletion.CONFIRM, SharedComparisonCompletion.KEEP_LOCAL) ||
-    comparisonState().completion != mode) return
-   val proof = comparisonAdapter.capture(comparisonContext()) ?: return
-   busy = true; comparisonAdapter.invalidate()
-   scope.launch {
-    var validated = false
-    try {
-     withContext(Dispatchers.IO) {
-      val manager = proof.session
-      val target = manager.targetInfo()
-      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
-      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
-      if (mode == SharedComparisonCompletion.KEEP_LOCAL) manager.confirmLocalProgressReady(proof.observed, store, stopped)
-      else manager.confirmOnboardingReady(proof.observed, store, stopped)
-     }
-     validated = true
-     if (!comparisonAdapter.matches(comparisonContext(), proof, requireIdle = false)) return@launch
-     remoteInspectionReady = true
-     selected = OnboardingGate.homeSelection(proof.baseline, proof.observed.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
-     finishOnboarding(OnboardingProgress.COMPLETE, if (mode == SharedComparisonCompletion.KEEP_LOCAL) "已选择本机进度。" else "两边进度相同，配置完成。")
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) {
-     if (comparisonAdapter.owns(comparisonContext(), proof)) {
-      // A rejected content/graph proof needs a new comparison. A subsequent configuration-save
-      // failure leaves the validated choice available for retry instead of discarding it.
-      if (!validated && comparisonAdapter.invalidateFailedCompletion(comparisonContext(), proof)) comparison = null
-      comparisonNotice = "选择未保存：${e.message}"
-     }
-     authenticationFailed(e)
-    } finally { busy = false }
-   }
-  }
-  fun performOnboarding(action: SetupAction, finishAfterOperation: Boolean = false,
-                        confirmedProof: DesktopComparisonProof? = null) {
-   val proof = confirmedProof ?: comparisonAdapter.capture(comparisonContext()) ?: return
-   if (!comparisonAdapter.matches(comparisonContext(), proof)) return
-   val manager = proof.session
-   val observed = proof.observed
-   val chosen = proof.selectedId
-   busy = true; comparisonAdapter.invalidate(); comparisonNotice = null
-   scope.launch {
-    var succeeded = false
-    try {
-     val result = withContext(Dispatchers.IO) { diagnosticWork(when (action) {
-      SetupAction.UPLOAD -> DiagnosticAction.PUSH
-      SetupAction.RESTORE -> DiagnosticAction.RESTORE
-      SetupAction.ADOPT -> DiagnosticAction.CONFIGURE
-      SetupAction.MERGE -> DiagnosticAction.MERGE
-     }, result = ::diagnosticPublishedResult) {
-      val target = manager.targetInfo()
-      val stopped = {
-       val state = gameLauncher.status(target)
-       if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
-       true
-      }
-      SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
-      val store = AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)
-      when (action) {
-       SetupAction.UPLOAD -> manager.onboardingUpload(observed, store, stopped)
-       SetupAction.RESTORE -> manager.onboardingRestore(observed, requireNotNull(chosen), store, stopped)
-       SetupAction.ADOPT -> manager.adoptOnboardingRemote(observed, store, stopped)
-       SetupAction.MERGE -> manager.mergeCurrent(observed, store, stopped)
-      }
-     } }
-     succeeded = desktopOnboardingOperationSucceeded(result)
-     if (!succeeded) comparisonNotice = "云端分支已变化，请重新选择。"
-    } catch (e: CancellationException) { busy = false; throw e }
-    catch (e: Exception) {
-     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "操作未完成：${e.message}。已有快照与备份保留。"
-     authenticationFailed(e)
-    }
-    try {
-     // Observe the same session after every outcome. Only an explicitly requested, successful
-     // operation plus a fresh no-action proof can finish; failed/pending/forked work stays here.
-     if (comparisonAdapter.owns(comparisonContext(), proof)) {
-      val fresh = withContext(Dispatchers.IO) {
-       val target = manager.targetInfo()
-       manager.compareOnboarding(AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
-        gameLauncher.status(target) is GameProcessStatus.Stopped
-       }
-      }
-      if (!comparisonAdapter.owns(comparisonContext(), proof)) return@launch
-      comparison = fresh; comparisonAdapter.observed(fresh); comparisonCheckedAt = java.time.Instant.now().toString()
-      remoteTips = fresh.remoteEntries.map { it.entry.manifest.id }.toSet()
-      val refreshed = withContext(Dispatchers.IO) { Triple(manager.history(), manager.hasPending(), manager.syncHistory()) }
-      if (!comparisonAdapter.owns(comparisonContext(), proof) || comparison !== fresh) return@launch
-      history = refreshed.first; pending = refreshed.second; graphHistory = refreshed.third
-      if (desktopCanFinishAfterOperation(finishAfterOperation, succeeded, fresh)) {
-       withContext(Dispatchers.IO) {
-        val target = manager.targetInfo()
-        manager.confirmOnboardingReady(fresh, AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password)) {
-         gameLauncher.status(target) is GameProcessStatus.Stopped
-        }
-       }
-       if (!comparisonAdapter.owns(comparisonContext(), proof) || comparison !== fresh) return@launch
-       remoteInspectionReady = true; automatic.applied(fresh.localFiles, monotonicMillis())
-       selected = OnboardingGate.homeSelection(fresh.baselineId, fresh.remoteEntries.associate { it.commit.id to it.entry.manifest.id })
-       finishOnboarding(OnboardingProgress.COMPLETE, "配置完成。")
-      }
-     }
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) {
-     if (comparisonAdapter.owns(comparisonContext(), proof)) comparisonNotice = "尚不能完成：${e.message}"
-     authenticationFailed(e)
-    } finally { busy = false }
-   }
-  }
-  fun previewOnboardingMerge(token: Long) {
-   val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.CONFLICT) ?: return
-   if (comparisonAdapter.dialog?.presentation?.canPreviewMerge != true || !comparisonState().restoreSupported) return
-   busy = true; comparisonNotice = null
-   scope.launch {
-    try {
-     val result = withContext(Dispatchers.IO) { diagnosticWork(DiagnosticAction.MERGE) {
-      val manager = proof.session
-      val target = manager.targetInfo()
-      val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
-      SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
-      manager.previewOnboardingMerge(proof.observed,
-       AppendOnlyWebDav(manager.config.endpoint, manager.adapter.id, manager.config.profile, manager.config.username, password), stopped)
-     } }
-     comparisonAdapter.acceptMergePreview(comparisonContext(), proof, result)
-    } catch (e: CancellationException) { throw e }
-    catch (e: Exception) {
-     if (comparisonAdapter.owns(comparisonContext(), proof)) {
-      comparisonAdapter.invalidate(); comparisonNotice = "无法合并：${e.message}"
-     }
-     authenticationFailed(e)
-    } finally { busy = false }
-   }
-  }
   LaunchedEffect(Unit) {
    // No observation/upload engine is released until target and onboarding progress are known.
    try {
@@ -795,32 +776,53 @@ internal fun runSyncApplication(
     if (saved == null) {
      onboardingActive = true; settingsMode = SettingsMode.FULL
      scanDiscovery(); page = Page.DISCOVERY
-     initialResult.exceptionOrNull()?.let { discoveryNotice = "旧设置无法读取，原文件保留。请重新检查游戏并配置连接。" }
+     initialResult.exceptionOrNull()?.let { discoveryNotice = DesktopMessages.OLD_SETTINGS_COULD_NOT_BE_READ_THE_ORIGINAL_FILE_IS_PRESERVED_CHECK_THE_GAM.text() }
      if (initialResult.isSuccess && System.getProperty("pdsync.workspace") == null && java.nio.file.Files.exists(Path.of(".local/config.json"))) {
-      discoveryNotice = "发现旧启动目录中的设置，原文件已保留。本次使用固定用户目录，请重新填写连接。"
+      discoveryNotice = DesktopMessages.SETTINGS_FOUND_IN_THE_OLD_LAUNCH_FOLDER_THE_ORIGINAL_FILE_IS_PRESERVED_THIS.text()
      }
-    } else {
+    } else if (desktopCompletedSetup(saved)) {
+     // A missing/unreadable save directory is a HOME issue, never a reason to replay setup.
+     // Keep explicit completion without deriving or manufacturing sync ancestry.
+     onboardingActive = false; navigate(Page.HOME)
      refreshProfile(saved)
-     if (session == null || targetInfo?.trusted != true) {
+     reconnectSaved(saved)
+    } else {
+     // Resume an older unfinished PATH/connection flow using only the selected game.
+     // Save-directory inspection must not block game selection or service configuration.
+     val target = withContext(Dispatchers.IO) {
+      runCatching { ShatteredInstallationDiscovery().validateJar(Path.of(saved.targetGame)).target }
+       .getOrNull()?.takeIf { it.trusted }
+     }
+     if (target == null) {
       onboardingActive = true; setupDraft = saved.copy(onboardingProgress = OnboardingProgress.PENDING)
-      scanDiscovery(); page = Page.DISCOVERY
+      scanDiscovery(); navigate(Page.DISCOVERY)
      } else {
-      // A verified v9 baseline is a returning setup, not a fabricated first-run decision.
-      val hasBaseline = withContext(Dispatchers.IO) { session?.baselineFiles() != null }
-      val progress = OnboardingGate.resumedProgress(saved.onboardingProgress, targetInfo?.trusted == true, hasBaseline)
-      val resumed = saved.copy(onboardingProgress = progress)
-      if (resumed != saved) withContext(Dispatchers.IO) { configFile.save(resumed) }
-      config = resumed; setupDraft = resumed; onboardingActive = progress != OnboardingProgress.COMPLETE
+      discoveredTarget = target; targetInfo = target
+      var resumed = saved
+      if (saved.onboardingProgress == OnboardingProgress.LEGACY) {
+       // Preserve legacy migration only with a genuine existing baseline, inspected on HOME.
+       navigate(Page.HOME)
+       refreshProfile(saved)
+       val hasBaseline = withContext(Dispatchers.IO) { session?.baselineFiles() != null }
+       val progress = OnboardingGate.resumedProgress(saved.onboardingProgress, true, hasBaseline)
+       resumed = saved.copy(onboardingProgress = progress)
+       if (resumed != saved) withContext(Dispatchers.IO) { configFile.save(resumed) }
+      }
+      config = resumed; setupDraft = resumed; onboardingActive = !desktopCompletedSetup(resumed)
       reconnectSaved(resumed)
-      if (!connected) page = Page.CONNECTION
+      if (onboardingActive) navigate(Page.CONNECTION) else navigate(Page.HOME)
      }
     }
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
-    onboardingActive = true; page = Page.DISCOVERY
-    discoveryNotice = "启动检查未完成：${e.message}。请重新扫描；没有上传或覆盖存档。"
+    if (desktopCompletedSetup(config)) {
+     onboardingActive = false; navigate(Page.HOME)
+     status = DesktopMessages.STARTUP_CHECK_INCOMPLETE_1_S_CHECK_AGAIN_IN_SETTINGS.text(e.message)
+    } else {
+     onboardingActive = true; navigate(Page.DISCOVERY)
+     discoveryNotice = DesktopMessages.STARTUP_CHECK_INCOMPLETE_1_S_SCAN_AGAIN_NO_SAVES_WERE_UPLOADED_OR_OVERWRITT.text(e.message)
+    }
    } finally { connectingAtStartup = false }
-   if (connected && onboardingActive && page != Page.DISCOVERY) inspectOnboarding()
   }
   LaunchedEffect(page, pathAdapter.revision, busy, connectingAtStartup) {
    if (page == Page.PATH && !busy && !connectingAtStartup && !appClosed) {
@@ -836,6 +838,12 @@ internal fun runSyncApplication(
      pathAdapter.state.path == preview.path && pathAdapter.revision == preview.revision &&
      !busy && !connectingAtStartup) continuePath()
    }
+  }
+  LaunchedEffect(page, pageGeneration, config, busy, connectingAtStartup, serviceExpired, renewalReads.pending) {
+   val request = renewalReads.takeForHome(config, page == Page.HOME,
+    !busy && !connectingAtStartup && !appClosed && connected && !serviceExpired &&
+     !onboardingActive && desktopCompletedSetup(config)) ?: return@LaunchedEffect
+   readRemote(request)
   }
   // Keep launch availability fresh even when disconnected or automatic upload is paused.
   LaunchedEffect(targetInfo) {
@@ -854,73 +862,114 @@ internal fun runSyncApplication(
   LaunchedEffect(session, connected) {
    while (isActive && !appClosed) {
     delay(1000)
+    serviceExpired = syncAccess.isExpired(config)
+    if (serviceExpired) {
+     automaticStatus = pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text()
+     val saved = config
+     val now = monotonicMillis()
+     if (!busy && !connectingAtStartup && page == Page.HOME && saved != null &&
+         (entitlementRetryAt == 0L || now - entitlementRetryAt >= 60000)) {
+      entitlementRetryAt = now
+      val secret = password; val generation = pageGeneration
+      fun current() = !appClosed && page == Page.HOME && pageGeneration == generation &&
+       config == saved && password == secret
+      renewalReads.refreshStarted(saved, homeAvailable = false)
+      try {
+       withContext(Dispatchers.IO) { syncAccess.beginOperation(saved, secret) }
+       if (current()) {
+        serviceExpired = false; connected = true; connectionNotice = null
+        renewalReads.accountAccessChanged(saved, true)
+       }
+      } catch (failure: CancellationException) { throw failure }
+      catch (_: Exception) {
+       if (current()) renewalReads.accountAccessChanged(saved, false)
+       // A failed refresh never authorizes DAV or proves expiry.
+      }
+     }
+     continue
+    }
     if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE) continue
+    if (renewalReads.blocksHomeObservation) continue
     val manager = session ?: continue
     if (connected && !remoteInspectionReady) {
-     automaticStatus = "云端检查未完成，自动上传暂停。"
+     automaticStatus = DesktopMessages.CLOUD_CHECK_INCOMPLETE_AUTOMATIC_UPLOAD_PAUSED.text()
      if (remoteReadAt == 0L || monotonicMillis() - remoteReadAt >= 60000) readRemote()
      continue
     }
+    val observedGeneration = pageGeneration; val observedConfig = config
     try {
      val target = targetInfo
      val observation = withContext(Dispatchers.IO) {
       val state = gameLauncher.status(target)
       state to manager.observedFiles()
      }
-     if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager) continue
+     if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager) continue
      val state = observation.first; val files = observation.second; val now = monotonicMillis()
-     if(graphHistory?.currentFiles!=files)graphHistory=withContext(Dispatchers.IO){manager.syncHistory()}
+     if (graphHistory?.currentFiles != files) {
+      val generation = pageGeneration; val readConfig = config
+      val loadedGraph = archiveReads.reading { withContext(Dispatchers.IO) { manager.syncHistory() } }
+      if (busy || appClosed || page != Page.HOME || pageGeneration != generation || config != readConfig || session !== manager) continue
+      graphHistory = loadedGraph
+     }
+     localHistoryVerified = true
      gameStatus = state
      automatic.observe(files, state is GameProcessStatus.Running, state is GameProcessStatus.Stopped, now)
-     val retryable = withContext(Dispatchers.IO) { manager.retryablePending() }
-     if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || appClosed) continue
+     val retryable = withContext(Dispatchers.IO) { manager.retryablePendingSourceAvailable() }
+     if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || appClosed) continue
+     pendingUploadSourceAvailable = retryable
      automaticStatus = when {
-      config?.autoUploadPaused == true -> "自动上传已暂停；仍可手动上传。"
-      !connected -> "请先连接云端。"
+      config?.autoUploadPaused == true -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_YOU_CAN_STILL_UPLOAD_MANUALLY.text()
+      !connected -> DesktopMessages.CONNECT_TO_THE_CLOUD_FIRST.text()
       state !is GameProcessStatus.Stopped -> processMessage(state)
-      pending && !retryable -> "有待检查的中断操作，请在设置中处理。"
-      conflict != null || remoteTips.size > 1 -> "云端有多份进度，请点击恢复后选择。"
-      automatic.needsAttention -> "自动上传暂停，请处理下方问题后重试。"
-      automatic.waitingForRetry -> "上次上传未完成，稍后重试。"
-      retryable -> "等待存档稳定后重试上传。"
-      else -> "自动上传已开启。"
+      pending && !retryable -> DesktopMessages.AN_INTERRUPTED_OPERATION_NEEDS_CHECKING_HANDLE_IT_IN_SETTINGS.text()
+      conflict != null || hasRemoteBranches() -> DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text()
+      automatic.needsAttention -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_RESOLVE_THE_ISSUE_BELOW_AND_TRY_AGAIN.text()
+      automatic.waitingForRetry -> DesktopMessages.LAST_UPLOAD_INCOMPLETE_RETRY_LATER.text()
+      retryable -> DesktopMessages.WAITING_FOR_SAVES_TO_STABILIZE_BEFORE_RETRYING_UPLOAD.text()
+      else -> DesktopMessages.AUTOMATIC_UPLOAD_ENABLED.text()
      }
-     if (automatic.shouldUpload(now, config?.autoUploadPaused != true && OnboardingGate.allowsAutomatic(config?.onboardingProgress, onboardingActive, remoteInspectionReady), connected, state is GameProcessStatus.Stopped, retryable, conflict != null || remoteTips.size > 1, busy)) {
+     if (automatic.shouldUpload(now, config?.autoUploadPaused != true && OnboardingGate.allowsAutomatic(config?.onboardingProgress, onboardingActive, remoteInspectionReady), connected, state is GameProcessStatus.Stopped, retryable, conflict != null || hasRemoteBranches(), busy)) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
-      if (busy || connectingAtStartup || page != Page.HOME || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || !connected || appClosed) continue
+      if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || !connected || appClosed) continue
       if (!retryable && files == baseline) automatic.succeeded(files)
       else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true)
      } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
      observationDiagnostics.recovered()
     } catch (e: CancellationException) { throw e }
     catch (failure: Exception) {
-     observationDiagnostics.failed(failure)
-     automaticStatus = "存档正在变化或暂不可读，自动上传等待中。"
+     if (!appClosed && page == Page.HOME && pageGeneration == observedGeneration && config == observedConfig && session === manager) {
+      localHistoryVerified = false; pendingUploadSourceAvailable = false
+      observationDiagnostics.failed(failure)
+      automaticStatus = DesktopMessages.SAVES_ARE_CHANGING_OR_TEMPORARILY_UNREADABLE_AUTOMATIC_UPLOAD_IS_WAITING.text()
+     }
     }
    }
   }
-  LaunchedEffect(session, selected, busy) {
-   restoreIssue = "正在校验实际版本…"
+  LaunchedEffect(session, selected, busy, graphHistory, targetInfo, config, pageGeneration) {
+   restoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
    val manager = session; val id = selected
-   if (manager != null && id != null && !busy) restoreIssue = withContext(Dispatchers.IO) {
-    val cloud=graphHistory?.graph?.commits?.values?.firstOrNull {it.snapshot.id==id}
-    runCatching { if(cloud==null)manager.checkRestore(id) else cloud.snapshot.saveVersions?.let {ShatteredVersions.requireCompatible(it,requireNotNull(targetInfo){"请选择游戏"})} }.exceptionOrNull()?.message
+   val owner = config; val generation = pageGeneration; val target = targetInfo; val observedHistory = graphHistory
+   if (manager != null && id != null && !busy) {
+    val issue = withContext(Dispatchers.IO) {
+     val cloud=observedHistory?.graph?.commits?.values?.firstOrNull {it.snapshot.id==id}
+     runCatching { if(cloud==null)manager.checkRestore(id) else cloud.snapshot.saveVersions?.let {ShatteredVersions.requireCompatible(it,requireNotNull(target){DesktopMessages.SELECT_A_GAME.text()})} }.exceptionOrNull()?.message
+    }
+    if (!appClosed && !busy && session === manager && selected == id && config == owner &&
+     pageGeneration == generation && targetInfo == target && graphHistory === observedHistory) restoreIssue = issue
    }
   }
-  LaunchedEffect(session, conflict, conflictSelection, busy) {
-   conflictRestoreIssue = "正在校验实际版本…"
+  LaunchedEffect(session, conflict, conflictSelection, busy, config, pageGeneration, targetInfo) {
+   conflictRestoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
    val manager = session; val value = conflict; val id = conflictSelection
-   if (manager != null && value != null && id != null && !busy) conflictRestoreIssue = withContext(Dispatchers.IO) { runCatching { manager.checkResolution(id) }.exceptionOrNull()?.message }
+   val owner = conflictOwner(); val target = targetInfo
+   if (manager != null && value != null && id != null && !busy && !appClosed && page == Page.CONFLICT) {
+    val issue = withContext(Dispatchers.IO) { desktopConflictCompatibilityIssue { manager.checkResolution(id) } }
+    if (!appClosed && !busy && owner.matches(conflictOwner(), page == Page.CONFLICT) &&
+     conflictSelection == id && targetInfo == target) conflictRestoreIssue = issue
+   }
   }
   MaterialTheme(colors = lightColors(primary = green, secondary = Color(0xFF8A6B42)), shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
-   renameSnapshot?.let { id ->
-    SharedNamingDialog(SharedNamingState(id.hashCode().toLong(), historyName, busy = busy,
-     notice = "保存在此设备，不改写已发布的历史。"),
-     onNameChange = { historyName = it },
-     onSave = { name -> busy=true;scope.launch {try{withContext(Dispatchers.IO){session!!.renameHistory(id,name)};graphHistory=withContext(Dispatchers.IO){session!!.syncHistory()};renameSnapshot=null}catch(e:Exception){status=e.message.orEmpty()}finally{busy=false}} },
-     onDismiss = { renameSnapshot=null })
-   }
-   directoryEditor?.let { metadata ->
+   directoryEditor?.takeUnless { directoryInline && page == Page.HOME }?.let { metadata ->
     SharedNamingDialog(SharedNamingState(System.identityHashCode(metadata).toLong(), directoryName,
      busy = busy, notice = directoryNotice.orEmpty()),
      onNameChange = { directoryName=it },
@@ -928,23 +977,23 @@ internal fun runSyncApplication(
      onDismiss = { directoryEditor=null }) {
       // Identity decisions remain the existing host maintenance actions, with their original proof.
       if (metadata.runs.values.any { it.runUUID == null }) {
-       Text("不能确定是否仍为原来的一局时，请保留待确认。", style=MaterialTheme.typography.caption)
+       Text(DesktopMessages.IF_YOU_ARE_UNSURE_WHETHER_THIS_IS_THE_SAME_RUN_LEAVE_IT_UNCONFIRMED.text(), style=MaterialTheme.typography.caption)
        metadata.runs.forEach { (slot,run) ->
         if(run.runUUID==null) {
-         Text("$slot · 身份待确认", fontWeight=FontWeight.Medium)
+         Text(DesktopMessages.RUN_IDENTITY_UNCONFIRMED.text(slot), fontWeight=FontWeight.Medium)
          Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
           if(run.previousRunUUID!=null) TextButton(enabled=!busy,onClick={
            editDirectory { manager,stopped ->
-            val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){"存档已变化，请关闭后重新检查"}
+            val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){DesktopMessages.SAVES_CHANGED_CLOSE_THIS_AND_CHECK_AGAIN.text()}
             manager.confirmRunIdentity(slot,files,true,stopped)
            }
-          }) { Text("同一局继续") }
+          }) { Text(DesktopMessages.CONTINUE_THE_SAME_RUN.text()) }
           TextButton(enabled=!busy,onClick={
            editDirectory { manager,stopped ->
-            val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){"存档已变化，请关闭后重新检查"}
+            val files=manager.observedFiles();require(contentSha256(files)==metadata.contentSha256){DesktopMessages.SAVES_CHANGED_CLOSE_THIS_AND_CHECK_AGAIN.text()}
             manager.confirmRunIdentity(slot,files,false,stopped)
            }
-          }) { Text("这是新的一局") }
+          }) { Text(DesktopMessages.THIS_IS_A_NEW_RUN.text()) }
          }
         }
        }
@@ -955,8 +1004,8 @@ internal fun runSyncApplication(
     Column(Modifier.fillMaxSize()) {
      if (closeBlocked) Surface(color = Color(0xFFFFECCD)) {
       Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-       Text(if (busy || connectingAtStartup) "请等待当前操作结束，再关闭窗口。备份、恢复或连接验证仍在进行。" else "操作已结束，现在可以关闭窗口。", Modifier.weight(1f), color = Color(0xFF75572C), style = MaterialTheme.typography.body2)
-       TextButton(onClick = { closeBlocked = false }) { Text("知道了") }
+       Text(if (busy || connectingAtStartup) DesktopMessages.WAIT_FOR_THE_CURRENT_OPERATION_TO_FINISH_BEFORE_CLOSING_THE_WINDOW_BACKUP_R.text() else DesktopMessages.THE_OPERATION_HAS_FINISHED_YOU_CAN_CLOSE_THE_WINDOW_NOW.text(), Modifier.weight(1f), color = Color(0xFF75572C), style = MaterialTheme.typography.body2)
+       TextButton(onClick = { closeBlocked = false }) { Text(DesktopMessages.GOT_IT.text()) }
       }
      }
      Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -967,10 +1016,9 @@ internal fun runSyncApplication(
         val discoveryState = SharedGameSelectionState(
          game = selectedGame?.let { gameIdentity(it) },
          selectionId = selectedGame?.path,
-         selectionStatus = if (selectedGame != null) "已找到" else "",
          location = selectedGame?.path.orEmpty(),
          rows = listOf(
-          SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) "选择游戏 JAR…" else "重新选择"),
+          SharedGameSelectionRow(SharedGameSelectionControl.CHOOSE_FILE, if (selectedGame == null) DesktopMessages.CHOOSE_GAME_JAR.text() else DesktopMessages.CHANGE_GAME.text()),
          ),
          candidates = discovery?.trustedTargets?.takeIf { discovery?.requiresSelection == true }.orEmpty().map {
           SharedGameCandidate(it.path, gameIdentity(it), it.path)
@@ -978,11 +1026,11 @@ internal fun runSyncApplication(
          pageActive = !appClosed && page == Page.DISCOVERY,
          busy = busy || connectingAtStartup,
          canContinue = selectedGame != null,
-         notice = discoveryNotice?.let { NoviceCopy.feedback(it, "检查未完成，请重新选择游戏或重试。") }
+         notice = discoveryNotice?.let { NoviceCopy.feedback(it, DesktopMessages.CHECK_INCOMPLETE_SELECT_THE_GAME_AGAIN_OR_RETRY.text()) }
           ?: DiscoveryCopy.game(discovery, discoveredTarget),
          noticeError = discoveryNotice != null,
          details = buildList {
-          add("存档位置：${pathAdapter.state.path}")
+          add(DesktopMessages.SAVE_LOCATION_1_S.text(pathAdapter.state.path))
           discovery?.defaultSave?.reason?.let { add(it) }
           discovery?.diagnostics?.let { addAll(it) }
           discoveryNotice?.let { add(it) }
@@ -1009,7 +1057,15 @@ internal fun runSyncApplication(
        Page.PATH -> key(pageGeneration) {
         val generation = pageGeneration
         fun current() = !appClosed && page == Page.PATH && pageGeneration == generation
-        SharedSavePathScreen(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
+        SharedSettingsScreen(DesktopSharedSettingsAdapter.state(DesktopSettingsContext(
+         config = config, game = targetInfo?.let { gameIdentity(it) }, savePath = config?.selectedSaveRoot ?: pathAdapter.state.path,
+         hasSession = session != null, connected = connected, pendingUpload = pending,
+         currentName = graphHistory?.currentName.orEmpty(), pageActive = false, busy = false,
+         connectingAtStartup = false, appClosed = appClosed)), object : SharedSettingsActions {
+          override fun perform(key: SharedSettingsKey) = Unit
+          override fun back() = Unit
+        })
+        SharedSavePathDialog(pathAdapter.state.copy(busy = busy || connectingAtStartup), DesktopSavePathActions(
         adapter = pathAdapter,
         canAct = { !busy && !connectingAtStartup && current() },
         choose = {
@@ -1030,69 +1086,30 @@ internal fun runSyncApplication(
          }
         },
         continuePath = { continuePath() }
-       ), game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
-        gameIdentity(it)
-       })
+       ))
        }
-       Page.COMPARISON -> SharedComparisonScreen(comparisonState(), object : SharedComparisonActions {
-        override fun back() {
-         if (comparisonState().canInteract && comparisonAdapter.dialog == null) {
-          setupDraft = config ?: setupDraft; settingsMode = SettingsMode.FULL; navigate(Page.CONNECTION)
-         }
-        }
-        override fun refresh() { if (comparisonState().canInteract) inspectOnboarding() }
-        override fun selectProgress(choice: SharedProgressChoice) { comparisonAdapter.selectProgress(comparisonContext(), choice) }
-        override fun selectRemote(snapshotId: String) { comparisonAdapter.selectRemote(comparisonContext(), snapshotId) }
-        override fun finish(mode: SharedComparisonCompletion) {
-         val current = comparisonState()
-         if (!current.primaryEnabled || current.completion != mode) return
-         when (mode) {
-          SharedComparisonCompletion.EMPTY -> postponeOnboarding(true)
-          SharedComparisonCompletion.CONFIRM, SharedComparisonCompletion.KEEP_LOCAL -> completeObservedComparison(mode)
-          SharedComparisonCompletion.ADOPT -> performOnboarding(SetupAction.ADOPT, finishAfterOperation = true)
-          SharedComparisonCompletion.UPLOAD_LOCAL -> performOnboarding(SetupAction.UPLOAD, finishAfterOperation = true)
-          SharedComparisonCompletion.RESTORE_REMOTE -> performOnboarding(SetupAction.RESTORE, finishAfterOperation = true)
-          SharedComparisonCompletion.NONE -> Unit
-         }
-        }
-        override fun handleConflict() { comparisonAdapter.openConflict(comparisonContext()) }
-        override fun upload() {
-         if (comparisonState().primary == SharedComparisonPrimary.RETRY_UPLOAD && comparisonState().primaryEnabled)
-          performOnboarding(SetupAction.UPLOAD)
-        }
-        override fun openRecovery() {
-         if (comparisonState().primary == SharedComparisonPrimary.OPEN_RECOVERY && comparisonState().primaryEnabled) navigate(Page.SETTINGS)
-        }
-        override fun confirmConflict(token: Long) {
-         val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.CONFLICT) ?: return
-         if (comparisonState().confirmationPresentation?.confirmEnabled == true)
-          performOnboarding(SetupAction.RESTORE, finishAfterOperation = true, confirmedProof = proof)
-        }
-        override fun previewMerge(token: Long) { previewOnboardingMerge(token) }
-        override fun confirmMerge(token: Long) {
-         val proof = comparisonAdapter.confirmation(comparisonContext(), token, SharedComparisonConfirmationStage.MERGE_REVIEW) ?: return
-         if (comparisonState().confirmationPresentation?.confirmEnabled == true)
-          performOnboarding(SetupAction.MERGE, finishAfterOperation = true, confirmedProof = proof)
-        }
-        override fun cancelConflict(token: Long) { comparisonAdapter.cancel(comparisonContext(), token) }
-       })
        Page.HOME -> SharedHomeScreen(homeState(), object : SharedHomeActions {
         override fun settings() { if (homeState().canInteract) navigate(Page.SETTINGS) }
+        override fun appreciate() = openHomeAppreciation()
+        override fun refreshHistory() {
+         if (!homeState().refreshHistoryEnabled) return
+         readRemote(refreshLocal = true)
+        }
         override fun upload() {
          if (!homeState().uploadEnabled) return
          if (!connected) openConnection(if (config == null) SettingsMode.FULL else SettingsMode.UNLOCK)
-         else if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding()
          else execute(operationEvents.begin(Action.PUSH))
         }
         override fun restore() {
          if (!homeState().restoreEnabled) return
-         if (config?.onboardingProgress != OnboardingProgress.COMPLETE) inspectOnboarding() else openRestore()
+         openRestore()
         }
         override fun launch() { if (homeState().launchEnabled) launchGame() }
         override fun selectSnapshot(snapshotId: String) {
          val current = homeState()
          if (current.canInteract && current.history?.nodes?.any { it.selectable && it.snapshotId == snapshotId } == true) {
-          if (selected != snapshotId) restoreIssue = "正在校验实际版本…"
+          if (selected != snapshotId) restoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
+          homeSelectionGeneration++
           selected = snapshotId; selectedByUser = true
          }
         }
@@ -1101,7 +1118,7 @@ internal fun runSyncApplication(
          if (!current.canInteract || session == null || current.history?.nodes?.any {
            if (snapshotId == null) it.id == "local-current" else it.snapshotId == snapshotId
           } != true) return
-         if (snapshotId == null) editDirectory()
+         if (snapshotId == null) editDirectory(inline = true)
          else { renameSnapshot = snapshotId; historyName = graphHistory?.aliases?.get(snapshotId).orEmpty() }
         }
         override fun changeHistoryPage(page: Int) {
@@ -1109,6 +1126,32 @@ internal fun runSyncApplication(
          val presentation = current.history ?: return
          if (current.canInteract && page in 0 until presentation.pages) homeHistoryPage = page
         }
+       }, naming = renameSnapshot?.let { id ->
+        val manager = session
+        val ownerConfig = config
+        SharedHistoryNaming(id, SharedNamingState(id.hashCode().toLong(), historyName,
+         busy = busy || connectingAtStartup || appClosed, notice = directoryNotice.orEmpty()),
+         onNameChange = { if (!busy && renameSnapshot == id) historyName = it },
+         onSave = { name ->
+          if (manager != null && !busy && !appClosed && page == Page.HOME && renameSnapshot == id && session === manager && config == ownerConfig) {
+           busy = true; directoryNotice = null
+           scope.launch { try {
+            withContext(Dispatchers.IO) { manager.renameHistory(id, name) }
+            if (session === manager && config == ownerConfig) {
+             graphHistory = withContext(Dispatchers.IO) { manager.syncHistory() }; renameSnapshot = null
+            }
+           } catch (e: Exception) { directoryNotice = NoviceCopy.feedback(e.message.orEmpty(), DesktopMessages.NAME_NOT_SAVED_PLEASE_TRY_AGAIN.text()) }
+           finally { busy = false } }
+          }
+         },
+         onDismiss = { if (!busy) { renameSnapshot = null; directoryNotice = null } })
+       } ?: directoryEditor?.takeIf { directoryInline }?.let { metadata ->
+        SharedHistoryNaming(null, SharedNamingState(System.identityHashCode(metadata).toLong(), directoryName,
+         busy = busy || connectingAtStartup || appClosed, notice = directoryNotice.orEmpty()),
+         onNameChange = { if (!busy) directoryName = it },
+         onSave = { name -> editDirectory { manager, stopped -> manager.renameCurrent(name, stopped) } },
+         onDismiss = { if (!busy) { directoryEditor = null; directoryInline = false } },
+         onMaintenance = if (metadata.runs.values.any { it.runUUID == null }) ({ directoryInline = false }) else null)
        })
        Page.SETTINGS -> key(pageGeneration) {
         val generation = pageGeneration
@@ -1162,13 +1205,13 @@ internal fun runSyncApplication(
            DesktopSettingsMaintenance.ARCHIVE_PENDING -> requestConfirmation(Action.ARCHIVE)
           }
          }
-         AlertDialog(onDismissRequest = ::dismissManagement, title = { Text("存档管理") },
+         AlertDialog(onDismissRequest = ::dismissManagement, title = { Text(DesktopMessages.MANAGE_SAVES.text()) },
           text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
            verticalArrangement = Arrangement.spacedBy(8.dp)) {
            TextButton(enabled = settingsContext().maintenanceEnabled(DesktopSettingsMaintenance.EDIT_DIRECTORY),
-            onClick = { maintenance.perform(DesktopSettingsMaintenance.EDIT_DIRECTORY) }) { Text("存档名称与单局身份") }
+            onClick = { maintenance.perform(DesktopSettingsMaintenance.EDIT_DIRECTORY) }) { Text(DesktopMessages.SAVE_NAME_AND_RUN_IDENTITIES.text()) }
            if (pending) TextButton(enabled = settingsContext().maintenanceEnabled(DesktopSettingsMaintenance.ARCHIVE_PENDING),
-            onClick = { maintenance.perform(DesktopSettingsMaintenance.ARCHIVE_PENDING) }) { Text("检查未完成的上传") }
+            onClick = { maintenance.perform(DesktopSettingsMaintenance.ARCHIVE_PENDING) }) { Text(DesktopMessages.REVIEW_INCOMPLETE_UPLOAD.text()) }
            Details {
             SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
              Text(processMessage(gameStatus))
@@ -1178,39 +1221,95 @@ internal fun runSyncApplication(
            }
           } },
           confirmButton = { TextButton(enabled = !busy && !connectingAtStartup,
-           onClick = ::dismissManagement) { Text("关闭") } })
+           onClick = ::dismissManagement) { Text(DesktopMessages.CLOSE.text()) } })
         }
        }
        Page.CONNECTION -> key(pageGeneration) {
         val generation = pageGeneration
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
-        DesktopSharedConnectionPage(window, configFile, if (onboardingActive) setupDraft else config, password,
-         if (connectionReturnPage == Page.PATH) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
+        DesktopSharedConnectionPage(configFile, if (onboardingActive && !connectionAppreciationOnly) setupDraft else config, password,
+         if (connectionReturnPage == Page.DISCOVERY) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
           gameIdentity(it)
          },
+         appreciationOnly = connectionAppreciationOnly,
+         onAccountStatus = { source, expiry, serverTime ->
+          val saved = config
+          if (current() && saved != null && source == desktopConnectionConfig(saved, password)) {
+           // The saved root omits "/", while the shared official account uses its canonical root.
+           // Display facts stay keyed to the same saved identity used by operation authorization.
+           syncAccess.observeAccountStatus(saved.endpoint, saved.username, expiry, serverTime)
+           serviceExpired = syncAccess.isExpired(saved)
+          }
+         },
+         onAccountRefreshStarted = { source ->
+          val saved = config
+          if (current() && saved != null && source == desktopConnectionConfig(saved, password)) {
+           renewalReads.refreshStarted(saved, connected && !serviceExpired && session != null &&
+            localHistoryVerified && remoteInspectionReady && sameDesktopHomeProfile(homeProfile, saved))
+          }
+         },
+         onAccountAccessChanged = { source, available ->
+          val saved = config
+          if (current() && saved != null && source == desktopConnectionConfig(saved, password)) {
+           renewalReads.accountAccessChanged(saved, available)
+           if (available) { connected = true; connectionNotice = null }
+          }
+         },
          onBusy = { if (current()) busy = it },
-         onDismiss = { if (current() && !busy && !connectingAtStartup) navigate(connectionReturnPage) },
+         onDismiss = { if (current() && !busy && !connectingAtStartup) {
+          if (connectionAppreciationOnly) entitlementRetryAt = 0L
+          navigate(connectionReturnPage)
+         } },
          onApplied = { applied, note ->
           if (current()) {
+           val prepareNamespace = onboardingActive || !sameDesktopHomeProfile(config, applied.config)
            config = applied.config; setupDraft = applied.config; password = applied.password; connected = true
+           renewalReads.reset()
+           syncAccess.reset(); serviceExpired = false; entitlementRetryAt = 0L
            connectionNotice = note
-           onboardingActive = applied.config.onboardingProgress != OnboardingProgress.COMPLETE || onboardingActive
-           if (onboardingActive) inspectOnboarding() else { navigate(Page.HOME); loadProfile(applied.config) }
+           // Connection completion only changes configuration. HOME owns history and save actions.
+           onboardingActive = false
+           status = DesktopMessages.SETUP_COMPLETE.text()
+           automaticStatus = DesktopMessages.READING_SAVE_HISTORY_MANUAL_UPLOAD_AND_RESTORE_ARE_AVAILABLE_ON_HOME.text()
+           navigate(Page.HOME)
+           loadProfile(applied.config, prepareOfficialNamespace = prepareNamespace, prepareSelectedDirectory = true)
           }
          })
        }
-       Page.CONFLICT -> conflict?.let { value ->
-        ConflictPage(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected,
+       Page.CONFLICT -> key(pageGeneration) { conflict?.let { value ->
+        val owner = conflictOwner()
+        fun current() = !appClosed && !busy && !connectingAtStartup &&
+         owner.matches(conflictOwner(), page == Page.CONFLICT)
+        fun canResolve() = current() && connected && !serviceExpired && !pending
+        SharedHomeScreen(homeState().copy(pageActive = false), object : SharedHomeActions {
+         override fun settings() = Unit; override fun upload() = Unit; override fun restore() = Unit; override fun launch() = Unit
+         override fun selectSnapshot(snapshotId: String) = Unit; override fun rename(snapshotId: String?) = Unit
+         override fun changeHistoryPage(page: Int) = Unit
+        })
+        ConflictDialog(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected && !serviceExpired,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
           gameIdentity(it)
          }, pending = pending,
-         onSelect = { if (!busy && !connectingAtStartup) conflictSelection = it },
-         onBack = { if (!busy && !connectingAtStartup) navigate(Page.HOME) },
-         onConfirm = { execute(operationEvents.begin(Action.RESOLVE)) },
-         onMerge = { execute(operationEvents.begin(Action.MERGE)) })
-       }
+         onSelect = { id ->
+          if (current() && connected && !serviceExpired && value.branches.any { it.snapshot.manifest.id == id }) {
+           if (conflictSelection != id) conflictRestoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
+           conflictSelection = id
+          }
+         },
+         onBack = { if (current()) navigate(Page.HOME) },
+         onConfirm = { id ->
+          if (canResolve() && conflictSelection == id && conflictRestoreIssue == null &&
+           value.branches.any { it.snapshot.manifest.id == id }) execute(operationEvents.begin(Action.RESOLVE))
+         },
+         onMerge = { if (canResolve()) execute(operationEvents.begin(Action.MERGE)) })
+       } }
        Page.CONFIRM -> confirm?.let { trace ->
+        SharedHomeScreen(homeState().copy(pageActive = false), object : SharedHomeActions {
+         override fun settings() = Unit; override fun upload() = Unit; override fun restore() = Unit; override fun launch() = Unit
+         override fun selectSnapshot(snapshotId: String) = Unit; override fun rename(snapshotId: String?) = Unit
+         override fun changeHistoryPage(page: Int) = Unit
+        })
         ConfirmationPage(trace.id.hashCode().toLong(), trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else selection?.manifest, busy || connectingAtStartup, confirmationNotice,
          onBack = { cancelConfirmation(trace) },
          onConfirm = { execute(trace) },
@@ -1229,7 +1328,7 @@ internal fun runSyncApplication(
 private fun GuidedPage(title: String, subtitle: String, footer: @Composable ColumnScope.() -> Unit, content: @Composable ColumnScope.() -> Unit) {
  Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-   Text("像素地牢  /  存档同步", color = muted, style = MaterialTheme.typography.caption)
+   Text(DesktopMessages.PIXEL_DUNGEON_SAVE_SYNC_220.text(), color = muted, style = MaterialTheme.typography.caption)
    Text(title, style = MaterialTheme.typography.h5, fontWeight = FontWeight.SemiBold)
    if (subtitle.isNotBlank()) Text(subtitle, color = muted, style = MaterialTheme.typography.body2)
   }
@@ -1243,10 +1342,10 @@ private fun GuidedPage(title: String, subtitle: String, footer: @Composable Colu
 }
 
 @Composable
-private fun Details(label: String = "详情", resetKey: Any? = Unit, content: @Composable ColumnScope.() -> Unit) {
+private fun Details(label: String = DesktopMessages.DETAILS.text(), resetKey: Any? = Unit, content: @Composable ColumnScope.() -> Unit) {
  var state by remember(resetKey) { mutableStateOf(DetailsState()) }
  Column {
-  TextButton(onClick = { state = state.toggle() }) { Text(if (state.expanded) "收起$label" else label) }
+  TextButton(onClick = { state = state.toggle() }) { Text(if (state.expanded) DesktopMessages.COLLAPSE_1_S.text(label) else label) }
   if (state.expanded) Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
  }
 }
@@ -1255,18 +1354,21 @@ private fun Details(label: String = "详情", resetKey: Any? = Unit, content: @C
 private fun CompactFeedback(raw: String, fallback: String) {
  val summary = NoviceCopy.feedback(raw, fallback)
  if (summary.isNotBlank()) Text(summary, color = muted, style = MaterialTheme.typography.body2)
- if (summary != raw) Details("问题详情", raw) { SelectionContainer { Text(raw, style = MaterialTheme.typography.caption) } }
+ if (summary != raw) Details(DesktopMessages.PROBLEM_DETAILS.text(), raw) { SelectionContainer { Text(raw, style = MaterialTheme.typography.caption) } }
 }
 
 /** The same controller and composable are used by Android; this host only supplies desktop I/O. */
 @Composable
 private fun DesktopSharedConnectionPage(
- window: java.awt.Window,
  configFile: ConfigFile,
  initial: AppConfig?,
  currentPassword: String,
  origin: ConnectionEntryModel.Origin,
  game: SharedGameIdentity?,
+ appreciationOnly: Boolean = false,
+ onAccountStatus: (SharedConnectionConfig, Long?, Long) -> Unit,
+ onAccountRefreshStarted: (SharedConnectionConfig) -> Unit,
+ onAccountAccessChanged: (SharedConnectionConfig, Boolean) -> Unit,
  onBusy: (Boolean) -> Unit,
  onDismiss: () -> Unit,
  onApplied: (AppliedConnection, String?) -> Unit
@@ -1278,8 +1380,20 @@ private fun DesktopSharedConnectionPage(
  val latestDismiss by rememberUpdatedState(onDismiss)
  val latestApplied by rememberUpdatedState(onApplied)
  val latestBusy by rememberUpdatedState(onBusy)
- DisposableEffect(controller, window) {
+ val latestAccountStatus by rememberUpdatedState(onAccountStatus)
+ val latestAccountRefreshStarted by rememberUpdatedState(onAccountRefreshStarted)
+ val latestAccountAccessChanged by rememberUpdatedState(onAccountAccessChanged)
+ DisposableEffect(controller) {
   controller.attach(object : SharedConnectionHost {
+   override fun onAccountStatus(config: SharedConnectionConfig, expiresMs: Long?, serverTimeMs: Long) {
+    latestAccountStatus(config, expiresMs, serverTimeMs)
+   }
+   override fun onAccountRefreshStarted(config: SharedConnectionConfig) {
+    latestAccountRefreshStarted(config)
+   }
+   override fun onAccountAccessChanged(config: SharedConnectionConfig, available: Boolean) {
+    latestAccountAccessChanged(config, available)
+   }
    override fun onBusyChanged(busy: Boolean) { latestBusy(busy) }
    override fun onBack(destination: ConnectionEntryModel.Back) { latestBusy(false); latestDismiss() }
    override fun onCommitted(config: SharedConnectionConfig) {
@@ -1287,9 +1401,10 @@ private fun DesktopSharedConnectionPage(
     adapter.appliedConnection?.let { latestApplied(it, null) }
    }
   })
-  val visibility = observeDesktopConnectionWindow(window, controller::foreground)
+  // Account/appreciation state belongs to this page, independent of native window focus.
+  controller.foreground(true)
+  if (appreciationOnly) controller.openAppreciationOnly()
   onDispose {
-   visibility.close()
    controller.foreground(false)
    controller.detach()
    controller.close()
@@ -1302,30 +1417,30 @@ private fun DesktopSharedConnectionPage(
 }
 
 @Composable
-private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean,
+private fun ConflictDialog(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean,
  game: SharedGameIdentity?, pending: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit,
- onConfirm: () -> Unit, onMerge: () -> Unit) {
+ onConfirm: (String) -> Unit, onMerge: () -> Unit) {
  val state = SharedBranchChoiceState(
   observation = value,
-  branches = value.branches.map { branch ->
+  branches = value.branches.sortedBy { it.commit.id }.distinctBy { it.snapshot.manifest.id }.map { branch ->
    val manifest = branch.snapshot.manifest
    SharedBranchChoice(manifest.id,
-    manifest.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: manifest.metadata?.device?.label ?: "设备未知",
+    manifest.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: manifest.metadata?.device?.label ?: DesktopMessages.UNKNOWN_DEVICE.text(),
     listOfNotNull(manifest.metadata?.device?.label,
      pdsync.presentation.HistoryPresentation.time(manifest.metadata?.latestFileModifiedAt),
-     "${manifest.files.size} 个文件", "与当前本机进度一致".takeIf { manifest.files == value.observedLocalFiles })
+     DesktopMessages.FILE_COUNT.text(manifest.files.size), DesktopMessages.IDENTICAL_TO_CURRENT_LOCAL_PROGRESS.text().takeIf { manifest.files == value.observedLocalFiles })
      .joinToString(" · "))
   },
   selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
   observationCurrent = true, resolutionBlocked = pending,
   overwriteSupported = restoreIssue == null, mergeSupported = true,
-  notice = if (pending) "有未完成操作，请返回主页处理。" else if (selected != null) restoreIssue.orEmpty() else "",
+  notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else if (selected != null) restoreIssue.orEmpty() else "",
  )
- SharedBranchChoiceScreen(state, object : SharedBranchChoiceActions {
+ SharedBranchChoiceDialog(state, object : SharedBranchChoiceActions {
   override fun select(snapshotId: String) = onSelect(snapshotId)
   override fun back() = onBack()
   override fun refresh() = onBack()
-  override fun overwrite(snapshotId: String) { if (snapshotId == selected) onConfirm() }
+  override fun overwrite(snapshotId: String) { if (snapshotId == selected) onConfirm(snapshotId) }
   override fun merge() = onMerge()
   override fun preserveLocal() = Unit
  })
@@ -1335,32 +1450,32 @@ private fun ConflictPage(value: AppendConflict, selected: String?, restoreIssue:
 private fun ConfirmationPage(token: Long, action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit,onMerge:(()->Unit)?=null) {
  val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP,Action.CLOUD_HISTORY)
  val message = when {
-  action == Action.ARCHIVE -> "只移除待上传标记，历史保留，不删除云端内容。若此前恢复中断，请先核对当前档案与备份；归档也会解除中断恢复保护，下次同步将重新采集当前档案。"
-  restoring -> listOfNotNull(snapshot?.let { "所选存档：${it.metadata?.device?.label ?: "设备未知"} · ${snapshotBriefTime(it)}" },
-   NoviceCopy.restoreWarning, "请退出游戏，并暂停其他存档同步。").joinToString("\n\n")
-  action == Action.PUSH && pending -> "将重试上次保存的内容，可能不是当前最新进度。"
-  else -> "确认继续此操作？"
+  action == Action.ARCHIVE -> DesktopMessages.ONLY_THE_PENDING_UPLOAD_MARKER_IS_REMOVED_HISTORY_IS_PRESERVED_AND_CLOUD_CO.text()
+  restoring -> listOfNotNull(snapshot?.let { DesktopMessages.SELECTED_SAVE_1_S_2_S.text(it.metadata?.device?.label ?: DesktopMessages.UNKNOWN_DEVICE.text(), snapshotBriefTime(it)) },
+   NoviceCopy.restoreWarning, DesktopMessages.EXIT_THE_GAME_AND_PAUSE_OTHER_SAVE_SYNC_TOOLS.text()).joinToString("\n\n")
+  action == Action.PUSH && pending -> DesktopMessages.THIS_RETRIES_THE_PREVIOUSLY_SAVED_CONTENT_WHICH_MAY_NOT_BE_THE_LATEST_PROGR.text()
+  else -> DesktopMessages.CONTINUE_WITH_THIS_OPERATION.text()
  }
  SharedConnectionTheme {
   SharedConfirmationDialog(SharedConfirmationState(token,
-   title = if (onMerge != null) "如何处理冲突？" else if (restoring) "恢复存档" else if (action == Action.ARCHIVE) "结束待上传操作" else "操作前确认",
-   message = message, confirmLabel = if (restoring) "覆盖本机" else "确认继续",
-   confirmEnabled = true, secondaryLabel = if (onMerge != null) "合并" else null,
-   secondaryEnabled = onMerge != null, busy = busy, details = notice.orEmpty()),
+   title = if (onMerge != null) DesktopMessages.HOW_SHOULD_THE_PROGRESS_CONFLICT_BE_RESOLVED.text() else if (restoring) DesktopMessages.RESTORE_SAVE.text() else if (action == Action.ARCHIVE) DesktopMessages.END_PENDING_UPLOAD.text() else DesktopMessages.CONFIRM_OPERATION.text(),
+   message = message, confirmLabel = if (restoring) DesktopMessages.OVERWRITE_LOCAL.text() else DesktopMessages.CONTINUE.text(),
+   confirmEnabled = true, secondaryLabel = if (onMerge != null) DesktopMessages.SMART_MERGE_BOTH_SIDES.text() else null,
+   secondaryEnabled = onMerge != null, busy = busy, details = notice.orEmpty(), destructive = restoring),
    onConfirm = { onConfirm() }, onSecondary = { onMerge?.invoke() }, onDismiss = { onBack() })
  }
 }
 
 private fun monotonicMillis() = System.nanoTime() / 1_000_000
 private fun processMessage(status: GameProcessStatus): String = when (status) {
- is GameProcessStatus.Stopped -> "当前账户未检测到游戏，等待存档稳定。"
- is GameProcessStatus.Running -> "检测到游戏正在运行，退出后自动上传。"
- is GameProcessStatus.Unknown -> if (status.reason.startsWith("无法确认游戏已退出")) status.reason else "无法确认游戏已退出：${status.reason}"
+ is GameProcessStatus.Stopped -> DesktopMessages.NO_GAME_DETECTED_FOR_THE_CURRENT_ACCOUNT_WAITING_FOR_SAVES_TO_STABILIZE.text()
+ is GameProcessStatus.Running -> DesktopMessages.THE_GAME_IS_RUNNING_AUTOMATIC_UPLOAD_WILL_START_AFTER_IT_EXITS.text()
+ is GameProcessStatus.Unknown -> status.reason.ifBlank { DesktopMessages.CANNOT_CONFIRM_THE_GAME_HAS_EXITED.text() }
 }
 private fun DeviceIdentity.displayLabel() = "$label · ${id.take(8)}"
 private fun localTime(value: String): String = runCatching {
- java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(value))
-}.getOrElse { "时间未知" }
+ java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM).withLocale(pdsync.i18n.UiLocale.formattingLocale()).withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(value))
+}.getOrElse { DesktopMessages.UNKNOWN_TIME.text() }
 private fun snapshotBriefTime(manifest: Manifest): String =
- manifest.metadata?.latestFileModifiedAt?.let { "存档修改 ${localTime(it)}" }
-  ?: manifest.metadata?.capturedAt?.let { "保存时间 ${localTime(it)}" } ?: "时间未知"
+ manifest.metadata?.latestFileModifiedAt?.let { DesktopMessages.SAVE_MODIFIED_1_S.text(localTime(it)) }
+  ?: manifest.metadata?.capturedAt?.let { DesktopMessages.SAVED_AT_1_S.text(localTime(it)) } ?: DesktopMessages.UNKNOWN_TIME.text()

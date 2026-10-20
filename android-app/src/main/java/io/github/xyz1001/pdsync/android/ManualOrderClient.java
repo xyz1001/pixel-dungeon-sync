@@ -1,5 +1,7 @@
 package io.github.xyz1001.pdsync.android;
 
+import pdsync.i18n.AndroidMessages;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
@@ -206,7 +208,7 @@ public final class ManualOrderClient {
     public ManualOrderClient(String baseUrl, Transport transport) {
         Matcher match = BASE.matcher(baseUrl == null ? "" : baseUrl);
         if (!match.matches() || Integer.parseInt(match.group(1)) > 65535 || transport == null) {
-            throw new IllegalArgumentException("Explicit sandbox loopback base and transport required");
+            throw new IllegalArgumentException(AndroidMessages.MANUAL_ORDER_CLIENT_01.text());
         }
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.host = "127.0.0.1:" + match.group(1);
@@ -563,19 +565,19 @@ public final class ManualOrderClient {
     private static String messageFor(FailureKind kind, boolean unknown) {
         String text;
         switch (kind) {
-            case INVALID_INPUT: text = "沙箱订单参数无效。"; break;
-            case AUTHENTICATION_REQUIRED: text = "沙箱身份验证未完成。"; break;
-            case FORBIDDEN: text = "沙箱未允许这次操作。"; break;
-            case CONFLICT: text = "沙箱订单状态有冲突，请刷新原订单。"; break;
-            case SERVICE_UNAVAILABLE: text = "沙箱服务暂不可用。"; break;
-            case UNSUPPORTED_CONTRACT: text = "赞赏服务版本不支持。"; break;
-            case REDIRECT_REJECTED: text = "已拒绝沙箱地址跳转。"; break;
-            case RESPONSE_TOO_LARGE: text = "沙箱响应超过大小限制。"; break;
-            case TIMEOUT: text = "沙箱请求超时。"; break;
-            case NETWORK_ERROR: text = "沙箱连接中断。"; break;
-            case REQUEST_REJECTED: text = "沙箱未接受这次请求。"; break;
-            default: text = "沙箱响应不符合约定。"; break;
+            case INVALID_INPUT: text = AndroidMessages.MANUAL_ORDER_ERROR_1.text(); break;
+            case AUTHENTICATION_REQUIRED: text = AndroidMessages.MANUAL_ORDER_ERROR_2.text(); break;
+            case FORBIDDEN: text = AndroidMessages.MANUAL_ORDER_ERROR_3.text(); break;
+            case CONFLICT: text = AndroidMessages.MANUAL_ORDER_ERROR_4.text(); break;
+            case SERVICE_UNAVAILABLE: text = AndroidMessages.MANUAL_ORDER_ERROR_5.text(); break;
+            case UNSUPPORTED_CONTRACT: text = AndroidMessages.MANUAL_ORDER_ERROR_6.text(); break;
+            case REDIRECT_REJECTED: text = AndroidMessages.MANUAL_ORDER_ERROR_7.text(); break;
+            case RESPONSE_TOO_LARGE: text = AndroidMessages.MANUAL_ORDER_ERROR_8.text(); break;
+            case TIMEOUT: text = AndroidMessages.MANUAL_ORDER_ERROR_9.text(); break;
+            case NETWORK_ERROR: text = AndroidMessages.MANUAL_ORDER_ERROR_10.text(); break;
+            case REQUEST_REJECTED: text = AndroidMessages.MANUAL_ORDER_ERROR_11.text(); break;
+            default: text = AndroidMessages.MANUAL_ORDER_ERROR_12.text(); break;
         }
-        return text + (unknown ? "操作结果未确认，请查询原订单并保留原请求标识，不要新建替代订单。" : "");
+        return text + (unknown ? AndroidMessages.MANUAL_ORDER_ERROR_13.text() : "");
     }
 }

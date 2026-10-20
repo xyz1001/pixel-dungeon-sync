@@ -8,11 +8,19 @@ import kotlin.test.*
 class AndroidProfileVersionsTest {
  private val origin = "a".repeat(64)
  private fun identity(packageName: String = "org.example.game", source: String = origin, capabilities: AndroidSaveCapabilities = AndroidSaveCapabilities()) =
-  AndroidGameIdentity(packageName, "Test game", source, "test-game", capabilities)
+  AndroidGameIdentity(packageName, "Test game", source, capabilities)
  private fun target(identity: AndroidGameIdentity, version: Long = 42) = AndroidGameTarget(identity, "arbitrary release", version, "b".repeat(64), "c".repeat(64))
  private fun policy(identity: AndroidGameIdentity, version: Long = 42) = AndroidProfileVersions(identity, AndroidGameAdapter(identity)) { target(identity, version) }
  private fun snapshot(identity: AndroidGameIdentity, version: Int = 896): Snapshot = Snapshots.fromFiles(
   mapOf("game1/game.dat" to "{\"version\":$version}".encodeToByteArray()), AndroidGameAdapter(identity), "demo", "capture")
+ @Test fun everyCurrentCaptureRecordsPackageAndSourceProvenance() {
+  for (source in listOf(origin, "32cd68da7bd2cdb467330cf33ca7c0e9b18eaae94ecf0b4b944313def1732f89")) {
+   val id = identity("com.shatteredpixel.shatteredpixeldungeon", source)
+   val captured = policy(id, 896).annotate(snapshot(id))
+   assertEquals(id.packageName, captured.manifest.gamePackage)
+   assertEquals(GameSaveSource(source, "c".repeat(64)), captured.manifest.gameSource)
+  }
+ }
  @Test fun samePackageDifferentSourceAndApkRemainCompatible() {
   val id = identity(); val original = policy(id).annotate(snapshot(id))
   val other = identity(source = "d".repeat(64)); val versions = policy(other)
@@ -26,10 +34,11 @@ class AndroidProfileVersionsTest {
  }
  @Test fun unknownLegacyPackageCannotBeInferredFromNamespace() {
   val id = identity(); val original = snapshot(id)
-  assertFails { policy(id).checkRestore(original, "") }
-  val old = original.copy(manifest = original.manifest.copy(gameSource = GameSaveSource(origin, "b".repeat(64))))
-  policy(id).checkRestore(old, "")
-  assertFails { policy(identity(source = "d".repeat(64))).checkRestore(old, "") }
+  val missingPackage = original.copy(manifest = original.manifest.copy(gamePackage = null))
+  assertFails { policy(id).checkRestore(missingPackage, "") }
+  val sourceOnly = missingPackage.copy(manifest = missingPackage.manifest.copy(gameSource = GameSaveSource(origin, "b".repeat(64))))
+  assertFails { policy(id).checkRestore(sourceOnly, "") }
+  assertFails { policy(identity(source = "d".repeat(64))).checkRestore(sourceOnly, "") }
  }
  @Test fun unknownLoaderAllowsRecognizedWriterButNeverSemanticMerge() {
   val id = identity(); val versions = policy(id)
@@ -72,9 +81,9 @@ class AndroidProfileVersionsTest {
   assertFails { AndroidSaveCapabilities(802, null) }; assertFails { AndroidSaveCapabilities(900, 896) }
   assertFails { AndroidSaveCapabilities(900, 1000, AndroidMergePolicy.SHATTERED_896) }
   assertFails { identity("../bad") }; assertFails { identity(source = "not-a-digest") }
-  assertFails { AndroidGameIdentity("org.example.game", "bad\nlabel", origin, "test") }
+  assertFails { AndroidGameIdentity("org.example.game", "bad\nlabel", origin) }
   assertFalse(AndroidConnection("https://localhost/", "user", "secret").toString().contains("secret"))
-  assertEquals("shattered", AndroidGameIdentity.defaultNamespace(AndroidGameIdentity.KNOWN_SHATTERED_ORIGIN))
+  assertEquals("shattered", identity("com.shatteredpixel.shatteredpixeldungeon").namespace)
  }
  @Test fun adapterMergeUsesPackageIdentityAndRecordsFreshVersions() {
   val id = identity(capabilities = AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896)); val adapter = AndroidGameAdapter(id)

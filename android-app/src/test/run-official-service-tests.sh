@@ -43,7 +43,7 @@ assert '"quota_mb": 5.0' in fixtures[0]
 pathlib.Path(sys.argv[2]).write_text("\n".join(fixtures) + "\n", encoding="utf-8")
 PY
 CP="$CORE:$(find -L "$RUNTIME" -maxdepth 1 -name '*.jar' | sort | paste -sd:)"
-"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -encoding UTF-8 -cp "$CP" -d "$OUT" \
+"$JAVA" -m jdk.compiler/com.sun.tools.javac.Main -sourcepath "$REPO/core/src/main/java" -source 17 -target 17 -encoding UTF-8 -cp "$CP" -d "$OUT" \
   "$SRC/OfficialServiceRegistrationClient.java" \
   "$HERE/java/io/github/xyz1001/pdsync/android/OfficialServiceRegistrationChecks.java"
-"$JAVA" -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.OfficialServiceRegistrationChecks "$OUT/server-account-info.jsonl"
+"$JAVA" -Duser.language=zh -Duser.country=CN -cp "$OUT:$CP" io.github.xyz1001.pdsync.android.OfficialServiceRegistrationChecks "$OUT/server-account-info.jsonl"

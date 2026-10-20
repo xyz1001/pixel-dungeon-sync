@@ -1,0 +1,247 @@
+package io.github.xyz1001.pdsync.android;
+
+import static pdsync.i18n.AndroidHostMessages.*;
+import static pdsync.i18n.PrepareMessages.*;
+
+import java.io.IOException;
+
+/** Lifecycle/scheduler/coordinator ports. The three Activity methods and result branch are production code. */
+final class MainActivity {
+    static final int RESULT_OK = -1, RESULT_CANCELED = 0;
+    enum DiagnosticAction { INSTALL }
+    static final class ModeChoice {
+        Object request;
+        Object pending() { return request; }
+    }
+    static final class SetupSession {
+        boolean running, externalCheckPending;
+        final ModeChoice modeChoice = new ModeChoice();
+        MainActivity owner;
+        Runnable scheduled;
+    }
+    static final class Installer {
+        boolean active = true, observation, exact, verified, failCheckpoint, failVerification;
+        boolean selectedReceipt = true, immutableShare = true;
+        String nonce = "request-one";
+        int requestCode = 16001;
+        int returns, checks, selections, revokes;
+        String requestNonce() { return nonce; }
+        int externalActivityRequestCode() { return requestCode; }
+        String state() { return active ? "EXTERNAL_INSTALL" : observation ? "EXTERNAL_RETURNED" : "READY"; }
+        boolean externalInstallPending() { return active; }
+        boolean externalInstallObservation() { return observation; }
+        void externalActivityReturned(String expected) throws IOException {
+            if (!active || !nonce.equals(expected)) return;
+            if (failCheckpoint) throw new IOException("Checkpoint unavailable");
+            returns++; active = false; observation = true;
+        }
+        void checkExternalInstall() throws IOException {
+            checks++;
+            if (failVerification) throw new IOException("Package changed during verification");
+            if (!exact) return;
+            active = observation = false; verified = true; selectedReceipt = false;
+            immutableShare = false; selections++; revokes++;
+        }
+        String summary() { return verified ? "Verified installed package" : "Not yet verified"; }
+        void supersede() { active = observation = false; nonce = "new-selection"; }
+    }
+    interface Task<T> { T run() throws Exception; }
+    interface Done<T> { void accept(MainActivity owner, T value) throws Exception; }
+
+    final Installer installer;
+    final SetupSession setupSession;
+    boolean resumed = true, busy, destroyed, deferWork;
+    String notice, setupOutcome;
+    int errors, readiness, workStarts;
+    MainActivity() { this(new Installer(), new SetupSession()); }
+    MainActivity(Installer installer, SetupSession session) {
+        this.installer = installer; this.setupSession = session; session.owner = this;
+    }
+    boolean isDestroyed() { return destroyed; }
+    void reportError(Exception error) { errors++; }
+    void refreshReadiness() { readiness++; }
+
+    <T> void setupWork(DiagnosticAction action, String message, Task<T> task, Done<T> done) {
+        if (busy || setupSession.running || destroyed) return;
+        busy = setupSession.running = true; workStarts++;
+        Runnable work = () -> {
+            MainActivity owner = setupSession.owner;
+            try {
+                T result = task.run();
+                busy = false; owner.busy = false; setupSession.running = false;
+                done.accept(owner, result);
+            } catch (Exception failure) {
+                busy = false; owner.busy = false; setupSession.running = false;
+                owner.reportError(failure);
+            }
+            /* PRODUCTION_COMPLETION_DRAIN */
+        };
+        if (deferWork) { deferWork = false; setupSession.scheduled = work; }
+        else work.run();
+    }
+    void finishDeferredWork() {
+        Runnable work = setupSession.scheduled; setupSession.scheduled = null;
+        require(work != null, "Deferred verification work exists"); work.run();
+    }
+    void completeOtherSetupWork() {
+        busy = setupSession.running = false;
+        MainActivity owner = this;
+        /* PRODUCTION_COMPLETION_DRAIN */
+    }
+    void resumeExternalObservation() {
+        resumed = true;
+        /* PRODUCTION_RESUME_QUEUE */
+        drainExternalInstallation();
+    }
+    void externalInstallResult(int resultCode) {
+        externalInstallResult(installer.externalActivityRequestCode(), resultCode);
+    }
+
+    /* PRODUCTION_METHODS */
+
+    static int scenarios;
+    static void require(boolean condition, String reason) { if (!condition) throw new AssertionError(reason); }
+    static void retainsUnverifiedShare(MainActivity a) {
+        require(!a.installer.active && a.installer.observation, "True result releases only the business wait");
+        require(!a.installer.verified && a.installer.selections == 0 && a.installer.selectedReceipt,
+                "Unverified return neither reports success nor consumes selected-file intent");
+        require(a.installer.immutableShare && a.installer.revokes == 0,
+                "Unverified return preserves the immutable share for background installation");
+    }
+    static void resultCodesNeverProveSuccess() {
+        for (int code : new int[] {RESULT_OK, RESULT_CANCELED, 1, 37}) {
+            MainActivity a = new MainActivity();
+            a.externalInstallResult(code);
+            retainsUnverifiedShare(a);
+            require(a.installer.returns == 1 && a.installer.checks == 1 && a.readiness == 1,
+                    "Every external result code records the boundary and checks actual package state");
+            a.drainExternalInstallation(); a.drainExternalInstallation();
+            require(a.installer.checks == 1 && a.workStarts == 1, "Duplicate drains do not replay verification");
+        }
+        scenarios++;
+    }
+    static void ordinaryResumeDoesNotInventReturn() {
+        MainActivity a = new MainActivity();
+        a.resumed = false; a.resumeExternalObservation(); a.resumeExternalObservation();
+        require(a.installer.active && !a.installer.observation && a.installer.returns == 0,
+                "Plain resume cannot invent an external Activity return");
+        require(a.installer.checks == 0 && a.workStarts == 0 && a.installer.immutableShare,
+                "Plain resume does not poll or revoke an outstanding external share");
+        scenarios++;
+    }
+    static void pausedReturnWaitsForResume() {
+        MainActivity a = new MainActivity(); a.resumed = false;
+        a.externalInstallResult(RESULT_CANCELED); retainsUnverifiedShare(a);
+        require(a.setupSession.externalCheckPending && a.installer.checks == 0,
+                "Paused callback retains its pending check instead of losing the return");
+        a.resumeExternalObservation();
+        require(a.installer.checks == 1 && !a.setupSession.externalCheckPending,
+                "Resume drains a queued return once"); scenarios++;
+    }
+    static void busyReturnWaitsForCompletion() {
+        for (boolean running : new boolean[] {false, true}) {
+            MainActivity a = new MainActivity(); a.busy = !running; a.setupSession.running = running;
+            a.externalInstallResult(RESULT_CANCELED); retainsUnverifiedShare(a);
+            require(a.installer.checks == 0 && a.setupSession.externalCheckPending,
+                    "Busy or running setup retains the return before verification can start");
+            a.completeOtherSetupWork();
+            require(a.installer.checks == 1 && !a.setupSession.externalCheckPending,
+                    "Setup completion drains the queued external return");
+        }
+        scenarios++;
+    }
+    static void foregroundChoiceDefersObservation() {
+        MainActivity a = new MainActivity(); a.setupSession.modeChoice.request = new Object();
+        a.externalInstallResult(RESULT_CANCELED);
+        require(a.setupSession.externalCheckPending && a.installer.checks == 0,
+                "An open source choice defers observation without losing it");
+        a.setupSession.modeChoice.request = null; a.drainExternalInstallation();
+        require(a.installer.checks == 1, "Closing the choice allows the preserved return to drain"); scenarios++;
+    }
+    static void deferredWorkCannotDuplicate() {
+        MainActivity a = new MainActivity(); a.deferWork = true;
+        a.externalInstallResult(RESULT_OK); a.drainExternalInstallation(); a.drainExternalInstallation();
+        require(a.workStarts == 1 && a.installer.checks == 0 && a.setupSession.running,
+                "An asynchronous return check is scheduled only once");
+        a.finishDeferredWork(); retainsUnverifiedShare(a);
+        require(a.installer.checks == 1 && !a.busy && !a.setupSession.running,
+                "Deferred check completes and leaves the business flow unlocked"); scenarios++;
+    }
+    static void rotationKeepsQueuedReturn() {
+        MainActivity old = new MainActivity(); old.resumed = false;
+        old.externalInstallResult(RESULT_CANCELED); old.destroyed = true;
+        MainActivity current = new MainActivity(old.installer, old.setupSession);
+        current.resumeExternalObservation();
+        require(current.installer.checks == 1 && current.readiness == 1 && old.readiness == 0,
+                "Rotation drains the retained return through the current Activity"); scenarios++;
+    }
+    static void rotationDuringCheckUsesCurrentOwner() {
+        MainActivity old = new MainActivity(); old.deferWork = true; old.externalInstallResult(RESULT_CANCELED);
+        old.destroyed = true; old.resumed = false;
+        MainActivity current = new MainActivity(old.installer, old.setupSession);
+        current.finishDeferredWork();
+        require(current.readiness == 1 && old.readiness == 0 && !current.setupSession.running,
+                "An in-flight external check completes against the retained current owner"); scenarios++;
+    }
+    static void restartAndLateExactProof() {
+        MainActivity old = new MainActivity(); old.resumed = false; old.externalInstallResult(RESULT_CANCELED);
+        MainActivity current = new MainActivity(old.installer, new SetupSession());
+        current.resumeExternalObservation(); retainsUnverifiedShare(current);
+        current.installer.exact = true; current.resumeExternalObservation();
+        require(current.installer.verified && current.installer.selections == 1 && current.installer.revokes == 1,
+                "A durable returned checkpoint accepts late verified package proof exactly once");
+        current.resumeExternalObservation(); current.drainExternalInstallation();
+        require(current.installer.checks == 2 && current.installer.selections == 1,
+                "Completed proof stops further automatic external checks"); scenarios++;
+    }
+    static void staleObservationCannotChangeNewSelection() {
+        MainActivity a = new MainActivity(); a.resumed = false; a.externalInstallResult(RESULT_CANCELED);
+        a.installer.supersede(); a.installer.exact = true;
+        a.resumeExternalObservation(); a.drainExternalInstallation();
+        require(a.installer.checks == 0 && a.installer.selections == 0 && a.installer.revokes == 0,
+                "Stale queued observation cannot verify or bind after a new selection supersedes it");
+        require(!a.setupSession.externalCheckPending, "A stale queued observation is discarded once"); scenarios++;
+    }
+    static void persistenceAndVerificationFailuresStaySafe() {
+        MainActivity a = new MainActivity(); a.installer.failCheckpoint = true;
+        a.externalInstallResult(RESULT_CANCELED);
+        require(a.errors == 1 && a.installer.active && a.installer.checks == 0,
+                "Failed return persistence cannot authorize verification or pretend the checkpoint changed");
+        a = new MainActivity(); a.installer.failVerification = true; a.externalInstallResult(RESULT_OK);
+        retainsUnverifiedShare(a);
+        require(a.errors == 1 && !a.busy, "Failed verification does not restore the business lock");
+        a.installer.failVerification = false; a.installer.exact = true; a.resumeExternalObservation();
+        require(a.installer.verified && a.installer.selections == 1,
+                "A later real observation can recover from a transient verification error"); scenarios++;
+    }
+    static void oldCallbackCannotUnlockNewRequest() {
+        MainActivity a = new MainActivity();
+        int oldRequestCode = a.installer.externalActivityRequestCode();
+        a.externalInstallResult(RESULT_CANCELED);
+        a.installer.active = true; a.installer.observation = false;
+        a.installer.nonce = "request-two"; a.installer.requestCode++;
+        a.externalInstallResult(oldRequestCode, RESULT_CANCELED);
+        a.externalInstallResult(8107, RESULT_OK);
+        require(a.installer.active && !a.installer.observation && a.installer.returns == 1
+                        && a.installer.checks == 1 && !a.setupSession.externalCheckPending,
+                "A stale old callback cannot release a newer external request");
+        a.externalInstallResult(RESULT_CANCELED);
+        require(!a.installer.active && a.installer.observation && a.installer.returns == 2,
+                "The newer request unlocks only on its own Activity result"); scenarios++;
+    }
+    static void legacyRequestCodeStillReturns() {
+        MainActivity a = new MainActivity(); a.installer.requestCode = 8107;
+        a.externalInstallResult(8107, RESULT_CANCELED); retainsUnverifiedShare(a);
+        require(a.installer.returns == 1 && a.installer.checks == 1,
+                "A matching legacy outstanding request can finish through the original request code"); scenarios++;
+    }
+    public static void main(String[] args) {
+        resultCodesNeverProveSuccess(); ordinaryResumeDoesNotInventReturn(); pausedReturnWaitsForResume();
+        busyReturnWaitsForCompletion(); foregroundChoiceDefersObservation(); deferredWorkCannotDuplicate();
+        rotationKeepsQueuedReturn(); rotationDuringCheckUsesCurrentOwner(); restartAndLateExactProof();
+        staleObservationCannotChangeNewSelection(); persistenceAndVerificationFailuresStaySafe();
+        oldCallbackCannotUnlockNewRequest(); legacyRequestCodeStillReturns();
+        System.out.println("external return execution passed: " + scenarios + " scenarios");
+        System.out.println("Boundary: production Activity return/drain/check methods and external result branch; lifecycle, scheduling, coordinator, and PackageManager are ports. No Android device installation evidence.");
+    }
+}

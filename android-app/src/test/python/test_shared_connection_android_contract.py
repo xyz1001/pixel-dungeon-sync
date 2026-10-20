@@ -18,7 +18,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_component_activity_mounts_the_actual_shared_composable(self):
         self.assertIn("extends ComponentActivity implements SharedConnectionHost", MAIN)
         self.assertIn("activity.setContent", ADAPTER)
-        self.assertIn("SharedConnectionScreen(session.controller, game)", ADAPTER)
+        self.assertIn("SharedConnectionScreen(session.controller, game,", ADAPTER)
         route = body(MAIN, "public void render()")
         self.assertLess(route.index("renderSharedConnection()"), route.index("ScrollView scrollView"))
         self.assertIn("this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly", route)
@@ -26,12 +26,12 @@ class SharedConnectionAndroidContract(unittest.TestCase):
                          "ManagedAccountPanel.render", "ManualPaymentPanel.render"):
             self.assertNotIn(renderer, MAIN)
 
-    def test_unmigrated_native_pages_are_explicit_and_unchanged_routes(self):
+    def test_remaining_routes_keep_home_settings_and_no_path_step(self):
         route = body(MAIN, "public void render()")
         for page in ("Home", "Settings", "Discovery", "Conflict", "Confirmation"):
             self.assertIn("render" + page + "()", route)
-        self.assertIn("renderSharedSavePath()", route)
-        self.assertIn("renderSharedComparison()", route)
+        self.assertNotIn("renderSharedSavePath()", route)
+        self.assertNotIn("renderSharedComparison()", route)
 
     def test_platform_adapter_is_typed_and_keeps_only_application_context(self):
         ports = ADAPTER[ADAPTER.index("internal class AndroidConnectionPorts"):]
@@ -65,7 +65,8 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("SyncRuntime.facade(app, candidate).connect().isSuccess", probe)
         for mutation in (".save(", "setConnection(", "setOnboardingProgress(", "forget("):
             self.assertNotIn(mutation, probe)
-        save = body(ADAPTER, "override fun saveAndActivate(")
+        self.assertIn("override fun saveAndActivate(config: SharedConnectionConfig) = persistAndActivate(config)", ADAPTER)
+        save = body(ADAPTER, "private fun persistAndActivate(")
         self.assertIn("if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)", save)
         self.assertLess(save.index(".save(candidate)"), save.index("SyncRuntime.setConnection(candidate)"))
         self.assertIn("AutoSyncService.cancelForConnectionChange(app)", save)
@@ -76,7 +77,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
                           "RootSelectionStore", "GamePreparationService", "clearBaseline", "delete", ".restore", ".upload"):
             self.assertNotIn(forbidden, ADAPTER)
         committed = body(MAIN, "private boolean drainSharedCommit()")
-        self.assertIn("refreshComparison(SyncPage.COMPARISON)", committed)
+        self.assertIn("refreshComparison(SyncPage.HOME)", committed)
         for forbidden in ("setNamespace", "setPreparedGame", "setRootGame", "delete", "clearBaseline"):
             self.assertNotIn(forbidden, committed)
 
@@ -110,7 +111,10 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("host = null", body(COMMON, "fun detach()"))
         foreground = body(COMMON, "fun foreground(")
         self.assertIn("proof = null", foreground)
-        self.assertIn("cancelAppreciationRequest()", foreground)
+        self.assertNotIn("cancelAppreciationRequest()", foreground)
+        self.assertNotIn("refreshAppreciation()", foreground)
+        self.assertNotIn("officialSession = null", foreground)
+        self.assertIn("if (!entered)", foreground)
 
     def test_saved_instance_state_contains_no_credentials_or_controller(self):
         saved = body(MAIN, "protected void onSaveInstanceState(")
@@ -151,7 +155,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(resume.index("commitBeforeResume = this.sharedCommitSerial"),
                         resume.index("getController().foreground(true)"))
         self.assertLess(resume.index("commitBeforeResume != this.sharedCommitSerial || drainSharedCommit()"),
-                        resume.index("requestReadinessRefresh()"))
+                        resume.index("if (this.initialLoad"))
         self.assertIn("this.sharedCommitSerial++", body(MAIN, "private boolean drainSharedCommit()"))
 
     def test_saved_recovery_error_updates_existing_controller_and_preserves_draft(self):
@@ -164,7 +168,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("this.sharedReloadPending = true", reload)
         failed = body(MAIN, "void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(")
         failure = body(failed, "if (this.sharedReloadPending)")
-        self.assertIn('this.connectionLoadError = "连接设置读取失败，请重试。"', failure)
+        self.assertIn('this.connectionLoadError = COULD_NOT_READ_CONNECTION_SETTINGS_PLEASE_2.text()', failure)
         for destructive in ("closeSharedConnection", "forget(", "this.connection =", ".save("):
             self.assertNotIn(destructive, failure)
         success = body(MAIN, "void m71x6d7dc9b8(")
@@ -177,12 +181,13 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(render.index("this.sharedConnectionSession != visibleSession"),
                         render.index("AndroidConnectionComposition.show(this, visibleSession, selectedGameIdentity())"))
 
-    def test_commit_preserves_runtime_connection_identity_for_history_guards(self):
+    def test_commit_preserves_exact_verified_runtime_identity_for_history_guards(self):
         commit = body(MAIN, "private boolean drainSharedCommit()")
-        self.assertLess(commit.index("this.connection = AndroidConnectionComposition.toStored(config)"),
-                        commit.index("SyncRuntime.setConnection(this.connection)"))
-        self.assertLess(commit.index("SyncRuntime.setConnection(this.connection)"),
-                        commit.index("refreshComparison(SyncPage.COMPARISON)"))
+        self.assertLess(commit.index("owner.completedConnection(config)"), commit.index("this.connection = committed"))
+        self.assertLess(commit.index("if (committed == null)"), commit.index("OnboardingProgress.COMPLETE"))
+        self.assertNotIn("toStored(config)", commit)
+        self.assertLess(commit.index("this.connection = committed"), commit.index("refreshComparison(SyncPage.HOME)"))
+
 
     def test_system_back_dispatches_once_to_existing_navigation_and_shared_controller(self):
         create = body(MAIN, "public void onCreate(")
@@ -194,7 +199,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertIn("finally { this.navigationBack.setEnabled(true); }", back)
 
     def test_android_only_insets_keep_status_navigation_bars_and_keyboard_clear(self):
-        self.assertIn("Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding())", ADAPTER)
+        self.assertIn("AndroidAppViewport {", ADAPTER)
         self.assertNotIn("safeDrawingPadding", SCREEN)
         self.assertNotIn("imePadding", SCREEN)
 
@@ -209,7 +214,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
             self.assertNotIn(action, saved)
         self.assertIn(".getOrDefault(false)", ADAPTER)
 
-    def test_fresh_verification_remains_mandatory_before_android_persistence(self):
+    def test_custom_dav_proof_and_authenticated_identity_remain_distinct_before_persistence(self):
         commit = body(COMMON, "fun continueConnection()")
         self.assertIn("if (hasProof()) proof!!.config else savedDraftForRevalidation()", commit)
         self.assertLess(commit.index("if (candidate == null)"), commit.index("ports.saveAndActivate(candidate)"))
@@ -217,8 +222,19 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         self.assertLess(commit.index("verify(candidate, pending)"), commit.index("ports.saveAndActivate(candidate)"))
         self.assertLess(commit.index("checkWork(pending)"), commit.index("ports.saveAndActivate(candidate)"))
         verify = body(COMMON, "private fun verify(")
-        self.assertLess(verify.index("entitlement.requireSyncAccess()"), verify.index("ports.testConnection(candidate)"))
         self.assertIn("if (!ports.testConnection(candidate)) throw ProbeRejected()", verify)
+        self.assertIn("!candidate.official", verify)
+        self.assertIn("officialSession?.takeIf { hasAuthenticatedOfficialIdentity(it) }?.config", commit)
+        identity = body(COMMON, "private fun hasAuthenticatedOfficialIdentity(")
+        self.assertIn("session.record.enabled", identity)
+        self.assertNotIn("record.active", identity)
+        self.assertNotIn("officialExpired", identity)
+        self.assertIn("ports.saveAuthenticatedOfficial(candidate)", commit)
+        self.assertIn("else verify(candidate, pending)", commit)
+        builtin = body(ADAPTER, "override fun saveAuthenticatedOfficial(")
+        self.assertIn("config.official && config.endpoint == TrustedEntitlementCache.OFFICIAL_ENDPOINT", builtin)
+        self.assertIn("persistAndActivate(config)", builtin)
+        self.assertNotIn(".connect()", builtin)
 
 
 if __name__ == "__main__":

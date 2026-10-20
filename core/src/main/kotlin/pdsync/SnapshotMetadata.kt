@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -22,8 +23,8 @@ const val MAX_DEVICE_LABEL_CODE_POINTS = 64
 @Serializable data class DeviceIdentity(val id: String, val label: String) {
  val displayName: String get() = "$label · ${id.take(8)}"
  fun validated(): DeviceIdentity = also {
-  require(validCommitId(id)) { "Invalid device identity" }
-  require(label.isNotEmpty() && label == sanitizeDeviceLabel(label)) { "Invalid device label" }
+  require(validCommitId(id)) { CoreMessages.VALIDATION_INVALID_DEVICE_IDENTITY.text() }
+  require(label.isNotEmpty() && label == sanitizeDeviceLabel(label)) { CoreMessages.VALIDATION_INVALID_DEVICE_LABEL.text() }
  }
 }
 
@@ -37,9 +38,9 @@ const val MAX_DEVICE_LABEL_CODE_POINTS = 64
 ) {
  val latestFileModifiedAt: String? get() = fileModifiedAt.values.maxByOrNull { Instant.parse(it) }
  fun validated(files: Set<String>): SnapshotMetadata = also {
-  require(version == 1) { "Unsupported snapshot metadata version" }
+  require(version == 1) { CoreMessages.VALIDATION_UNSUPPORTED_SNAPSHOT_METADATA_VERSION.text() }
   device.validated(); requireUtcTimestamp(capturedAt)
-  require(fileModifiedAt.size <= MAX_SNAPSHOT_FILES && fileModifiedAt.keys == files) { "Invalid file modification metadata" }
+  require(fileModifiedAt.size <= MAX_SNAPSHOT_FILES && fileModifiedAt.keys == files) { CoreMessages.VALIDATION_INVALID_FILE_MODIFICATION_METADATA.text() }
   fileModifiedAt.values.forEach(::requireUtcTimestamp)
  }
 }
@@ -52,7 +53,7 @@ const val MAX_DEVICE_LABEL_CODE_POINTS = 64
  val preparedAt: String
 ) {
  fun validated(): CommitOperationMetadata = also {
-  require(version == 1) { "Unsupported operation metadata version" }
+  require(version == 1) { CoreMessages.VALIDATION_UNSUPPORTED_OPERATION_METADATA_VERSION.text() }
   device.validated(); requireUtcTimestamp(preparedAt)
  }
 }
@@ -61,8 +62,8 @@ const val MAX_DEVICE_LABEL_CODE_POINTS = 64
 data class SnapshotCaptureContext(val device: DeviceIdentity, val capturedAt: String)
 
 internal fun requireUtcTimestamp(value: String) {
- require(value.length in 20..30 && value.endsWith('Z')) { "Invalid UTC metadata timestamp" }
- require(Instant.parse(value).toString() == value) { "Metadata timestamp must be canonical UTC" }
+ require(value.length in 20..30 && value.endsWith('Z')) { CoreMessages.VALIDATION_INVALID_UTC_METADATA_TIMESTAMP.text() }
+ require(Instant.parse(value).toString() == value) { CoreMessages.VALIDATION_METADATA_TIMESTAMP_MUST_BE_CANONICAL_UTC.text() }
 }
 
 /** Bound work and Unicode code points, remove controls/bidi formatting, and never split a surrogate. */
@@ -80,7 +81,7 @@ fun sanitizeDeviceLabel(raw: String?): String {
   pendingSpace = false
   if (count < MAX_DEVICE_LABEL_CODE_POINTS) { out.appendCodePoint(point); count++ }
  }
- return out.toString().ifEmpty { "此设备" }
+ return out.toString().ifEmpty { CoreMessages.THIS_DEVICE.text() }
 }
 
 /** One random identity per app state root, shared by profiles. No MAC/serial/account/path derivation. */
@@ -103,7 +104,7 @@ class DeviceMetadata(
    channel.lock().use {
     if (!path.exists()) SafePaths.atomicWrite(path, json.encodeToString(StoredIdentity(id = UUID.randomUUID().toString())).encodeToByteArray())
     val stored = json.decodeFromString<StoredIdentity>(SafePaths.boundedRead(path, 1024).decodeToString(throwOnInvalidSequence = true))
-    require(stored.schema == 1 && validCommitId(stored.id)) { "本机设备身份损坏；未自动替换已有身份" }
+    require(stored.schema == 1 && validCommitId(stored.id)) { CoreMessages.LOCAL_DEVICE_IDENTITY_IS_CORRUPT_THE_EXISTING_IDENTITY_WAS_NOT_AUTOMATICALLY_REPLACED.text() }
     stored.id
    }
   }

@@ -13,6 +13,48 @@ SCREEN = (REPO / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/Sha
 
 
 class SharedHomeAndroidContract(unittest.TestCase):
+    def test_official_account_button_eligibility_uses_current_trusted_metadata(self):
+        gate = body(MAIN, 'private boolean homeAccountAccessAvailable()')
+        self.assertIn('!isOfficialAccount(this.connection)', gate)
+        self.assertIn('TrustedEntitlementCache.currentAccessAvailable', gate)
+        self.assertIn('this.connection.username', gate)
+        self.assertIn('homeAccountAccessAvailable()', body(MAIN, 'private boolean canHomeUpload()'))
+        self.assertIn('homeAccountAccessAvailable()', body(MAIN, 'private boolean canHomeRestore()'))
+
+    def test_home_expiry_uses_current_account_state_and_existing_appreciation_navigation(self):
+        home = body(MAIN, 'private void renderHome()')
+        self.assertIn('final boolean serviceExpired = homeAccountExpired()', home)
+        self.assertIn('homeStatus(content)', home)
+        self.assertIn('serviceExpired ? pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text()',
+                      body(MAIN, 'private String homeStatus('))
+        self.assertIn('TrustedEntitlementCache.withoutExpiryNotice(visibleNotice())', home)
+        self.assertIn('serviceExpired ? SharedHomeStatusKind.EXPIRED', home)
+        self.assertIn('isCurrentHomeAction(owner) && homeAccountExpired() && !installer.hasActiveRequest()', home)
+        self.assertIn('showManagedAccount(MainActivity.this.connection)', home)
+        state = body(MAIN, 'private boolean homeAccountExpired()')
+        for expected in ('isOfficialAccount(this.connection)', '.read(', 'this.connection.username', 'elapsedRealtime()', 'bootCount(', 'TrustedEntitlementCache.currentExpired('):
+            self.assertIn(expected, state)
+        for forbidden in ('.entitlement(', '.requireSyncAccess(', '.save(', '.write(', 'lease ='):
+            self.assertNotIn(forbidden, state)
+
+    def test_confirmation_replaces_legacy_chrome_with_inactive_real_shared_backdrop(self):
+        confirmation = body(MAIN, 'private void renderConfirmation()')
+        for actual in ('this.root.removeAllViews()', 'this.root.setPadding(0, 0, 0, 0)',
+                       'this.root.setOnApplyWindowInsetsListener(null)', 'this.root.addView(',
+                       'this.history, this.historyPage, selectedGameIdentity()',
+                       'this.confirmationSettingsBackdrop', 'new LinearLayout.LayoutParams(-1, -1)'):
+            self.assertIn(actual, confirmation)
+        self.assertNotIn('this.body.addView(', confirmation)
+        self.assertNotIn('new LinearLayout.LayoutParams(0, 0)', confirmation)
+        adapter = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidHomeDialogComposition.kt').read_text()
+        actual = body(adapter, 'fun confirmationView(')
+        for guard in ('AndroidAppViewport {', 'SharedHomeScreen(SharedHomeState(', 'pageActive = false',
+                      'HistoryPresentation.from(it, historyPage)', 'SharedSettingsScreen(settingsBackdrop.copy(pageActive = false)',
+                      'SharedConfirmationDialog(state,'):
+            self.assertIn(guard, actual)
+        for forbidden in ('.inspect(', 'freshExport(', 'SaveSummary(', '.restore(', '.upload(', '.entitlement('):
+            self.assertNotIn(forbidden, actual)
+
     def test_home_routes_to_shared_composition_before_native_hierarchy(self):
         render = body(MAIN, 'public void render()')
         home = body(render, 'if (this.page == SyncPage.HOME)')
@@ -27,8 +69,8 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertNotIn('private void renderHistory()', MAIN)
         adapter = body(ADAPTER, 'fun showHome(')
         self.assertIn('SharedHomeState(', adapter)
-        self.assertIn('SharedHomeScreen(state, actions)', adapter)
-        self.assertIn('safeDrawingPadding().imePadding()', adapter)
+        self.assertIn('SharedHomeScreen(state, actions, naming = naming.naming)', adapter)
+        self.assertIn('AndroidAppViewport {', adapter)
         self.assertIn('SharedHistorySection(state.history', SCREEN)
 
     def test_target_comes_from_full_real_history_not_visible_page_or_labels(self):
@@ -101,10 +143,11 @@ class SharedHomeAndroidContract(unittest.TestCase):
 
     def test_platform_gate_and_real_operations_remain_without_new_process_rules(self):
         home = body(MAIN, 'private void renderHome()')
-        for capability in ('canRequestSaveAccess()', 'restoreSupported()', 'restoreNeedsAttention()',
-                           'automaticObservationSupported()', 'SyncRuntime.isAutoUploadPaused(this)',
-                           'automaticStatusBrief()', 'this.inspection.isRetryablePending()'):
+        for capability in ('canRequestSaveAccess()', 'canHomeUpload()', 'canHomeRestore()', 'restoreNeedsAttention()',
+                           'homeStatus(content)', 'this.inspection.isRetryablePending()'):
             self.assertIn(capability, home)
+        for capability in ('automaticObservationSupported()', 'SyncRuntime.isAutoUploadPaused(this)', 'automaticStatusBrief()'):
+            self.assertIn(capability, body(MAIN, 'private String homeStatus('))
         for dispatch in ('requestUpload()', 'requestRestore()', 'launchGame()', 'MainActivity.this.rename(snapshotId)',
                          'navigate(SyncPage.SETTINGS)'):
             self.assertIn(dispatch, home)
@@ -112,10 +155,73 @@ class SharedHomeAndroidContract(unittest.TestCase):
                           'readComparison()', 'freshExport(', 'replaceMirror(', '.historyPresentation(', '.exportTo('):
             self.assertNotIn(forbidden, home)
         self.assertIn('sync().upload(inspection)', body(MAIN, 'AndroidSyncFacade.OperationResult m146lambda$upload$71$'))
-        self.assertIn('requireOfficialSyncAccess(account)', body(MAIN, 'String snapshotId, boolean replace, ComparisonProofState.Ticket proof)'))
+        self.assertIn('owner = sync()', body(MAIN, 'private AndroidSyncFacade.OperationResult restoreForCurrentAccount('))
+        self.assertIn('requireOfficialSyncAccess(this.connection)', body(MAIN, 'private AndroidSyncFacade sync()'))
         self.assertIn('requestRootAuthorization()', MAIN)
         self.assertIn('refreshComparison(SyncPage.HOME)', body(MAIN, 'void m130x445a4530()'))
-        self.assertIn('检查未完成恢复', body(MAIN, 'private void showSettingsMaintenance('))
+        self.assertIn('CHECK_UNFINISHED_RESTORE_226.text()', body(MAIN, 'private void showSettingsMaintenance('))
+
+    def test_archive_sources_guard_display_retained_callbacks_and_direct_entries(self):
+        home = body(MAIN, 'private void renderHome()')
+        for name in ('Upload', 'Restore'):
+            gate = 'canHome' + name + '()'
+            self.assertIn('final boolean can' + name + ' = ' + gate, home)
+            self.assertIn(gate, body(home, 'public void ' + name.lower() + '()'))
+            entry = body(MAIN, 'public void request' + name + '()')
+            self.assertTrue(entry.lstrip('{').strip().startswith('if (!' + gate + ') return;'))
+            check = body(MAIN, 'private boolean ' + gate)
+            self.assertIn('isForegroundHome()', check)
+            self.assertIn('!this.busy', check)
+            self.assertIn('homeArchiveAvailability().get' + name + 'SourceAvailable()', check)
+        source = body(MAIN, 'private SharedHomeArchiveAvailability homeArchiveAvailability()')
+        for guard in ('SharedHomeArchiveAvailability.from(this.history, this.selected',
+                      'this.homeObservationOwner.accepts(currentHomeContext(0)',
+                      'this.cloudVerified', 'this.connection != null', 'this.facade != null',
+                      'this.inspection != null', 'selectedGamePackage() != null', 'readyForSaves()',
+                      '!this.archiveReads.loading()', '!isHomeArchiveLoading()',
+                      'kind() != OnboardingKind.BLOCKED'):
+            self.assertIn(guard, source)
+        self.assertIn('this.homeObservationOwner = currentHomeContext(0)', body(MAIN, 'private void readComparison(boolean prepareNamespace)'))
+        self.assertIn('this.homeObservationOwner = this.cloudVerified ? currentHomeContext(0) : null',
+                      body(MAIN, 'private void drainAutomaticHistoryRefresh()'))
+        confirmation = body(MAIN, 'void m143x7dd3dfcf(')
+        for guard in ('this.inspection != inspection', 'java.util.Objects.equals(this.selected, str)',
+                      'homeArchiveAvailability().getRestoreSourceAvailable()'):
+            self.assertIn(guard, confirmation)
+        self.assertLess(confirmation.index('return;'), confirmation.index('operation('))
+
+    def test_archive_loading_tracks_reads_without_starting_io_from_render(self):
+        adapter = body(ADAPTER, 'fun showHome(')
+        self.assertIn('archiveLoading: Boolean', ADAPTER)
+        self.assertIn('archiveLoading = archiveLoading', adapter)
+        home = body(MAIN, 'private void renderHome()')
+        self.assertIn('isHomeArchiveLoading()', home)
+        state = body(MAIN, 'private boolean isHomeArchiveLoading()')
+        for guard in ('isForegroundHome()', 'this.archiveReads.loading()',
+                      'this.automaticHistoryState.inFlight', 'currentAutomaticHistory('):
+            self.assertIn(guard, state)
+        for forbidden in ('refreshComparison(', 'readComparison(', 'this.busy', 'activeWorkAction'):
+            self.assertNotIn(forbidden, state)
+        read = body(MAIN, 'private void readComparison(boolean prepareNamespace)')
+        self.assertLess(read.index('this.archiveReads.begin()'), read.index('activeFacade.inspect()'))
+        self.assertIn('finally {', read)
+        self.assertIn('this.archiveReads.finish(archiveRead)', read)
+        self.assertIn('publishArchiveReadState()', read)
+        self.assertLess(read.index('SyncHistory observedHistory ='), read.index('this.history = observedHistory'))
+        self.assertIn('requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage)', read)
+        scope = body(MAIN, 'private void requireCurrentArchiveRead(')
+        for guard in ('this.archiveReads.accepts(ticket)', '!isDestroyed()', 'this.connection == account',
+                      'SyncRuntime.currentConnection() == account', 'this.page == origin',
+                      'SyncRuntime.currentSelectionToken(this)', 'SyncRuntime.currentNamespace(this)'):
+            self.assertIn(guard, scope)
+        worker = body(MAIN, 'void m150lambda$work$2$iogithubxyz1001pdsyncandroidMainActivity(')
+        self.assertIn('synchronized (SyncRuntime.OPERATION_LOCK)', worker)
+        self.assertIn('objRun = task.run()', worker)
+        self.assertIn('this.archiveReads.close()', body(MAIN, 'protected void onDestroy()'))
+        self.assertIn('this.archiveReads.invalidate()', body(MAIN, 'private void navigate('))
+        automatic = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
+        self.assertLess(automatic.index('state.inFlight = true'), automatic.index('work(DiagnosticAction.INSPECT'))
+        self.assertIn('finally { state.inFlight = false; }', automatic)
 
     def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
         home = body(MAIN, 'private void renderHome()')
@@ -126,10 +232,10 @@ class SharedHomeAndroidContract(unittest.TestCase):
                          'kind() != OnboardingKind.BLOCKED', 'this.inspection.isRetryablePending()',
                          'kind() == OnboardingKind.BRANCHED'):
             self.assertIn(required, evidence)
-        self.assertIn('!content.getUploadUnnecessary()', home)
-        self.assertIn('!content.getRestoreUnnecessary()', home)
-        self.assertIn('!homeContent().getUploadUnnecessary()', body(home, 'public void upload()'))
-        self.assertIn('!homeContent().getRestoreUnnecessary()', body(home, 'public void restore()'))
+        self.assertIn('!homeContent().getUploadUnnecessary()', body(MAIN, 'private boolean canHomeUpload()'))
+        self.assertIn('!homeContent().getRestoreUnnecessary()', body(MAIN, 'private boolean canHomeRestore()'))
+        self.assertIn('canHomeUpload()', body(home, 'public void upload()'))
+        self.assertIn('canHomeRestore()', body(home, 'public void restore()'))
         self.assertNotIn('getClean()', home)
         for forbidden in ('.inspect(', 'SyncRuntime.', 'freshExport(', 'getLocalFileCount()',
                           'getClean()', 'getBaselineCommit()', 'getSummary()', '.historyPresentation('):
@@ -137,24 +243,38 @@ class SharedHomeAndroidContract(unittest.TestCase):
 
     def test_shared_confirmation_and_naming_keep_real_host_action_boundaries(self):
         restore = body(MAIN, 'public void requestRestore()')
-        self.assertIn('showConfirmation(', restore)
+        self.assertIn('showDestructiveConfirmation(', restore)
+        destructive = body(MAIN, 'private void showDestructiveConfirmation(')
+        self.assertIn('showConfirmation(title, message, label, action, merge, true)', destructive)
+        confirmation = body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2, boolean destructive)')
+        self.assertIn('this.confirmationDestructive = destructive', confirmation)
+        self.assertIn('this.confirmationDestructive', body(MAIN, 'private void renderConfirmation()'))
         self.assertIn('navigate(SyncPage.CONFLICT)', restore)
         # Protected local bytes still restore directly; UI migration adds no universal prompt.
         protected = body(restore, 'if (syncHistory != null && syncHistory.getCurrentProtected())')
         self.assertIn('operation(DiagnosticAction.RESTORE', protected)
         self.assertIn('return;', protected)
         self.assertNotIn('showConfirmation(', protected)
+        self.assertNotIn('showDestructiveConfirmation(', protected)
         rename = body(MAIN, 'public void rename(final String snapshotId)')
         current = body(MAIN, 'public void editCurrent()')
-        for naming in (rename, current):
-            self.assertIn('AndroidHomeDialogComposition.showNaming(', naming)
+        inline_current = body(MAIN, 'private void renameCurrentInline()')
+        for naming in (rename, current, inline_current):
             self.assertIn('isCurrentHomeAction(owner)', naming)
             self.assertNotIn('new AlertDialog.Builder', naming)
             self.assertNotIn('EditText', naming)
-        self.assertIn('editCurrent()', rename)
+        self.assertIn('this.homeNaming.open(', rename)
+        self.assertIn('this.homeNaming.open(', inline_current)
+        self.assertIn('renameCurrentInline()', rename)
+        self.assertIn('AndroidHomeDialogComposition.showNaming(', current)
+        self.assertIn('localSync().renameCurrent(observed, name)', inline_current)
+        self.assertIn('readComparison()', inline_current)
+        self.assertIn('chooseRunIdentity()', inline_current)
+        for signature in ('protected void onPause()', 'protected void onDestroy()', 'private void navigate(', 'private void renderHome()'):
+            self.assertIn('this.homeNaming.close()', body(MAIN, signature))
         self.assertIn('chooseRunIdentity()', current)
-        self.assertIn('sync().renameHistory(snapshotId, name)', rename)
-        self.assertIn('sync().renameCurrent(observed, name)', current)
+        self.assertIn('localSync().renameHistory(snapshotId, name)', rename)
+        self.assertIn('localSync().renameCurrent(observed, name)', current)
         self.assertIn('readComparison()', rename)
         self.assertIn('readComparison()', current)
         confirmation = body(MAIN, 'private void renderConfirmation()')
@@ -167,7 +287,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('SharedNamingDialog(SharedNamingState(', adapter)
         self.assertIn('SharedConfirmationDialog(state,', adapter)
         self.assertIn('onDismiss = { close() }', adapter)
-        self.assertIn('确认单局身份', adapter)
+        self.assertIn('CONFIRM_RUN_IDENTITY.text()', adapter)
         for forbidden in ('sync()', 'restoreSelected(', 'mergeConflict(', 'renameHistory(', 'renameCurrent('):
             self.assertNotIn(forbidden, adapter)
 

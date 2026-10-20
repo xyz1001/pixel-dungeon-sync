@@ -1,5 +1,6 @@
 package pdsync
 
+import pdsync.i18n.CoreMessages
 import kotlinx.serialization.json.*
 import java.time.LocalDate
 import java.util.UUID
@@ -25,10 +26,10 @@ internal object RankingsMerge {
  private val empty = State(emptyMap(), null, 0, 0, null, emptyMap())
 
  fun merge(base: JsonObject?, branches: List<JsonObject>): JsonObject {
-  if (branches.isEmpty()) globalFail("排行榜缺少待合并分支")
+  if (branches.isEmpty()) globalFail(CoreMessages.RANKINGS_HAS_NO_BRANCHES_TO_MERGE.text())
   val original = base?.let(::read) ?: empty
   val states = branches.map(::read)
-  val out = mergeOpaqueFields(base, branches, keys, "排行榜")
+  val out = mergeOpaqueFields(base, branches, keys, CoreMessages.RANKINGS.text())
   val sources = listOf(original) + states
   val allRecords = linkedMapOf<String, Record>()
   val variants = sources.flatMap { it.records.values + listOfNotNull(it.daily) }.groupBy { it.id }
@@ -36,7 +37,7 @@ internal object RankingsMerge {
    // One event cannot occupy both official containers. Choosing its role would lose the
    // only daily object while retaining its history, or put a daily row in normal records.
    if (versions.map { it.daily }.distinct().size != 1)
-    globalFail("排行榜同一 gameID 的普通/每日归属矛盾")
+    globalFail(CoreMessages.RANKINGS_ASSIGNS_THE_SAME_GAMEID_TO_BOTH_REGULAR_AND_DAILY_RUNS.text())
    allRecords[id] = versions.maxWith(if (versions.first().daily) dailyPreference else recordPreference)
   }
   val records = allRecords.values.filter { !it.daily }
@@ -88,7 +89,7 @@ internal object RankingsMerge {
   val latestDaily = allRecords.values.filter { it.daily }.maxWithOrNull(dailyPreference)
   val history = linkedMapOf<Long, Int>()
   val historyDates = sources.flatMap { it.history.keys }.toSortedSet()
-  if (historyDates.size > HISTORY_CAPACITY) globalFail("每日历史合并超过已验证的 $HISTORY_CAPACITY 条容量")
+  if (historyDates.size > HISTORY_CAPACITY) globalFail(CoreMessages.MERGED_DAILY_HISTORY_EXCEEDS_THE_VERIFIED_CAPACITY_OF_1_S_ENTRIES.text(HISTORY_CAPACITY))
   for (date in historyDates) {
    history[date] = sources.mapNotNull { it.history[date] }.max()
   }
@@ -99,85 +100,85 @@ internal object RankingsMerge {
  }
 
  private fun read(root: JsonObject): State {
-  val array = root["records"] as? JsonArray ?: globalFail("排行榜 records 不是数组")
-  if (array.size > CAPACITY) globalFail("排行榜输入超过已验证的 $CAPACITY 条容量")
+  val array = root["records"] as? JsonArray ?: globalFail(CoreMessages.RANKINGS_RECORDS_IS_NOT_AN_ARRAY.text())
+  if (array.size > CAPACITY) globalFail(CoreMessages.RANKINGS_INPUT_EXCEEDS_THE_VERIFIED_CAPACITY_OF_1_S_ENTRIES.text(CAPACITY))
   val records = linkedMapOf<String, Record>()
   array.forEach { value ->
    val rec = record(value, false)
-   if (records.put(rec.id, rec) != null) globalFail("排行榜包含重复 gameID")
+   if (records.put(rec.id, rec) != null) globalFail(CoreMessages.RANKINGS_CONTAINS_DUPLICATE_GAMEIDS.text())
   }
-  val storedTotal = globalInt(root["total"], "排行榜 total")
-  val storedWon = globalInt(root["won"], "排行榜 won")
+  val storedTotal = globalInt(root["total"], CoreMessages.RANKINGS_TOTAL.text())
+  val storedWon = globalInt(root["won"], CoreMessages.RANKINGS_WON.text())
   val loadedTotal = if (storedTotal == 0) records.size else storedTotal
   val loadedWon = if (storedWon == 0) records.values.count { it.win } else storedWon
   val zeroFallback = loadedTotal != storedTotal || loadedWon != storedWon
-  if (storedWon > storedTotal && !zeroFallback) globalFail("排行榜显式胜局数超过总局数")
+  if (storedWon > storedTotal && !zeroFallback) globalFail(CoreMessages.EXPLICIT_RANKING_WIN_COUNT_EXCEEDS_TOTAL_RUNS.text())
   // Small/reset counters are incomplete evidence, not malformed JSON. Retain the
   // game's observed counts and the visible ordinary-event lower bound without adding.
   val won = maxOf(loadedWon, records.values.count { it.seed.isEmpty() && it.win })
   val total = maxOf(loadedTotal, records.values.count { it.seed.isEmpty() }, won)
   val exactCounters = !zeroFallback && total == storedTotal && won == storedWon
-  val latestValue = root["latest"] as? JsonPrimitive ?: globalFail("排行榜缺少 latest 索引")
+  val latestValue = root["latest"] as? JsonPrimitive ?: globalFail(CoreMessages.RANKINGS_IS_MISSING_THE_LATEST_INDEX.text())
   val latest = latestValue.intOrNull
   if (latestValue.isString || latest == null || (latest !in 0 until records.size && latest != -1 && !(records.isEmpty() && latest == 0)))
-   globalFail("排行榜 latest 索引超出记录范围")
+   globalFail(CoreMessages.RANKINGS_LATEST_INDEX_IS_OUTSIDE_THE_RECORD_RANGE.text())
   val daily = root["latest_daily"]?.takeUnless { it == JsonNull }?.let { record(it, true) }
   val dateValues = root["daily_history_dates"]
   val scoreValues = root["daily_history_scores"]
   val history = linkedMapOf<Long, Int>()
   if (dateValues != null || scoreValues != null) {
-   val dates = dateValues as? JsonArray ?: globalFail("每日日期不是数组")
-   val scores = scoreValues as? JsonArray ?: globalFail("每日成绩不是数组")
-   if (dates.size != scores.size || dates.size > HISTORY_CAPACITY) globalFail("每日日期和成绩未一一对应或超出范围")
+   val dates = dateValues as? JsonArray ?: globalFail(CoreMessages.DAILY_DATES_IS_NOT_AN_ARRAY.text())
+   val scores = scoreValues as? JsonArray ?: globalFail(CoreMessages.DAILY_SCORES_IS_NOT_AN_ARRAY.text())
+   if (dates.size != scores.size || dates.size > HISTORY_CAPACITY) globalFail(CoreMessages.DAILY_DATES_AND_SCORES_ARE_NOT_ONE_TO_ONE_OR_EXCEED_THE_ALLOWED_RANGE.text())
    dates.forEachIndexed { i, value ->
-    val primitive = value as? JsonPrimitive ?: globalFail("每日日期不是整数")
+    val primitive = value as? JsonPrimitive ?: globalFail(CoreMessages.DAILY_DATE_IS_NOT_AN_INTEGER.text())
     val date = primitive.longOrNull
-    if (primitive.isString || date == null || !primitive.content.matches(Regex("0|[1-9][0-9]*"))) globalFail("每日日期不是有效的非负 long")
-    if (history.put(date, globalInt(scores[i], "每日成绩")) != null) globalFail("每日历史包含重复日期")
+    if (primitive.isString || date == null || !primitive.content.matches(Regex("0|[1-9][0-9]*"))) globalFail(CoreMessages.DAILY_DATE_IS_NOT_A_VALID_NONNEGATIVE_LONG.text())
+    if (history.put(date, globalInt(scores[i], CoreMessages.DAILY_SCORE.text())) != null) globalFail(CoreMessages.DAILY_HISTORY_CONTAINS_DUPLICATE_DATES.text())
    }
   }
-  if ((daily == null) != history.isEmpty()) globalFail("每日完整记录与历史数组不一致")
+  if ((daily == null) != history.isEmpty()) globalFail(CoreMessages.COMPLETE_DAILY_RECORDS_DO_NOT_MATCH_THE_HISTORY_ARRAYS.text())
   return State(records, records.keys.elementAtOrNull(latest!!), total, won, daily, history, exactCounters)
  }
 
  private fun record(value: JsonElement, daily: Boolean): Record {
-  val raw = value as? JsonObject ?: globalFail("排行榜条目不是对象")
-  if ((raw.keys - recordKeys).isNotEmpty()) globalFail("排行榜条目含未验证字段，不能解释其统计语义")
-  if (string(raw["__className"], "排行榜记录类") != RECORD_CLASS) globalFail("排行榜记录不是已验证的官方类型")
-  val id = string(raw["gameID"], "排行榜 gameID")
-  if (runCatching { UUID.fromString(id).toString() }.getOrNull() != id) globalFail("排行榜缺少稳定有效的 gameID，不能补造身份")
-  val score = globalInt(raw["score"], "排行榜 score")
-  val seed = string(raw["custom_seed"], "排行榜 custom_seed")
-  val win = globalBoolean(raw["win"], "排行榜 win")
-  if (globalBoolean(raw["daily"], "排行榜 daily") != daily) globalFail("普通和每日排行榜记录混放")
-  if (string(raw["class"], "排行榜职业") !in heroClasses) globalFail("排行榜含未知职业")
-  listOf("tier", "level", "depth").forEach { globalInt(raw[it], "排行榜 $it") }
-  globalBoolean(raw["ascending"], "排行榜 ascending")
-  listOf("cause", "date", "version").forEach { key -> raw[key]?.takeUnless { it == JsonNull }?.let { string(it, "排行榜 $key") } }
+  val raw = value as? JsonObject ?: globalFail(CoreMessages.RANKINGS_ENTRY_IS_NOT_AN_OBJECT.text())
+  if ((raw.keys - recordKeys).isNotEmpty()) globalFail(CoreMessages.RANKINGS_ENTRY_CONTAINS_UNVERIFIED_FIELDS_THEIR_STATISTICAL_MEANING_CANNOT_BE_INTERPR.text())
+  if (string(raw["__className"], CoreMessages.RANKINGS_RECORD_CLASS.text()) != RECORD_CLASS) globalFail(CoreMessages.RANKINGS_RECORD_IS_NOT_A_VERIFIED_OFFICIAL_TYPE.text())
+  val id = string(raw["gameID"], CoreMessages.RANKINGS_GAMEID.text())
+  if (runCatching { UUID.fromString(id).toString() }.getOrNull() != id) globalFail(CoreMessages.RANKINGS_HAS_NO_VALID_STABLE_GAMEID_AN_IDENTITY_CANNOT_BE_FABRICATED.text())
+  val score = globalInt(raw["score"], CoreMessages.RANKINGS_SCORE.text())
+  val seed = string(raw["custom_seed"], CoreMessages.RANKINGS_CUSTOM_SEED.text())
+  val win = globalBoolean(raw["win"], CoreMessages.RANKINGS_WIN.text())
+  if (globalBoolean(raw["daily"], CoreMessages.RANKINGS_DAILY.text()) != daily) globalFail(CoreMessages.REGULAR_AND_DAILY_RANKINGS_RECORDS_ARE_MIXED.text())
+  if (string(raw["class"], CoreMessages.RANKINGS_HERO_CLASS.text()) !in heroClasses) globalFail(CoreMessages.RANKINGS_CONTAINS_AN_UNKNOWN_HERO_CLASS.text())
+  listOf("tier", "level", "depth").forEach { globalInt(raw[it], CoreMessages.RANKINGS_1_S.text(it)) }
+  globalBoolean(raw["ascending"], CoreMessages.RANKINGS_ASCENDING.text())
+  listOf("cause", "date", "version").forEach { key -> raw[key]?.takeUnless { it == JsonNull }?.let { string(it, CoreMessages.RANKINGS_1_S.text(key)) } }
   raw["version"]?.takeUnless { it == JsonNull }?.let { value ->
-   val version = string(value, "排行榜 version")
+   val version = string(value, CoreMessages.RANKINGS_VERSION.text())
    if (version.isNotEmpty()) {
     val parts = Regex("v([0-9]+)\\.([0-9]+)\\.([0-9]+)").matchEntire(version)?.groupValues?.drop(1)?.map { it.toIntOrNull() }
-    if (parts == null || parts.any { it == null }) globalFail("排行榜存在无法识别的记录版本")
+    if (parts == null || parts.any { it == null }) globalFail(CoreMessages.RANKINGS_CONTAINS_AN_UNRECOGNIZED_RECORD_VERSION.text())
     val numbers = parts.filterNotNull()
     if (numbers[0] > 3 || (numbers[0] == 3 && (numbers[1] > 3 || (numbers[1] == 3 && numbers[2] > 8))))
-     globalFail("排行榜记录版本超出已验证的 3.3.8")
+     globalFail(CoreMessages.RANKINGS_RECORD_VERSION_EXCEEDS_THE_VERIFIED_3_3_8_VERSION.text())
    }
   }
   raw["gameData"]?.let { data ->
-   if (data !is JsonObject) globalFail("排行榜 gameData 不是完整对象")
-   data["game_version"]?.let { if (globalInt(it, "排行榜初始版本") > 896) globalFail("排行榜初始版本超出已验证的 896") }
+   if (data !is JsonObject) globalFail(CoreMessages.RANKINGS_GAMEDATA_IS_NOT_A_COMPLETE_OBJECT.text())
+   data["game_version"]?.let { if (globalInt(it, CoreMessages.RANKINGS_INITIAL_VERSION.text()) > 896) globalFail(CoreMessages.RANKINGS_INITIAL_VERSION_EXCEEDS_THE_VERIFIED_896_VERSION.text()) }
   }
-  val dateText = raw["date"]?.takeUnless { it == JsonNull }?.let { string(it, "排行榜 date") }
+  val dateText = raw["date"]?.takeUnless { it == JsonNull }?.let { string(it, CoreMessages.RANKINGS_DATE.text()) }
   val date = if (dateText.isNullOrEmpty()) null else {
-   if (!dateText.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}"))) globalFail("排行榜 date 不是有效日期")
-   runCatching { LocalDate.parse(dateText) }.getOrElse { globalFail("排行榜 date 不是有效日期") }
+   if (!dateText.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}"))) globalFail(CoreMessages.RANKINGS_DATE_IS_NOT_A_VALID_DATE.text())
+   runCatching { LocalDate.parse(dateText) }.getOrElse { globalFail(CoreMessages.RANKINGS_DATE_IS_NOT_A_VALID_DATE.text()) }
   }
   return Record(id, raw, score, seed, win, daily, date, stableJson(raw).toString())
  }
  private fun string(value: JsonElement?, label: String): String {
-  val p = value as? JsonPrimitive ?: globalFail("$label 缺少字符串")
-  if (!p.isString || p.content.length > 4096) globalFail("$label 不是受支持的字符串")
+  val p = value as? JsonPrimitive ?: globalFail(CoreMessages.TEXT_1_S_IS_MISSING_A_STRING.text(label))
+  if (!p.isString || p.content.length > 4096) globalFail(CoreMessages.TEXT_1_S_IS_NOT_A_SUPPORTED_STRING.text(label))
   return p.content
  }
  // Prefer an intact details object, then an actual date, score, and the entire stable

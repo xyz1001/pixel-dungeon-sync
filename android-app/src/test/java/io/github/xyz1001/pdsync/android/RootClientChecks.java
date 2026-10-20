@@ -113,7 +113,7 @@ public final class RootClientChecks {
         active.start();check(launched.await(1,TimeUnit.SECONDS),"cancel started");cancellation.close();active.join(2000);
         check(!active.isAlive()&&cancelled.destroyed&&cancelError.get()!=null,"close kills active process");
         AtomicInteger calls=new AtomicInteger(),verifies=new AtomicInteger();
-        AndroidGameIdentity identity=new AndroidGameIdentity(game.gamePackage,game.gameLabel,game.originIdentity,game.namespaceId);
+        AndroidGameIdentity identity=new AndroidGameIdentity(game.gamePackage,game.gameLabel,game.originIdentity);
         RootGameBridge unauthorized=new RootGameBridge(game,identity,g->verifies.incrementAndGet(),(r,o)->{calls.incrementAndGet();return okayUnchecked(gamet()).withRequest(r,RootProtocol.Outcome.READ_ONLY);},()->false,dir.toFile());
         check(unauthorized.mode()==GameAccessBackend.Mode.ROOT_DIRECT,"root mode");
         unauthorized.targetGame();check(calls.get()==0,"target/readiness render never requests root");

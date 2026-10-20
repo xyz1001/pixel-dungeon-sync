@@ -1,5 +1,7 @@
 package pdsync
 
+import pdsync.i18n.DesktopMessages
+
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
@@ -17,18 +19,18 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.sqrt
 import pdsync.presentation.HistoryPresentation
 
-internal fun historyTime(value:String?):String=value?.let { runCatching { DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull() } ?: "时间未知"
+internal fun historyTime(value:String?):String=value?.let { runCatching { DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT).withLocale(pdsync.i18n.UiLocale.formattingLocale()).withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull() } ?: DesktopMessages.UNKNOWN_TIME.text()
 
 /** Bounded pages keep the complete verified history selectable without an unbounded canvas. */
 @Composable internal fun HistoryChart(state:SyncHistory?,selected:String?,busy:Boolean,onSelect:(String)->Unit,onRename:(String?)->Unit) {
- if(state==null){Text("正在读取存档历史…");return}
+ if(state==null){Text(DesktopMessages.READING_SAVE_HISTORY.text());return}
  var page by remember { mutableStateOf(0) }
  val pages=maxOf(1,(state.cloud.size+19)/20);val current=page.coerceIn(0,pages-1)
  val cloud=state.cloud.drop(current*20).take(20)
  val rows=maxOf(1,cloud.size,state.localNodeCount)
  val rowHeight=164.dp
  Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-  Row(Modifier.fillMaxWidth()){Text("云端存档",Modifier.weight(1f),fontWeight=FontWeight.SemiBold);Text("本机",Modifier.weight(1f),fontWeight=FontWeight.SemiBold)}
+  Row(Modifier.fillMaxWidth()){Text(DesktopMessages.CLOUD_SAVES.text(),Modifier.weight(1f),fontWeight=FontWeight.SemiBold);Text(DesktopMessages.LOCAL.text(),Modifier.weight(1f),fontWeight=FontWeight.SemiBold)}
   BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
    val width=maxWidth;val height=rowHeight*rows
    Box(Modifier.width(width).height(height)) {
@@ -61,16 +63,16 @@ internal fun historyTime(value:String?):String=value?.let { runCatching { DateTi
        val commit=cloud.getOrNull(row)
        Box(Modifier.fillMaxWidth(.42f).padding(vertical=5.dp)) { commit?.let {
         val m=it.snapshot
-        HistoryNode(state.aliases[m.id]?.takeIf(String::isNotBlank) ?: m.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: "存档 ${it.id.take(6)}",
-         historyTime(m.metadata?.latestFileModifiedAt ?: m.metadata?.capturedAt),"${m.metadata?.device?.label ?: "来源未知"} · ${m.saveVersions?.runs?.size?.toString() ?: "?"} 个槽位",
-         if(it.id in state.graph.tips)"云端当前分支" else "云端历史",false,selected==m.id,busy,{onSelect(m.id)},{onRename(m.id)})
+        HistoryNode(state.aliases[m.id]?.takeIf(String::isNotBlank) ?: m.directoryMetadata?.displayName?.takeIf(String::isNotBlank) ?: DesktopMessages.SAVE_1_S.text(it.id.take(6)),
+         historyTime(m.metadata?.latestFileModifiedAt ?: m.metadata?.capturedAt),DesktopMessages.SOURCE_AND_SLOT_COUNT.text(m.metadata?.device?.label ?: DesktopMessages.UNKNOWN_SOURCE.text(), m.saveVersions?.runs?.size?.toString() ?: "?"),
+         if(it.id in state.graph.tips)DesktopMessages.CURRENT_CLOUD_BRANCH.text() else DesktopMessages.CLOUD_HISTORY.text(),false,selected==m.id,busy,{onSelect(m.id)},{onRename(m.id)})
        } }
        Box(Modifier.fillMaxWidth(.724f).padding(vertical=5.dp)) {
-        if(row==0 && state.localNodeCount==0)Text("无存档",Modifier.padding(20.dp),color=Color.Gray)
-        else if(row==0 && state.localNodeCount>0)HistoryNode(state.currentName.ifBlank{"本机当前"},historyTime(state.summary?.slots?.values?.filterNotNull()?.maxOrNull()),
-         "${state.summary?.slots?.size?.toString() ?: "?"} 个槽位 · ${HistoryPresentation.plays(state.summary?.plays)}",if(state.clean)"已同步云端" else "未同步云端",!state.clean,false,busy,{}, {onRename(null)})
+        if(row==0 && state.localNodeCount==0)Text(DesktopMessages.NO_SAVES.text(),Modifier.padding(20.dp),color=Color.Gray)
+        else if(row==0 && state.localNodeCount>0)HistoryNode(state.currentName.ifBlank{DesktopMessages.CURRENT_LOCAL_SAVE.text()},historyTime(state.summary?.slots?.values?.filterNotNull()?.maxOrNull()),
+         DesktopMessages.SLOT_COUNT_AND_PLAYS.text(state.summary?.slots?.size?.toString() ?: "?", HistoryPresentation.plays(state.summary?.plays)),if(state.clean)DesktopMessages.SYNCED_TO_CLOUD.text() else DesktopMessages.NOT_SYNCED_TO_CLOUD.text(),!state.clean,false,busy,{}, {onRename(null)})
         else if(row==1 && state.localNodeCount==2)state.baselineCommit?.snapshot?.let { m ->
-         HistoryNode(m.directoryMetadata?.displayName?.ifBlank{"同步基线"} ?: "同步基线",historyTime(m.metadata?.latestFileModifiedAt),"${m.saveVersions?.runs?.size?.toString() ?: "?"} 个槽位","已同步云端",false,false,busy,{}, {onRename(m.id)})
+         HistoryNode(m.directoryMetadata?.displayName?.ifBlank{DesktopMessages.SYNC_BASELINE.text()} ?: DesktopMessages.SYNC_BASELINE.text(),historyTime(m.metadata?.latestFileModifiedAt),DesktopMessages.SLOT_COUNT.text(m.saveVersions?.runs?.size?.toString() ?: "?"),DesktopMessages.SYNCED_TO_CLOUD.text(),false,false,busy,{}, {onRename(m.id)})
         }
        }
       }
@@ -78,7 +80,7 @@ internal fun historyTime(value:String?):String=value?.let { runCatching { DateTi
     }
    }
   }
-  if(pages>1)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){TextButton(enabled=current>0,onClick={page=current-1}){Text("较新")};Text("${current+1} / $pages");TextButton(enabled=current+1<pages,onClick={page=current+1}){Text("更早")}}
+  if(pages>1)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){TextButton(enabled=current>0,onClick={page=current-1}){Text(DesktopMessages.NEWER.text())};Text("${current+1} / $pages");TextButton(enabled=current+1<pages,onClick={page=current+1}){Text(DesktopMessages.OLDER.text())}}
  }
 }
 
@@ -87,7 +89,7 @@ internal fun historyTime(value:String?):String=value?.let { runCatching { DateTi
   Column(Modifier.fillMaxWidth().clickable(enabled=!busy,onClick=onSelect).padding(10.dp),verticalArrangement=Arrangement.spacedBy(3.dp)) {
    Text(name,maxLines=1,fontWeight=FontWeight.Medium);Text(time,style=MaterialTheme.typography.caption)
    Text(detail,style=MaterialTheme.typography.caption,maxLines=1);Text(status,style=MaterialTheme.typography.caption)
-   TextButton(enabled=!busy,onClick=onRename,contentPadding=PaddingValues(0.dp),modifier=Modifier.height(25.dp)){Text("命名",style=MaterialTheme.typography.caption)}
+   TextButton(enabled=!busy,onClick=onRename,contentPadding=PaddingValues(0.dp),modifier=Modifier.height(25.dp)){Text(DesktopMessages.RENAME.text(),style=MaterialTheme.typography.caption)}
   }
  }
 }

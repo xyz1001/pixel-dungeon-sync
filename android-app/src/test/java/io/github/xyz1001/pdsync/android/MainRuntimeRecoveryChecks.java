@@ -593,6 +593,13 @@ public final class MainRuntimeRecoveryChecks {
         equal(null,SystemConfirmationToken.find(context,"",retained),"empty nonce rejected");
         equal(null,SystemConfirmationToken.find(context,"nonce",null),"missing retained filter rejected");
 
+        android.content.Intent actionless = new android.content.Intent().setPackage("system-installer").putExtra("session-secret", "do-not-serialize");
+        String actionlessFilter = SystemConfirmationToken.retain(context, "no-action", actionless);
+        check(SystemConfirmationToken.find(context, "no-action", actionlessFilter).intent == actionless,
+                "actionless OEM confirmation recovers original token without adding ACTION_VIEW");
+        SystemConfirmationToken.cancel(context, "no-action", actionlessFilter);
+        equal(null, SystemConfirmationToken.find(context, "no-action", actionlessFilter), "actionless token cancellation");
+
         android.app.PendingIntent.reset();
         InstallResultReceiver receiver = new InstallResultReceiver();
         for (android.content.Intent rejected : List.of(callback("wrong", "nonce", 7, -1),callback("nonce", "wrong", 7, -1),callback("nonce", "nonce", 8, -1))) {
@@ -644,6 +651,7 @@ public final class MainRuntimeRecoveryChecks {
                 final java.util.Map<String,Object> updates=new java.util.HashMap<>();
                 public Editor putString(String key,String value) { updates.put(key,value);return this; }
                 public Editor putInt(String key,int value) { updates.put(key,value);return this; }
+                public Editor putBoolean(String key,boolean value) { updates.put(key,value);return this; }
                 public Editor remove(String key) { updates.put(key,null);return this; }
                 public boolean commit() { commits++;if(!commitSucceeds)return false;updates.forEach((k,v)->{if(v==null)values.remove(k);else values.put(k,v);});return true; }
             };

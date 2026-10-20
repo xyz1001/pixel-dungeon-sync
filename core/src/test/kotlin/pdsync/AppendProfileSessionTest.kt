@@ -274,7 +274,12 @@ class AppendProfileSessionTest {
 
  @Test fun adapterIdentitySeparatesVariantsWithIdenticalLocalFiles() {
   val root = root(); val state = temp.resolve("variants"); val shattered = session(root, state)
-  val variant = object: GameAdapter by Shattered { override val id = "variant" }
+  val variant = object: GameAdapter {
+   override val id = "variant"
+   override fun includes(name: String) = Shattered.includes(name)
+   override fun compatible(source: String, target: String) = source == target
+   override fun launchCommand(executable: Path) = listOf(executable.toString())
+  }
   val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions(), captureQuietMillis = 0)
   assertNotEquals(shattered.directory, other.directory)
   val store = Memory(); published(shattered, store)

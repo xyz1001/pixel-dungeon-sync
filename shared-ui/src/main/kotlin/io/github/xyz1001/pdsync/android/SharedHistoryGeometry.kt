@@ -28,21 +28,22 @@ internal data class SharedHistoryCanvasLayout(
 )
 
 /**
- * Rows use their tallest measured card, including wrapped text. The prototype's 280px lanes and
- * 200px cards stay readable at every viewport width; only the containing history region scrolls.
+ * Rows hug their tallest measured card and rename action. Both lanes fill the available width;
+ * a minimum readable canvas scrolls only on very narrow viewports.
  */
 internal fun sharedHistoryCanvasLayout(
     presentation: HistoryPresentation,
     measurements: Map<String, SharedHistoryNodeMeasurement>,
     density: Float = 1f,
+    canvasWidth: Float = 560 * density,
 ): SharedHistoryCanvasLayout {
     require(density > 0 && density.isFinite())
-    val lane = 280 * density
-    val cardWidth = 200 * density
-    val inset = 40 * density
-    val top = 24 * density
-    val gap = 16 * density
-    val bottom = 32 * density
+    val lane = canvasWidth / 2
+    val inset = 16 * density
+    val cardWidth = lane - inset * 2
+    val top = 14 * density
+    val gap = 6 * density
+    val bottom = 14 * density
     val rowCount = presentation.rows.coerceAtLeast(1)
     val cardHeights = FloatArray(rowCount)
     val renameHeights = FloatArray(rowCount)
@@ -53,7 +54,7 @@ internal fun sharedHistoryCanvasLayout(
         renameHeights[node.row] = max(renameHeights[node.row], measured.renameHeight)
     }
     val rows = FloatArray(rowCount) { row ->
-        max(208 * density, top + cardHeights[row] + gap + renameHeights[row] + bottom)
+        max(126 * density, top + cardHeights[row] + gap + renameHeights[row] + bottom)
     }
     val tops = FloatArray(rows.size)
     for (index in 1 until rows.size) tops[index] = tops[index - 1] + rows[index - 1]

@@ -40,7 +40,7 @@ class SavePathNavigationContract(unittest.TestCase):
         self.assertNotIn("configFile.save", back)
         self.assertNotIn("config =", back)
 
-    def test_successful_commit_still_requires_connection_and_comparison(self):
+    def test_successful_path_commit_still_requires_connection_completion(self):
         commit = body(MAIN, "fun continuePath()")
         self.assertIn("onboardingProgress=OnboardingProgress.PENDING", commit)
         self.assertLess(commit.index("inspectSelectedSaveDirectory(root)"), commit.index("configFile.save(next)"))
@@ -49,11 +49,25 @@ class SavePathNavigationContract(unittest.TestCase):
         self.assertIn("navigate(Page.CONNECTION)", commit)
         self.assertNotIn("OnboardingProgress.COMPLETE", commit)
         self.assertNotIn("navigate(Page.HOME)", commit)
-        self.assertIn("pathNavigation.beginSetup()", body(MAIN, "fun continueDiscovery()"))
+        discovery = body(MAIN, "fun continueDiscovery()")
+        self.assertIn("navigate(Page.CONNECTION)", discovery)
+        self.assertNotIn("Page.PATH", discovery)
+        self.assertNotIn("pathNavigation.beginSetup()", discovery)
+        # The current settings path editor is a dialog over an inactive settings page.
+        # It delegates completion to the same guarded commit rather than activating HOME.
+        path = body(MAIN, "Page.PATH -> key(pageGeneration)")
+        self.assertIn("SharedSettingsScreen(DesktopSharedSettingsAdapter.state", path)
+        self.assertIn("pageActive = false", path)
+        self.assertIn("SharedSavePathDialog(pathAdapter.state.copy(busy = busy || connectingAtStartup)", path)
+        self.assertIn("continuePath = { continuePath() }", path)
+        self.assertNotIn("OnboardingProgress.COMPLETE", path)
+        self.assertNotIn("navigate(Page.HOME)", path)
 
-    def test_android_settings_path_remains_read_only_and_step_back_remains_setup(self):
+    def test_android_settings_path_remains_read_only_and_legacy_path_back_returns_to_game(self):
         settings = body(ANDROID, "private void renderSettings()")
-        self.assertIn('SharedSettingsKey.SAVE_PATH, "存档位置", savePathLabel(), null, false', settings)
+        self.assertIn('SharedSettingsKey.SAVE_PATH, SAVE_LOCATION_189.text(), savePathLabel(), null, false', settings)
+        catalog = (REPO / "core/src/main/java/pdsync/i18n/AndroidHostMessages.java").read_text()
+        self.assertIn('new UiText("android.host.save_location_189", "存档位置", "Save location")', catalog)
         action = settings[settings.index("case SAVE_PATH:"):].split("}", 1)[0]
         self.assertNotIn("navigate(", action)
         self.assertIn("break;", action)

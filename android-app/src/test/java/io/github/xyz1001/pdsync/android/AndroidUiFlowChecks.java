@@ -7,6 +7,7 @@ import pdsync.OnboardingGate;
 import pdsync.OnboardingKind;
 import pdsync.OnboardingProgress;
 import pdsync.presentation.AppPresentation;
+import pdsync.presentation.SyncPage;
 
 /** Executes production guards and the unchanged PC/core policy. No device, Root, or network calls. */
 public final class AndroidUiFlowChecks {
@@ -91,7 +92,7 @@ public final class AndroidUiFlowChecks {
                 }
             }
         }
-        check("配置完成".equals(EmptySetupCompletion.message), "Empty completion uses the PC success message");
+        check("配置完成".equals(EmptySetupCompletion.INSTANCE.getMessage()), "Empty completion uses the PC success message");
     }
 
     private static void identicalCompletionUsesExactCoreProofAndOneAction() {
@@ -126,13 +127,13 @@ public final class AndroidUiFlowChecks {
                 "Similar labels, timestamps or counts never suppress genuinely different bytes");
     }
 
-    private static void startupUsesExistingBaselinePolicy() {
+    private static void startupKeepsConfigurationSeparateFromBaseline() {
         check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, true) == OnboardingProgress.COMPLETE,
                 "Configured trusted target with baseline resumes completed/Home");
         check(OnboardingGate.resumedProgress(OnboardingProgress.LEGACY, true, true) == OnboardingProgress.COMPLETE,
                 "Existing verified legacy configuration resumes Home");
-        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.PENDING,
-                "Completed BOTH_EMPTY without a real baseline must compare again after restart");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.COMPLETE,
+                "Completed configuration resumes Home without manufacturing a sync baseline");
         for (OnboardingProgress progress : OnboardingProgress.values()) {
             check(OnboardingGate.resumedProgress(progress, false, true) == OnboardingProgress.PENDING,
                     "Untrusted target cannot resume Home: " + progress);
@@ -143,12 +144,41 @@ public final class AndroidUiFlowChecks {
         check(OnboardingGate.allowsAutomatic(OnboardingProgress.COMPLETE, false, true), "Verified completed Home keeps existing automatic gate");
     }
 
-    private static void fourStepPresentationMatchesPc() {
-        check("1 / 4  选择游戏".equals(AppPresentation.DISCOVERY_TITLE), "Step one is game selection");
-        check("2 / 4  设置存档路径".equals(AppPresentation.PATH_TITLE), "Step two is save path preview");
-        check("3 / 4  连接云端".equals(AppPresentation.CONNECTION_TITLE), "Step three is DAV connection");
-        check("4 / 4  选择存档".equals(AppPresentation.COMPARISON_TITLE), "Step four is save comparison");
-        check("4 / 4  配置完成".equals(AppPresentation.COMPLETE_TITLE), "Verified empty comparison is completed setup");
+    private static void pendingConfigurationCannotSkipConnection() {
+        check(OnboardingGate.resumedProgress(OnboardingProgress.PENDING, true, false) == OnboardingProgress.PENDING,
+                "New setup remains pending until Step 2 completes");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.PENDING, true, true) == OnboardingProgress.PENDING,
+                "An old save baseline cannot complete the connection step");
+        check(OnboardingGate.resumedProgress(OnboardingProgress.COMPLETE, true, false) == OnboardingProgress.COMPLETE,
+                "Two-step completion is independent of save ancestry");
+    }
+
+    private static void twoStepPresentationMatchesPc() {
+        check("1 / 2  选择游戏".equals(AppPresentation.INSTANCE.getDISCOVERY_TITLE()), "Step one is game selection");
+        check("存档位置".equals(AppPresentation.INSTANCE.getPATH_TITLE()), "Standalone path information has no setup step number");
+        check("2 / 2  连接云端".equals(AppPresentation.INSTANCE.getCONNECTION_TITLE()), "Step two completes configuration");
+    }
+
+    private static void obsoleteRoutesNormalizeAndLiveConfirmationRemains() {
+        for (SyncPage page : SyncPage.values()) {
+            boolean obsolete = page == SyncPage.PATH || page == SyncPage.COMPARISON;
+            SyncPage current = obsolete ? SyncPage.CONNECTION : page;
+            SyncPage restored = page == SyncPage.CONFIRM ? SyncPage.HOME : current;
+            check(AndroidUiFlowPolicy.currentPage(page) == current,
+                    "Only removed path/comparison pages redirect during navigation: " + page);
+            check(AndroidUiFlowPolicy.currentPage(AndroidUiFlowPolicy.currentPage(page)) == current,
+                    "Repeated render/navigation normalization is stable: " + page);
+            check(AndroidUiFlowPolicy.restoredPage(page) == restored,
+                    "Restoration also discards an interrupted confirmation: " + page);
+            check(AndroidUiFlowPolicy.restoredPage(AndroidUiFlowPolicy.restoredPage(page)) == restored,
+                    "Repeated restoration normalization is stable: " + page);
+            check(AndroidUiFlowPolicy.currentPage(AndroidUiFlowPolicy.restoredPage(page)) == restored,
+                    "Rendering a restored page cannot revive an obsolete route: " + page);
+        }
+        check(AndroidUiFlowPolicy.currentPage(SyncPage.CONFIRM) == SyncPage.CONFIRM,
+                "A live user confirmation must remain reachable");
+        check(AndroidUiFlowPolicy.restoredPage(SyncPage.CONFIRM) == SyncPage.HOME,
+                "Activity recreation must not reuse a stale confirmation");
     }
 
     public static void main(String[] args) throws Exception {
@@ -156,8 +186,10 @@ public final class AndroidUiFlowChecks {
         passwordMayBeEmptyAndFailedDavDoesNotSave();
         onlyVerifiedEmptyComparisonOffersFinish();
         identicalCompletionUsesExactCoreProofAndOneAction();
-        startupUsesExistingBaselinePolicy();
-        fourStepPresentationMatchesPc();
+        startupKeepsConfigurationSeparateFromBaseline();
+        pendingConfigurationCannotSkipConnection();
+        twoStepPresentationMatchesPc();
+        obsoleteRoutesNormalizeAndLiveConfirmationRemains();
         System.out.println("Android UI flow: " + checks + " checks passed");
     }
 }

@@ -1,3 +1,5 @@
+> Historical document. For code59, the v21-M3 design and two-step setup contract in [M3_REFERENCE_CONTRACT.md](M3_REFERENCE_CONTRACT.md) supersedes older colours, geometry, account layout and setup-step descriptions below. Historical validation results do not validate code59.
+
 # Shared Android and desktop UI migration
 
 ## Baseline and goal

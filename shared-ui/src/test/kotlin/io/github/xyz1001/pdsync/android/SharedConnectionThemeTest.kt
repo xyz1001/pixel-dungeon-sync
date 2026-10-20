@@ -13,18 +13,18 @@ import kotlin.test.assertTrue
 class SharedConnectionThemeTest {
     @Test fun paletteMatchesReferenceSurfaceAndText() {
         val colors = sharedConnectionColors()
-        assertEquals(Color(0xFF326650), colors.primary)
-        assertEquals(Color(0xFFE9EFEA), colors.secondary)
-        assertEquals(Color(0xFFEFF3EF), colors.background)
-        assertEquals(Color(0xFF213B30), colors.onSurface)
+        assertEquals(Color(0xFF006877), colors.primary)
+        assertEquals(Color(0xFFF1F5F9), colors.secondary)
+        assertEquals(Color(0xFFF8FAFC), colors.background)
+        assertEquals(Color(0xFF0F172A), colors.onSurface)
         assertEquals(Color.White, colors.surface)
         assertTrue(colors.isLight)
     }
 
     @Test fun shapesMatchReferenceButtonsCardsAndShell() {
-        assertEquals(RoundedCornerShape(10.dp), sharedConnectionShapes.small)
-        assertEquals(RoundedCornerShape(14.dp), sharedConnectionShapes.medium)
-        assertEquals(RoundedCornerShape(22.dp), sharedConnectionShapes.large)
+        assertEquals(RoundedCornerShape(8.dp), sharedConnectionShapes.small)
+        assertEquals(RoundedCornerShape(12.dp), sharedConnectionShapes.medium)
+        assertEquals(RoundedCornerShape(24.dp), sharedConnectionShapes.large)
     }
 
     @Test fun publicScreenOwnsThemeAndAndroidHasNoCompetingDefaultTheme() {
@@ -35,7 +35,7 @@ class SharedConnectionThemeTest {
         val entry = screen.substringAfter("fun SharedConnectionScreen(")
             .substringBefore("private fun SharedConnectionContent(")
         assertTrue(entry.contains("SharedConnectionTheme {"))
-        assertTrue(entry.contains("SharedConnectionContent(controller, game)"))
+        assertTrue(entry.contains("SharedConnectionContent(controller, game, onSaveImage, imageSaveBusy, imageSaveMessage)"))
         val android = Files.readString(root.resolve(
             "android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidConnectionComposition.kt"))
         assertTrue(android.contains("SharedConnectionScreen(session.controller,"))
