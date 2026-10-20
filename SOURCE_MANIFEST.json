@@ -289,8 +289,8 @@
       "sha256": "8485709bf585e47115878fcd98ad06c609a6bd2c9f6887ce54cdbcde64e63268"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/InstalledApkIdentityScope.java": {
-      "size": 8219,
-      "sha256": "afd7e4a8cdb11d5f8f185ffb30935bd831bb524d91f5b6ab8d8e7706a635a154"
+      "size": 8312,
+      "sha256": "f574e8d901a5716169b0560e6332453250c705f47cd80b11dd2a126cbc215312"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/InstalledAppCatalog.java": {
       "size": 4060,
@@ -743,6 +743,14 @@
     "android-app/src/test/fixtures/identity-scope-stubs/README.md": {
       "size": 3599,
       "sha256": "cfda0015ae28194486d16e04f7bbb7d74d90c836e38d006d3555d20e6f802fbd"
+    },
+    "android-app/src/test/fixtures/identity-scope-stubs/android/annotation/SuppressLint.java": {
+      "size": 153,
+      "sha256": "2522f4a6cb6c9008de0a0f898b9616a3fed8023fb105be16f9e642b031061d56"
+    },
+    "android-app/src/test/fixtures/identity-scope-stubs/android/annotation/TargetApi.java": {
+      "size": 145,
+      "sha256": "e9e27b7345b7f426d5662cd1e033790c322e829603ccf4da41b4964312661e18"
     },
     "android-app/src/test/fixtures/identity-scope-stubs/android/system/Os.java": {
       "size": 562,

@@ -171,6 +171,8 @@ final class InstalledApkIdentityScope {
         }
     }
 
+    @android.annotation.TargetApi(27)
+    @android.annotation.SuppressLint("UseRequiresApi")
     private static final class Times {
         static String value(StructStat stat) {
             return stat.st_mtim.tv_sec + ":" + stat.st_mtim.tv_nsec + ":" + stat.st_ctim.tv_sec + ":" + stat.st_ctim.tv_nsec;
