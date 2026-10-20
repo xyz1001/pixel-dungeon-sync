@@ -109,7 +109,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private String confirmationTitle;
     private Runnable confirmedAction;
     private SecureConnectionStore.Connection connection;
-    private AndroidSyncFacade preparedOfficialNamespaceFacade;
+    private OfficialNamespacePreparation preparedOfficialNamespace = new OfficialNamespacePreparation();
     private boolean detailsExpanded;
     private boolean feedbackError;
     private boolean draftLoaded;
@@ -290,6 +290,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final SharedConnectionConfig pendingCommit;
         final AutomaticHistoryState automaticHistory;
         final RenewalArchiveReadState renewalRead;
+        final OfficialNamespacePreparation preparedNamespace;
         final SetupSession setup;
         final SetupSnapshot snapshot;
         final InstallCoordinator installer;
@@ -299,6 +300,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         RetainedConnectionUi(MainActivity activity) {
             automaticHistory = activity.automaticHistoryState;
             renewalRead = activity.renewalArchiveRead;
+            preparedNamespace = activity.preparedOfficialNamespace;
             setup = activity.setupSession; snapshot = new SetupSnapshot(activity); installer = activity.installer;
             openedNonce = activity.openedConfirmationNonce; systemReturn = activity.systemReturnPending;
             activationReturn = activity.activationReturnPending; checks = activity.pendingSystemChecks;
@@ -407,6 +409,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void restoreConnectionUi(RetainedConnectionUi retained) {
         this.automaticHistoryState = retained.automaticHistory;
         this.renewalArchiveRead = retained.renewalRead;
+        this.preparedOfficialNamespace = retained.preparedNamespace;
         this.setupSession = retained.setup; this.installer = retained.installer;
         this.openedConfirmationNonce = retained.openedNonce; this.systemReturnPending = retained.systemReturn;
         this.activationReturnPending = retained.activationReturn; this.pendingSystemChecks = retained.checks;
@@ -618,6 +621,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                     try (OfficialOperationLease lease = new OfficialOperationLease()) {
                         officialOperationLease.set(lease);
                         try { objRun = task.run(); }
+                        catch (Exception failure) {
+                            invalidatePreparedOfficialNamespace();
+                            throw failure;
+                        }
                         finally { officialOperationLease.remove(); }
                     }
                 }
@@ -3102,7 +3109,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void readHomeArchives(final SecureConnectionStore.Connection account, final String selection, final String namespace) {
         if (!isCurrentHomeRead(account, selection, namespace) || this.busy || this.installer.hasActiveRequest()) return;
         this.cloudVerified = false; this.inspection = null; this.history = null; this.homeObservationOwner = null;
-        this.facade = null; this.preparedOfficialNamespaceFacade = null;
+        this.facade = null;
         final java.util.concurrent.atomic.AtomicReference<Exception> readFailure = new java.util.concurrent.atomic.AtomicReference<>();
         work(DiagnosticAction.INSPECT, CHECKING_SAVES_144.text(), () -> {
             if (!isCurrentHomeRead(account, selection, namespace)) throw new StaleArchiveReadException();
@@ -3336,6 +3343,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 if (!completed.applied) {
                     completed.applied = true;
                     if (completed.error != null) {
+                        invalidatePreparedOfficialNamespace();
                         this.cloudVerified = false;
                         this.inspection = null;
                         this.history = null;
@@ -3345,6 +3353,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         this.facade = completed.facade;
                         this.inspection = completed.inspection;
                         this.history = completed.history;
+                        if (completed.history == null) invalidatePreparedOfficialNamespace();
                         this.cloudVerified = completed.history != null;
                         this.homeObservationOwner = this.cloudVerified ? currentHomeContext(0) : null;
                         if (this.rootGame != null && this.cloudVerified)
@@ -3422,17 +3431,30 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void prepareOfficialHomeNamespace(AndroidSyncFacade owner) throws Exception {
         final SecureConnectionStore.Connection account = this.connection;
         if (this.page != SyncPage.HOME || this.progress != OnboardingProgress.COMPLETE
-                || !isOfficialAccount(account) || this.preparedOfficialNamespaceFacade == owner) return;
+                || !isOfficialAccount(account)) return;
         final String selection = SyncRuntime.currentSelectionToken(this);
         final String namespace = SyncRuntime.currentNamespace(this);
-        if (!currentOfficialHomeNamespace(owner, account, selection, namespace))
-            throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
-        AndroidSyncFacade.ConnectionStatus preparedNamespace = owner.connect();
-        if (!preparedNamespace.isSuccess()) throw new IOException(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
-        if (!currentOfficialHomeNamespace(owner, account, selection, namespace))
-            throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
-        this.preparedOfficialNamespaceFacade = owner;
+        final long generation = SyncRuntime.connectionGeneration();
+        final OfficialOperationLease.Binding key = new OfficialOperationLease.Binding(account, generation,
+                account.endpoint, account.username, account.profile, selection, namespace);
+        try {
+            if (!currentOfficialHomeNamespace(owner, account, selection, namespace)
+                    || generation != SyncRuntime.connectionGeneration())
+                throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
+            if (this.preparedOfficialNamespace.contains(key)) return;
+            AndroidSyncFacade.ConnectionStatus preparedNamespace = owner.connect();
+            if (!preparedNamespace.isSuccess()) throw new IOException(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
+            if (!currentOfficialHomeNamespace(owner, account, selection, namespace)
+                    || generation != SyncRuntime.connectionGeneration())
+                throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
+            this.preparedOfficialNamespace.succeeded(key);
+        } catch (Exception failure) {
+            invalidatePreparedOfficialNamespace();
+            throw failure;
+        }
     }
+
+    private void invalidatePreparedOfficialNamespace() { this.preparedOfficialNamespace.clear(); }
 
     private boolean currentOfficialHomeNamespace(AndroidSyncFacade owner, SecureConnectionStore.Connection account,
                                                  String selection, String namespace) throws Exception {
@@ -3516,6 +3538,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
                 requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                 if ("BLOCKED".equals(inspectionInspect.getKind())) {
+                    invalidatePreparedOfficialNamespace();
                     this.inspection = inspectionInspect;
                     return;
                 }
@@ -3543,6 +3566,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
                 if (error instanceof StaleArchiveReadException) throw error;
                 requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
+                invalidatePreparedOfficialNamespace();
                 if (InstallDiagnostics.find(error) != null || PreparationDiagnostics.find(error) != null
                         || BridgeDiagnostics.find(error) != null) throw error;
                 throw SyncInspectionDiagnostics.at(stage, error);

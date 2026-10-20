@@ -329,8 +329,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 285815,
-      "sha256": "eb129e2eb68e1ffae5c198d5132829bcdabf4daa30078cc7e1db16856b7f3896"
+      "size": 287171,
+      "sha256": "793fd0e6bd901cf0882660b332ae892c6c3392b0a81174d144e247da30a6feea"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -359,6 +359,10 @@
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManualPaymentSession.java": {
       "size": 10136,
       "sha256": "edb9f49e62d0fb1d86c3f428f65118d4c8e9d3808605d36c8036f186784a2b22"
+    },
+    "android-app/src/main/java/io/github/xyz1001/pdsync/android/OfficialNamespacePreparation.java": {
+      "size": 682,
+      "sha256": "7190c25504dd4890c7b2ad96755b732048f02886d3f930c7ea344b51d9984165"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/OfficialOperationLease.java": {
       "size": 2880,
@@ -737,8 +741,8 @@
       "sha256": "63d6f7e50bbc2d19d039ae005f39bb8935257aa01b8338f13dbbb62ac9cac067"
     },
     "android-app/src/test/fixtures/home-history-read-host.java.txt": {
-      "size": 10333,
-      "sha256": "44b03e7fa860f323ee559e641f4d5c6b0a64fa5e23e6db05c0ed17cedba7c456"
+      "size": 10384,
+      "sha256": "52512b5b074dcb96e2f4b8fa11cd5eba621cc81c12416c6f58702cf094a82788"
     },
     "android-app/src/test/fixtures/identity-scope-stubs/BridgeClientIdentityChecks.java.in": {
       "size": 11291,
@@ -909,8 +913,8 @@
       "sha256": "87cfb6d2984b4e9a52a9da980cdc150d0f669eb7106f265513f109df4ca6039e"
     },
     "android-app/src/test/fixtures/manual-home-history-refresh-host.java.txt": {
-      "size": 20233,
-      "sha256": "137aa1778a839212e9e8e7e39770320379fa1501a6150213199a035e0e6cfe48"
+      "size": 20099,
+      "sha256": "e0b82eca7bb14dddd719cf40e1a0ba4c616847a03dea87daacc5c9cb6596d629"
     },
     "android-app/src/test/fixtures/picker-host-checks/AndroidPickerHostChecks.kt": {
       "size": 4562,
@@ -1157,8 +1161,8 @@
       "sha256": "5ccaec27851e69b9cd1738e144a3ada62f03fca925e7a62be5bf0486149e9220"
     },
     "android-app/src/test/fixtures/renewal-archive-read-host.java.txt": {
-      "size": 12348,
-      "sha256": "6177662ed08cfceb755bc4cc6965ec90630e957b8dc3a98f0ec98d85053a80f2"
+      "size": 12257,
+      "sha256": "341ec7ee87192de02d28a8df5a704b2af11c2237bbc27dcb925de923c5bcfa4a"
     },
     "android-app/src/test/fixtures/root-resolver-stubs/README.md": {
       "size": 678,
@@ -1625,8 +1629,8 @@
       "sha256": "5f7cd176a3f3d0406c9f817eafc62cc678c9d3a678ee32d9fb1b0ffecfea4061"
     },
     "android-app/src/test/python/test_home_scope_timing_execution.py": {
-      "size": 14237,
-      "sha256": "a91138c9a0b608cf4d90beecee2b6e0d92550dddc4289c180ccfec498401528f"
+      "size": 14460,
+      "sha256": "d6831caf868f577f934d4e3064af21b9a28f4e58f3d29f678e04bc2245a7a9aa"
     },
     "android-app/src/test/python/test_inline_appreciation_android_contract.py": {
       "size": 4996,
@@ -1652,6 +1656,10 @@
       "size": 6892,
       "sha256": "375ead1d6936b727658d0c6c40c3583c97bbdfbed7d2b043a15ac94da8775400"
     },
+    "android-app/src/test/python/test_namespace_preparation_execution.py": {
+      "size": 8507,
+      "sha256": "00665d9fe6d3ecf2cc2a3bbdcf34599914d20eff9f71a55ec2a89c626bb9391a"
+    },
     "android-app/src/test/python/test_official_sync_access_execution.py": {
       "size": 11228,
       "sha256": "1486af31f7974a68e79b3145961077ff21d2023da52991fe3f1f1907ed78471d"
@@ -1669,8 +1677,8 @@
       "sha256": "527111dedbf2b6f2fe0a8fe4f488fcbfa1f45b1d5619e2217178613c4baba9a8"
     },
     "android-app/src/test/python/test_renewal_archive_read_execution.py": {
-      "size": 7727,
-      "sha256": "eabb148b722fb0abbb56522baf70ac2533fc3ef0f08cc8cca4e33708c7a4fdad"
+      "size": 7682,
+      "sha256": "2c4a586cea03939650f8eef76894cc913a4e55a04f5ea94ab41109d6ca413d3d"
     },
     "android-app/src/test/python/test_root_client_contract.py": {
       "size": 3798,

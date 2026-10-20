@@ -58,6 +58,7 @@ class MainActivity {
     Object diagnosticInspectionDetails(AndroidSyncFacade.Inspection inspection) { return null; }
     AndroidSyncFacade sync() { return facade; }
     void prepareOfficialHomeNamespace(AndroidSyncFacade facade) { namespacePreparations++; }
+    void invalidatePreparedOfficialNamespace() { }
     Object currentHomeContext(int token) { return new Object(); }
     /* PRODUCTION_METHODS */
     static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

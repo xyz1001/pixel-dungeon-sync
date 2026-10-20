@@ -44,7 +44,7 @@ class MainActivity {
     interface Change { void run(MainActivity host); }
     RenewalArchiveReadState renewalArchiveRead = new RenewalArchiveReadState();
     SecureConnectionStore.Connection connection = new SecureConnectionStore.Connection();
-    Object sharedConnectionSession = new Object(), facade = new Object(), preparedOfficialNamespaceFacade = new Object();
+    Object sharedConnectionSession = new Object(), facade = new Object();
     Object history = new Object(), homeObservationOwner = new Object();
     Inspection inspection = new Inspection();
     Installer installer = new Installer();
@@ -71,7 +71,7 @@ class MainActivity {
         workCalls++; pendingTask = task; pendingDone = done;
     }
     void readComparison(boolean prepareNamespace) {
-        check(facade == null && preparedOfficialNamespaceFacade == null, "renewal must create a fresh facade");
+        check(facade == null, "renewal must create a fresh facade");
         check(history == null && inspection == null && !cloudVerified && homeObservationOwner == null, "clear old observation before read");
         reads++; if (prepareNamespace) preparingReads++;
         facade = new Object(); history = new Object(); inspection = new Inspection();

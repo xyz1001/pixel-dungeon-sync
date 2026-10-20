@@ -4,6 +4,7 @@ import java.util.*;
 
 /** Real Activity guard/read methods with deterministic scheduling and read-only I/O ports. */
 class MainActivity {
+    void invalidatePreparedOfficialNamespace() { }
     enum SyncPage { HOME, SETTINGS }
     enum OnboardingProgress { COMPLETE, INCOMPLETE }
     enum DiagnosticAction { INSPECT }
@@ -95,7 +96,7 @@ class MainActivity {
     OnboardingProgress progress = OnboardingProgress.COMPLETE;
     boolean resumed = true, destroyed, sharedAppreciationOnly, busy, available = true, ready = true;
     boolean cloudVerified = true;
-    AndroidSyncFacade facade = new AndroidSyncFacade(), preparedOfficialNamespaceFacade = facade;
+    AndroidSyncFacade facade = new AndroidSyncFacade();
     AndroidSyncFacade nextFacade = new AndroidSyncFacade();
     AndroidSyncFacade.Inspection inspection = facade.observed;
     SyncHistory history = facade.history;
@@ -124,7 +125,6 @@ class MainActivity {
     void publishArchiveReadState() { published++; }
     void prepareOfficialHomeNamespace(AndroidSyncFacade owner) { namespacePreparations++; }
     AndroidSyncFacade sync() {
-        check(preparedOfficialNamespaceFacade == null, "manual read must discard prepared facade");
         if (facade == null) { facadeCreations++; facade = nextFacade; }
         return facade;
     }
@@ -132,7 +132,7 @@ class MainActivity {
         check(action == DiagnosticAction.INSPECT && "checking saves".equals(label), "reuse existing inspection work");
         check(!cloudVerified && inspection == null && history == null && homeObservationOwner == null,
                 "manual read must clear old observation before worker");
-        check(facade == null && preparedOfficialNamespaceFacade == null, "manual read must discard cached facade");
+        check(facade == null, "manual read must discard cached facade");
         check(!busy && pendingTask == null, "duplicate read queued");
         busy = true; workCalls++; pendingTask = task; pendingDone = done;
     }

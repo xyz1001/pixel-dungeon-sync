@@ -75,7 +75,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
         self.assertIn('readiness failure', result.stderr)
 
     def test_regression_detects_reused_facade(self):
-        result = self.execute(('this.facade = null; this.preparedOfficialNamespaceFacade = null;', ''))
+        result = self.execute(('this.facade = null;', ''))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('renewal must create a fresh facade', result.stderr)
 

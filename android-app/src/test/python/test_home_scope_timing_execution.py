@@ -156,6 +156,9 @@ class MainActivity {
 import java.util.*;
 class MainActivity {
  enum DiagnosticAction{INSPECT,LAUNCH}
+ static class OfficialOperationLease implements AutoCloseable { public void close(){} }
+ final ThreadLocal<OfficialOperationLease> officialOperationLease = new ThreadLocal<>();
+ void invalidatePreparedOfficialNamespace(){}
  enum DiagnosticStage{WORK,FINISHED,GAME_LAUNCH,REFRESH}
  enum DiagnosticResult{STARTED,SUCCEEDED}
  enum DiagnosticFailure{NONE}
