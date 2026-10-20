@@ -329,8 +329,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 283110,
-      "sha256": "ee03cb290110bee4048a71707f6eda476c14e83e8ff7e2035e349a6825e05aa9"
+      "size": 285815,
+      "sha256": "eb129e2eb68e1ffae5c198d5132829bcdabf4daa30078cc7e1db16856b7f3896"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -359,6 +359,10 @@
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManualPaymentSession.java": {
       "size": 10136,
       "sha256": "edb9f49e62d0fb1d86c3f428f65118d4c8e9d3808605d36c8036f186784a2b22"
+    },
+    "android-app/src/main/java/io/github/xyz1001/pdsync/android/OfficialOperationLease.java": {
+      "size": 2880,
+      "sha256": "2f1c44dc4013adf33f4bec2c16aaf5ab5d97ee99f934c746256e56cd2625e735"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/PackageTrust.java": {
       "size": 17016,
@@ -441,8 +445,8 @@
       "sha256": "dd4e50f93690053f5a9fb46ce83b59fc9b5158f6b7b43c27a38252301dbb7c51"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/SyncRuntime.java": {
-      "size": 21484,
-      "sha256": "f4f7c33a56207daea622467e97053b467f5510787c0474c7800aa59a230cafdf"
+      "size": 22475,
+      "sha256": "60b310b4a76fb43a180663b6ca2f5ef99a6872d0df072f33850e1e5b0920c407"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/SystemConfirmationToken.java": {
       "size": 4443,
@@ -1649,12 +1653,16 @@
       "sha256": "375ead1d6936b727658d0c6c40c3583c97bbdfbed7d2b043a15ac94da8775400"
     },
     "android-app/src/test/python/test_official_sync_access_execution.py": {
-      "size": 10470,
-      "sha256": "094de90eb8de7ff8ed547beb85ffc391c35441b2ed5fd469c3cb48d832dbf66e"
+      "size": 10793,
+      "sha256": "09f84b480d58a1bd4d6b8d9467d84569def3b80c4a4b9cb74f2e991e2e68912f"
     },
     "android-app/src/test/python/test_onboarding_marker_failure_contract.py": {
       "size": 5561,
       "sha256": "8717726e6dec15aa9ca68d1e05e5cc9635b4cdd1312e36326cb888fa1a9a37dc"
+    },
+    "android-app/src/test/python/test_operation_access_lease_execution.py": {
+      "size": 6923,
+      "sha256": "18ad1f397cc25cae4e2aae7f65b8a58fc777bb30e923ab268de6b3b0af758cfb"
     },
     "android-app/src/test/python/test_package_namespace_scope_contract.py": {
       "size": 8320,

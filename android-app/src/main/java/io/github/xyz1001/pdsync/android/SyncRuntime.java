@@ -21,6 +21,7 @@ final class SyncRuntime {
     static final Object OPERATION_LOCK = new Object();
     private static final String PREFS = "sync-presentation-v2";
     private static volatile SecureConnectionStore.Connection connection;
+    private static final java.util.concurrent.atomic.AtomicLong connectionGeneration = new java.util.concurrent.atomic.AtomicLong();
     private static volatile GamePreparationService.PreparedPair selected;
     // SharedPreferences may expose new memory values even when its disk commit fails.
     private static final java.util.Set<String> failedOnboardingWrites = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -34,8 +35,12 @@ final class SyncRuntime {
     static SecureConnectionStore.Connection currentConnection() { return connection; }
 
     static void setConnection(SecureConnectionStore.Connection connection2) {
+        if (connection != connection2) connectionGeneration.incrementAndGet();
         connection = connection2;
     }
+
+    /** Changes even when an account is reloaded with identical credential text. */
+    static long connectionGeneration() { return connectionGeneration.get(); }
 
     static SecureConnectionStore.Connection connection(Context context) throws Exception {
         SecureConnectionStore.Connection connection2 = connection;
@@ -43,7 +48,7 @@ final class SyncRuntime {
             return connection2;
         }
         SecureConnectionStore.Connection connectionLoad = new SecureConnectionStore(context).load();
-        connection = connectionLoad;
+        setConnection(connectionLoad);
         return connectionLoad;
     }
 
@@ -278,6 +283,16 @@ final class SyncRuntime {
         if (gate == null || gate.account != account)
             throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
         gate.refresh(context);
+    }
+
+    /** Same-operation reuse checks the real deadline without another entitlement request. */
+    static void checkOfficialSyncAccess(SecureConnectionStore.Connection account, AndroidSyncFacade facade)
+            throws IOException {
+        if (account == null) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
+        if (!OfficialSyncAccess.isOfficialEndpoint(account.endpoint)) return;
+        OfficialOperationGate gate = officialGates.get(facade);
+        if (gate == null || gate.account != account) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
+        gate.check();
     }
 
     private static void rememberEntitlement(Context context, SecureConnectionStore.Connection account,

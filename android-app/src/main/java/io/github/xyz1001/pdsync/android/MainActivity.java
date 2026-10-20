@@ -315,6 +315,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: io, reason: collision with root package name */
     private final ExecutorService f9io = Executors.newSingleThreadExecutor();
+    private final ThreadLocal<OfficialOperationLease> officialOperationLease = new ThreadLocal<>();
     private SyncPage page = SyncPage.DISCOVERY;
     private boolean initialLoad = true;
     private boolean onboardingActive = true;
@@ -614,7 +615,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             try (DiagnosticTiming.Scope lockWait = DiagnosticTiming.start(trace, DiagnosticPhase.OPERATION_LOCK_WAIT)) {
                 synchronized (SyncRuntime.OPERATION_LOCK) {
                     lockWait.close();
-                    objRun = task.run();
+                    try (OfficialOperationLease lease = new OfficialOperationLease()) {
+                        officialOperationLease.set(lease);
+                        try { objRun = task.run(); }
+                        finally { officialOperationLease.remove(); }
+                    }
                 }
             }
             final DiagnosticResult result = diagnosticWorkResult(trace.getAction(), objRun);
@@ -3245,17 +3250,24 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private AndroidSyncFacade sync() throws Exception {
-        AndroidSyncFacade owner = localSync();
+        AndroidSyncFacade owner = requireSyncFacade();
         requireOfficialSyncAccess(this.connection);
         return owner;
     }
 
     /** Local maintenance never requires renewed cloud access, and cannot accidentally perform DAV I/O. */
     private AndroidSyncFacade localSync() throws Exception {
+        OfficialOperationLease lease = this.officialOperationLease.get();
+        if (lease != null) lease.invalidate();
+        AndroidSyncFacade owner = requireSyncFacade();
+        SyncRuntime.clearOfficialSyncAccess(owner);
+        return owner;
+    }
+
+    private AndroidSyncFacade requireSyncFacade() throws Exception {
         SecureConnectionStore.Connection connection = this.connection;
         if (connection == null) throw new IOException(SET_UP_THE_CLOUD_CONNECTION_FIRST_143.text());
         if (this.facade == null) this.facade = SyncRuntime.localFacade(this, connection);
-        SyncRuntime.clearOfficialSyncAccess(this.facade);
         if (this.connection != connection) throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
         return this.facade;
     }
@@ -3750,9 +3762,41 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void requireOfficialSyncAccess(SecureConnectionStore.Connection account) throws Exception {
-        if (account == null || this.connection != account) throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
-        SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, this.facade);
-        if (this.connection != account) throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+        final AndroidSyncFacade owner = this.facade;
+        final OfficialOperationLease lease = this.officialOperationLease.get();
+        try {
+            if (account == null || this.connection != account) throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+            if (lease == null) {
+                SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, owner);
+            } else {
+                final OfficialOperationLease.Binding binding = officialOperationBinding(account);
+                lease.authorize(binding, owner, THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text(),
+                        () -> SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, owner),
+                        () -> SyncRuntime.checkOfficialSyncAccess(account, owner),
+                        () -> {
+                            if (this.facade != owner || !binding.matches(officialOperationBinding(account)))
+                                throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+                        }, () -> SyncRuntime.clearOfficialSyncAccess(owner));
+            }
+            if (this.connection != account) throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+        } catch (Exception | Error failure) {
+            if (lease != null) lease.invalidate();
+            SyncRuntime.clearOfficialSyncAccess(owner);
+            throw failure;
+        }
+    }
+
+    private OfficialOperationLease.Binding officialOperationBinding(SecureConnectionStore.Connection account) throws Exception {
+        final long credentialsGeneration = SyncRuntime.connectionGeneration();
+        if (this.connection != account || SyncRuntime.currentConnection() != account)
+            throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+        OfficialOperationLease.Binding binding = new OfficialOperationLease.Binding(account, credentialsGeneration,
+                account.endpoint, account.username, account.profile,
+                SyncRuntime.currentSelectionToken(this), SyncRuntime.currentNamespace(this));
+        if (this.connection != account || SyncRuntime.currentConnection() != account
+                || credentialsGeneration != SyncRuntime.connectionGeneration())
+            throw new IOException(THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158.text());
+        return binding;
     }
 
     /* renamed from: lambda$requestRestore$75$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */

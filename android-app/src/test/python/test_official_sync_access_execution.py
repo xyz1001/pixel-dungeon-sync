@@ -16,8 +16,8 @@ class OfficialSyncAccessExecution(unittest.TestCase):
     def test_every_reused_facade_reauthorizes_and_auto_checks_at_publication(self):
         sync = body(MAIN, 'private AndroidSyncFacade sync()')
         self.assertIn('requireOfficialSyncAccess(this.connection)', sync)
-        self.assertIn('localSync()', sync)
-        self.assertIn('SyncRuntime.localFacade(this, connection)', body(MAIN, 'private AndroidSyncFacade localSync()'))
+        self.assertIn('requireSyncFacade()', sync)
+        self.assertIn('SyncRuntime.localFacade(this, connection)', body(MAIN, 'private AndroidSyncFacade requireSyncFacade()'))
         factory = body(RUNTIME, 'private static AndroidSyncFacade createFacade(')
         self.assertLess(factory.index('gate.refresh(context)'), factory.index('backend(context)'))
         self.assertIn('androidGameIdentityGameIdentity, gate)', factory)
@@ -30,7 +30,8 @@ class OfficialSyncAccessExecution(unittest.TestCase):
 
     def test_local_recovery_accessor_remains_available_without_cloud_authorization(self):
         methods = ('private AndroidSyncFacade localSync() throws Exception ' + body(MAIN, 'private AndroidSyncFacade localSync()')
-                   + '\nprivate AndroidSyncFacade sync() throws Exception ' + body(MAIN, 'private AndroidSyncFacade sync()'))
+                   + '\nprivate AndroidSyncFacade sync() throws Exception ' + body(MAIN, 'private AndroidSyncFacade sync()')
+                   + '\nprivate AndroidSyncFacade requireSyncFacade() throws Exception ' + body(MAIN, 'private AndroidSyncFacade requireSyncFacade()'))
         for action in ('recoverRestore', 'discardInterruptedRestore', 'archivePending', 'renameHistory', 'renameCurrent', 'confirmRunIdentity'):
             self.assertIn('localSync().' + action + '(', MAIN)
             self.assertNotIn('sync().' + action + '(', MAIN)
@@ -40,6 +41,8 @@ import java.io.IOException;
 class LocalCheck {
     static class SecureConnectionStore { static class Connection {} }
     static class AndroidSyncFacade { boolean authorized; }
+    static class OfficialOperationLease { void invalidate(){} }
+    final ThreadLocal<OfficialOperationLease> officialOperationLease = new ThreadLocal<>();
     static class Message { String text(){return "blocked";} }
     static final Message SET_UP_THE_CLOUD_CONNECTION_FIRST_143=new Message(), THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158=new Message();
     static class SyncRuntime {
