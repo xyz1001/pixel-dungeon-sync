@@ -82,9 +82,15 @@ public final class BridgeClientIdentityChecks {
             AutoCloseable contents = client.beginHomeReadIdentityScope();
             Files.writeString(f.base, "new");
             check(client.targetGame().installedHash.equals(initial), "metadata-equal intermediate target returns scoped identity");
-            Failure mismatch = failed(contents::close, "full exit hash mismatch blocks result");
-            check(mismatch.getCause() instanceof IOException, "exit mismatch propagated as identity cause");
-            check(!client.targetGame().installedHash.equals(initial), "ordinary action target full-checks new bytes");
+            contents.close(); // Host stat double deliberately stayed equal; no exit full hash is expected.
+            check(!client.targetGame().installedHash.equals(initial), "next ordinary target full-checks bytes even with unchanged host stat");
+            try (AutoCloseable nextOperation = client.beginHomeReadIdentityScope()) {
+                check(!client.targetGame().installedHash.equals(initial), "next scoped operation also captures a fresh full hash");
+            }
+            AutoCloseable changedStamp = client.beginHomeReadIdentityScope();
+            android.system.Os.values.get(f.base.toString()).st_ctim.tv_nsec++;
+            Failure mismatch = failed(changedStamp::close, "fresh exit stat mismatch blocks result");
+            check(mismatch.getCause() instanceof IOException, "exit token mismatch propagated as identity cause");
 
             android.system.Os.values.get(f.base.toString()).st_size = -1;
             failed(client::beginHomeReadIdentityScope, "begin failure uses identity failure boundary");

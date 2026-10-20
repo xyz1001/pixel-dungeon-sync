@@ -29,7 +29,7 @@ public final class InstalledApkIdentityScopeChecks {
     }
     public static void main(String[] args) throws Exception {
         reuseAndBoundaries(); invalidationAndIsolation(); packageFences(); statFences(); racesAndPaths(); api26Fallback();
-        System.out.println("Reconstructed code92 installed identity scope: " + checks + " assertions passed. Host PM/stat doubles; no device/ART proof.");
+        System.out.println("Code93 operation-local installed identity scope: " + checks + " assertions passed. Host PM/stat doubles; no device/ART proof.");
     }
 
     static void reuseAndBoundaries() throws Exception {
@@ -46,15 +46,18 @@ public final class InstalledApkIdentityScopeChecks {
             rejects(scope::begin, "nested scope rejected");
             rejects(scope::requireNoReadScope, "read scope blocks mutating operation");
             check(expected.equals(scope.apkSetSha256(f.game)), "nested/mutation rejection does not revive or damage active read");
+            int pmBeforeClose = f.pmReads, stampsBeforeClose = f.files.stamps;
             read.close();
-            check(f.files.hashes == 6, "exit fully hashes base and split");
+            check(f.pmReads >= pmBeforeClose + 2 && f.files.stamps == stampsBeforeClose + 2,
+                    "exit independently revalidates resolver, PM, and every APK stamp");
+            check(f.files.hashes == 4, "exit validates fresh tokens without rehashing base and split");
             read.close();
-            check(f.files.hashes == 6, "second close is idempotent");
+            check(f.files.hashes == 4, "second close is idempotent");
             scope.requireNoReadScope();
             scope.apkSetSha256(f.game);
-            check(f.files.hashes == 8, "after close no cached authority remains");
+            check(f.files.hashes == 6, "after close no cached authority remains");
             try (AutoCloseable next = scope.begin()) { scope.apkSetSha256(f.game); }
-            check(f.files.hashes == 12, "next operation gets new entry and exit hashes");
+            check(f.files.hashes == 8, "next operation gets one new full APK-set entry hash");
         }
     }
 
@@ -77,7 +80,7 @@ public final class InstalledApkIdentityScopeChecks {
             });
             worker.start(); worker.join();
             if (failure.get() != null) throw new AssertionError("cross-thread checks", failure.get());
-            check(f.files.hashes == 10, "other thread fully hashes outside scope and owns a separate scoped read");
+            check(f.files.hashes == 8, "other thread fully hashes outside scope and owns a separate scoped read");
             check(a.apkSetSha256(f.game) != null, "wrong-thread close leaves owner read active");
             a.invalidate();
             rejects(() -> a.apkSetSha256(f.game), "explicit invalidation rejects further reuse");
@@ -191,24 +194,36 @@ public final class InstalledApkIdentityScopeChecks {
         try (Fixture f = new Fixture()) {
             InstalledApkIdentityScope scope = f.scope();
             AutoCloseable read = scope.begin();
-            Files.writeString(f.base, "new"); // Deterministic unchanged test stamp, simulating hidden content change.
-            check(scope.apkSetSha256(f.game) != null, "intermediate reads use captured hash while fences are equal");
-            rejects(read::close, "exit full hash catches same-size content change despite unchanged stat seam");
+            String before = scope.apkSetSha256(f.game);
+            Files.writeString(f.base, "new"); // Deliberately constant test stamp; real high-resolution ctime changes.
+            check(before.equals(scope.apkSetSha256(f.game)), "reuse depends on strong installation token within this operation");
+            read.close();
             scope.requireNoReadScope();
-            try (AutoCloseable next = scope.begin()) { check(scope.apkSetSha256(f.game) != null, "new operation captures changed content"); }
+            try (AutoCloseable next = scope.begin()) {
+                check(!before.equals(scope.apkSetSha256(f.game)), "next operation always rehashes even if the injected stamp stays equal");
+            }
         }
         try (Fixture f = new Fixture()) {
             InstalledApkIdentityScope scope = f.scope();
             AutoCloseable read = scope.begin();
-            f.files.afterHash = () -> f.files.stamp += "exit-race";
-            rejects(read::close, "exit hash race caught by posthash metadata fence");
+            f.files.stamp += "exit-change";
+            rejects(read::close, "fresh exit stamp catches changes since the final target call");
+            scope.requireNoReadScope();
+        }
+        try (Fixture f = new Fixture()) {
+            InstalledApkIdentityScope scope = f.scope();
+            AutoCloseable read = scope.begin();
+            f.files.failStamp = true;
+            rejects(read::close, "stat IO failure propagates on exit");
             scope.requireNoReadScope();
         }
         try (Fixture f = new Fixture()) {
             InstalledApkIdentityScope scope = f.scope();
             AutoCloseable read = scope.begin();
             f.files.failHash = true;
-            rejects(read::close, "hash IO failure propagates on exit");
+            read.close();
+            check(f.files.hashes == 2, "close performs no hidden full hash");
+            rejects(scope::begin, "next operation cannot reuse prior hash if fresh hashing fails");
             scope.requireNoReadScope();
         }
         try (Fixture f = new Fixture()) {

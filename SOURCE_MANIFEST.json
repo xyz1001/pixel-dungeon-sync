@@ -289,8 +289,8 @@
       "sha256": "8485709bf585e47115878fcd98ad06c609a6bd2c9f6887ce54cdbcde64e63268"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/InstalledApkIdentityScope.java": {
-      "size": 8312,
-      "sha256": "f574e8d901a5716169b0560e6332453250c705f47cd80b11dd2a126cbc215312"
+      "size": 8256,
+      "sha256": "d88659faea89c1d8b90d7a137902249e2a5b8271ab491bd226c8eb3aac24bad9"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/InstalledAppCatalog.java": {
       "size": 4060,
@@ -745,8 +745,8 @@
       "sha256": "52512b5b074dcb96e2f4b8fa11cd5eba621cc81c12416c6f58702cf094a82788"
     },
     "android-app/src/test/fixtures/identity-scope-stubs/BridgeClientIdentityChecks.java.in": {
-      "size": 11291,
-      "sha256": "396c4d75caed8d4d478ee278f14358f99c724ae7c0714668b65bcb8df5c715e8"
+      "size": 11823,
+      "sha256": "757bddb1b7ab131278dece001113066909b3720fddaf780f20cf64963c182596"
     },
     "android-app/src/test/fixtures/identity-scope-stubs/README.md": {
       "size": 3599,
@@ -1413,8 +1413,8 @@
       "sha256": "d699663b16322d943850d1db500fbc4b41ab6f4b28c0217bf90df5a018fa5636"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/InstalledApkIdentityScopeChecks.java": {
-      "size": 19604,
-      "sha256": "a8250895ba8ca65c3c05029ef9cd39a3a3787e24a9ab9bbcc2cf570722119060"
+      "size": 20374,
+      "sha256": "d5f9cf23bd75a21045ea68fb04cc01924ff1ef271dbcc07cff9fb8d9a5684f13"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/InstalledAppCatalogChecks.java": {
       "size": 16600,

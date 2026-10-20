@@ -12,9 +12,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
-/** Reconstructed from verified code92 DEX; scoped read-only installed-APK identity checks. */
+/** Operation-local installed-APK identity: full hash at entry, fresh strong tokens until close. */
 final class InstalledApkIdentityScope {
     private final ThreadLocal<Read> active = new ThreadLocal<>();
     private final Context context;
@@ -146,9 +145,8 @@ final class InstalledApkIdentityScope {
             if (closed) return;
             try {
                 requireSame(null);
-                String after = fullHash(PackageTrust.installed(context, selected.gamePackage));
-                requireSame(null);
-                if (!Objects.equals(hash, after)) throw new IOException("HOME APK contents changed");
+                // The entry hash was fenced by this same complete PM/high-resolution stat token.
+                // Never retain its authority across operations; close discards it even on failure.
             } finally {
                 closed = true;
                 token = null;
