@@ -245,9 +245,14 @@ class DesktopSharedHomeAdapterTest {
    assertFalse(state.uploadEnabled); assertFalse(state.restoreEnabled); assertFalse(state.launchEnabled)
   }
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(gameStatus = GameProcessStatus.Running(setOf(123L)))).canLaunch)
-  val running = DesktopSharedHomeAdapter.state(base.copy(gameStatus = GameProcessStatus.Running(setOf(123L))))
-  assertFalse(running.canUpload)
-  assertFalse(running.canRestore)
+  val changed = base.copy(history = history().copy(currentFiles = files + ("badges.dat" to "c".repeat(64))))
+  for (process in listOf(GameProcessStatus.Stopped, GameProcessStatus.Running(setOf(123L)), GameProcessStatus.Unknown("unavailable"))) {
+   val state = DesktopSharedHomeAdapter.state(changed.copy(gameStatus = process))
+   assertTrue(state.canUpload)
+   assertTrue(state.canRestore)
+   assertEquals(DesktopSharedHomeAdapter.state(changed).status, state.status)
+   assertEquals(DesktopSharedHomeAdapter.state(changed).statusKind, state.statusKind)
+  }
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(config = null)).canLaunch)
   // The existing disconnected Upload remains an intentional route into login.
   assertTrue(DesktopSharedHomeAdapter.state(base.copy(connected = false)).canUpload)
@@ -300,10 +305,9 @@ class DesktopSharedHomeAdapterTest {
   }
  }
 
- @Test fun noGameUnknownProcessStaleOwnerAndInterruptedReadsBlockHostEntry() {
+ @Test fun noGameStaleOwnerAndInterruptedReadsBlockHostEntry() {
   val base = ready(history().copy(currentFiles = mapOf("game1/game.dat" to "c".repeat(64))))
   val states = listOf(base.copy(game = null), base.copy(config = null),
-   base.copy(gameStatus = GameProcessStatus.Unknown("not inspected")),
    base.copy(archiveLoading = true), base.copy(localHistoryVerified = false),
    base.copy(historyVerified = false), base.copy(history = null),
    base.copy(historyOwner = config.copy(username = "old-account")),

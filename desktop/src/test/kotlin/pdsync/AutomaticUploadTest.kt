@@ -10,9 +10,17 @@ class AutomaticUploadTest {
  @Test fun `startup does not upload existing or empty files`() {
   for (files in listOf(a, emptyMap())) { val c=AutomaticUpload(); c.observe(files,false,true,0); assertFalse(c.ready(100000)) }
  }
- @Test fun `changes debounce and do not upload while running unknown paused offline busy or conflict`() {
-  val c=AutomaticUpload(); c.observe(a,false,true,0); c.observe(b,true,false,100); assertFalse(c.ready(2600,stopped=false)); c.observe(b,false,true,3000)
-  assertFalse(c.ready(5499)); assertFalse(c.ready(5500,enabled=false)); assertFalse(c.ready(5500,connected=false)); assertFalse(c.ready(5500,busy=true)); assertFalse(c.ready(5500,conflict=true)); assertTrue(c.ready(5500))
+ @Test fun `changes debounce while running or unknown and retain pause network conflict and busy gates`() {
+  for (running in listOf(true, false)) {
+   val c=AutomaticUpload(); c.observe(a,false,true,0); c.observe(b,running,false,100)
+   assertFalse(c.ready(2599,stopped=false)); assertTrue(c.ready(2600,stopped=false))
+   assertFalse(c.ready(2600,enabled=false)); assertFalse(c.ready(2600,connected=false))
+   assertFalse(c.ready(2600,busy=true)); assertFalse(c.ready(2600,conflict=true))
+  }
+ }
+ @Test fun `game exit does not delay a queued content change`() {
+  val c=AutomaticUpload(); c.observe(a,false,true,0); c.observe(b,true,false,100)
+  c.observe(b,false,true,2600); assertTrue(c.ready(2600))
  }
  @Test fun `pending retry resumes after restart without recapture`() { val c=AutomaticUpload(); c.observe(a,false,true,0); assertTrue(c.ready(2500,pending=true)) }
  @Test fun `singleflight and bounded backoff`() {

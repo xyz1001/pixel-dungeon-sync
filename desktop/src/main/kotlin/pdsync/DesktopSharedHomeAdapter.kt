@@ -74,7 +74,6 @@ internal object DesktopSharedHomeAdapter {
   val complete = current.config?.onboardingProgress == OnboardingProgress.COMPLETE
   val locked = current.busy || current.connectingAtStartup || current.appClosed
   val transferLocked = locked || current.archiveLoading
-  val gameStopped = current.gameStatus is GameProcessStatus.Stopped
   val localVerified = current.hasSession && current.localHistoryVerified && current.game != null &&
    current.locationIssue == null && sameDesktopHomeProfile(current.historyOwner, current.config)
   val remoteVerified = current.historyVerified &&
@@ -108,7 +107,6 @@ internal object DesktopSharedHomeAdapter {
      SharedHomeOperation.MERGE -> DesktopMessages.CHECKING_AND_MERGING_SAVES.text()
      else -> DesktopMessages.PROCESSING_PLEASE_WAIT.text()
     }
-    current.gameStatus is GameProcessStatus.Running -> DesktopMessages.THE_GAME_IS_RUNNING_EXIT_IT_BEFORE_SYNCING.text()
     !current.connected -> DesktopMessages.NOT_CONNECTED_TO_THE_CLOUD_CLICK_UPLOAD_TO_SIGN_IN.text()
     !complete -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_CHOOSE_UPLOAD_OR_RESTORE_FIRST.text()
     current.pendingUpload -> DesktopMessages.THE_LAST_UPLOAD_IS_INCOMPLETE_RETRY_THE_UPLOAD_FIRST.text()
@@ -119,11 +117,11 @@ internal object DesktopSharedHomeAdapter {
    },
    statusKind = when {
     current.serviceExpired -> SharedHomeStatusKind.EXPIRED
-    current.connectingAtStartup || current.launchingGame || current.busy || current.gameStatus is GameProcessStatus.Running -> SharedHomeStatusKind.RUNNING
+    current.connectingAtStartup || current.launchingGame || current.busy -> SharedHomeStatusKind.RUNNING
     !current.connected || !complete || current.pendingUpload -> SharedHomeStatusKind.WARNING
     current.hasConflict || hasRemoteBranches -> SharedHomeStatusKind.CONFLICT
     content.uploadUnnecessary -> SharedHomeStatusKind.SYNCED
-    current.config?.autoUploadPaused == true || current.gameStatus is GameProcessStatus.Unknown -> SharedHomeStatusKind.WARNING
+    current.config?.autoUploadPaused == true -> SharedHomeStatusKind.WARNING
     else -> SharedHomeStatusKind.NEUTRAL
    },
    pageActive = current.pageActive && !current.appClosed,
@@ -131,9 +129,9 @@ internal object DesktopSharedHomeAdapter {
    archiveLoading = current.archiveLoading && current.pageActive && !current.appClosed,
    // Login remains reachable through Upload only when this profile has a verified source.
    // A genuine frozen retry is a source even when the live save has subsequently disappeared.
-   canUpload = !current.serviceExpired && !transferLocked && gameStopped && !content.uploadUnnecessary &&
+   canUpload = !current.serviceExpired && !transferLocked && !content.uploadUnnecessary &&
     (if (current.pendingUpload) frozenUploadAvailable else sources.uploadSourceAvailable),
-   canRestore = !current.serviceExpired && current.hasSession && !transferLocked && gameStopped && current.connected &&
+   canRestore = !current.serviceExpired && current.hasSession && !transferLocked && current.connected &&
     sources.restoreSourceAvailable && !content.restoreUnnecessary &&
     (!complete || !current.pendingUpload && (current.hasConflict || hasRemoteBranches ||
      current.selectedId != null && current.restoreIssue == null)),

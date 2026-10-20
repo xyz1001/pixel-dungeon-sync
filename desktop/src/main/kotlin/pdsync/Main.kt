@@ -458,17 +458,7 @@ internal fun runSyncApplication(
     try {
      val result = withContext(Dispatchers.IO) { trace.withDiagnostics {
       trace.record(OperationEvent.WORK_STARTED)
-      val target = manager.targetInfo()
-      val stopped = {
-       val fresh = gameLauncher.status(target)
-       if (fresh !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(fresh))
-       fresh == GameProcessStatus.Stopped
-      }
-      if (action != Action.ARCHIVE) {
-       val state = gameLauncher.status(target)
-       if (state !is GameProcessStatus.Stopped) throw SaveNotStableException(processMessage(state))
-       SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
-      }
+      val stopped = { true }
       val remoteStore by lazy { syncAccess.store(manager.config, manager.adapter.id, secret) }
       fun store() = remoteStore
       // Explicit manual upload may retry failed initial app-folder preparation.
@@ -594,8 +584,7 @@ internal fun runSyncApplication(
    scope.launch {
     try {
      val metadata=withContext(Dispatchers.IO) {
-      val target=manager.targetInfo()
-      val stopped={ gameLauncher.status(target) is GameProcessStatus.Stopped }
+      val stopped = { true }
       if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
      }
      directoryEditor=metadata;directoryName=metadata.displayName
@@ -671,10 +660,7 @@ internal fun runSyncApplication(
     scope.launch {
      try {
       val found = withContext(Dispatchers.IO) {
-       val target = manager.targetInfo()
-       val stopped = { gameLauncher.status(target) is GameProcessStatus.Stopped }
-       require(stopped()) { processMessage(gameLauncher.status(target)) }
-       SaveStabilityGuard(manager.root, manager.adapter, stopped).awaitStable()
+       val stopped = { true }
        manager.inspectConflict(syncAccess.store(manager.config, manager.adapter.id, password), stopped)
       }
       conflict = found; conflictSelection = null
@@ -941,7 +927,6 @@ internal fun runSyncApplication(
      automaticStatus = when {
       config?.autoUploadPaused == true -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_YOU_CAN_STILL_UPLOAD_MANUALLY.text()
       !connected -> DesktopMessages.CONNECT_TO_THE_CLOUD_FIRST.text()
-      state !is GameProcessStatus.Stopped -> processMessage(state)
       pending && !retryable -> DesktopMessages.AN_INTERRUPTED_OPERATION_NEEDS_CHECKING_HANDLE_IT_IN_SETTINGS.text()
       conflict != null || hasRemoteBranches() -> DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text()
       automatic.needsAttention -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_RESOLVE_THE_ISSUE_BELOW_AND_TRY_AGAIN.text()
@@ -1236,7 +1221,6 @@ internal fun runSyncApplication(
             onClick = { maintenance.perform(DesktopSettingsMaintenance.ARCHIVE_PENDING) }) { Text(DesktopMessages.REVIEW_INCOMPLETE_UPLOAD.text()) }
            Details {
             SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-             Text(processMessage(gameStatus))
              listOfNotNull(targetError, locationIssue, directoryNotice, diagnosticExportNotice,
               status.takeIf { it != initialStatus }).filter(String::isNotBlank).distinct().forEach { Text(it) }
             } }
@@ -1489,11 +1473,6 @@ private fun ConfirmationPage(token: Long, action: Action, root: String?, pending
 }
 
 private fun monotonicMillis() = System.nanoTime() / 1_000_000
-private fun processMessage(status: GameProcessStatus): String = when (status) {
- is GameProcessStatus.Stopped -> DesktopMessages.NO_GAME_DETECTED_FOR_THE_CURRENT_ACCOUNT_WAITING_FOR_SAVES_TO_STABILIZE.text()
- is GameProcessStatus.Running -> DesktopMessages.THE_GAME_IS_RUNNING_AUTOMATIC_UPLOAD_WILL_START_AFTER_IT_EXITS.text()
- is GameProcessStatus.Unknown -> status.reason.ifBlank { DesktopMessages.CANNOT_CONFIRM_THE_GAME_HAS_EXITED.text() }
-}
 private fun DeviceIdentity.displayLabel() = "$label · ${id.take(8)}"
 private fun localTime(value: String): String = runCatching {
  java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM).withLocale(pdsync.i18n.UiLocale.formattingLocale()).withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(value))

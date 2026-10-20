@@ -2817,8 +2817,8 @@
       "sha256": "5749b01ed8f7e4ab1201d7130a9c2341086c53acaa1d44110c3e3dabb5dac4d3"
     },
     "desktop/src/main/kotlin/pdsync/AutomaticUpload.kt": {
-      "size": 3515,
-      "sha256": "a59fe987a7807842fc37fd19a6b60c007e4cc0c7925486b7f6dc3aa6e20b43de"
+      "size": 3608,
+      "sha256": "cf388197b9b007f09f88cfb548747f0ab8ff57b5abb573c1ced118667402b77a"
     },
     "desktop/src/main/kotlin/pdsync/ConnectionPageLifetime.kt": {
       "size": 1115,
@@ -2865,8 +2865,8 @@
       "sha256": "fd37096c2191e349990f99495f3e8afe027ff598b7905d424dcee20969eb6ded"
     },
     "desktop/src/main/kotlin/pdsync/DesktopSharedHomeAdapter.kt": {
-      "size": 13123,
-      "sha256": "f9c3ae7a0ad0daab205b8df68cbacbc4d43fc0976e91890e59afae2a030e6d25"
+      "size": 12802,
+      "sha256": "c5b3c1eb4cb2292859d10f85fa46506be70dcc2fe189adfae0fd25032ba5207e"
     },
     "desktop/src/main/kotlin/pdsync/DesktopSharedSettingsAdapter.kt": {
       "size": 7185,
@@ -2889,8 +2889,8 @@
       "sha256": "2ddb8d107ca5abdd69c807de4b09e2a0fe359a5a55f5350acb300201d9a54661"
     },
     "desktop/src/main/kotlin/pdsync/Main.kt": {
-      "size": 90853,
-      "sha256": "58f5570ecba6dec989526faa262168638b7cb6ca551320733f6c33ab00f61207"
+      "size": 89456,
+      "sha256": "a98e51ae07eb6236168d84675b1bd71d95ab243184ac390e7917c87b48bbbb0b"
     },
     "desktop/src/main/kotlin/pdsync/NativeFolderChooser.kt": {
       "size": 3610,
@@ -2925,8 +2925,8 @@
       "sha256": "cafa065f778fd34ff4697d822c80e7efc13a4f472ac1fabdd6fdd8e7ffea099c"
     },
     "desktop/src/test/kotlin/pdsync/AutomaticUploadTest.kt": {
-      "size": 4619,
-      "sha256": "71adabb97348ebc007f90431228d62a1cb228a978821e2b04a513380daf659a6"
+      "size": 4840,
+      "sha256": "b8a620599dff09b3400d5429b54c2c9b76d0a772c00ecce487c445fdcf0249ab"
     },
     "desktop/src/test/kotlin/pdsync/BuiltinSetupNamespaceWiringTest.kt": {
       "size": 3600,
@@ -2997,8 +2997,8 @@
       "sha256": "bcb0f1a3cce44654631befa44a62d7188421fc11bedaf99d64822d404018359f"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedHomeAdapterTest.kt": {
-      "size": 22888,
-      "sha256": "9e5bf65776b664cbdb7d6fb8c48a8e8bc50e9d1cb4f596fb8106096ac7f49a23"
+      "size": 23184,
+      "sha256": "d68a214ab38a79766631f2efdde8b0df14931ecac43ac64852b39923618d3e8b"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedSavePathFlowTest.kt": {
       "size": 14182,

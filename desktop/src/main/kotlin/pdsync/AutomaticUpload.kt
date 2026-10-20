@@ -25,10 +25,15 @@ internal class AutomaticUpload(private val quietMillis: Long = 2500, private val
   if (observed == null) { observed = immutable; if (settled == null) settled = immutable; dirty = immutable != settled; changedAt = now }
   else if (observed != immutable) { observed = immutable; changedAt = now; dirty = immutable != settled; comparisonSkipped = false }
   if (running) runningSeen = true
-  if (stopped && runningSeen) { runningSeen = false; dirty = true; changedAt = now; comparisonSkipped = false }
+  if (stopped && runningSeen) {
+   runningSeen = false
+   if (!dirty) changedAt = now
+   dirty = true; comparisonSkipped = false
+  }
  }
+ @Suppress("UNUSED_PARAMETER") // Process observations never gate synchronization.
  fun shouldUpload(now: Long, enabled: Boolean, connected: Boolean, stopped: Boolean, pending: Boolean, conflict: Boolean, busy: Boolean): Boolean =
-  enabled && connected && stopped && !busy && !inFlight && !blocked && !comparisonSkipped && !conflict && observed != null &&
+  enabled && connected && !busy && !inFlight && !blocked && !comparisonSkipped && !conflict && observed != null &&
    now >= retryAt && now - changedAt >= quietMillis && (pending || dirty && observed!!.isNotEmpty())
  fun started() { check(!inFlight); inFlight = true }
  /** Only the files actually published become settled; concurrent later changes remain dirty. */
