@@ -22,9 +22,8 @@ data class SaveSummary(val slots: Map<String,String?>, val plays: Int?, val file
    return SaveSummary(versions.runs.keys.associateWith { slot -> bytes.keys.filter { it.startsWith("$slot/") }.mapNotNull(modifiedAt).maxOrNull() },plays,bytes.size)
   }
   fun read(root: Path): SaveSummary {
-   val snapshot=Snapshots.capture(root,Shattered,"preview","preview",null)
-   val summary=from(snapshot)
-   return summary.copy(slots=summary.slots.mapValues { (slot,_) -> snapshot.manifest.files.keys.filter { it.startsWith("$slot/") }.map { Files.getLastModifiedTime(SafePaths.checked(root.resolve(it))).toInstant().toString() }.maxOrNull() })
+   val read=Snapshots.readLocal(root,Shattered)
+   return fromVerifiedEntries(read.entries) { name -> read.fingerprint.metadata[name]?.modified?.toInstant()?.toString() }
   }
  }
 }

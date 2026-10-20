@@ -43,6 +43,11 @@ object Shattered : GameAdapter {
 }
 fun deduplicate(paths: List<Path>, adapter: GameAdapter) = paths.distinctBy { adapter.canonical(it) }
 data class Snapshot(val manifest: Manifest, val zip: ByteArray)
+/** One bounded filesystem read. Its fingerprint describes the same bytes used for the snapshot. */
+internal class LocalSaveRead(
+ val entries: Map<String, ByteArray>,
+ val fingerprint: SaveFingerprint
+)
 const val MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 const val MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 const val MAX_SNAPSHOT_FILES = 4096
@@ -75,40 +80,63 @@ object Snapshots {
   return snapshot
  }
  fun capture(root: Path, adapter: GameAdapter, profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null): Snapshot {
+  return capture(readLocal(root, adapter), adapter, profile, version, parent, captureContext)
+ }
+
+ internal fun capture(read: LocalSaveRead, adapter: GameAdapter, profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null): Snapshot {
   require(profile.matches(Regex("[a-zA-Z0-9_-]+")))
-  val modifiedAt = sortedMapOf<String, String>()
-  val files = readCaptureFiles(root, adapter, captureContext) { name, path, bytes ->
-   if (captureContext != null) modifiedAt[name] = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant().toString()
+  captureContext?.let { it.device.validated(); requireUtcTimestamp(it.capturedAt) }
+  val zip = archive(read.entries); require(zip.size <= MAX_SNAPSHOT_BYTES)
+  val modifiedAt = read.fingerprint.metadata.filterKeys { it in read.entries }.mapValues { it.value.modified.toInstant().toString() }
+  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=read.fingerprint.files,
+   metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(read.entries.keys) }), zip)
+ }
+
+ internal fun readLocal(root: Path, adapter: GameAdapter): LocalSaveRead {
+  val metadata = sortedMapOf<String, SaveFileMetadata>()
+  val hashes = sortedMapOf<String, String>()
+  val entries = readCaptureFiles(root, adapter, metadata) { name, _, bytes ->
+   hashes[name] = hash(bytes)
    bytes
   }
-  val zip = archive(files); require(zip.size <= MAX_SNAPSHOT_BYTES)
-  return Snapshot(Manifest(game=adapter.id, profile=profile, version=version, id=UUID.randomUUID().toString(), parent=parent, sha256=hash(zip), files=files.mapValues { hash(it.value) },
-   metadata=captureContext?.let { SnapshotMetadata(device=it.device, capturedAt=it.capturedAt, fileModifiedAt=modifiedAt).validated(files.keys) }), zip)
+  return LocalSaveRead(entries, SaveFingerprint(hashes, metadata))
+ }
+
+ internal fun fingerprint(root: Path, adapter: GameAdapter): SaveFingerprint {
+  val metadata = sortedMapOf<String, SaveFileMetadata>()
+  val hashes = readCaptureFiles(root, adapter, metadata) { _, _, bytes -> hash(bytes) }
+  return SaveFingerprint(hashes, metadata)
  }
 
  /** The same bounded allowed-file read as capture, without allocating or compressing a ZIP. */
  fun fileHashes(root: Path, adapter: GameAdapter): Map<String, String> =
   readCaptureFiles(root, adapter) { _, _, bytes -> hash(bytes) }
 
- private fun <T> readCaptureFiles(root: Path, adapter: GameAdapter, captureContext: SnapshotCaptureContext? = null,
+ private fun <T> readCaptureFiles(root: Path, adapter: GameAdapter, metadata: MutableMap<String, SaveFileMetadata>? = null,
   read: (String, Path, ByteArray) -> T): Map<String, T> {
+  if (Thread.currentThread().isInterrupted) throw InterruptedException()
   SafePaths.checked(root)
   require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { CoreValidationMessages.SAVE_ROOT_MUST_BE_A_REAL_DIRECTORY_NOT_A_SYMBOLIC_LINK_OR_FILE.text() }
-  captureContext?.let { it.device.validated(); requireUtcTimestamp(it.capturedAt) }
   val files = sortedMapOf<String, T>(); var total = 0L; val portableNames = mutableSetOf<String>()
   Files.walk(root).use { stream -> stream.forEach { p ->
+   if (Thread.currentThread().isInterrupted) throw InterruptedException()
    val name = root.relativize(p).toString().replace('\\','/')
    if (adapter.includes(name) && !isDirectoryMetadata(name)) {
-    require(!Files.isSymbolicLink(p)) { CoreValidationMessages.SYMBOLIC_LINKS_ARE_FORBIDDEN.text() }
-    if (Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)) {
+    val attributes = Files.readAttributes(p, java.nio.file.attribute.BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+    require(!attributes.isSymbolicLink) { CoreValidationMessages.SYMBOLIC_LINKS_ARE_FORBIDDEN.text() }
+    if (attributes.isRegularFile) {
      require(safePath(name) && portableNames.add(name.lowercase(java.util.Locale.ROOT))) { CoreValidationMessages.UNSAFE_OR_ALIASED_SAVE_PATH.text() }
      require(files.size < MAX_SNAPSHOT_FILES)
      val remaining = MAX_SNAPSHOT_BYTES - total.toInt()
-     val bytes = Files.newInputStream(p).use { it.readUpTo(remaining + 1) }
+     val bytes = Files.newInputStream(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { it.readUpTo(remaining + 1) }
      total += bytes.size; require(total <= MAX_SNAPSHOT_BYTES)
      files[name] = read(name, p, bytes)
     } else {
-     require(Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) { CoreValidationMessages.SAVE_ENTRY_DISAPPEARED_OR_IS_NOT_A_REGULAR_FILE_DIRECTORY.text() }
+     require(attributes.isDirectory) { CoreValidationMessages.SAVE_ENTRY_DISAPPEARED_OR_IS_NOT_A_REGULAR_FILE_DIRECTORY.text() }
+    }
+    metadata?.let {
+     require(it.size < MAX_SNAPSHOT_FILES * 4) { pdsync.i18n.CoreMessages.VALIDATION_TOO_MANY_SAVE_ENTRIES.text() }
+     it[name] = SaveFileMetadata(attributes.isDirectory, if (attributes.isDirectory) 0 else attributes.size(), attributes.lastModifiedTime(), attributes.fileKey()?.toString())
     }
    }
   } }
@@ -141,7 +169,8 @@ object Snapshots {
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
   captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
   beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) : Path {
-  require(guard()) { CoreValidationMessages.GAME_RUNNING_STATUS_MUST_BE_CONFIRMED_STOPPED.text() }
+  guard() // Existing callers may verify package/authorization here; running state does not gate I/O.
+  if (Thread.currentThread().isInterrupted) throw InterruptedException()
   SafePaths.directory(root); SafePaths.checked(backupRoot)
   validateCompatibility(snapshot, version)
   val files = verify(snapshot,adapter)
@@ -161,13 +190,14 @@ object Snapshots {
   }
   onBackupReady(backup, backupPath)
   // No restore mutation has occurred yet. A restarted game must not trigger rollback.
-  require(guard()) { CoreValidationMessages.GAME_RUNNING_STATUS_CHANGED_BEFORE_RESTORE.text() }
-  require(capture(root,adapter,snapshot.manifest.profile,version,null).manifest.files == backup.manifest.files) { CoreValidationMessages.SAVE_FILES_CHANGED_AFTER_BACKUP_RESTORE_CANCELLED_WITHOUT_ROLLBACK.text() }
+  guard()
+  if (Thread.currentThread().isInterrupted) throw InterruptedException()
+  require(fileHashes(root,adapter) == backup.manifest.files) { CoreValidationMessages.SAVE_FILES_CHANGED_AFTER_BACKUP_RESTORE_CANCELLED_WITHOUT_ROLLBACK.text() }
   // Final metadata/process check stays outside rollback: no target mutation has happened yet.
   beforeReplacement()
   try {
    replace(emptyMap()); beforeWrite(); replace(files,true)
-   require(capture(root, adapter, snapshot.manifest.profile, version, null).manifest.files == snapshot.manifest.files) { CoreValidationMessages.RESTORED_FILES_FAILED_VERIFICATION.text() }
+   require(fileHashes(root, adapter) == snapshot.manifest.files) { CoreValidationMessages.RESTORED_FILES_FAILED_VERIFICATION.text() }
    afterRestore()
   } catch(e: Exception) {
    try { replace(verify(backup,adapter)) } catch(rollback: Exception) { val failed = IllegalStateException(CoreValidationMessages.RESTORE_AND_ROLLBACK_FAILED_BACKUP_RETAINED_AT.text(backupPath),e); failed.addSuppressed(rollback); throw failed }

@@ -186,12 +186,15 @@ class ProfileSession(
   locked { validateRoot() }
  }
  fun validateRoot(): Int {
+  validateRootStructure()
+  return Snapshots.fileHashes(root, adapter).size.also {
+   require(it > 0 || Files.list(root).use { entries -> entries.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { CoreSessionMessages.NO_GAMEN_GAME_DAT_RANKINGS_BADGES_OR_JOURNAL_FILES_WERE.text() }
+  }
+ }
+ private fun validateRootStructure() {
   require(SafePaths.directory(root) == root)
   require(Files.isReadable(root) && Files.isWritable(root)) { CoreSessionMessages.THE_FOLDER_REQUIRES_READ_AND_WRITE_ACCESS.text() }
   Files.walk(root).use { paths -> paths.forEach { require(!Files.isSymbolicLink(it)) { CoreSessionMessages.THE_SAVES_FOLDER_CANNOT_CONTAIN_SYMBOLIC_LINKS.text() } } }
-  return Snapshots.capture(root, adapter, config.profile, "自动识别", null).manifest.files.size.also {
-   require(it > 0 || Files.list(root).use { entries -> entries.allMatch { p -> isDirectoryMetadata(p.fileName.toString()) } }) { CoreSessionMessages.NO_GAMEN_GAME_DAT_RANKINGS_BADGES_OR_JOURNAL_FILES_WERE.text() }
-  }
  }
  internal fun <T> locked(action: () -> T): T {
   SafePaths.checked(state.resolve("locks")).createDirectories()
@@ -204,7 +207,11 @@ class ProfileSession(
  }
  fun deviceIdentity(): DeviceIdentity = metadata.currentDevice()
  internal fun operationMetadata(): CommitOperationMetadata = metadata.operation()
- internal fun guard(stopped: () -> Boolean) { if (!stopped()) throw SaveNotStableException(CoreSessionMessages.THE_GAME_IS_RUNNING_OR_ITS_PROCESS_STATE_IS_UNKNOWN.text()) }
+ internal fun guard(stopped: () -> Boolean) {
+  // Keep identity/authorization failures from existing platform callbacks, without a running gate.
+  stopped()
+  if (Thread.currentThread().isInterrupted) throw InterruptedException()
+ }
  private fun checkedManifest(manifest: Manifest) {
   require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
   require(adapter.acceptsManifest(manifest) && manifest.profile == config.profile) { CoreSessionMessages.THE_SNAPSHOT_GAME_OR_PROFILE_DOES_NOT_MATCH.text() }
@@ -212,11 +219,9 @@ class ProfileSession(
   manifest.directoryMetadata?.validated(manifest.files)
  }
  internal fun capture(stopped: () -> Boolean, parent: String? = head(), persistDirectoryMetadata: Boolean = true): Snapshot {
-  guard(stopped); validateRoot()
+  validateRootStructure()
   val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
   require(snapshot.manifest.files.isNotEmpty()) { CoreSessionMessages.AN_EMPTY_FOLDER_CAN_ONLY_BE_USED_FOR_RESTORING_EMPTY.text() }
-  guard(stopped)
-  if (Snapshots.capture(root, adapter, config.profile, "自动识别", parent).manifest.files != snapshot.manifest.files) throw SaveNotStableException(CoreSessionMessages.SAVES_CHANGED_DURING_CAPTURE_THE_OPERATION_STOPPED_WAIT_FOR_FILES.text())
   return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists(),persist=persistDirectoryMetadata)))
  }
  private fun head(): String? = if (SafePaths.checked(headPath).exists())

@@ -2293,8 +2293,8 @@
       "sha256": "ca4179fb6a3c3dcfb55b588d66c5697f985d98c6896329e380bd8f9dc13fc6a8"
     },
     "core/src/main/kotlin/pdsync/Core.kt": {
-      "size": 13421,
-      "sha256": "cb1dc911b6f584b67431f47653bfa4279faca0acfc9132f0b733946474cb45ca"
+      "size": 14960,
+      "sha256": "bf535e91140d8273394dc68c17e8bcd21457c75b0e65c292d97bb5b15e8d78ed"
     },
     "core/src/main/kotlin/pdsync/DefaultProfileLocation.kt": {
       "size": 4672,
@@ -2397,8 +2397,8 @@
       "sha256": "0bf63ab6fe3f1586c3b493fb2fea60dda1fdc7903bd0a4cfd03878627777ca52"
     },
     "core/src/main/kotlin/pdsync/ProfileSession.kt": {
-      "size": 24109,
-      "sha256": "d6ad2fa0b05239496a28bbce9c9a876f58b0c60f89d8b43e21df7afd7783f307"
+      "size": 23919,
+      "sha256": "01f5f07ef51ca567c571c1794148680791983c38dfe555fe4c73136f0ce670a1"
     },
     "core/src/main/kotlin/pdsync/RankingsMerge.kt": {
       "size": 14036,
@@ -2413,12 +2413,12 @@
       "sha256": "d0b8c86a329cf8789c323aab522f4c5000066243f5438244505ad10c7470a3fa"
     },
     "core/src/main/kotlin/pdsync/SaveStabilityGuard.kt": {
-      "size": 6037,
-      "sha256": "39c00a23e15263049289286ce253ec7bcf1adc5c48bb8084cddf84082fd54248"
+      "size": 5852,
+      "sha256": "13fb93fcec841437bc5af058292e42bd0d49322f9c683467ec0dc900a4cffeb2"
     },
     "core/src/main/kotlin/pdsync/SaveSummary.kt": {
-      "size": 1899,
-      "sha256": "18bf14fb8b2c16e62444593e87e36d83741fb954822428d9eb85662bec3f2fb9"
+      "size": 1725,
+      "sha256": "36ab32816a30ac837be967b08bf93ccfabbe542b1c4fdf97575f762827168f97"
     },
     "core/src/main/kotlin/pdsync/SaveVersions.kt": {
       "size": 20022,
@@ -2589,8 +2589,8 @@
       "sha256": "e4f9fe05be597afb9fa54d61ac81384b3b16cbe6dff752842bd197f461a82d13"
     },
     "core/src/test/kotlin/pdsync/CoreTest.kt": {
-      "size": 14171,
-      "sha256": "b09d5372e5b37809957e5c8ae3f3ffbfcb42e89823d718cd24fdbe071f32571a"
+      "size": 14196,
+      "sha256": "dfaf78a38ec58c6889486f91718e95b6fe9c2172091a3a363d44300e8ec9e97c"
     },
     "core/src/test/kotlin/pdsync/DefaultProfileLocationTest.kt": {
       "size": 5605,
@@ -2713,8 +2713,8 @@
       "sha256": "730f6e30cc09209c666da12020a3dad310394e10a0add39aa8dabc6d7acb288a"
     },
     "core/src/test/kotlin/pdsync/ReconstructedFileHashesTest.kt": {
-      "size": 3144,
-      "sha256": "0fae8ffb74075f8d3243e7e8f7d98fa98c4641d01d3ae5a1b9f8b9db0b9dd77e"
+      "size": 3141,
+      "sha256": "870f05ad9be7f21881755afba0b3872a23f99ca54565f5e837b6f11821cbcbf8"
     },
     "core/src/test/kotlin/pdsync/ReconstructedHomeProofTest.kt": {
       "size": 3662,
@@ -2741,8 +2741,8 @@
       "sha256": "e1dc3c3207d28922f9c7aa2cb020011577d70764cc5823d92e0ccce1ea57e3aa"
     },
     "core/src/test/kotlin/pdsync/SaveStabilityGuardTest.kt": {
-      "size": 7828,
-      "sha256": "34642454bff2b43c7e3fd4effa8c85103af358971f4f172e0efd9989f2f64b03"
+      "size": 8919,
+      "sha256": "76349a317b18c53983d7c6191ce8d6712366b7278fe98b9b1a9990252a08e323"
     },
     "core/src/test/kotlin/pdsync/SaveSummaryPlayCountTest.kt": {
       "size": 3214,

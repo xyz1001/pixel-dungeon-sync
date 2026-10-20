@@ -26,7 +26,7 @@ class CoreTest {
  @Test fun offlineBranches() { val m=Memory(); val a=snap(); Sync(m).push(a); val b=snap(); val e=assertFailsWith<Conflict> { Sync(m).push(b) }; assertEquals(a.manifest.id,e.remote.manifest.id); assertEquals(b,e.local) }
  @Test fun authError() { MockWebServer().use { s -> s.enqueue(MockResponse().setResponseCode(401)); s.start(); assertFails { WebDav(s.url("/").toString(),"shattered","test","bad","bad").head() } } }
  @Test fun webdavConditionalWrite() { MockWebServer().use { s -> s.enqueue(MockResponse().setResponseCode(412)); s.start(); val m=snap().manifest; assertFails { WebDav(s.url("/").toString(),"shattered","test","a","b").publish(m,RemoteHead(m,"\"old\"")) }; assertEquals("\"old\"",s.takeRequest().getHeader("If-Match")) } }
- @Test fun stoppedAndVersionRequired() { assertFails { Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v1",{false}) }; assertFails { Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v2",{true}) } }
+ @Test fun runningDoesNotBlockRestoreButVersionIsStillRequired() { assertNotNull(Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v1",{false})); assertFails { Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v2",{true}) } }
  @Test fun gameRestartBeforeRestoreDoesNotOverwriteNewerSave() {
   val target=root(); val backup=Files.createTempDirectory("backup"); var guardCalls=0
   assertFailsWith<IllegalArgumentException> {

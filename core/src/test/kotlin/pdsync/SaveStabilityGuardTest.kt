@@ -32,20 +32,20 @@ class SaveStabilityGuardTest {
   it.resolve("rankings.dat").writeText("rank")
   it.resolve("settings.xml").writeText("excluded")
  }
- @Test fun stableContentUsesDefaultTwoSecondObservationAndDeterministicHashes() {
+ @Test fun oneObservationHasNoQuietWaitAndKeepsDeterministicHashes() {
   val root = root(); var paused = -1L; var checks = 0
   val guard = SaveStabilityGuard(root, Shattered, { checks++; true }, pause = { paused = it })
   val first = guard.fingerprint(); val second = guard.awaitStable()
-  assertEquals(2_000L, paused); assertEquals(first, second); assertTrue(checks >= 4)
+  assertEquals(-1L, paused); assertEquals(first, second); assertEquals(1, checks)
   val capture = guard.capture("demo", "v1", null)
   assertEquals(first.files, capture.manifest.files)
   assertFalse(capture.manifest.files.containsKey("settings.xml"))
  }
- @Test fun writeDuringQuiescenceIsRejectedWithoutSaveMutation() {
+ @Test fun captureNeverStartsTheRemovedQuietWait() {
   val root = root()
   val guard = SaveStabilityGuard(root, Shattered, { true }, pause = { root.resolve("game1/game.dat").writeText("changed by game") })
-  assertFailsWith<SaveNotStableException> { guard.capture("demo", "v1", null) }
-  assertEquals("changed by game", root.resolve("game1/game.dat").readText())
+  assertEquals(hash("initial".encodeToByteArray()), guard.capture("demo", "v1", null).manifest.files["game1/game.dat"])
+  assertEquals("initial", root.resolve("game1/game.dat").readText())
  }
  @Test fun sameSizeWriteWithRestoredMtimeStillChangesFingerprint() {
   val root = root(); val save = root.resolve("game1/game.dat"); val time = Files.getLastModifiedTime(save)
@@ -67,23 +67,25 @@ class SaveStabilityGuardTest {
   root.resolve("bones.dat").writeText("excluded bones")
   guard.requireUnchanged(first)
  }
- @Test fun stoppedCallbackIsFreshAndGameRestartDuringQuietWindowIsRejected() {
+ @Test fun callerGateIsEvaluatedOnceWithoutAQuietWindow() {
   val root = root(); var stopped = true
   val guard = SaveStabilityGuard(root, Shattered, { stopped }, pause = { stopped = false })
-  assertFails { guard.capture("demo", "v1", null) }
+  assertNotNull(guard.capture("demo", "v1", null))
+  assertTrue(stopped)
   assertEquals("initial", root.resolve("game1/game.dat").readText())
-  assertFails { SaveStabilityGuard(root, Shattered, { false }, quietMillis = 0).capture("demo", "v1", null) }
+  assertNotNull(SaveStabilityGuard(root, Shattered, { false }, quietMillis = 0).capture("demo", "v1", null))
+  assertFailsWith<SecurityException> { SaveStabilityGuard(root, Shattered, { throw SecurityException("identity changed") }).capture("demo", "v1", null) }
  }
- @Test fun mutationInsideActualCaptureIsRejected() {
+ @Test fun captureUsesTheBytesFromItsSingleActualRead() {
   val root = root()
   val guard = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0,
    captureSnapshot = { path, adapter, profile, version, parent, context ->
     if (profile == "demo") path.resolve("game1/game.dat").writeText("late mutation")
     Snapshots.capture(path, adapter, profile, version, parent, context)
    })
-  assertFails { guard.capture("demo", "v1", null) }
+  assertEquals(hash("late mutation".encodeToByteArray()), guard.capture("demo", "v1", null).manifest.files["game1/game.dat"])
  }
- @Test fun mutationAfterActualCaptureIsRejected() {
+ @Test fun laterMutationIsRejectedByTheExplicitWriteBoundaryCheck() {
   val root = root()
   val guard = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0,
    captureSnapshot = { path, adapter, profile, version, parent, context ->
@@ -91,16 +93,20 @@ class SaveStabilityGuardTest {
      if (profile == "demo") path.resolve("game1/game.dat").writeText("post-read mutation")
     }
    })
-  assertFails { guard.capture("demo", "v1", null) }
+  val captured = guard.captureStable("demo", "v1", null)
+  assertEquals(hash("initial".encodeToByteArray()), captured.snapshot.manifest.files["game1/game.dat"])
+  assertFails { guard.requireUnchanged(captured.fingerprint) }
  }
- @Test fun mutationDuringFingerprintReadIsRejected() {
+ @Test fun anObservationDoesNotClaimThatAWriterCannotChangeFilesLater() {
   val root = root()
   val guard = SaveStabilityGuard(root, Shattered, { true }, quietMillis = 0,
    // Reconstructed adaptation: fingerprint no longer calls the ZIP-producing capture hook.
    captureFileHashes = { path, adapter ->
     Snapshots.fileHashes(path, adapter).also { path.resolve("rankings.dat").writeText("new rank bytes") }
    })
-  assertFails { guard.fingerprint() }
+  val first = guard.fingerprint()
+  assertEquals(hash("rank".encodeToByteArray()), first.files["rankings.dat"])
+  assertFails { guard.requireUnchanged(first) }
  }
  @Test fun metadataContextIsPreservedOnlyForActualSnapshot() {
   val root = root(); val context = SnapshotCaptureContext(DeviceIdentity("12345678-1234-4234-9234-123456789abc", "Fixture"), "2026-10-09T00:00:00Z")
@@ -108,11 +114,11 @@ class SaveStabilityGuardTest {
   assertEquals(context.device, snapshot.manifest.metadata?.device)
   assertEquals(context.capturedAt, snapshot.manifest.metadata?.capturedAt)
  }
- @Test fun stableCaptureRetainsExactFingerprintAndDelaysMetadataProviderUntilCapture() {
+ @Test fun singleCaptureRetainsExactFingerprintAndReadsMetadataProviderOnce() {
   val root = root(); var observedQuiet = false; var providerCalls = 0
   val guard = SaveStabilityGuard(root, Shattered, { true }, pause = { observedQuiet = true })
   val captured = guard.captureStable("demo", "v1", null, captureContextProvider = {
-   assertTrue(observedQuiet); providerCalls++
+   assertFalse(observedQuiet); providerCalls++
    SnapshotCaptureContext(DeviceIdentity("12345678-1234-4234-9234-123456789abc", "Fixture"), "2026-10-09T00:00:00Z")
   })
   assertEquals(1, providerCalls); assertEquals(captured.snapshot.manifest.files, captured.fingerprint.files)
@@ -132,8 +138,18 @@ class SaveStabilityGuardTest {
  @Test fun interruptPreservesThreadCancellation() {
   val root = root()
   try {
-   assertFailsWith<InterruptedException> { SaveStabilityGuard(root, Shattered, { true }, pause = { throw InterruptedException() }).awaitStable() }
+   Thread.currentThread().interrupt()
+   assertFailsWith<InterruptedException> { SaveStabilityGuard(root, Shattered, { true }, pause = { error("No wait is permitted") }).awaitStable() }
    assertTrue(Thread.currentThread().isInterrupted)
   } finally { Thread.interrupted() }
+ }
+ @Test fun oneLocalReadCanProduceASnapshotWithoutReopeningSourceFiles() {
+  val root = root()
+  val read = Snapshots.readLocal(root, Shattered)
+  root.resolve("game1/game.dat").deleteExisting()
+  root.resolve("rankings.dat").deleteExisting()
+  val snapshot = Snapshots.capture(read, Shattered, "demo", "v1", null)
+  assertEquals(read.fingerprint.files, snapshot.manifest.files)
+  assertEquals("initial", Snapshots.verify(snapshot, Shattered).getValue("game1/game.dat").decodeToString())
  }
 }

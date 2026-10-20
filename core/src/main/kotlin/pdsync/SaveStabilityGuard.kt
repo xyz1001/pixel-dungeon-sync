@@ -13,13 +13,13 @@ data class SaveFileMetadata(val directory: Boolean, val size: Long, val modified
 /** files contains deterministic allowed-file content hashes, independent of ZIP IDs and timestamps. */
 data class SaveFingerprint(val files: Map<String, String>, val metadata: Map<String, SaveFileMetadata>)
 data class StableSaveCapture(val snapshot: Snapshot, val fingerprint: SaveFingerprint)
-/** Safe to retry after a new stopped/quiescent observation; distinct from invalid paths/archives. */
+/** Safe to retry after a fresh observation; distinct from invalid paths/archives. */
 class SaveNotStableException(message: String) : IllegalStateException(message)
 
 /**
- * This is a race-reduction guard, not an OS lock on the game or Steam Cloud. Call on a worker
- * thread under the existing profile lock. The stopped callback must make a fresh process query.
- * A quiet observation is never a promise that an external writer cannot start later.
+ * One bounded read under the existing profile lock, not an OS lock on external writers.
+ * An action may explicitly compare a later observation at its write boundary. Reading a save
+ * does not wait for a quiet period or repeatedly scan the same content.
  */
 class SaveStabilityGuard(
  private val root: Path,
@@ -27,36 +27,27 @@ class SaveStabilityGuard(
  private val stopped: () -> Boolean,
  private val quietMillis: Long = 2_000,
  private val pause: (Long) -> Unit = { Thread.sleep(it) },
- private val captureSnapshot: (Path, GameAdapter, String, String, String?, SnapshotCaptureContext?) -> Snapshot = Snapshots::capture,
- private val captureFileHashes: (Path, GameAdapter) -> Map<String, String> = Snapshots::fileHashes
+ private val captureSnapshot: ((Path, GameAdapter, String, String, String?, SnapshotCaptureContext?) -> Snapshot)? = null,
+ private val captureFileHashes: ((Path, GameAdapter) -> Map<String, String>)? = null
 ) {
  init { require(quietMillis >= 0) }
 
  /** Uses the existing bounded capture/path checks; does not inspect excluded device files. */
  fun fingerprint(): SaveFingerprint {
-  val before = metadata()
-  val files = captureFileHashes(root, adapter)
-  val after = metadata()
-  stableCheck(before == after, CoreMessages.SAVES_CHANGED_WHILE_READING_WAIT_FOR_THE_GAME_TO_EXIT_AND_RETRY.text())
-  return SaveFingerprint(files.toSortedMap(), after)
+  val injected = captureFileHashes
+  return if (injected == null) Snapshots.fingerprint(root, adapter)
+   else SaveFingerprint(injected(root, adapter).toSortedMap(), metadata())
  }
 
+ /** Compatibility name; this now performs one observation with no delay. */
  fun awaitStable(): SaveFingerprint {
-  requireStopped()
-  val first = fingerprint()
-  requireStopped()
-  try { pause(quietMillis) } catch (e: InterruptedException) { Thread.currentThread().interrupt(); throw e }
-  requireStopped()
-  val second = fingerprint()
-  requireStopped()
-  stableCheck(first == second, CoreMessages.SAVES_ARE_STILL_BEING_WRITTEN_WAIT_FOR_FILES_TO_STABILIZE_AND_RETRY.text())
-  return second
+  requireContext()
+  return fingerprint()
  }
 
  fun requireUnchanged(expected: SaveFingerprint) {
-  requireStopped()
+  requireContext()
   stableCheck(fingerprint() == expected, CoreMessages.SAVES_CHANGED_AFTER_THE_CHECK_OPERATION_CANCELED.text())
-  requireStopped()
  }
 
  /** All checks precede returning bytes to history/publication; no save mutation occurs here. */
@@ -67,15 +58,23 @@ class SaveStabilityGuard(
  /** Keep this exact fingerprint for the final restore check after backup registration. */
  fun captureStable(profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null,
   captureContextProvider: (() -> SnapshotCaptureContext)? = null): StableSaveCapture {
-  val stable = awaitStable()
-  requireUnchanged(stable)
-  val captured = captureSnapshot(root, adapter, profile, version, parent, captureContextProvider?.invoke() ?: captureContext)
-  stableCheck(captured.manifest.files == stable.files, CoreMessages.SAVES_CHANGED_WHILE_CREATING_THE_SNAPSHOT_OPERATION_CANCELED.text())
-  requireUnchanged(stable)
-  return StableSaveCapture(captured, stable)
+  requireContext()
+  val context = captureContextProvider?.invoke() ?: captureContext
+  val injected = captureSnapshot
+  if (injected != null) {
+   val captured = injected(root, adapter, profile, version, parent, context)
+   return StableSaveCapture(captured, SaveFingerprint(captured.manifest.files, metadata()))
+  }
+  val read = Snapshots.readLocal(root, adapter)
+  return StableSaveCapture(Snapshots.capture(read, adapter, profile, version, parent, context), read.fingerprint)
  }
 
- private fun requireStopped() { stableCheck(stopped(), CoreMessages.THE_GAME_IS_RUNNING_OR_ITS_PROCESS_STATUS_IS_UNKNOWN_SAVE_OPERATIONS_PAUSED.text()) }
+ private fun requireContext() {
+  // Android's existing callback also verifies package identity. Preserve that exception boundary,
+  // but a process-state Boolean is no longer a reason to wait or reject a save operation.
+  stopped()
+  if (Thread.currentThread().isInterrupted) throw InterruptedException()
+ }
  private fun stableCheck(condition: Boolean, message: String) { if (!condition) throw SaveNotStableException(message) }
 
  private fun metadata(): Map<String, SaveFileMetadata> {

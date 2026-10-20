@@ -38,7 +38,7 @@ class ReconstructedFileHashesTest {
    captureFileHashes = { path, adapter -> hashReads++; Snapshots.fileHashes(path, adapter) })
   guard.fingerprint(); assertEquals(0, captures)
   val snapshot = guard.capture("demo", "v1", null)
-  assertEquals(1, captures); assertTrue(hashReads >= 5); assertEquals(2_000L, paused)
+  assertEquals(1, captures); assertEquals(1, hashReads); assertEquals(-1L, paused)
   assertEquals(Snapshots.fileHashes(root, Shattered), snapshot.manifest.files)
  }
  @Test fun incompleteRunsAndAliasesAreRejected() {
