@@ -188,8 +188,7 @@ class MainActivity {
             a -> a.archiveReads.begin(),
             a -> { a.automaticHistoryState.inFlight = true; a.automaticHistoryState.connection = a.connection; },
             a -> a.installer.active = true,
-            a -> a.ready = false,
-            a -> a.available = false
+            a -> a.ready = false
         };
         for (int condition = 0; condition < changes.length; condition++) {
             MainActivity host = new MainActivity(); changes[condition].run(host);
@@ -226,6 +225,20 @@ class MainActivity {
                 "subsequent refresh must replace rather than reuse previous facade");
         check(host.history == host.nextFacade.history && "new snapshot".equals(host.selected),
                 "second refresh publishes newly observed cloud history");
+    }
+    static void unavailableCacheCanRetry() throws Exception {
+        MainActivity host = new MainActivity(); host.available = false;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            check(host.canRefreshHomeHistory(), "unavailable cached access blocked foreground retry");
+            host.nextFacade = new AndroidSyncFacade();
+            host.nextFacade.inspectHook = () -> { throw new java.io.IOException("offline"); };
+            host.failure = null; host.refreshHomeHistory(); host.runPending(); terminal(host);
+            check(!host.cloudVerified && host.history == null, "failed retry retained observation");
+        }
+        host.nextFacade = new AndroidSyncFacade(); host.failure = null;
+        host.refreshHomeHistory(); host.runPending(); terminal(host);
+        check(host.cloudVerified && host.workCalls == 3 && !host.available,
+                "foreground retry must read without treating cached access as authority");
     }
     static void manualConsumesPendingRenewal() throws Exception {
         MainActivity host = new MainActivity();
@@ -333,7 +346,7 @@ class MainActivity {
         terminal(replacement); check(replacement.cloudVerified, "replacement HOME must independently refresh after rotation");
     }
     public static void main(String[] args) throws Exception {
-        guards(); emptyUnknownHistoryAndRepeatedClicks(); manualConsumesPendingRenewal();
+        guards(); unavailableCacheCanRetry(); emptyUnknownHistoryAndRepeatedClicks(); manualConsumesPendingRenewal();
         staleBeforeWorkerAndBeforeCompletion(); staleDuringRead(); failureAfterLeavingScope(); failureBlockedReadinessAndRetry();
         System.out.println("Manual HOME history refresh execution passed");
     }

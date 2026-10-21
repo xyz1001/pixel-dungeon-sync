@@ -1712,10 +1712,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.connection.username, android.os.SystemClock.elapsedRealtime(), bootCount(getApplicationContext()));
     }
 
+    // A read retries live authorization; unavailable cached access must not block its recovery.
     private boolean canRefreshHomeHistory() {
         return this.connection != null && this.progress == OnboardingProgress.COMPLETE
                 && isForegroundHome() && !this.busy && !isHomeArchiveLoading()
-                && !this.installer.hasActiveRequest() && readyForSaves() && homeAccountAccessAvailable();
+                && !this.installer.hasActiveRequest() && readyForSaves();
     }
 
     private void refreshHomeHistory() {

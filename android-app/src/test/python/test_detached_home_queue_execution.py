@@ -28,7 +28,7 @@ public class MainActivity {
  static class SyncRuntime {
   static final Object OPERATION_LOCK=new Object();static Object account;static long generation=1;static int refreshes;
   static AndroidSyncFacade localFacade(MainActivity a,Object account){a.creations++;return a.nextFacade;}
-  static void requireOfficialSyncAccess(Object app,Object account,AndroidSyncFacade facade)throws Exception{refreshes++;facade.gate=true;}
+  static void requireOfficialSyncAccess(Object app,Object account,AndroidSyncFacade facade)throws Exception{refreshes++;if(facade.failAuthorization)throw new IOException("offline authorization");facade.gate=true;}
   static void checkOfficialSyncAccess(Object account,AndroidSyncFacade facade)throws Exception {if(!facade.gate)throw new IOException("expired");}
   static void clearOfficialSyncAccess(AndroidSyncFacade facade){facade.gate=false;}
  }
@@ -46,7 +46,7 @@ public class MainActivity {
   static class HomeReadContext implements AutoCloseable {volatile boolean closed;final CountDownLatch release;HomeReadContext(CountDownLatch r){release=r;}public void close(){closed=true;release.countDown();}}
   static class HomeReadResult{}
   final Inspection inspection=new Inspection();final SyncHistory history=new SyncHistory();long epoch;long observationGeneration(){return epoch;}
-  CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(0);boolean gate,supported=true,fail,failClose;int connects,legacy,accepts;HomeReadContext context;
+  CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(0);boolean gate,supported=true,fail,failClose,failAuthorization;int connects,legacy,accepts;HomeReadContext context;
   AutoCloseable beginHomeReadIdentityScope(){return ()->{if(failClose)throw new IOException("identity changed at close");};}
   ConnectionStatus connect(){connects++;return new ConnectionStatus();}
   HomeReadContext captureHomeReadContext(){return supported?(context=new HomeReadContext(release)):null;}
@@ -120,6 +120,26 @@ public class MainActivity {
    }finally{a.close();}
   }
  }
+ static void retryAfterFailure()throws Exception{
+  for(boolean authorization:new boolean[]{false,true}){
+   MainActivity a=new MainActivity();int before=SyncRuntime.refreshes;
+   try{
+    for(int attempt=0;attempt<2;attempt++){
+     a.nextFacade=new AndroidSyncFacade();a.nextFacade.failAuthorization=authorization;a.nextFacade.fail=!authorization;
+     a.startDetachedHomeRead(a.connection,false,false,null);a.finish();
+     check(a.detachedHomeRead==null&&!a.archiveReads.loading()&&!a.busy&&!a.cloudVerified,"failed read blocked retry");
+     check(!a.nextFacade.gate&&a.nextFacade.connects==0,"failed read retained lease or wrote namespace");
+    }
+    a.nextFacade=new AndroidSyncFacade();a.startDetachedHomeRead(a.connection,false,false,null);a.finish();
+    check(a.cloudVerified&&a.errors==2&&SyncRuntime.refreshes==before+3,"online foreground retry did not reauthorize");
+    a.nextFacade=new AndroidSyncFacade();a.nextFacade.release=new CountDownLatch(1);
+    a.startDetachedHomeRead(a.connection,false,false,null);check(a.nextFacade.entered.await(5,TimeUnit.SECONDS),"no pending read");
+    a.foreground=false;a.cancelDetachedHomeRead();a.finish();
+    a.foreground=true;a.nextFacade=new AndroidSyncFacade();a.startDetachedHomeRead(a.connection,false,false,null);a.finish();
+    check(a.cloudVerified&&!a.archiveReads.loading()&&a.errors==2,"cancel/background return blocked fresh read");
+   }finally{a.close();}
+  }
+ }
  static void automatic()throws Exception{
   MainActivity a=new MainActivity();AutoSyncHistoryRefresh.Ticket ticket=new AutoSyncHistoryRefresh.Ticket();
   try{
@@ -133,7 +153,7 @@ public class MainActivity {
   }finally{a.close();}
  }
  public static void main(String[] args)throws Exception{
-  good();cancelledAndStale();automatic();
+  good();cancelledAndStale();retryAfterFailure();automatic();
   MainActivity a=new MainActivity();try{a.nextFacade.fail=true;a.startDetachedHomeRead(a.connection,false,false,null);a.finish();check(a.errors==1&&!a.busy&&!a.archiveReads.loading(),"failure left loading");}finally{a.close();}
   MainActivity b=new MainActivity();try{b.ready=false;int count=SyncRuntime.refreshes;b.startDetachedHomeRead(b.connection,false,true,null);b.finish();check(SyncRuntime.refreshes==count&&b.nextFacade.accepts==0,"readiness failure issued remote request");}finally{b.close();}
   for(boolean automatic:new boolean[]{false,true}) {

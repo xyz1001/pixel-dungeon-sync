@@ -333,8 +333,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 308449,
-      "sha256": "3d9193793355c3f013cd1970fee511c41f32e08679ab5f091dd8b949c4133dc4"
+      "size": 308514,
+      "sha256": "7f5e47c66aca0ee0d37307317a86fb5adcef96b7f7733bd52024e82420da7d62"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -917,8 +917,8 @@
       "sha256": "87cfb6d2984b4e9a52a9da980cdc150d0f669eb7106f265513f109df4ca6039e"
     },
     "android-app/src/test/fixtures/manual-home-history-refresh-host.java.txt": {
-      "size": 21498,
-      "sha256": "df6c42bdf6cbee0739c23d6474004ebc87a347f1947a18752ca04ee180515eed"
+      "size": 22452,
+      "sha256": "0234a65065ca5be43d7847a0c37659b30fd106118c00e8d4c5bf62dbfa72d90b"
     },
     "android-app/src/test/fixtures/picker-host-checks/AndroidPickerHostChecks.kt": {
       "size": 4562,
@@ -1589,8 +1589,8 @@
       "sha256": "79196a210b082d594438f77f0f3abc293ab9251d1c0ba1f71e82b6ff7583a7a4"
     },
     "android-app/src/test/python/test_detached_home_queue_execution.py": {
-      "size": 14366,
-      "sha256": "785b8bf60e2b99d63b0eed503bfae162f9fe12fb870705147a540816ba061e5d"
+      "size": 15911,
+      "sha256": "8b2c6bb4557b8ad82d1e5e5eb0c891a5bf08028773e6da70e5981ca536e6bc10"
     },
     "android-app/src/test/python/test_diagnostic_environment_contract.py": {
       "size": 1966,
@@ -1661,8 +1661,8 @@
       "sha256": "c184886500f1928c39be24f89f6acc6ef0c3e24b535bb70863cb71255db5abc2"
     },
     "android-app/src/test/python/test_manual_home_history_refresh_execution.py": {
-      "size": 7421,
-      "sha256": "749674e285c70c09287cba078556d63370a5a5475d72effdbeb60ec8315f0280"
+      "size": 7699,
+      "sha256": "aa31dd010e5168d20b7fa8b7b2d78f91ce43d0975f9506346def4da6577b74a5"
     },
     "android-app/src/test/python/test_manual_payment_ui_contract.py": {
       "size": 6892,

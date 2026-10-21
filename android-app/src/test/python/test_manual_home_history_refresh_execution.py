@@ -57,10 +57,10 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('Manual HOME history refresh execution passed', result.stdout)
 
-    def test_regression_detects_missing_entitlement_guard(self):
-        result = self.execute(('&& readyForSaves() && homeAccountAccessAvailable();', '&& readyForSaves();'))
+    def test_regression_detects_cached_entitlement_blocking_retry(self):
+        result = self.execute(('&& readyForSaves();', '&& readyForSaves() && homeAccountAccessAvailable();'))
         self.assertNotEqual(0, result.returncode)
-        self.assertIn('manual refresh guard missing: 11', result.stderr)
+        self.assertIn('unavailable cached access blocked foreground retry', result.stderr)
 
     def test_regression_detects_missing_loading_guard(self):
         result = self.execute(('&& !isHomeArchiveLoading()', ''))
@@ -110,6 +110,9 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         failure = body(MAIN, 'void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(')
         self.assertIn('this.busy = false', failure)
         self.assertIn('if (!(exc instanceof StaleArchiveReadException)) reportError(exc)', failure)
+        self.assertIn('SyncRuntime.requireOfficialSyncAccess', reader)
+        for write_gate in ('private boolean canHomeUpload()', 'private boolean canHomeRestore()'):
+            self.assertIn('homeAccountAccessAvailable()', body(MAIN, write_gate))
         gate = body(MAIN, 'private boolean canRefreshHomeHistory()')
         for forbidden in ('this.history', 'this.inspection', 'this.cloudVerified', 'SourceAvailable', 'getLocalNodeCount'):
             self.assertNotIn(forbidden, gate)
