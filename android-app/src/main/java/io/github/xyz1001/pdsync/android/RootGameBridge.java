@@ -15,6 +15,9 @@ import pdsync.android.app.AndroidGameIdentity;
 import pdsync.android.app.AndroidGameTarget;
 import pdsync.android.app.AndroidRestoreReceipt;
 import pdsync.Snapshot;
+import pdsync.android.app.AndroidSaveObservation;
+import pdsync.android.app.AndroidSaveFile;
+import io.github.xyz1001.pdsync.bridge.SaveArchive;
 
 /** Short-lived root access adapter. Core comparison, DAV and UUID logic remain unchanged. */
 public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
@@ -115,6 +118,24 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
         finally {if(archive!=null)try{Files.deleteIfExists(archive);}catch(IOException ignored){}}
     }
     /** Sends the already verified snapshot archive unchanged; the runner owns its sole extraction. */
+    @Override public AndroidSaveObservation readSnapshot() {
+        try {
+            AndroidGameTarget target = targetGame();
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            RootProtocol.Response reply = call(RootProtocol.Command.READ_SNAPSHOT,
+                    new SaveArchive.LimitedOutputStream(bytes, SaveArchive.MAX_OBSERVATION_BYTES), false);
+            SaveArchive.Observation observation = SaveArchive.readObservation(new ByteArrayInputStream(bytes.toByteArray()));
+            requireInventory(reply, observation.inventory.fingerprint(), observation.inventory.hashes.size(), observation.inventory.bytes, "ROOT_INVALID_REPLY");
+            AndroidGameTarget after = targetGame();
+            if (!target.equals(after)) throw failure("ROOT_BINDING_MISMATCH", null);
+            Map<String,AndroidSaveFile> inventory = new java.util.TreeMap<>();
+            for (Map.Entry<String,String> item : observation.inventory.hashes.entrySet())
+                inventory.put(item.getKey(), new AndroidSaveFile(item.getValue(), observation.sizes.get(item.getKey()), observation.modifiedMillis.get(item.getKey())));
+            return new AndroidSaveObservation(after, inventory, observation.payloads);
+        } catch (BridgeDiagnostics.Failure failure) { throw failure; }
+        catch (Exception failure) { throw failure("ROOT_INVALID_REPLY", failure); }
+    }
+
     @Override public AndroidRestoreReceipt restoreVerified(Snapshot snapshot, Map<String,String> expectedCurrentFiles) {
         if (!supported.restoreSupported) throw failure("ROOT_RESTORE_UNSUPPORTED", null);
         try {
@@ -245,10 +266,10 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
             if(reply.status!=RootProtocol.Status.OK)throw failure("ROOT_"+reply.status.name(),
                     BridgeDiagnostics.rootDetail(reply.diagnosticStage.name(),reply.diagnosticCategory.name(),reply.errno));
             if(!selected.binding().fingerprint().equals(reply.bindingFingerprint))throw failure("ROOT_BINDING_MISMATCH",null);
-            if(command!=RootProtocol.Command.EXPORT && reply.archiveLength!=0)throw failure("ROOT_UNEXPECTED_ARCHIVE",null);
+            if(command!=RootProtocol.Command.EXPORT && command!=RootProtocol.Command.READ_SNAPSHOT && reply.archiveLength!=0)throw failure("ROOT_UNEXPECTED_ARCHIVE",null);
             if(command!=RootProtocol.Command.RESTORE&&command!=RootProtocol.Command.RECOVER&&reply.outcome!=RootProtocol.Outcome.READ_ONLY)
                 throw failure("ROOT_REPLY_MISMATCH",null);
-            if(command==RootProtocol.Command.INSPECT || command==RootProtocol.Command.EXPORT) {
+            if(command==RootProtocol.Command.INSPECT || command==RootProtocol.Command.EXPORT || command==RootProtocol.Command.READ_SNAPSHOT) {
                 if(!RootBinding.isHash(reply.contentFingerprint)
                         || !("EMPTY_DIRECTORY".equals(reply.contentState) || "NO_TRANSFERABLE_FILES".equals(reply.contentState)
                         || "ALLOWLISTED_FILES_PRESENT".equals(reply.contentState)))throw failure("ROOT_INVALID_REPLY",null);

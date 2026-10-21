@@ -59,6 +59,7 @@ public final class RootClientChecks {
     public static void main(String[] args)throws Exception {
         SelectedRootGame game=selection();Path dir=Files.createTempDirectory("root-client-host-");
         diagnosticLoggingChecks(dir, game);
+        observationChecks(dir, game);
         String[] rootCodes={"ROOT_AUTH_REQUIRED","ROOT_UNAVAILABLE","ROOT_DENIED_OR_EXITED","ROOT_TIMEOUT",
                 "ROOT_RUNNER_TIMEOUT","ROOT_CANCELLED","ROOT_INVALID_REPLY","ROOT_PIPE_FAILED","ROOT_DIAGNOSTIC_LIMIT","ROOT_TARGET_CHANGED",
                 "ROOT_BINDING_MISMATCH","ROOT_ACCESS_FAILED","ROOT_SAVE_NOT_READY","ROOT_UNEXPECTED_ARCHIVE",
@@ -74,9 +75,9 @@ public final class RootClientChecks {
         check(store.load().selectionToken().equals(game.selectionToken()),"token continuity");
         String original=new String(Files.readAllBytes(dir.resolve("root-selection-v1.properties")),java.nio.charset.StandardCharsets.ISO_8859_1);
         Files.write(dir.resolve("root-selection-v1.properties"),(original+"\nuid=10124\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
-        rejects(store::load,"Invalid root selection");store.save(game);
+        rejects(store::load,pdsync.i18n.AndroidMessages.ROOT_SELECTION_STORE_03.text());store.save(game);
         rejects(()->new SelectedRootGame(game.gamePackage,"Game","1",1,10,11,0,10123,game.dataDir,
-                Collections.singletonList(A),Collections.singletonList(B),B,game.apkHashes,false),"provenance");
+                Collections.singletonList(A),Collections.singletonList(B),B,game.apkHashes,false),pdsync.i18n.AndroidMessages.SELECTED_ROOT_GAME_03.text());
         RootProtocol.Request request=new RootProtocol.Request(RootProtocol.Command.PROBE,game.binding());
         byte[] valid=reply(okay(game).withRequest(request,RootProtocol.Outcome.READ_ONLY));FakeProcess success=new FakeProcess(valid,0);AtomicInteger launches=new AtomicInteger();
         RootProcessTransport transport=new RootProcessTransport("/data/app/self/base.apk",cmd->{
@@ -96,7 +97,7 @@ public final class RootClientChecks {
         FakeProcess blocked=new FakeProcess(new BlockingInput());long start=System.nanoTime();
         rejects(()->new RootProcessTransport("/data/app/self/base.apk",cmd->blocked,50).exchange(request,null),"ROOT_TIMEOUT");
         check(blocked.destroyed&&(System.nanoTime()-start)<2000000000L,"timeout kills child promptly");
-        rejects(()->new RootProcessTransport("/data/app/a'; touch /tmp/b/base.apk",cmd->success,50),"fixed root launcher");
+        rejects(()->new RootProcessTransport("/data/app/a'; touch /tmp/b/base.apk",cmd->success,50),pdsync.i18n.AndroidMessages.ROOT_PROCESS_TRANSPORT_01.text());
         FakeProcess late=new FakeProcess(valid,0);CountDownLatch release=new CountDownLatch(1), started=new CountDownLatch(1);
         RootProcessTransport delayed=new RootProcessTransport("/data/app/self/base.apk",cmd->{
             started.countDown();while(true){try{release.await();break;}catch(InterruptedException ignored){}}
@@ -117,7 +118,7 @@ public final class RootClientChecks {
         RootGameBridge unauthorized=new RootGameBridge(game,identity,g->verifies.incrementAndGet(),(r,o)->{calls.incrementAndGet();return okayUnchecked(gamet()).withRequest(r,RootProtocol.Outcome.READ_ONLY);},()->false,dir.toFile());
         check(unauthorized.mode()==GameAccessBackend.Mode.ROOT_DIRECT,"root mode");
         unauthorized.targetGame();check(calls.get()==0,"target/readiness render never requests root");
-        rejects(unauthorized::inspectReady,"Root 游戏选择");check(calls.get()==0,"authorization gates transport");
+        rejects(unauthorized::inspectReady,pdsync.i18n.AndroidMessages.ROOT_GAME_BRIDGE_07.text());check(calls.get()==0,"authorization gates transport");
         unauthorized.probeAuthorization();check(calls.get()==1,"explicit probe only");
         // A fresh process can use the same persisted opt-in for a deliberate operation; construction is passive.
         AtomicInteger restartedCalls=new AtomicInteger();
@@ -129,10 +130,10 @@ public final class RootClientChecks {
         restarted.inspectReady();check(restartedCalls.get()==1,"explicit post-restart inspect needs no redundant manual probe");
 
         check(!unauthorized.capabilities().restoreSupported&&!unauthorized.capabilities().interruptedBackupRecovery,"readonly caps");
-        rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),"尚未提供");
+        rejects(()->unauthorized.restoreFrom(dir,Collections.emptyMap()),pdsync.i18n.AndroidMessages.ROOT_GAME_BRIDGE_06.text());
         try{unauthorized.restoreFrom(dir,Collections.emptyMap());}catch(BridgeDiagnostics.Failure failure){
             check(failure.code.equals("ROOT_RESTORE_UNSUPPORTED")&&failure.stage==BridgeDiagnostics.Stage.RESTORE,"restore stage/code preserved");}
-        rejects(unauthorized::recoverInterruptedBackup,"尚未提供");check(calls.get()==1,"unsupported write never launches root");
+        rejects(unauthorized::recoverInterruptedBackup,pdsync.i18n.AndroidMessages.ROOT_GAME_BRIDGE_06.text());check(calls.get()==1,"unsupported write never launches root");
         RootGameBridge changed=new RootGameBridge(game,identity,g->{if(verifies.incrementAndGet()>0)throw new IOException("changed");},(r,o)->{calls.incrementAndGet();return okayUnchecked(game).withRequest(r,RootProtocol.Outcome.READ_ONLY);},()->true,dir.toFile());
         rejects(changed::targetGame,"ROOT_TARGET_CHANGED");check(calls.get()==1,"target change blocks transport");
         String emptyFingerprint=DirectoryMetadataKt.contentSha256(Collections.emptyMap());
@@ -185,9 +186,29 @@ public final class RootClientChecks {
         rejects(()->truncatedArchive.exportTo(Files.createDirectory(dir.resolve("bad-archive"))),"ROOT_EXPORT_FAILED");
         Path empty=Files.createTempFile(dir,"empty-",".zip");byte[] emptyZip=new byte[22];emptyZip[0]=0x50;emptyZip[1]=0x4b;emptyZip[2]=5;emptyZip[3]=6;Files.write(empty,emptyZip);
         RootExportValidation.requireCompleteArchive(empty.toFile(),22,0);check(true,"empty archive framing");
-        Files.write(empty,new byte[22]);rejects(()->RootExportValidation.requireCompleteArchive(empty.toFile(),22,0),"Incomplete");
+        Files.write(empty,new byte[22]);rejects(()->RootExportValidation.requireCompleteArchive(empty.toFile(),22,0),pdsync.i18n.AndroidMessages.ROOT_EXPORT_VALIDATION_02.text());
         store.clear();check(store.load()==null,"switch clears root only");
         System.out.println("Root client host checks passed: "+checks+" (no root/phone calls)");
+    }
+    private static void observationChecks(Path directory, SelectedRootGame game) throws Exception {
+        byte[] run="real summary bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Map<String,String> hashes=Map.of("game1/game.dat",io.github.xyz1001.pdsync.bridge.SaveArchive.sha256(run),"game1/level.dat",A);
+        io.github.xyz1001.pdsync.bridge.SaveArchive.Observation observation=new io.github.xyz1001.pdsync.bridge.SaveArchive.Observation(
+                hashes,Map.of("game1/game.dat",(long)run.length,"game1/level.dat",123L),Map.of("game1/game.dat",1234L,"game1/level.dat",5678L),Map.of("game1/game.dat",run));
+        ByteArrayOutputStream encoded=new ByteArrayOutputStream();io.github.xyz1001.pdsync.bridge.SaveArchive.writeObservation(encoded,observation);
+        byte[] payload=encoded.toByteArray();AtomicInteger calls=new AtomicInteger();AtomicReference<String> receiptHash=new AtomicReference<>(observation.inventory.fingerprint());
+        RootProcessTransport.Exchange exchange=(request,sink)->{
+            calls.incrementAndGet();check(request.command==RootProtocol.Command.READ_SNAPSHOT,"HOME uses the no-ZIP root command");
+            sink.write(payload);
+            return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),"ALLOWLISTED_FILES_PRESENT",2,
+                    observation.inventory.bytes,receiptHash.get(),"UNKNOWN",false,payload).withRequest(request,RootProtocol.Outcome.READ_ONLY);
+        };
+        RootGameBridge bridge=new RootGameBridge(game,null,selected->{},exchange,()->true,directory.toFile());
+        pdsync.android.app.AndroidSaveObservation read=bridge.readSnapshot();
+        check(read.getFiles().equals(hashes)&&read.getByteCount()==run.length+123,"client preserves full real inventory and total bytes");
+        check(read.getInventory().get("game1/game.dat").getModifiedMillis()==1234L,"client preserves raw source timestamp");
+        check(calls.get()==1,"observation uses one root read and no export");
+        receiptHash.set(A);rejects(bridge::readSnapshot,"ROOT_INVALID_REPLY");
     }
     private static SelectedRootGame gamet(){try{return selection();}catch(Exception e){throw new AssertionError(e);}}
     private static RootProtocol.Response okayUnchecked(SelectedRootGame game){try{return okay(game);}catch(Exception e){throw new AssertionError(e);}}
@@ -207,20 +228,17 @@ public final class RootClientChecks {
         RootGameBridge bridge = new RootGameBridge(game, null, selected -> {}, busyReply, () -> true, directory.toFile());
         pdsync.DiagnosticTrace trace = pdsync.DiagnosticLog.begin(pdsync.DiagnosticAction.ACCESS_CHECK, false);
         try (AndroidDiagnosticLogging.Scope ignored = AndroidDiagnosticLogging.bind(trace)) {
-            try { bridge.inspectReady(); throw new AssertionError("busy inspection accepted"); }
-            catch (BridgeDiagnostics.Failure failure) {
-                check("ROOT_BUSY".equals(failure.code), "existing busy decision preserved");
-                AndroidDiagnosticLogging.failure(trace, pdsync.DiagnosticStage.FINISHED, failure);
-            }
+            bridge.inspectReady();
+            check(true, "foreground lifecycle does not reject a valid inventory");
         }
         String events = diagnosticEvents();
         check(events.contains("\"rootCommand\":\"INSPECT\""), "actual request command exported");
         check(events.contains("\"readinessCode\":\"OK\""), "protocol response is only OK");
-        check(!events.contains("\"readinessCode\":\"READY\""), "busy response never marked ready");
+        check(!events.contains("\"readinessCode\":\"READY\""), "protocol diagnostic does not invent READY");
         check(events.contains("\"observationState\":\"FOREGROUND\""), "real UID observation preserved");
-        check(events.contains("\"fileCount\":\"4\""), "inventory retained before busy readiness rejection");
+        check(events.contains("\"fileCount\":\"4\""), "inventory retained independently of lifecycle");
         check(events.contains("\"contentBytes\":\"1234\""), "bounded inventory size retained");
-        check(events.contains("\"failure\":\"BUSY\""), "busy terminal error retained");
+        check(!events.contains("\"failure\":\"BUSY\""), "no lifecycle busy error fabricated");
         RootProcessTransport.Exchange permissionReply = (request, archive) -> RootProtocol.Response.failure(RootProtocol.Status.NOT_ROOT,
                 request).withDiagnostic(RootProtocol.DiagnosticStage.EUID, RootProtocol.DiagnosticCategory.PERMISSION, 13);
         RootGameBridge denied = new RootGameBridge(game, null, selected -> {}, permissionReply, () -> true, directory.toFile());

@@ -10,8 +10,53 @@ interface AndroidGameBridge {
  fun restoreFrom(preparedDirectory: Path, expectedCurrentFiles: Map<String, String>)
  fun targetGame(): AndroidGameTarget
  fun beginHomeReadIdentityScope(): AutoCloseable = AutoCloseable {}
+ /** A complete single-read inventory with only summary inputs. Null means unsupported. */
+ fun readSnapshot(): AndroidSaveObservation? = null
  /** Null is an unsupported capability, with no save mutation or transfer having occurred. */
  fun restoreVerified(snapshot: Snapshot, expectedCurrentFiles: Map<String, String>): AndroidRestoreReceipt? = null
+}
+
+data class AndroidSaveFile(val sha256:String,val size:Long,val modifiedMillis:Long) {
+ init {
+  require(Regex("[0-9a-f]{64}").matches(sha256))
+  require(size in 0..pdsync.MAX_SNAPSHOT_BYTES.toLong())
+ }
+}
+
+/** Detached backend evidence, never a filesystem fingerprint or a long-lived live-save cache. */
+class AndroidSaveObservation(
+ val target:AndroidGameTarget,
+ inventory:Map<String,AndroidSaveFile>,
+ summaryBytes:Map<String,ByteArray>
+) {
+ val inventory:Map<String,AndroidSaveFile> = Collections.unmodifiableMap(LinkedHashMap(inventory))
+ val files:Map<String,String> = Collections.unmodifiableMap(this.inventory.mapValues { it.value.sha256 })
+ val byteCount:Long = this.inventory.values.sumOf { it.size }
+ internal val summaryEntries:Map<String,ByteArray>
+ init {
+  require(this.inventory.size<=pdsync.MAX_SNAPSHOT_FILES && byteCount<=pdsync.MAX_SNAPSHOT_BYTES)
+  this.inventory.keys.forEach { name ->
+   require(pdsync.safePath(name) && pdsync.Shattered.includes(name) && !pdsync.isDirectoryMetadata(name))
+  }
+  require(this.inventory.keys.map { it.lowercase(java.util.Locale.ROOT) }.distinct().size==this.inventory.size)
+  this.inventory.keys.forEach { name ->
+   var parent=name.substringBeforeLast('/',"")
+   while(parent.isNotEmpty()) {
+    require(parent !in this.inventory)
+    parent=parent.substringBeforeLast('/',"")
+   }
+  }
+  this.inventory.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { slot ->
+   require("$slot/game.dat" in this.inventory)
+  }
+  val wanted=this.inventory.keys.filter { it=="rankings.dat" || Regex("game[0-9]+/game\\.dat").matches(it) }.toSet()
+  require(summaryBytes.keys==wanted)
+  summaryEntries=Collections.unmodifiableMap(summaryBytes.mapValues { (name,value) ->
+   val copy=value.copyOf();val entry=this.inventory.getValue(name)
+   require(copy.size.toLong()==entry.size && pdsync.hash(copy)==entry.sha256)
+   copy
+  })
+ }
 }
 
 /**

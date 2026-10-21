@@ -36,7 +36,8 @@ class RootClientContract(unittest.TestCase):
         self.assertIn('AndroidGameIdentity.forPackage(root.gamePackage, root.gameLabel, root.originIdentity)', text)
         self.assertNotIn('"namespace."', text)
         self.assertIn('backendSupportsAutomatic(access.mode(), access.capabilities())', text)
-        self.assertIn('capabilities.exportSupported && capabilities.lifecycleObservation', text)
+        self.assertIn('&& capabilities.exportSupported;', text)
+        self.assertNotIn('&& capabilities.lifecycleObservation', text)
         self.assertIn('mode != GameAccessBackend.Mode.LEGACY_HELPER_BRIDGE', text)
 
     def test_root_opt_in_never_probes_from_lookup(self):

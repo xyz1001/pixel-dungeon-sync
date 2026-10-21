@@ -27,6 +27,9 @@ import pdsync.android.app.AndroidGameIdentity;
 import pdsync.android.app.AndroidGameTarget;
 import pdsync.android.app.AndroidRestoreReceipt;
 import pdsync.Snapshot;
+import pdsync.android.app.AndroidSaveObservation;
+import pdsync.android.app.AndroidSaveFile;
+import io.github.xyz1001.pdsync.bridge.SaveArchive;
 
 
 public final class BridgeClient implements GameAccessBackend {
@@ -229,8 +232,10 @@ public final class BridgeClient implements GameAccessBackend {
     
     public static void closeReply(Bundle bundle) throws Exception {
         ParcelFileDescriptor parcelFileDescriptorDescriptor = bundle == null ? null : AndroidCompat.descriptor(bundle, "archive");
-        if (parcelFileDescriptorDescriptor != null) {
-            parcelFileDescriptorDescriptor.close();
+        try { if (parcelFileDescriptorDescriptor != null) parcelFileDescriptorDescriptor.close(); }
+        finally {
+            ParcelFileDescriptor snapshot = bundle == null ? null : AndroidCompat.descriptor(bundle, "snapshot");
+            if (snapshot != null) snapshot.close();
         }
     }
 
@@ -431,11 +436,39 @@ public final class BridgeClient implements GameAccessBackend {
     }
 
     @Override
+    public AndroidSaveObservation readSnapshot() {
+        try {
+            if (!supportsCapability("readSnapshotVersion")) return null;
+            AndroidGameTarget target = targetGame(); Bundle reply = call("readSnapshot", null);
+            try {
+                ParcelFileDescriptor descriptor = AndroidCompat.descriptor(reply, "snapshot");
+                if (reply.getInt("readSnapshotVersion", 0) != 1 || descriptor == null || reply.containsKey("archive"))
+                    throw new IOException("Invalid observation reply");
+                SaveArchive.Observation observation;
+                try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
+                    observation = SaveArchive.readObservation(input);
+                }
+                if (!observation.inventory.fingerprint().equals(reply.getString("fingerprint"))
+                        || observation.inventory.hashes.size() != reply.getInt("fileCount", -1)
+                        || observation.inventory.bytes != reply.getLong("byteCount", -1))
+                    throw new IOException("Observation receipt mismatch");
+                AndroidGameTarget after = targetGame();
+                if (!target.equals(after)) throw new IOException("Observation target changed");
+                Map<String,AndroidSaveFile> inventory = new java.util.TreeMap<>();
+                for (Map.Entry<String,String> item : observation.inventory.hashes.entrySet())
+                    inventory.put(item.getKey(), new AndroidSaveFile(item.getValue(), observation.sizes.get(item.getKey()), observation.modifiedMillis.get(item.getKey())));
+                return new AndroidSaveObservation(after, inventory, observation.payloads);
+            } finally { closeReply(reply); }
+        } catch (Failure failure) { throw failure; }
+        catch (Exception failure) { throw new Failure(BridgeDiagnostics.Stage.EXPORT, "EXPORT_FAILED", AndroidMessages.BRIDGE_CLIENT_33.text(), failure); }
+    }
+
+    @Override
     public AndroidRestoreReceipt restoreVerified(Snapshot snapshot, Map<String,String> expectedCurrentFiles) {
         File archive = null;
         try {
             if (homeIdentity != null) homeIdentity.requireNoReadScope();
-            if (!supportsRestoreReceipt()) return null;
+            if (!supportsCapability("restoreResultVersion")) return null;
             AndroidGameTarget target = targetGame();
             Map<String,String> desired = new java.util.TreeMap<>(snapshot.getManifest().getFiles());
             if (desired.size() > MAX_FILES) throw new IOException("Restore inventory exceeds the file limit");
@@ -473,7 +506,7 @@ public final class BridgeClient implements GameAccessBackend {
     }
 
     /** The installed runtime, rather than the bundled DEX or a version label, grants this capability. */
-    private boolean supportsRestoreReceipt() throws Exception {
+    private boolean supportsCapability(String capability) throws Exception {
         if (!embedded()) return false;
         Bundle reply;
         try { reply = call("authenticate", null); }
@@ -486,7 +519,7 @@ public final class BridgeClient implements GameAccessBackend {
         try {
             return reply.getInt("accessProtocolVersion", 0) == 1 && reply.getBoolean("metadataOnly", false)
                     && (reply.getBoolean("accessAuthenticated", false) || reply.getBoolean("authenticated", false))
-                    && !reply.containsKey("archive") && reply.getInt("restoreResultVersion", 0) == 1;
+                    && !reply.containsKey("archive") && !reply.containsKey("snapshot") && reply.getInt(capability, 0) == 1;
         } finally { closeReply(reply); }
     }
 

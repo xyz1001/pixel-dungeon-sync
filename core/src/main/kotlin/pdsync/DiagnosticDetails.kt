@@ -233,7 +233,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.ACCESS -> accessStates
    Field.GAME_PACKAGE_STATUS, Field.HELPER_PACKAGE_STATUS -> packageStates
    Field.SAVE_LAYOUT_STATE -> layoutStates
-   Field.ROOT_COMMAND -> setOf("PROBE", "INSPECT", "EXPORT", "OBSERVE", "RESTORE", "RECOVER", "UNKNOWN")
+   Field.ROOT_COMMAND -> setOf("PROBE", "INSPECT", "EXPORT", "OBSERVE", "RESTORE", "RECOVER", "READ_SNAPSHOT", "UNKNOWN")
    Field.ROOT_STAGE -> rootStages
    Field.ROOT_CATEGORY -> rootCategories
    Field.BRIDGE_STAGE -> bridgeStages

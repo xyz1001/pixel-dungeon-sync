@@ -103,7 +103,7 @@ public final class RootProcessTransport implements AutoCloseable {
     }
     public static long budgetMillis(RootProtocol.Command command) {
         if(command==RootProtocol.Command.RESTORE||command==RootProtocol.Command.RECOVER)return 135000;
-        if(command==RootProtocol.Command.INSPECT||command==RootProtocol.Command.EXPORT)return 60000;
+        if(command==RootProtocol.Command.INSPECT||command==RootProtocol.Command.EXPORT||command==RootProtocol.Command.READ_SNAPSHOT)return 60000;
         return 30000;
     }
     @Override public void close(){closed=true;Process process=active.getAndSet(null);if(process!=null)destroy(process);}
