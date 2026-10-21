@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPOutputStream
 import java.util.jar.JarOutputStream
@@ -22,6 +23,7 @@ class ProductionWebDavFlowTest {
  private class Dav:AutoCloseable {
   val server=MockWebServer()
   val contents=ConcurrentHashMap<String,ByteArray>()
+  val methods=CopyOnWriteArrayList<String>()
   val folders=ConcurrentHashMap.newKeySet<String>().apply{add("/dav/")}
   val failCommitAfterAccept=AtomicBoolean(false);val failObjects=AtomicBoolean(false)
   val failCommitReads=AtomicBoolean(false)
@@ -30,6 +32,7 @@ class ProductionWebDavFlowTest {
   init {
    server.dispatcher=object:Dispatcher(){
     override fun dispatch(r:RecordedRequest):MockResponse {
+     methods.add(requireNotNull(r.method))
      if(r.getHeader("If-Match")!=null || r.getHeader("If-None-Match")!=null || r.method !in setOf("GET","PUT","PROPFIND","MKCOL"))invalidProtocol.set(true)
      if(r.getHeader("Authorization")!=Credentials.basic("fixture",""))return MockResponse().setResponseCode(401)
      val path=r.path!!.substringBefore('?')
@@ -82,6 +85,24 @@ class ProductionWebDavFlowTest {
  }
  private fun open(c:AppConfig)=AppendProfileSession(c,temp.resolve(Path.of(c.saveRoot).parent.fileName.toString()).resolve("app-state"),captureQuietMillis=0)
  private fun published(s:AppendProfileSession,dav:Dav)=assertIs<AppendPushResult.Success>(s.push(dav.store()){true}).commit
+ private fun <T> readOnlyDav(dav:Dav,action:()->T):T {
+  val before=dav.fingerprint();val folders=dav.folders.toSet();val requestStart=dav.methods.size
+  try {return action()} finally {
+   assertEquals(before,dav.fingerprint(),"Merge preparation must not modify cloud objects or commits")
+   assertEquals(folders,dav.folders.toSet(),"Merge preparation must not create remote directories")
+   assertTrue(dav.methods.drop(requestStart).all {it in setOf("GET","HEAD","PROPFIND")},"Merge preparation attempted a write HTTP method")
+  }
+ }
+ private fun mergeAndPublish(s:AppendProfileSession,dav:Dav):AppendCommit {
+  val baseline=s.baseline()
+  val prepared=assertIs<AppendPushResult.Prepared>(readOnlyDav(dav){s.mergeCurrent(dav.store()){true}})
+  assertEquals(baseline,s.baseline());assertTrue(s.hasPending());assertTrue(s.retryablePending())
+  assertEquals(prepared.commit.snapshot.files,s.observedFiles())
+  assertFalse(s.directory.resolve("backups").exists(),"Merge must not create old-data backups")
+  val published=published(s,dav)
+  assertEquals(prepared.commit,published);assertFalse(s.hasPending())
+  return published
+ }
  private fun restore(s:AppendProfileSession,dav:Dav)=s.restoreRemote(s.readRemote(dav.store()).single().entry.manifest.id,dav.store()){true}
  private fun advance(s:AppendProfileSession,slot:Int,value:String) {
   s.root.resolve("game$slot/depth1.dat").writeBytes(gzip(value));s.confirmRunIdentity("game$slot",s.observedFiles(),true){true}
@@ -99,13 +120,13 @@ class ProductionWebDavFlowTest {
   assertEquals(base.id,(b.directoryStatus() as SidecarRead.Valid).value.lastSynced!!.commitId)
   assertTrue(base.snapshot.files.keys.none(::isDirectoryMetadata));assertEquals(7,SaveSummary.read(b.root).plays)
   advance(a,1,"A1");published(a,dav);advance(b,2,"B1")
-  val merge=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val merge=mergeAndPublish(b,dav)
   assertEquals(2,merge.snapshot.saveVersions!!.runs.size);assertContentEquals(gzip("A1"),b.root.resolve("game1/depth1.dat").readBytes());assertContentEquals(gzip("B1"),b.root.resolve("game2/depth1.dat").readBytes())
   val files=b.observedFiles();b.renameCurrent("隔离进度"){true};assertEquals(files,b.observedFiles());val renamed=published(b,dav)
   assertEquals(files,renamed.snapshot.files);assertEquals("隔离进度",renamed.snapshot.directoryMetadata!!.displayName)
   val restarted=open(cb);assertEquals(renamed.id,restarted.baseline());assertEquals("隔离进度",restarted.syncHistory().currentName)
   restore(a,dav);advance(a,1,"left-fork");published(a,dav);advance(restarted,1,"right-fork")
-  val fork=assertIs<AppendPushResult.Success>(restarted.mergeCurrent(dav.store()){true}).commit
+  val fork=mergeAndPublish(restarted,dav)
   assertEquals(3,fork.snapshot.saveVersions!!.runs.size)
   val children=fork.snapshot.directoryMetadata!!.runs.values.filter{it.parentRunUUIDs.isNotEmpty()};assertEquals(2,children.size);assertEquals(2,children.map{it.runUUID}.distinct().size)
  }
@@ -114,12 +135,12 @@ class ProductionWebDavFlowTest {
   val a=open(ca);val b=open(cb);published(a,dav);restore(b,dav)
   advance(a,1,"left");published(a,dav);advance(b,1,"right")
   val local=b.observedFiles();val remote=dav.fingerprint()
-  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"需要 7")
-  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertFalse(b.hasPending())
+  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"需要 7")
+  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
   a.root.resolve("rankings.dat").writeBytes(gzip("{\"total\":8}"));published(a,dav)
   b.root.resolve("rankings.dat").writeBytes(gzip("{\"total\":9}"));val globalBefore=b.observedFiles();val remoteBefore=dav.fingerprint()
-  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"全局记录")
-  assertEquals(globalBefore,b.observedFiles());assertEquals(remoteBefore,dav.fingerprint())
+  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"全局记录")
+  assertEquals(globalBefore,b.observedFiles());assertEquals(remoteBefore,dav.fingerprint());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
  }
  @Test fun acceptedThenFailedUploadRetriesExactKeysAndReadFailureDoesNotRestore()=Dav().use{dav->
   val ca=configured("retry-A",dav);val cb=configured("retry-B",dav);seed(Path.of(ca.saveRoot),1)
@@ -168,14 +189,14 @@ class ProductionWebDavFlowTest {
   val right=rankingRecord(java.util.UUID.randomUUID().toString(),90)
   globals(a,"\"MONSTERS_SLAIN_1\"",left,"com.shatteredpixel.shatteredpixeldungeon.items.food.Food");published(a,dav)
   globals(b,"\"GOLD_COLLECTED_1\"",right,"com.shatteredpixel.shatteredpixeldungeon.items.potions.PotionOfHealing")
-  val merged=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val merged=mergeAndPublish(b,dav)
   val records=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
   assertEquals(2,globalInt(records["total"],"total"));assertEquals(1,globalInt(records["won"],"won"))
   assertEquals(2,(records["records"] as kotlinx.serialization.json.JsonArray).size)
   assertEquals(setOf("MONSTERS_SLAIN_1","GOLD_COLLECTED_1"),globalStringSet(GlobalBundles.decode(b.root.resolve("badges.dat").readBytes(),"badges.dat")["badges"],"badges"))
   val journal=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")
   assertEquals(2,(journal["catalog_classes"] as kotlinx.serialization.json.JsonArray).size)
-  assertEquals(2,merged.parents.size);assertTrue(merged.snapshot.files.keys.none(::isDirectoryMetadata))
+  assertEquals(1,merged.parents.size);assertTrue(merged.snapshot.files.keys.none(::isDirectoryMetadata))
   val content=b.observedFiles();val remote=dav.fingerprint();assertEquals(merged.id,published(b,dav).id)
   assertEquals(content,b.observedFiles());assertEquals(remote,dav.fingerprint())
   restore(a,dav);assertEquals(content,a.observedFiles())
@@ -185,9 +206,9 @@ class ProductionWebDavFlowTest {
   a.root.resolve("rankings.dat").writeBytes(rankings(common,left,right));published(a,dav)
   b.root.resolve("rankings.dat").writeBytes(rankings(common,left,right))
   b.root.resolve("badges.dat").writeBytes(gzip("""{"badges":["MONSTERS_SLAIN_1","GOLD_COLLECTED_1","ITEM_LEVEL_1"]}"""))
-  val dedup=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val dedup=mergeAndPublish(b,dav)
   assertEquals(3,SaveSummary.read(b.root).plays)
-  val after=b.observedFiles();assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  val after=b.observedFiles();mergeAndPublish(b,dav)
   assertEquals(after,b.observedFiles());assertEquals(3,SaveSummary.read(b.root).plays)
  }
  @Test fun highestElevenRankingRowsKeepFullEventCountersThroughProductionHttp()=Dav().use { dav ->
@@ -200,14 +221,14 @@ class ProductionWebDavFlowTest {
   val lowWin=rankingRecord("00000000-0000-0000-0000-000000000012",1,true)
   a.root.resolve("rankings.dat").writeBytes(rankings(*(rows+high).toTypedArray()));published(a,dav)
   b.root.resolve("rankings.dat").writeBytes(rankings(*(rows+lowWin).toTypedArray()))
-  val merged=assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}).commit
+  val merged=mergeAndPublish(b,dav)
   val output=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
   val kept=output["records"] as kotlinx.serialization.json.JsonArray
   assertEquals(11,kept.size);assertEquals(high,kept.first());assertFalse(kept.contains(lowWin))
   assertEquals(12,globalInt(output["total"],"total"));assertEquals(1,globalInt(output["won"],"won"))
-  assertEquals(active,b.observedFiles().filterKeys { it.startsWith("game1/") });assertEquals(2,merged.parents.size)
+  assertEquals(active,b.observedFiles().filterKeys { it.startsWith("game1/") });assertEquals(1,merged.parents.size)
   val before=b.observedFiles();val remote=dav.fingerprint()
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  mergeAndPublish(b,dav)
   assertEquals(before,b.observedFiles());assertTrue(remote.all { (path,hash) -> dav.fingerprint()[path]==hash })
   assertEquals(12,SaveSummary.read(b.root).plays)
  }
@@ -218,11 +239,11 @@ class ProductionWebDavFlowTest {
   a.root.resolve("journal.dat").writeBytes(counts(2));published(a,dav);restore(b,dav)
   a.root.resolve("journal.dat").writeBytes(counts(4));published(a,dav)
   b.root.resolve("journal.dat").writeBytes(counts(7))
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  mergeAndPublish(b,dav)
   fun current()=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")["catalog_uses"].toString()
   assertEquals("[7]",current())
   val bytes=b.root.resolve("journal.dat").readBytes()
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  mergeAndPublish(b,dav)
   assertContentEquals(bytes,b.root.resolve("journal.dat").readBytes());assertEquals("[7]",current())
  }
  @Test fun rankingMissingEvidenceAndSoleResetRetainProgressThroughProductionHttp()=Dav().use { dav ->
@@ -238,17 +259,17 @@ class ProductionWebDavFlowTest {
   a.root.resolve("rankings.dat").writeBytes(counts(listOf(old),100,20));published(a,dav);restore(b,dav)
   a.root.resolve("rankings.dat").writeBytes(counts(listOf(old,left),101,20));published(a,dav)
   b.root.resolve("rankings.dat").writeBytes(counts(listOf(old,right),106,21)) // Missing five event IDs: do not add this delta.
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  mergeAndPublish(b,dav)
   fun current()=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
   assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
   assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
   restore(a,dav)
   a.root.resolve("rankings.dat").writeBytes(counts(emptyList(),0,0));published(a,dav)
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true}) // Only the remote rankings file changed.
+  mergeAndPublish(b,dav) // Only the remote rankings file changed.
   assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
   assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
   val bytes=b.root.resolve("rankings.dat").readBytes()
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(dav.store()){true})
+  mergeAndPublish(b,dav)
   assertContentEquals(bytes,b.root.resolve("rankings.dat").readBytes())
  }
  @Test fun malformedGlobalCountersFailPreflightWithoutAnyWrites()=Dav().use { dav ->
@@ -260,8 +281,8 @@ class ProductionWebDavFlowTest {
   b.root.resolve("journal.dat").writeBytes(gzip("""{"catalog_classes":["$item"],"catalog_seen":[true],"catalog_uses":["broken"],"documents":{}}"""))
   val local=b.observedFiles();val remote=dav.fingerprint();val baseline=b.baseline()
   val sidecar=b.root.resolve(DIRECTORY_METADATA_FILE);val sidecarBytes=sidecar.readBytes();val sidecarTime=Files.getLastModifiedTime(sidecar)
-  assertContains(assertFailsWith<RunMergeException>{b.mergeCurrent(dav.store()){true}}.message!!,"非负整数")
-  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertEquals(baseline,b.baseline());assertFalse(b.hasPending())
+  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"非负整数")
+  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertEquals(baseline,b.baseline());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
   assertContentEquals(sidecarBytes,sidecar.readBytes());assertEquals(sidecarTime,Files.getLastModifiedTime(sidecar))
  }
 

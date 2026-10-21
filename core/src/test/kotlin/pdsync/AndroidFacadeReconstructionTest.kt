@@ -402,12 +402,12 @@ class AndroidFacadeReconstructionTest {
             checkedJournal = true
         }
         val result = facade.mergeConflict(inspection)
-        assertFalse(result.isConflict); assertFalse(result.isPending)
-        assertEquals(fixture.store.latest().snapshot.id, result.snapshotId)
-        assertEquals("resolution", fixture.store.latest().kind)
+        assertFalse(result.isConflict); assertTrue(result.isPending)
+        assertNotNull(result.snapshotId)
+        assertNotEquals(fixture.store.latest().snapshot.id,result.snapshotId)
         assertTrue(checkedJournal); assertEquals(restores + 1, bridge.restores)
-        assertTrue(fixture.store.writes > writes)
-        assertEquals(fixture.expected, fixture.store.latest().snapshot.files)
+        assertEquals(writes,fixture.store.writes)
+        assertNotEquals(fixture.expected, fixture.store.latest().snapshot.files)
         assertEquals(fixture.expected, bridge.files.mapValues { hash(it.value) })
         assertEquals(fixture.expected, readFiles(mirror(fixture.local.root)).mapValues { hash(it.value) })
         assertFalse(facade.hasUnresolvedRestore()); assertFalse(journal(fixture.local.root).exists())
@@ -420,8 +420,8 @@ class AndroidFacadeReconstructionTest {
         val failure = assertFailsWith<IllegalStateException> { facade.mergeConflict(inspection) }
         assertEquals("Synthetic helper unavailable", failure.message)
         assertEquals(restores + 1, bridge.restores); assertEquals(before, bridge.files.mapValues { hash(it.value) })
-        assertEquals("resolution", fixture.store.latest().kind)
-        assertEquals(fixture.expected, fixture.store.latest().snapshot.files)
+        assertEquals("snapshot", fixture.store.latest().kind)
+        assertNotEquals(fixture.expected, fixture.store.latest().snapshot.files)
         assertEquals(fixture.expected, readFiles(mirror(fixture.local.root)).mapValues { hash(it.value) })
         assertTrue(facade.hasUnresolvedRestore())
         val persisted = json.parseToJsonElement(journal(fixture.local.root).readText()).jsonObject

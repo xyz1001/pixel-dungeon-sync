@@ -131,15 +131,17 @@ class OnboardingMergeProofTest {
   assertEquals(beforeBaseline, fixture.local.baseline())
   assertFalse(fixture.local.hasPending())
 
-  val result = assertIs<AppendPushResult.Success>(fixture.local.mergeCurrent(observed, fixture.store) { true })
-  assertEquals("resolution", result.commit.kind)
+  val result = assertIs<AppendPushResult.Prepared>(fixture.local.mergeCurrent(observed, fixture.store) { true })
+  assertEquals("snapshot", result.commit.kind)
   assertEquals(preview.snapshot.manifest.files, fixture.local.observedFiles())
   assertEquals("remote-1", fixture.local.root.resolve("game1/depth1.dat").readText())
   assertEquals("local-2", fixture.local.root.resolve("game2/depth1.dat").readText())
-  assertEquals(result.commit.id, fixture.local.baseline())
-  assertFalse(fixture.local.hasPending())
+  assertEquals(beforeBaseline, fixture.local.baseline())
+  assertTrue(fixture.local.hasPending()); assertEquals(result.commit, repository(fixture.local).pending()?.commit)
+  assertEquals(beforeWrites, fixture.store.writes)
   val graph = repository(fixture.local).discover(fixture.store)
-  assertEquals(setOf(result.commit.id), graph.tips)
+  assertEquals(observed.observedTips, graph.tips)
+  assertFalse(result.commit.id in graph.commits)
   assertTrue(result.commit.parents.containsAll(observed.observedTips))
  }
 
@@ -150,9 +152,16 @@ class OnboardingMergeProofTest {
   assertEquals(OnboardingKind.BRANCHED, observed.kind)
   assertEquals(2, observed.observedTips.size)
   val preview = fixture.local.previewOnboardingMerge(observed, fixture.store) { true }
-  val result = assertIs<AppendPushResult.Success>(fixture.local.mergeCurrent(observed, fixture.store) { true })
+  val beforeWrites = fixture.store.writes
+  val beforeBaseline = fixture.local.baseline()
+  val result = assertIs<AppendPushResult.Prepared>(fixture.local.mergeCurrent(observed, fixture.store) { true })
   assertEquals("resolution", result.commit.kind)
   assertEquals(2, result.commit.parents.size)
+  assertEquals(beforeWrites, fixture.store.writes); assertEquals(beforeBaseline, fixture.local.baseline())
+  assertEquals(observed.observedTips, repository(fixture.local).discover(fixture.store).tips)
+  assertTrue(fixture.local.hasPending()); assertEquals(result.commit, repository(fixture.local).pending()?.commit)
+  val uploaded = assertIs<AppendPushResult.Success>(fixture.local.push(fixture.store) { true })
+  assertEquals(result.commit, uploaded.commit)
   val graph = repository(fixture.local).discover(fixture.store)
   assertTrue(observed.observedTips.all { graph.descendsFrom(result.commit.id, it) })
   assertEquals(setOf(result.commit.id), graph.tips)
@@ -224,7 +233,7 @@ class OnboardingMergeProofTest {
   assertRejectedWithoutWrites(fixture, observed)
  }
 
- @Test fun siblingArrivingDuringLocalPublicationRequiresAnotherPreviewBeforeMerge() {
+ @Test fun siblingArrivingDuringExplicitMergedUploadRemainsIndependent() {
   val store = Memory()
   val remote = session(true)
   val local = session(false)
@@ -239,7 +248,8 @@ class OnboardingMergeProofTest {
   val observed = local.compareOnboarding(store) { true }
   val preview = local.previewOnboardingMerge(observed, store) { true }
   assertEquals(2, preview.slots)
-  val beforeFiles = local.observedFiles()
+  val beforeBaseline = local.baseline()
+  val beforeWrites = store.writes
   val beforeCommits = store.commits.keys.toSet()
   var localCommitId: String? = null
   var lateCommitId: String? = null
@@ -249,13 +259,19 @@ class OnboardingMergeProofTest {
    lateCommitId = lateDevice.baseline()
   }
 
-  val result = assertIs<AppendPushResult.Diverged>(local.mergeCurrent(observed, store) { true })
+  val prepared = assertIs<AppendPushResult.Prepared>(local.mergeCurrent(observed, store) { true })
+  assertEquals(beforeWrites, store.writes); assertEquals(beforeCommits, store.commits.keys)
+  assertEquals(beforeBaseline, local.baseline()); assertTrue(local.hasPending())
+  assertNull(localCommitId); assertNull(lateCommitId)
+  assertEquals(preview.snapshot.manifest.files, local.observedFiles())
+  val result = assertIs<AppendPushResult.Diverged>(local.push(store) { true })
+  assertEquals(prepared.commit.id, localCommitId)
   val newLocal = assertNotNull(localCommitId)
   val newLate = assertNotNull(lateCommitId)
-  assertEquals(observed.observedTips + newLocal + newLate, result.conflict.observedTips)
+  assertEquals(setOf(newLocal,newLate), result.conflict.observedTips)
   assertEquals(beforeCommits + newLocal + newLate, store.commits.keys)
-  assertEquals(beforeFiles, local.observedFiles())
-  assertEquals("base-1", local.root.resolve("game1/depth1.dat").readText())
+  assertEquals(preview.snapshot.manifest.files, local.observedFiles())
+  assertEquals("remote-1", local.root.resolve("game1/depth1.dat").readText())
   assertEquals("local-2", local.root.resolve("game2/depth1.dat").readText())
   assertEquals(newLocal, local.baseline())
   assertFalse(local.hasPending())

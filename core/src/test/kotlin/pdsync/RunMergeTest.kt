@@ -93,14 +93,24 @@ class RunMergeTest {
   bRoot.resolve("game2/depth1.dat").writeText("local B1");b.confirmRunIdentity("game2",b.observedFiles(),true){true}
   val conflict=assertIs<AppendPushResult.Diverged>(b.push(remote){true}).conflict
   val preview=b.previewMerge(conflict,remote){true};assertEquals(2,preview.slots);assertEquals(0,preview.addedSlots)
-  remote.fail=true;assertFails { b.merge(conflict,remote){true} };assertTrue(b.hasPending())
+  val originalCommits=remote.commits.mapValues { it.value.copyOf() }
+  val originalObjects=remote.objects.mapValues { it.value.copyOf() };val previousBaseline=b.baseline()
+  remote.fail=true;val prepared=assertIs<AppendPushResult.Prepared>(b.merge(conflict,remote){true});assertTrue(b.hasPending())
+  assertEquals(previousBaseline,b.baseline());assertEquals(originalCommits.keys,remote.commits.keys)
+  originalCommits.forEach { (id,bytes)->assertContentEquals(bytes,remote.commits.getValue(id)) }
+  originalObjects.forEach { (id,bytes)->assertContentEquals(bytes,remote.objects.getValue(id)) }
+  assertFails { b.push(remote){true} };assertTrue(b.hasPending())
   val mergedFiles=b.observedFiles();assertEquals(preview.snapshot.manifest.files,mergedFiles)
-  remote.fail=false;val result=assertIs<AppendPushResult.Success>(b.push(remote){true});assertEquals(mergedFiles,result.commit.snapshot.files);assertEquals(conflict.observedTips,result.commit.parents.toSet());assertFalse(b.hasPending())
+  remote.fail=false;val result=assertIs<AppendPushResult.Success>(b.push(remote){true});assertEquals(prepared.commit,result.commit);assertEquals(mergedFiles,result.commit.snapshot.files);assertEquals(conflict.observedTips,result.commit.parents.toSet());assertFalse(b.hasPending())
   assertEquals("remote A1",bRoot.resolve("game1/depth1.dat").readText());assertEquals("local B1",bRoot.resolve("game2/depth1.dat").readText())
   aRoot.resolve("game1/depth1.dat").writeText("remote A2");a.confirmRunIdentity("game1",a.observedFiles(),true){true};a.push(remote){true}
   bRoot.resolve("game2/depth1.dat").writeText("local B2");b.confirmRunIdentity("game2",b.observedFiles(),true){true}
   assertEquals(2,b.previewMerge(b.inspectConflict(remote){true}!!,remote){true}.slots)
-  assertIs<AppendPushResult.Success>(b.mergeCurrent(remote){true})
+  val beforeMergeCommits=remote.commits.keys.toSet();val beforeMergeBaseline=b.baseline()
+  val nextPrepared=assertIs<AppendPushResult.Prepared>(b.mergeCurrent(remote){true})
+  assertEquals(beforeMergeCommits,remote.commits.keys);assertEquals(beforeMergeBaseline,b.baseline());assertTrue(b.hasPending())
+  val nextUpload=assertIs<AppendPushResult.Success>(b.push(remote){true})
+  assertEquals(nextPrepared.commit,nextUpload.commit);assertFalse(b.hasPending())
   assertEquals("remote A2",bRoot.resolve("game1/depth1.dat").readText());assertEquals("local B2",bRoot.resolve("game2/depth1.dat").readText())
   bRoot.resolve("game1/game.dat").writeBytes(byteArrayOf());bRoot.resolve("game2/game.dat").writeBytes(byteArrayOf())
   val beforeCount=remote.commits.size;val beforeFiles=b.observedFiles()

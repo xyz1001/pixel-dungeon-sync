@@ -173,6 +173,9 @@ class DesktopSharedComparisonFlowTest {
 
  @Test fun failedOrDivergedReturnValuesCannotAuthorizeAutomaticCompletion() {
   val diverged = AppendPushResult.Diverged(AppendConflict(emptySet(), emptyList(), emptyMap()))
+  val prepared = AppendPushResult.Prepared(publish(session("prepared"), Memory()).commit)
+  assertFalse(desktopOnboardingOperationSucceeded(prepared))
+  assertFalse(desktopOnboardingOperationSucceeded(OnboardingRestoreResult.Published(prepared)))
   assertFalse(desktopOnboardingOperationSucceeded(diverged))
   assertFalse(desktopOnboardingOperationSucceeded(OnboardingRestoreResult.Published(diverged)))
   assertFalse(desktopOnboardingOperationSucceeded(null))

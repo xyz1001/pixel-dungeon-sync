@@ -46,6 +46,8 @@ internal class SelectedRestoreStage(
  val unchanged:Boolean=false
 )
 sealed interface AppendPushResult {
+ /** Verified local merge waiting for a separate upload action; no cloud write has occurred. */
+ data class Prepared(val commit: AppendCommit): AppendPushResult
  data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
  data class Diverged(val conflict: AppendConflict): AppendPushResult
 }
@@ -602,7 +604,7 @@ class AppendProfileSession(
    require(currentFiles()==observed.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_MERGING_NOTHING_WAS_OVERWRITTEN.text() }
    local.restore(snapshot(plan),stopped,observed.observedLocalFiles)
   }
-  return publish(plan,store,stopped)
+  return AppendPushResult.Prepared(plan.commit)
  }
  private fun buildMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult {
   local.guard(stopped);noLegacyPending();appliedOnly()
@@ -644,9 +646,8 @@ class AppendProfileSession(
    require(currentFiles()==conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_MERGING_NOTHING_WAS_OVERWRITTEN.text() }
    local.restore(snapshot(plan),stopped,conflict.observedLocalFiles)
   }
-  // A network failure after verified local apply leaves this exact plan pending for retry.
-  // It is not advertised as an atomic transaction across the local disk and WebDAV.
-  return publish(plan,store,stopped)
+  // Publication is exclusively performed by a later explicit upload or automatic-upload action.
+  return AppendPushResult.Prepared(plan.commit)
  }
  private fun resolveLocked(conflict: AppendConflict, chosenSnapshotId: String, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()

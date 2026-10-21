@@ -214,6 +214,7 @@ class AndroidSyncFacade internal constructor(
    }
    checkActualUnchanged(comparison.localFiles)
    when(val result=session.onboardingUpload(comparison,store,mirrorStopped)) {
+    is AppendPushResult.Prepared -> autoBlocked("SKIPPED_UNCERTAIN",SyncBlockReason.HISTORY_CONFLICT,true)
     is AppendPushResult.Success -> AutoUploadResult("UPLOADED",if(result.remoteAhead)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_BUT_THE_CLOUD_ADVANCED_REVIEW_BEFORE_RESTORING.text() else CoreMessages.ANDROID_BACKGROUND_SNAPSHOT_UPLOADED_AND_VERIFIED.text(),result.commit.snapshot.id,result.remoteAhead)
     is AppendPushResult.Diverged -> AutoUploadResult("SKIPPED_CONFLICT",CoreMessages.ANDROID_A_REMOTE_BRANCH_ARRIVED_DURING_UPLOAD_BOTH_IMMUTABLE_BRANCHES_ARE_PRESERVED_CHOOSE_EXPLICI.text(),result.conflict.branches.find {it.commit.id==result.conflict.publishedLocalCommit}?.snapshot?.manifest?.id,true,SyncBlockReason.HISTORY_CONFLICT)
    }
@@ -400,6 +401,7 @@ class AndroidSyncFacade internal constructor(
   require(conflict.observedTips==c.observedTips && conflict.observedLocalFiles==c.localFiles){CoreMessages.ANDROID_CLOUD_BRANCHES_OR_CURRENT_GAME_FILES_CHANGED_COMPARE_AGAIN_BEFORE_SELECTING_A_BRANCH.text()};return conflict
  }
  private fun pushResult(result:AppendPushResult,success:String=CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text())=when(result) {
+  is AppendPushResult.Prepared -> OperationResult(CoreMessages.ANDROID_GAME_RESTORE_VERIFIED_ANY_FROZEN_UPLOAD_REMAINS_AVAILABLE_FOR_EXPLICIT_RETRY.text(),false,true,result.commit.snapshot.id)
   is AppendPushResult.Diverged -> OperationResult(CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text(),true,session.hasPending(),null)
   is AppendPushResult.Success -> OperationResult(when {result.remoteAhead->CoreMessages.ANDROID_SNAPSHOT_IS_PRESERVED_BUT_ANOTHER_CLOUD_BRANCH_ADVANCED_COMPARE_AGAIN.text();result.localDirty->CoreMessages.ANDROID_SNAPSHOT_UPLOADED_NEWER_LOCAL_CHANGES_REMAIN_COMPARE_AGAIN.text();else->success},false,session.hasPending(),result.commit.snapshot.id)
  }

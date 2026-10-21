@@ -162,7 +162,7 @@ public final class AndroidHostMessages {
     public static final UiText CHECKING_THE_COMMON_BASELINE_RUN_IDENTITY_162 = new UiText("android.host.checking_the_common_baseline_run_identity_162", "正在检查共同基线、单局身份与六槽容量…", "Checking the common baseline, run identity, and six-slot capacity…");
     public static final UiText A_SAFE_MERGE_IS_NOT_POSSIBLE_163 = new UiText("android.host.a_safe_merge_is_not_possible_163", "无法安全合并，请选择要继续的进度。", "A safe merge is not possible. Choose the progress to continue.");
     public static final UiText THE_MERGE_WILL_USE_164 = new UiText("android.host.merge_slots", "合并后使用 %1$d 个槽位（最多 6 个）。\n", "Slots used after merging: %1$d (maximum 6).\n");
-    public static final UiText N_NLOCAL_SAVES_WILL_BE_BACKED_166 = new UiText("android.host.n_nlocal_saves_will_be_backed_166", "\n\n直接替换本机，不创建备份，并发布合并版本。原始云端快照保留。", "\n\nLocal saves will be replaced without a backup, and the merged version published. Original cloud snapshots are retained.");
+    public static final UiText N_NLOCAL_SAVES_WILL_BE_BACKED_166 = new UiText("android.host.n_nlocal_saves_will_be_backed_166", "\n\n直接替换本机，不创建备份，合并结果等待上传。原始云端快照保留。", "\n\nLocal saves will be replaced without a backup. The merged result will await upload. Original cloud snapshots are retained.");
     public static final UiText MERGE_SAVES_167 = new UiText("android.host.merge_saves_167", "合并存档", "Merge saves");
     public static final UiText MERGE_AND_UPLOAD_168 = new UiText("android.host.merge_and_upload_168", "合并并上传", "Merge and upload");
     public static final UiText APPLYING_AND_VERIFYING_THE_SAFE_MERGE_169 = new UiText("android.host.applying_and_verifying_the_safe_merge_169", "正在应用并核验安全合并…", "Applying and verifying the safe merge…");
