@@ -181,7 +181,7 @@ private fun SharedHistoryCanvas(
                     nodes[arrow.edge.fromId]?.column != nodes[arrow.edge.toId]?.column -> Color(0xFF006877)
                     else -> Color(0xFF94A3B8)
                 }
-                drawLine(color, arrow.start, arrow.tip,
+                drawLine(color, arrow.start, arrow.shaftEnd,
                     if (nodes[arrow.edge.fromId]?.column != nodes[arrow.edge.toId]?.column) 2.5.dp.toPx() else 2.2.dp.toPx(), cap = StrokeCap.Round,
                     pathEffect = if (arrow.edge.dashed)
                         PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())) else null)

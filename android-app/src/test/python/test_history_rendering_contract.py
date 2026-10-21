@@ -22,7 +22,8 @@ class HistoryRenderingContractTest(unittest.TestCase):
         self.assertIn('SharedHistoryNodeMeasurement(pair.first.height.toFloat(), pair.second.height.toFloat())', HISTORY)
         self.assertIn('geometry.layout?.arrows?.forEach', HISTORY)
         self.assertIn('arrow.edge.dashed', HISTORY)
-        self.assertIn('drawLine(color, arrow.start, arrow.tip', HISTORY)
+        self.assertIn('drawLine(color, arrow.start, arrow.shaftEnd', HISTORY)
+        self.assertNotIn('drawLine(color, arrow.start, arrow.tip', HISTORY)
         self.assertNotIn('cubicTo(', HISTORY)
 
     def test_content_match_uses_one_head_without_visible_label(self):

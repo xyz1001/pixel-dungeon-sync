@@ -1625,8 +1625,8 @@
       "sha256": "f49e3057afe2bdd98db81cda827931b6fa0c7d1d07fb7147438cb2547ac0ea55"
     },
     "android-app/src/test/python/test_history_rendering_contract.py": {
-      "size": 2423,
-      "sha256": "a63939403d29ef1f73ce3b05196b12e5d066480ed4a5835205147f1f329095b8"
+      "size": 2504,
+      "sha256": "d04967da1baa1b00e31d5884ad3fd491ae26cae87770a6529c20777e9929f757"
     },
     "android-app/src/test/python/test_home_archive_action_execution.py": {
       "size": 7464,
@@ -7021,16 +7021,16 @@
       "sha256": "e9c6c040fe806ef7b6e89b636f3b8606eb842c3fe48448edd1d9ad2e1d2a8bb2"
     },
     "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryGeometry.kt": {
-      "size": 4758,
-      "sha256": "c9508da22cfdddc43e49b316fa39a0349320c08ea8c382a5d793d73aea4973c6"
+      "size": 4915,
+      "sha256": "dd9840e169f3b1df31d3fc7f6b9d080d5f5cf4dbe6b705c1c3dbd8b51eb65429"
     },
     "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryNamingController.kt": {
       "size": 1687,
       "sha256": "18d88094764a816bd98c3db734e142b392620cd4bf060c7f51be5a6fb33a2322"
     },
     "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedHistorySection.kt": {
-      "size": 16894,
-      "sha256": "3eebf085a0c6116addc83b27c4b1c442a861becc314350249bac8888a600a465"
+      "size": 16899,
+      "sha256": "208a6227e4ed8e713d36a7e65c89df9dfb41b1d0ee2632bcff614ab58e5f9346"
     },
     "shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/SharedHomeArchiveAvailability.kt": {
       "size": 1479,
@@ -7148,9 +7148,13 @@
       "size": 8508,
       "sha256": "7423fb2970164fe50a46bb64f0f7539d1f4a7a05612002b5bdf8919f631f009e"
     },
+    "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryArrowRenderTest.kt": {
+      "size": 5660,
+      "sha256": "8517535d43d22d8351a2ea424dd24042af13433b834d101739481757605204aa"
+    },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryGeometryTest.kt": {
-      "size": 5288,
-      "sha256": "881882f1aa5929d84c261f4b998a70805ec73c5e4fd2154c1f16f020f0bf9d10"
+      "size": 6146,
+      "sha256": "8ac8113fd39017e42ab149733a24ea7edf7d6e8e2ccf2c5236371a251521b619"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryNamingControllerTest.kt": {
       "size": 2822,

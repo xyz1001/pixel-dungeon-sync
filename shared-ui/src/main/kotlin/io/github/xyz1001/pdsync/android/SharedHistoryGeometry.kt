@@ -17,7 +17,10 @@ internal data class SharedHistoryArrow(
     val tip: Offset,
     val headLeft: Offset,
     val headRight: Offset,
-)
+) {
+    // Stop the shaft at the head base: a round cap at the tip protrudes past the triangle.
+    val shaftEnd: Offset get() = (headLeft + headRight) / 2f
+}
 
 internal data class SharedHistoryCanvasLayout(
     val width: Float,

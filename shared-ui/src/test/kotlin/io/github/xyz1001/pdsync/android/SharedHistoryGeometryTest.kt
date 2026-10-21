@@ -85,6 +85,21 @@ class SharedHistoryGeometryTest {
         assertTrue(upload.headLeft.x > upload.tip.x && upload.headRight.x > upload.tip.x)
     }
 
+    @Test fun shaftStopsAtHeadBaseInEveryDirectionAndDensity() {
+        val cards = mapOf("a" to Rect(20f, 20f, 260f, 120f),
+            "b" to Rect(300f, 20f, 540f, 120f),
+            "c" to Rect(20f, 220f, 260f, 320f),
+            "d" to Rect(300f, 440f, 540f, 540f))
+        for (density in listOf(1f, 2f, 3f)) {
+            for ((from, to) in listOf("a" to "b", "b" to "a", "a" to "c", "c" to "a", "a" to "d", "d" to "a")) {
+                val arrow = assertNotNull(sharedHistoryArrow(HistoryEdge(from, to), cards, density))
+                assertEquals((arrow.headLeft + arrow.headRight) / 2f, arrow.shaftEnd)
+                assertEquals(8f * density, (arrow.tip - arrow.shaftEnd).getDistance(), 0.001f)
+                assertTrue((arrow.shaftEnd - arrow.start).getDistance() < (arrow.tip - arrow.start).getDistance())
+            }
+        }
+    }
+
     private fun node(id: String, column: Int, row: Int) =
         HistoryNode(id, null, id, "time", "detail", "status", column, row)
 }
