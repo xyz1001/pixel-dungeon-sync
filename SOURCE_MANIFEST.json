@@ -333,8 +333,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 302870,
-      "sha256": "8cd6d0bb3d46521a264296a2becbf8bd710c9b6d65c20369b42fc81ee67e43a7"
+      "size": 303321,
+      "sha256": "0793d6749d5b963d1ff7fffb99c23376938af308e5752ef001310cf1de08cff7"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -1697,8 +1697,8 @@
       "sha256": "dc38a71dfaacc7cd1d9de289d528e2632a02a8bcb68d2411bf2d1e021e991b8e"
     },
     "android-app/src/test/python/test_restore_receipt_execution.py": {
-      "size": 13879,
-      "sha256": "94184a329b8c2c6d70a05984e8ad43e1ca26b671e33d418d25e9d9b0cc27d1a5"
+      "size": 14529,
+      "sha256": "af2df69fc74d9b095adcf3833167224fc9385fd16c1c49cf3668f60743fcca94"
     },
     "android-app/src/test/python/test_root_client_contract.py": {
       "size": 3836,

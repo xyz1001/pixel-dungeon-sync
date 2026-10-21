@@ -47,7 +47,8 @@ public class MainActivity {
             Inspection getRefreshedInspection(){return refreshed;}
             boolean getConfigurationComplete(){return complete;}
         }
-        int historyReads, completions; Action historyHook = () -> {};
+        int historyReads, completions; long epoch; Action historyHook = () -> {};
+        long observationGeneration(){return epoch;}
         SyncHistory receiptHistory = new SyncHistory();
         SyncHistory historyPresentation(Inspection inspection) throws Exception { historyReads++; historyHook.run(); return receiptHistory; }
         void completeOnboarding(Object inspection){completions++;}
@@ -168,6 +169,12 @@ public class MainActivity {
             check(out.stale && stale.reads==0 && stale.markers==0,"stale worker refreshed/re-marked another scope");
             stale.m55x8211a061("old success",out);unchanged(stale,before,history);
         }
+        MainActivity newer=new MainActivity();OperationOutcome older=newer.run(result());
+        AndroidSyncFacade.Inspection newerInspection=newer.inspection;SyncHistory newerHistory=newer.history;
+        newer.facade.epoch++;newer.m55x8211a061("old success",older);unchanged(newer,newerInspection,newerHistory);
+        MainActivity racing=new MainActivity();racing.facade.historyHook=()->racing.facade.epoch++;
+        OperationOutcome raced=racing.run(result());
+        check(raced.stale && racing.markers==0 && raced.receipt==null,"same-facade stale worker published receipt");
         MainActivity readFailure=new MainActivity();readFailure.facade.historyHook=()->{throw new IOException("refresh unavailable");};
         OperationOutcome failed=readFailure.run(result());
         check(readFailure.mutations==1 && failed.refreshFailure!=null && !readFailure.cloudVerified

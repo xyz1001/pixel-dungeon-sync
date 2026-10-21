@@ -4217,8 +4217,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final OperationReceiptContext context;
         final AndroidSyncFacade.Inspection inspection;
         final SyncHistory history;
-        OperationReceipt(OperationReceiptContext context, AndroidSyncFacade.Inspection inspection, SyncHistory history) {
+        final long observationGeneration;
+        OperationReceipt(OperationReceiptContext context, AndroidSyncFacade.Inspection inspection, SyncHistory history,
+                         long observationGeneration) {
             this.context = context; this.inspection = inspection; this.history = history;
+            this.observationGeneration = observationGeneration;
         }
     }
 
@@ -4248,12 +4251,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
         if (outcome.result.isPending() || refreshed.getNeedsRestoreRecovery()
                 || hasAnyRestoreJournal()) return false;
+        final long observationGeneration = context.facade.observationGeneration();
         final SyncHistory refreshedHistory = context.facade.historyPresentation(refreshed);
-        if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
+        if (!currentOperationReceipt(context) || context.facade.observationGeneration() != observationGeneration) {
+            outcome.stale = true; return true;
+        }
         if (!outcome.result.isConflict() && outcome.result.getConfigurationComplete())
             SyncRuntime.setOnboardingProgress(this, context.account, OnboardingProgress.COMPLETE);
         if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
-        outcome.receipt = new OperationReceipt(context, refreshed, refreshedHistory);
+        outcome.receipt = new OperationReceipt(context, refreshed, refreshedHistory, observationGeneration);
         return true;
     }
 
@@ -4262,7 +4268,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (outcome.stale) return false;
         final OperationReceipt receipt = outcome.receipt;
         if (receipt == null) return true;
-        if (!currentOperationReceipt(receipt.context)) return false;
+        if (!currentOperationReceipt(receipt.context)
+                || receipt.context.facade.observationGeneration() != receipt.observationGeneration) return false;
         this.inspection = receipt.inspection;
         this.history = receipt.history;
         this.cloudVerified = true;
