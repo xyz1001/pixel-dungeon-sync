@@ -1,9 +1,9 @@
 {
-  "version_code": 93,
-  "version_name": "0.5.72-test",
+  "version_code": 94,
+  "version_name": "0.5.73-test",
   "reconstruction": true,
   "original_lost_source_exact": false,
-  "release_status": "performance93_candidate_integration_validation_pending",
+  "release_status": "atomic_code94_validation_pending",
   "baseline_archive_sha256": "334a408b131602728676f5b9babc1add73874a9af0d51d1c8295b2c00ea329e2",
   "shipped92_apk_sha256": "71550ee4005a76d761e473371eb9723b4380cb4448d1f0409e1b71e13e7d5198",
   "scope": "All packaged source/reference/test files excluding this manifest; no build cache, signing keys, credentials or save data. This is reconstructed source, not original lost commit ancestry.",
@@ -26,7 +26,7 @@
     },
     "android-app/AndroidManifest.xml": {
       "size": 3660,
-      "sha256": "c3bbfb0d52cdbf3faea124435073e9aae4b571db04a3f9f4a9fb51536eff33df"
+      "sha256": "73aea47c198d306a70a7a74f6a36018eb664311e6f4316ebeeb161844f7d2025"
     },
     "android-app/additional-java-sources.txt": {
       "size": 424,
