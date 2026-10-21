@@ -165,8 +165,8 @@
       "sha256": "7befd0892b6a9c28c80652962adb800cb3cccd0631c426e0a7b2b20fd4831a44"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeClient.java": {
-      "size": 36037,
-      "sha256": "e8929e8500f4fd5262b35c82677a47e08c502017d874152d0e2e7f82252049d0"
+      "size": 36704,
+      "sha256": "693b996f64e119deaa7fdedd153f2b143d72e4dfbc7731882d93f9d81b9b4eb3"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeDiagnostics.java": {
       "size": 28655,
@@ -1581,8 +1581,8 @@
       "sha256": "ae26e58ccfc60778749934f76b0549a083e41e3f0bcb841fe012533499720a80"
     },
     "android-app/src/test/python/test_bridge_capability_diagnostics94_execution.py": {
-      "size": 7887,
-      "sha256": "7d7fe921153405dca9b386bf62d9bd5af59d2b6b8da82ca06c0b5af92e7f1d09"
+      "size": 9083,
+      "sha256": "ba6d3561e343915e6751777ff7376bcb924527c14ca1a42a23fe670cf7cab6a8"
     },
     "android-app/src/test/python/test_controlled_session_contract.py": {
       "size": 2551,
@@ -2353,8 +2353,8 @@
       "sha256": "de89113e081e2133668d1d8b736fb4c40692ff683f6e4322d83c8eb816159478"
     },
     "core/src/main/kotlin/pdsync/DiagnosticTiming.kt": {
-      "size": 4006,
-      "sha256": "d68158f5d564018f7f24ded51cc529e33dcd9f9e02a78afb17e7aeb0071ecc2e"
+      "size": 4071,
+      "sha256": "4a581beedbbe3763593189a5d3164c8b157d0752977cf6eeec569da5d0bc3cf3"
     },
     "core/src/main/kotlin/pdsync/DirectoryMetadata.kt": {
       "size": 10491,
@@ -2649,8 +2649,8 @@
       "sha256": "e4bd7351fe0373479aedcbab0c0b988925e16041f7c89df18430e71a86a02269"
     },
     "core/src/test/kotlin/pdsync/DiagnosticCapabilityEvidence94Test.kt": {
-      "size": 4964,
-      "sha256": "f1ec6223261de68049c3c3ad69d5a2407cf14d5e1a0b30584fb9daed5d6b5832"
+      "size": 6202,
+      "sha256": "6f1b3afe2f8b9912dff065146b5d151c0fbdac49b2789d398d175c27c86c199b"
     },
     "core/src/test/kotlin/pdsync/DiagnosticDetailsTest.kt": {
       "size": 14031,

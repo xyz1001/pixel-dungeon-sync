@@ -101,6 +101,23 @@ public class BridgeCapabilityChecks {
                             '-d', temp, *map(str, target.rglob('*.java'))], check=True)
             subprocess.run([java, '-cp', temp, 'BridgeCapabilityChecks'], check=True)
 
+    def test_timing_wraps_real_transfer_and_only_existing_handshake(self):
+        source = CLIENT.read_text()
+        read = method(source, 'public AndroidSaveObservation readSnapshot()')
+        export = method(source, 'public void exportTo(')
+        for body, phase in ((read, 'BRIDGE_READ_SNAPSHOT'), (export, 'BRIDGE_SAVE_EXPORT')):
+            self.assertIn('DiagnosticTiming.start(DiagnosticPhase.' + phase + ')', body)
+            self.assertIn('finally { timing.close(); }', body)
+            self.assertIn('timing.failed(', body)
+        self.assertIn('timing.skipped(); return null;', read)
+        for signature in ('public AndroidRestoreReceipt restoreVerified(', 'public void restoreFrom('):
+            body = method(source, signature)
+            self.assertIn('DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_RESTORE_WRITE, () -> call("restore",', body)
+        capability = method(source, 'private boolean supportsCapability(')
+        self.assertEqual(1, capability.count('call("authenticate", null)'))
+        self.assertNotIn('DiagnosticLog.record', capability)
+        self.assertNotIn('DiagnosticLog.record', read)
+        self.assertNotIn('DiagnosticLog.record', export)
 
 
 if __name__ == '__main__':

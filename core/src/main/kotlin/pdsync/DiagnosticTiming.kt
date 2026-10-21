@@ -9,7 +9,8 @@ import kotlinx.serialization.json.Json
 /** Reconstructed from code92 DEX: bounded in-memory totals, emitted only with FINISHED. */
 @Serializable enum class DiagnosticPhase {
  QUEUE_WAIT, OPERATION_LOCK_WAIT, IDENTITY_VERIFICATION, SAVE_EXPORT, LOCAL_EXPORT_VERIFY,
- MIRROR_COPY, LOCAL_SUMMARY, COMPARISON, REMOTE_METADATA, UI_COMPLETION
+ MIRROR_COPY, LOCAL_SUMMARY, COMPARISON, REMOTE_METADATA, UI_COMPLETION,
+ BRIDGE_READ_SNAPSHOT, BRIDGE_SAVE_EXPORT, BRIDGE_RESTORE_WRITE
 }
 @Serializable data class DiagnosticPhaseMeasurement(val durationMs:Long,val count:Int,val failed:Int=0,val canceled:Int=0,val skipped:Int=0)
 internal class DiagnosticPhaseCollector {

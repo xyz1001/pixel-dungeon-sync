@@ -26,6 +26,7 @@ class DiagnosticCapabilityEvidence94Test {
   DiagnosticLog.bind(trace).use {
    DiagnosticCapabilities.reply(1,1,1,1)
    DiagnosticCapabilities.record(DiagnosticCapability.READ_SNAPSHOT,DiagnosticCapabilityState.SUPPORTED)
+   DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_READ_SNAPSHOT) { Unit }
   }
   assertContentEquals(queued,Files.readAllBytes(file),"no per-capability or per-phase log write")
   trace.record(DiagnosticStage.WORK,DiagnosticResult.SUCCEEDED)
@@ -38,6 +39,8 @@ class DiagnosticCapabilityEvidence94Test {
   assertEquals("SUPPORTED",details.getValue("helperReadSnapshotCapability").jsonPrimitive.content)
   for(key in listOf("helperAccessProtocolVersion","helperSinglePassReadVersion","helperReadSnapshotVersion","helperRestoreResultVersion"))
    assertEquals("1",details.getValue(key).jsonPrimitive.content)
+  val timings=DiagnosticTimingEvidence.decode(details.getValue("phaseTimings").jsonPrimitive.content)!!
+  assertEquals(1,timings.getValue(DiagnosticPhase.BRIDGE_READ_SNAPSHOT).count)
  }
  @Test fun missingVersionsAreOmittedAndOldReplyVersionsAreReplaced() {
   val trace=DiagnosticTrace("test",DiagnosticAction.INSPECT,false)
@@ -77,5 +80,19 @@ class DiagnosticCapabilityEvidence94Test {
   assertEquals(setOf(DiagnosticDetails.Field.HELPER_RESTORE_RESULT_CAPABILITY),inner.capabilities.snapshot().values.keys)
   assertTrue(DiagnosticTrace("empty",DiagnosticAction.INSPECT,false).capabilities.snapshot().isEmpty())
  }
-
+ @Test fun newPhasesKeepSkippedFailureAndCancellationDistinct() {
+  val trace=DiagnosticTrace("test",DiagnosticAction.RESTORE,false)
+  DiagnosticLog.bind(trace).use {
+   DiagnosticTiming.start(DiagnosticPhase.BRIDGE_READ_SNAPSHOT).use {it.skipped()}
+   assertFailsWith<IllegalStateException> {DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_SAVE_EXPORT){throw IllegalStateException("private")}}
+   assertFailsWith<CancellationException> {DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_RESTORE_WRITE){throw CancellationException("private")}}
+  }
+  val totals=trace.timings.snapshot()
+  assertEquals(1,totals.getValue(DiagnosticPhase.BRIDGE_READ_SNAPSHOT).skipped)
+  assertEquals(1,totals.getValue(DiagnosticPhase.BRIDGE_SAVE_EXPORT).failed)
+  assertEquals(1,totals.getValue(DiagnosticPhase.BRIDGE_RESTORE_WRITE).canceled)
+  val encoded=DiagnosticTimingEvidence.encode(totals)!!
+  assertEquals(totals,DiagnosticTimingEvidence.decode(encoded))
+  assertFalse("private" in encoded)
+ }
 }

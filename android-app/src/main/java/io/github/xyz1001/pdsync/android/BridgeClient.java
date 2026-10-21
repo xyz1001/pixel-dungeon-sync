@@ -422,6 +422,7 @@ public final class BridgeClient implements GameAccessBackend {
 
     @Override // pdsync.android.app.AndroidGameBridge
     public void exportTo(Path path) {
+        DiagnosticTiming.Scope timing = DiagnosticTiming.start(DiagnosticPhase.BRIDGE_SAVE_EXPORT);
         try {
             targetGame();
             Bundle reply=call("export",null);
@@ -434,14 +435,17 @@ public final class BridgeClient implements GameAccessBackend {
             if(!DirectoryMetadataKt.contentSha256(inventory.hashes).equals(reply.getString("fingerprint"))
                     || inventory.hashes.size()!=reply.getInt("fileCount",-1) || inventory.bytes!=reply.getLong("byteCount",-1L))
                 throw new Failure(AndroidMessages.BRIDGE_CLIENT_32.text());
-        } catch(Failure error) { throw error; }
-        catch(Exception error) { throw new Failure(BridgeDiagnostics.Stage.EXPORT,"EXPORT_FAILED",AndroidMessages.BRIDGE_CLIENT_33.text(),error); }
+        } catch(Failure error) { timing.failed(error); throw error; }
+        catch(Exception error) { timing.failed(error); throw new Failure(BridgeDiagnostics.Stage.EXPORT,"EXPORT_FAILED",AndroidMessages.BRIDGE_CLIENT_33.text(),error); }
+        catch(Error error) { timing.failed(error); throw error; }
+        finally { timing.close(); }
     }
 
     @Override
     public AndroidSaveObservation readSnapshot() {
+        DiagnosticTiming.Scope timing = DiagnosticTiming.start(DiagnosticPhase.BRIDGE_READ_SNAPSHOT);
         try {
-            if (!supportsCapability(DiagnosticCapability.READ_SNAPSHOT)) return null;
+            if (!supportsCapability(DiagnosticCapability.READ_SNAPSHOT)) { timing.skipped(); return null; }
             AndroidGameTarget target = targetGame(); Bundle reply = call("readSnapshot", null);
             try {
                 ParcelFileDescriptor descriptor = AndroidCompat.descriptor(reply, "snapshot");
@@ -462,8 +466,10 @@ public final class BridgeClient implements GameAccessBackend {
                     inventory.put(item.getKey(), new AndroidSaveFile(item.getValue(), observation.sizes.get(item.getKey()), observation.modifiedMillis.get(item.getKey())));
                 return new AndroidSaveObservation(after, inventory, observation.payloads);
             } finally { closeReply(reply); }
-        } catch (Failure failure) { throw failure; }
-        catch (Exception failure) { throw new Failure(BridgeDiagnostics.Stage.EXPORT, "EXPORT_FAILED", AndroidMessages.BRIDGE_CLIENT_33.text(), failure); }
+        } catch (Failure failure) { timing.failed(failure); throw failure; }
+        catch (Exception failure) { timing.failed(failure); throw new Failure(BridgeDiagnostics.Stage.EXPORT, "EXPORT_FAILED", AndroidMessages.BRIDGE_CLIENT_33.text(), failure); }
+        catch (Error failure) { timing.failed(failure); throw failure; }
+        finally { timing.close(); }
     }
 
     @Override
@@ -487,7 +493,7 @@ public final class BridgeClient implements GameAccessBackend {
                 Bundle extras = new Bundle();
                 extras.putParcelable("archive", descriptor);
                 extras.putString("expectedFingerprint", expected);
-                Bundle reply = call("restore", extras);
+                Bundle reply = DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_RESTORE_WRITE, () -> call("restore", extras));
                 try {
                     long actualBytes = reply.getLong("byteCount", -1L);
                     if (reply.getInt("restoreResultVersion", 0) != 1 || reply.containsKey("archive")
@@ -568,7 +574,7 @@ public final class BridgeClient implements GameAccessBackend {
             SaveArchiveCodec.writeRestoreArchive(path,archive);
             try(ParcelFileDescriptor descriptor=ParcelFileDescriptor.open(archive,ParcelFileDescriptor.MODE_READ_ONLY)) {
                 Bundle extras=new Bundle(); extras.putParcelable("archive",descriptor); extras.putString("expectedFingerprint",expected);
-                Bundle reply=call("restore",extras); closeReply(reply);
+                Bundle reply=DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_RESTORE_WRITE, () -> call("restore",extras)); closeReply(reply);
             }
         } catch(Failure error) { throw error; }
         catch(Exception error) { throw new Failure(BridgeDiagnostics.Stage.RESTORE,"RESTORE_FAILED",AndroidMessages.BRIDGE_CLIENT_34.text(),error); }
