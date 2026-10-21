@@ -3045,8 +3045,8 @@
       "sha256": "bcb0f1a3cce44654631befa44a62d7188421fc11bedaf99d64822d404018359f"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedHomeAdapterTest.kt": {
-      "size": 25951,
-      "sha256": "e8e301fc4d5fb3f202c22d684d91f71662f7804bcd96029f4c539dbc25602482"
+      "size": 26168,
+      "sha256": "5ad71ee79477bfb08b5b0605510fa35943f78bc798d380ef30e139be9932beb0"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedSavePathFlowTest.kt": {
       "size": 14182,

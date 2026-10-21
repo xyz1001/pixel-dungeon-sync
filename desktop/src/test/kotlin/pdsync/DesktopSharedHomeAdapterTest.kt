@@ -120,10 +120,12 @@ class DesktopSharedHomeAdapterTest {
    assertFalse(unknown.showAppreciation)
    assertFalse(desktopHomeAppreciationAllowed(changed, expired))
   }
-  for (blocked in listOf(base.copy(busy = true), base.copy(archiveLoading = true),
+  for (blocked in listOf(base.copy(busy = true), base.copy(busy = true, archiveLoading = true),
    base.copy(pageActive = false), base.copy(appClosed = true), base.copy(connectingAtStartup = true))) {
    assertFalse(desktopHomeAppreciationAllowed(official, DesktopSharedHomeAdapter.state(blocked)))
   }
+  assertTrue(desktopHomeAppreciationAllowed(official, DesktopSharedHomeAdapter.state(base.copy(archiveLoading = true))),
+   "A read-only HOME refresh does not block the existing appreciation navigation")
   assertFalse(DesktopSharedHomeAdapter.state(base.copy(serviceExpired = false)).showAppreciation)
  }
 
