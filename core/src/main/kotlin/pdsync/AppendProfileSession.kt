@@ -388,19 +388,7 @@ class AppendProfileSession(
   local.remember(chosen,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),selected?.let {repository.observedAt(it.id)})
   val isTip=!selection.historical && selected!=null && selected.id in graph.tips
   val before=selection.before
-  val baselineFiles=selection.baseline?.let {graph.commits.getValue(it).snapshot.files}
-  // An explicit restore of the sole current tip keeps the independent local backup/journal,
-  // without publishing the overwritten local bytes or an identical new cloud restore record.
-  // Actual branch choices retain their existing preservation/resolution publication semantics.
-  val preserveLocal=!selection.readOnly && isTip && graph.tips.size>1 && before.isNotEmpty() && before!=chosen.snapshot.manifest.files &&
-   (selection.baseline==null || before!=baselineFiles)
-  if(preserveLocal) {
-   val captured=VerifiedSnapshot.read(local.capture(stopped,null),adapter)
-   require(captured.snapshot.manifest.files==before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
-   val preservation=repository.prepareVerified(captured,listOfNotNull(selection.baseline),operation=local.operationMetadata())
-   local.remember(preservation.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text("snapshot"))
-   graph=publishSelectedPlan(preservation,graph,store,refreshGraph=false)
-  }
+  // Overwritten local bytes are not preserved locally or published as insurance.
   if(selection.readOnly) {
    val prior=(local.directoryMetadata.read() as? SidecarRead.Valid)?.value
    val beforeRuns=runContentHashes(before);val afterRuns=runContentHashes(chosen.snapshot.manifest.files)
@@ -414,33 +402,16 @@ class AppendProfileSession(
    val metadata=DirectorySnapshotMetadata(displayName=source?.displayName ?: "",contentSha256=contentSha256(chosen.snapshot.manifest.files),runs=runs).validated(chosen.snapshot.manifest.files)
    chosen=chosen.withManifest(chosen.snapshot.manifest.copy(directoryMetadata=metadata))
   }
-  // Keep the selected parents fixed. A later cloud branch is never silently adopted as a parent;
-  // completion refreshes its observation after the verified game receipt and any publication.
-  val direct=selection.readOnly || isTip && graph.tips.size==1
-  if(direct) {
-   SafePaths.atomicWrite(applyMarker,"selected-restore".encodeToByteArray())
-   val restored=local.restore(chosen,stopped,before)
-   if(selected!=null && selected.id in graph.tips) {
-    repository.setSelectedBaseline(selected,graph,selection.verified)
-    markDirectorySynced(selected)
-   }
-   SafePaths.checked(applyMarker).deleteExisting()
-   return@readLocked SelectedRestoreStage(selection,chosen,graph,localResult=restored)
+  // Download/overwrite adopts the selected immutable commit, including historical commits.
+  // It does not publish overwritten bytes or create a same-content restore record.
+  SafePaths.atomicWrite(applyMarker,"selected-restore".encodeToByteArray())
+  val restored=local.restore(chosen,stopped,before)
+  if(selected!=null) {
+   repository.setSelectedBaseline(selected,graph,selection.verified)
+   markDirectorySynced(selected)
   }
-  val parents=if(isTip&&graph.tips.size>1)graph.tips.sorted() else listOfNotNull(repository.baseline())
-  val kind=if(parents.size>1)"resolution" else "restore"
-  SafePaths.atomicWrite(applyMarker,kind.encodeToByteArray())
-  var plan:VerifiedUploadPlan?=null
-  try {
-   plan=repository.prepareVerified(chosen,parents,kind,local.operationMetadata())
-   local.remember(plan.verified,CoreSessionMessages.HISTORY_RESTORE_PENDING_PUBLICATION.text())
-   val restored=local.restore(plan.verified,stopped,before)
-   SafePaths.checked(applyMarker).deleteExisting()
-   SelectedRestoreStage(selection,plan.verified,graph,plan,localResult=restored)
-  } catch(failure:Exception) {
-   plan?.let {local.remember(it.verified,CoreSessionMessages.INCOMPLETE_LOCAL_RESTORE_ARCHIVED.text())}
-   repository.clearPending();throw failure
-  }
+  SafePaths.checked(applyMarker).deleteExisting()
+  SelectedRestoreStage(selection,chosen,graph,localResult=restored)
  }
  internal fun finishSelectedRestore(stage:SelectedRestoreStage,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
   require(stage.selection.owner===comparisonOwner);local.guard(stopped);appliedOnly()
@@ -560,12 +531,6 @@ class AppendProfileSession(
   val commit = graph.commits.getValue(graph.tips.single())
   require(commit.snapshot.id == snapshotId) { CoreSessionMessages.THE_OBSERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED_RELOAD_THE_CLOUD.text() }
   val before = currentFiles()
-  val baseline = repository.baseline()
-  if (baseline == null) require(before.isEmpty()) { CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNSYNCED_PROGRESS_AND_CANNOT_BE_OVERWRITTEN_DIRECTLY.text() }
-  else {
-   require(before == graph.commits.getValue(baseline).snapshot.files) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_AND_CANNOT_BE_OVERWRITTEN_DIRECTLY_SYNC_TO.text() }
-   require(graph.descendsFrom(commit.id, baseline)) { CoreSessionMessages.THE_SELECTED_BRANCH_DOES_NOT_DESCEND_FROM_THE_CURRENT_BASELINE.text() }
-  }
   val chosen = repository.download(store, commit)
   local.remember(chosen, CoreSessionMessages.CLOUD_RESTORE_SNAPSHOT_VERIFIED.text(), repository.observedAt(commit.id))
   local.checkRestore(chosen.manifest.id)
@@ -598,16 +563,22 @@ class AppendProfileSession(
   }
  }
 
- /** A history restore is new work parented at the actual baseline, not a rewind to the old ID. */
+ /** Restores cached history without manufacturing another upload of identical bytes. */
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
   require(repository.pending() == null) { CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text() }
-  local.checkRestore(id)
-  var restored: RestoreResult? = null
-  prepareAndApply(local.loadSnapshot(id), listOfNotNull(repository.baseline()), "restore", CoreSessionMessages.HISTORY_RESTORE_PENDING_PUBLICATION.text()) { plan ->
-   restored = local.restore(snapshot(plan), stopped)
+  val chosen=local.loadVerifiedSnapshot(id)
+  local.checkRestore(chosen)
+  val graph=repository.cachedGraph()
+  val selected=graph.commits.values.singleOrNull { it.snapshot == chosen.snapshot.manifest }
+  SafePaths.atomicWrite(applyMarker,"history-restore".encodeToByteArray())
+  val restored=local.restore(chosen,stopped)
+  if(selected!=null) {
+   repository.setSelectedBaseline(selected,CommitMetadataGraph(graph),chosen)
+   markDirectorySynced(selected)
   }
-  requireNotNull(restored)
+  SafePaths.checked(applyMarker).deleteExisting()
+  restored
  }
 
  /** Explicit whole-snapshot choice; every observed tip is retained as a resolution parent. */
@@ -889,85 +860,21 @@ class AppendProfileSession(
   publish(plan, store, stopped)
  }
 
- /**
-  * A first-run remote choice never discards populated unbased/dirty local bytes. Publish those
-  * bytes as their own branch first; then resolve only the exact branch set the user observed plus
-  * that new local commit. Late siblings are returned as a fresh conflict, never silently absorbed.
-  */
+ /** Applies the selected cloud branch without publishing overwritten local bytes. */
  fun onboardingRestore(comparison: OnboardingComparison, snapshotId: String, store: AppendStore, stopped: () -> Boolean): OnboardingRestoreResult = readLocked(store) {
-  var graph = revalidateComparison(comparison, store, stopped)
+  val graph = revalidateComparison(comparison, store, stopped)
   val selected = graph.snapshotCommit(snapshotId)?.takeIf { it.id in graph.tips }
    ?: throw IllegalArgumentException(CoreSessionMessages.THE_SELECTED_SNAPSHOT_IS_NOT_IN_A_COMPARED_CLOUD_BRANCH.text())
   val chosen = repository.download(store, selected)
   local.remember(chosen, CoreSessionMessages.INITIAL_RESTORE_SELECTION_VERIFIED.text(), repository.observedAt(selected.id))
   if (chosen.manifest.files != comparison.localFiles) local.checkRestore(snapshotId)
-  graph = revalidateComparison(comparison, store, stopped)
-  val before = comparison.localFiles
-  val baselineFiles = comparison.baselineId?.let { graph.commits.getValue(it).snapshot.files }
-  val preserveLocal = before.isNotEmpty() && (comparison.baselineId == null || before != baselineFiles)
-  var preservedLocalCommit: AppendCommit? = null
-  if (preserveLocal) {
-   val captured = local.capture(stopped, null)
-   require(captured.manifest.files == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
-   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
-   val plan = repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
-   val expectedTips = (graph.tips - plan.commit.parents.toSet()) + plan.commit.id
-   publish(plan, store, stopped)
-   preservedLocalCommit = plan.commit
-   graph = discover(store)
-   if (graph.tips != expectedTips) return@readLocked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(graph, store, stopped)))
-   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
-  }
+  revalidateComparison(comparison, store, stopped)
   if (graph.tips.size > 1) {
    val conflict = preserveConflict(graph, store, stopped)
-   require(conflict.observedLocalFiles == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_SELECTION_NOTHING_WAS_RESTORED.text() }
-   if (selected.id !in graph.tips) {
-    // Only this call's verified local preservation may replace the originally selected baseline
-    // tip. Ordinary conflict resolution must still reject historical, non-tip selections.
-    val preserved = requireNotNull(preservedLocalCommit) { CoreSessionMessages.THE_SELECTED_BRANCH_CHANGED_COMPARE_AGAIN.text() }
-    require(selected.id == comparison.baselineId && selected.id in comparison.observedTips &&
-     comparison.graph?.commits?.get(selected.id) == selected && preserved.parents == listOf(selected.id) &&
-     preserved.snapshot.files == before && repository.baseline() == preserved.id) { CoreSessionMessages.THE_SELECTED_BRANCH_DOES_NOT_BELONG_TO_THIS_PRESERVATION_OPERATION.text() }
-    val expectedTips = (comparison.observedTips - selected.id) + preserved.id
-    require(graph.tips == expectedTips && graph.commits[selected.id] == selected && graph.commits[preserved.id] == preserved) {
-     CoreSessionMessages.THE_SELECTED_HISTORY_OR_PRESERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED.text()
-    }
-    val verified = repository.download(store, selected)
-    require(verified.manifest == chosen.manifest && verified.zip.contentEquals(chosen.zip)) { CoreSessionMessages.THE_SELECTED_SNAPSHOT_CONTENT_CHANGED_NOTHING_WAS_RESTORED.text() }
-    local.checkRestore(chosen)
-    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
-    val fingerprint = requireNotNull(comparison.fingerprint)
-    stability.requireUnchanged(fingerprint)
-    // Downloads and validation can take time. A late branch requires a new explicit choice;
-    // it must never become an extra resolution parent or cause a local overwrite here.
-    val latest = discover(store)
-    if (latest.tips != expectedTips) return@readLocked OnboardingRestoreResult.Published(AppendPushResult.Diverged(preserveConflict(latest, store, stopped)))
-    require(latest.commits[selected.id] == selected && latest.commits[preserved.id] == preserved) { CoreSessionMessages.THE_SELECTED_HISTORY_OR_PRESERVED_BRANCH_CHANGED_NOTHING_WAS_RESTORED.text() }
-    val plan = prepareAndApply(chosen, latest.tips.sorted(), "resolution", CoreSessionMessages.INITIAL_RESTORE_PRESERVED_LOCAL_SAVES_AND_SELECTED_THE_ORIGINAL_BASELINE.text()) { plan ->
-     stability.requireUnchanged(fingerprint)
-     local.restore(snapshot(plan), stopped, before)
-    }
-    return@readLocked OnboardingRestoreResult.Published(publish(plan, store, stopped))
-   }
+   require(conflict.observedLocalFiles == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_SELECTION_NOTHING_WAS_RESTORED.text() }
    return@readLocked OnboardingRestoreResult.Published(resolveLocked(conflict, snapshotId, store, stopped))
   }
-  if (!preserveLocal && (comparison.baselineId == null || before == baselineFiles)) {
-   return@readLocked OnboardingRestoreResult.Restored(restoreRemoteLocked(snapshotId, store, stopped))
-  }
-  // Local publication may have advanced the selected former tip. Retain that progress and record
-  // the explicit older-snapshot choice as a new restore commit, never rewind the baseline. An
-  // empty dirty target also creates only a nonempty chosen restore, never an empty local upload.
-  val expectedGraph = graph
-  require(graph.commits[selected.id] == selected) { CoreSessionMessages.THE_SELECTED_HISTORY_CHANGED_NOTHING_WAS_RESTORED.text() }
-  val parent = repository.baseline() ?: graph.tips.single()
-  val currentFingerprint = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).awaitStable()
-  require(currentFingerprint.files == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_SELECTION_NOTHING_WAS_RESTORED.text() }
-  require(discover(store) == expectedGraph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
-  val plan = prepareAndApply(chosen, listOf(parent), "restore", CoreSessionMessages.INITIAL_RESTORE_PRESERVED_LOCAL_SAVES_AND_SELECTED_CLOUD_SAVES.text()) { plan ->
-   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(currentFingerprint)
-   if (before != chosen.manifest.files) local.restore(snapshot(plan), stopped)
-  }
-  OnboardingRestoreResult.Published(publish(plan, store, stopped))
+  OnboardingRestoreResult.Restored(restoreRemoteLocked(snapshotId, store, stopped))
  }
 
  /** Explicit confirmation removes retry markers only, after every original is kept in history. */

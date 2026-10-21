@@ -227,16 +227,11 @@ class SnapshotMetadataTest {
   val restored = b.restoreHistory(initial.snapshot.id) { true }
   assertEquals(a.deviceIdentity(), restored.restored.metadata!!.device)
   assertFalse(b.directory.resolve("backups").exists())
-  val plan = AppendRepository(b.directory.resolve("append-v2"), Shattered, "demo").pending()!!
-  assertEquals("restore", plan.commit.kind); assertEquals(listOf(later.id), plan.commit.parents)
-  assertEquals(initial.snapshot.metadata, plan.commit.snapshot.metadata)
-  assertEquals(b.deviceIdentity(), plan.commit.operation!!.device)
-  val published = assertIs<AppendPushResult.Success>(b.push(remote) { true }).commit
-  assertEquals(plan.commit, published)
-  assertEquals(initial.snapshot.metadata, published.snapshot.metadata)
+  assertNull(AppendRepository(b.directory.resolve("append-v2"), Shattered, "demo").pending())
+  assertEquals(initial.id,b.baseline())
+  assertEquals(2,remote.commits.size)
   assertEquals("source A", b.root.resolve("game1/game.dat").readText())
   assertContentEquals(initialBytes, remote.commits.getValue(initial.id))
-  assertNotNull(b.history().single { it.manifest.id == published.snapshot.id }.remoteObservedAt)
  }
 
  @Test fun appendResolutionChoosingAnotherDeviceKeepsItsSnapshotOriginAndCurrentActor() {

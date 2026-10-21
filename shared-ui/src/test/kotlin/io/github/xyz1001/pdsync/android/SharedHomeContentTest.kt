@@ -85,6 +85,25 @@ class SharedHomeContentTest {
         assertEquals(SharedHomeContent(true, false, matchesCloudTip = true), content(atTip, "missing-target"))
     }
 
+    @Test fun successiveRestoreReceiptsEnableDifferentTargetsAndDisableOnlyActualBytes() {
+        val a = commit("a")
+        val b = commit("b", files + ("badges.dat" to "e".repeat(64)), listOf("a"))
+        val c = commit("c", files + ("badges.dat" to "f".repeat(64)), listOf("b"))
+        val graph = history(listOf(a, b, c))
+        // The sole cloud tip remains C while verified local receipts move A -> B -> A.
+        // Neither baseline identity, previous selection nor newest-cloud status disables B.
+        for (actual in listOf(a, b, a)) {
+            val receipt = graph.copy(currentFiles = actual.snapshot.files, baseline = actual.id,
+                baselineDirection = "restore")
+            for (target in listOf(a, b, c)) {
+                val state = SharedHomeContent.fromHome(receipt, target.snapshot.id, true, false, false)
+                assertEquals(actual.snapshot.files == target.snapshot.files, state.restoreUnnecessary,
+                    "actual=${actual.id}, selected=${target.id}")
+            }
+            assertFalse(SharedHomeContent.fromHome(receipt, c.snapshot.id, true, false, false).uploadUnnecessary)
+        }
+    }
+
     @Test fun unknownFailedEmptyOrUnsettledHistoryDoesNotSuppressHostRecovery() {
         assertEquals(SharedHomeContent(), content(null))
         assertEquals(SharedHomeContent(), content(history(), verified = false))

@@ -29,7 +29,7 @@ class AndroidHomeReconstruction92Test {
  private inner class Bridge(initial:Map<String,ByteArray> = files()):AndroidGameBridge {
   var content=initial.toMutableMap();var exports=0;var restores=0;var targets=0;var identityScopes=0;var closedScopes=0
   var lastExport:Path?=null;var onTarget:((Int)->Unit)?=null;var afterExport:((Path)->Unit)?=null
-  var directRestore=false;var wrongReceiptBytes=false
+  var directRestore=false;var wrongReceiptBytes=false;var afterRestore:(()->Unit)?=null
   val target=AndroidGameTarget(identity,"synthetic-896",896,"b".repeat(64),"c".repeat(64))
   override fun targetGame():AndroidGameTarget {targets++;onTarget?.invoke(targets);return target}
   override fun exportTo(emptyDestination:Path) {
@@ -45,7 +45,7 @@ class AndroidHomeReconstruction92Test {
   override fun restoreVerified(snapshot:Snapshot,expectedCurrentFiles:Map<String,String>):AndroidRestoreReceipt? {
    if(!directRestore)return null
    restores++;require(content.mapValues {hash(it.value)}==expectedCurrentFiles)
-   content=Snapshots.verify(snapshot,AndroidGameAdapter(identity)).toMutableMap()
+   content=Snapshots.verify(snapshot,AndroidGameAdapter(identity)).toMutableMap();afterRestore?.invoke()
    return AndroidRestoreReceipt(target,snapshot.manifest.files,content.values.sumOf {it.size.toLong()}+if(wrongReceiptBytes)1 else 0)
   }
  }
@@ -116,8 +116,8 @@ class AndroidHomeReconstruction92Test {
   val result=rig.facade.restoreSelected(home,old.snapshot.id,false)
   assertEquals(1,store.objectReadIds.count {it==old.snapshot.id})
   assertEquals(1,store.objectReadIds.filter {it in listOf(old.snapshot.id)}.size)
-  assertEquals(exports+1,bridge.exports);assertTrue(publishedAfterReceipt)
-  assertEquals("restore",store.latest().kind);assertTrue(result.configurationComplete)
+  assertEquals(exports+1,bridge.exports);assertFalse(publishedAfterReceipt)
+  assertEquals(3,store.commits.size);assertEquals(old.id,result.refreshedInspection?.comparison?.baselineId);assertTrue(result.configurationComplete)
   assertNotNull(result.refreshedInspection);assertFalse(result.isPending)
   assertEquals(old.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }
@@ -140,13 +140,13 @@ class AndroidHomeReconstruction92Test {
   val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
   val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome()
   var late:AppendCommit?=null
-  store.afterCommit={store.afterCommit=null;late=store.child(chosen)}
+  bridge.afterRestore={bridge.afterRestore=null;late=store.child(chosen)}
   val result=rig.facade.restoreSelected(home,chosen.snapshot.id,true)
   assertTrue(result.isConflict);assertFalse(result.configurationComplete)
   assertEquals(1,bridge.restores);assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
-  assertTrue(store.commits.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}.any {it.snapshot.files==before})
+  assertFalse(store.commits.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}.any {it.snapshot.files==before})
   assertFalse(requireNotNull(late).id in store.latest().parents)
-  assertEquals(setOf(store.latest().id,requireNotNull(late).id),result.refreshedInspection?.comparison?.observedTips)
+  assertEquals(2,result.refreshedInspection?.comparison?.observedTips?.size)
   assertFalse(rig.facade.hasUnresolvedRestore())
  }
 

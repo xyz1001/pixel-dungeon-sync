@@ -214,16 +214,13 @@ class OnboardingComparisonTest {
   } }
  }
 
- @Test fun differentFirstRunPreservesLocalBranchBeforeChoosingRemote() {
+ @Test fun differentFirstRunOverwritesWithoutPublishingLocalInsurance() {
   val store = Memory(); val remote = publish(session("remote"), store); val local = session("local")
   val comparison = compare(local, store); assertEquals(OnboardingKind.DIFFERENT, comparison.kind); assertNull(local.baseline())
-  val outcome = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, remote.snapshot.id, store) { true })
-  val done = assertIs<AppendPushResult.Success>(outcome.result)
-  assertEquals("resolution", done.commit.kind); assertEquals(2, done.commit.parents.size)
-  assertEquals("remote", content(local)); assertEquals(3, store.commits.size)
-  val graph = repository(local).discover(store)
-  assertTrue(graph.commits.values.any { it.snapshot.files["game1/game.dat"] == hash("local".encodeToByteArray()) })
-  assertEquals(setOf(done.commit.id), graph.tips)
+  assertIs<OnboardingRestoreResult.Restored>(local.onboardingRestore(comparison, remote.snapshot.id, store) { true })
+  assertEquals("remote", content(local)); assertEquals(remote.id, local.baseline())
+  assertEquals(1, store.commits.size); assertEquals(1, store.objects.size); assertEquals(2, store.writes)
+  assertTrue(local.history().none { it.manifest.files["game1/game.dat"] == hash("local".encodeToByteArray()) })
  }
 
  @Test fun emptyLocalCanChooseAmongAllBranchesWithoutEmptyPublication() {
@@ -247,50 +244,43 @@ class OnboardingComparisonTest {
   assertIs<AppendPushResult.Success>(result.result); assertEquals(3, store.commits.size)
  }
 
- @Test fun dirtyDivergencePreservesRealAncestryThenResolves() {
-  val store = Memory(); val remote = session("base"); val base = publish(remote, store); val local = session("base")
+ @Test fun dirtyDivergenceAdoptsRemoteWithoutPublishingDirtyBytes() {
+  val store = Memory(); val remote = session("base"); publish(remote, store); val local = session("base")
   local.adoptOnboardingRemote(compare(local, store), store) { true }
   edit(remote, "remote"); val chosen = publish(remote, store); edit(local, "dirty")
-  val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(compare(local, store), chosen.snapshot.id, store) { true })
-  val done = assertIs<AppendPushResult.Success>(result.result); val graph = repository(local).discover(store)
-  val dirty = graph.commits.values.single { it.snapshot.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) }
-  assertEquals(listOf(base.id), dirty.parents); assertEquals(setOf(dirty.id, chosen.id), done.commit.parents.toSet())
-  assertEquals("remote", content(local)); assertEquals(4, store.commits.size)
+  assertIs<OnboardingRestoreResult.Restored>(local.onboardingRestore(compare(local, store), chosen.snapshot.id, store) { true })
+  val graph = repository(local).discover(store)
+  assertEquals(chosen.id, local.baseline()); assertEquals("remote", content(local)); assertEquals(2, graph.commits.size)
+  assertEquals(4, store.writes)
+  assertTrue(graph.commits.values.none { it.snapshot.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) })
  }
 
- @Test fun dirtySameTipRestoreRetainsLocalAsAncestorOfNewRestore() {
+ @Test fun dirtySameTipRestoreCreatesNoExtraCommitOrLocalBackup() {
   val store = Memory(); val local = session("base"); val base = publish(local, store); edit(local, "dirty")
-  val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(compare(local, store), base.snapshot.id, store) { true })
-  val done = assertIs<AppendPushResult.Success>(result.result); val graph = repository(local).discover(store)
-  assertEquals("restore", done.commit.kind); assertEquals("base", content(local)); assertEquals(3, graph.commits.size)
-  assertEquals(hash("dirty".encodeToByteArray()), graph.commits.getValue(done.commit.parents.single()).snapshot.files["game1/game.dat"])
+  assertIs<OnboardingRestoreResult.Restored>(local.onboardingRestore(compare(local, store), base.snapshot.id, store) { true })
+  assertEquals("base", content(local)); assertEquals(base.id, local.baseline()); assertEquals(1, store.commits.size)
+  assertEquals(2, store.writes)
+  assertTrue(local.history().none { it.manifest.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) })
  }
 
- @Test fun dirtySelectedBaselineWithSiblingPreservesLocalThenResolvesOriginalChoice() {
-  val store = Memory(); val local = session("base"); val base = publish(local, store)
-  val sibling = session("sibling"); assertIs<AppendPushResult.Diverged>(sibling.push(store) { true })
-  val siblingId = requireNotNull(sibling.baseline()); edit(local, "dirty")
-  val comparison = compare(local, store)
-  assertEquals(setOf(base.id, siblingId), comparison.observedTips)
+ @Test fun dirtySelectedBaselineWithSiblingResolvesOnlyOriginalCloudParents() {
+  val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
   val originals = store.commits.mapValues { it.value.copyOf() }
   val originalObjects = store.objects.mapValues { it.value.copyOf() }
   val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, base.snapshot.id, store) { true })
   val done = assertIs<AppendPushResult.Success>(result.result); val graph = repository(local).discover(store)
-  val dirty = graph.commits.values.single { it.snapshot.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) }
-  assertEquals(listOf(base.id), dirty.parents); assertEquals(setOf(dirty.id, siblingId), done.commit.parents.toSet())
+  assertEquals(comparison.observedTips, done.commit.parents.toSet())
   assertEquals("resolution", done.commit.kind); assertEquals(base.snapshot.files, done.commit.snapshot.files)
   assertEquals("base", content(local)); assertEquals(done.commit.id, local.baseline()); assertFalse(local.hasPending())
-  assertEquals(setOf(done.commit.id), graph.tips); assertEquals(4, graph.commits.size); assertEquals(4, store.objects.size)
+  assertEquals(setOf(done.commit.id), graph.tips); assertEquals(3, graph.commits.size); assertEquals(3, store.objects.size)
   originals.forEach { (id, bytes) -> assertContentEquals(bytes, store.commits.getValue(id)) }
   originalObjects.forEach { (id, bytes) -> assertContentEquals(bytes, store.objects.getValue(id)) }
   assertContentEquals(store.objects.getValue(base.snapshot.id), store.objects.getValue(done.commit.snapshot.id))
-  listOf(base, graph.commits.getValue(siblingId), dirty).forEach { commit ->
-   assertTrue(local.history().any { it.manifest.id == commit.snapshot.id })
-  }
-  assertTrue(local.history().any { it.reason == "恢复前自动备份" && it.manifest.files == dirty.snapshot.files })
+  assertTrue(local.history().none { it.manifest.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) })
+  assertTrue(graph.commits.values.none { it.snapshot.files["game1/game.dat"] == hash("dirty".encodeToByteArray()) })
  }
 
- @Test fun selectedBaselineProtectionWriteAndReadbackFailuresNeverRestoreAndRetryExactPlan() {
+ @Test fun resolutionWriteAndReadbackFailuresRetryExactSelectedPlanWithoutInsurance() {
   val failures: List<(Memory, AppendProfileSession) -> Unit> = listOf(
    { store, _ -> store.failWrites = true },
    { store, _ -> store.failCommitWrites = true },
@@ -302,17 +292,17 @@ class OnboardingComparisonTest {
    val originalIds = store.commits.keys.toSet(); fail(store, local)
    assertFails { local.onboardingRestore(comparison, base.snapshot.id, store) { true } }
    val frozen = requireNotNull(repository(local).pending())
-   assertEquals("snapshot", frozen.commit.kind); assertEquals(listOf(base.id), frozen.commit.parents)
-   assertEquals(comparison.localFiles, frozen.commit.snapshot.files); assertEquals(base.id, local.baseline())
-   assertEquals("dirty", content(local)); assertTrue(local.retryablePending())
+   assertEquals("resolution", frozen.commit.kind); assertEquals(comparison.observedTips, frozen.commit.parents.toSet())
+   assertEquals(base.snapshot.files, frozen.commit.snapshot.files); assertEquals(base.id, local.baseline())
+   assertEquals("base", content(local)); assertTrue(local.retryablePending())
    assertFalse(local.directory.resolve("append-v2/apply-required.txt").exists())
    assertTrue(store.commits.keys.all { it in originalIds || it == frozen.commit.id })
    edit(local, "newer"); store.failWrites = false; store.failCommitWrites = false
    store.hiddenObject = null; store.hiddenCommit = null
    val retry = compare(local, store); assertTrue(retry.retryablePending)
-   val done = assertIs<AppendPushResult.Diverged>(local.onboardingUpload(retry, store) { true })
-   assertEquals((comparison.observedTips - base.id) + frozen.commit.id, done.conflict.observedTips)
-   assertEquals(originalIds + frozen.commit.id, store.commits.keys); assertEquals(6, store.writes)
+   val done = assertIs<AppendPushResult.Success>(local.onboardingUpload(retry, store) { true })
+   assertEquals(frozen.commit, done.commit); assertTrue(done.localDirty)
+   assertEquals(originalIds + frozen.commit.id, store.commits.keys)
    assertContentEquals(frozen.manifestBytes, store.commits.getValue(frozen.commit.id))
    assertContentEquals(frozen.zip, store.objects.getValue(frozen.commit.snapshot.id))
    assertEquals("newer", content(local)); assertEquals(frozen.commit.id, local.baseline()); assertFalse(local.hasPending())
@@ -321,51 +311,57 @@ class OnboardingComparisonTest {
 
  @Test fun selectedBaselineResolutionUploadFailureRetriesFrozenChoiceAfterLaterLocalEdit() {
   val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
-  store.afterCommit = { store.failWrites = true }
+  store.failCommitWrites = true
   assertFails { local.onboardingRestore(comparison, base.snapshot.id, store) { true } }
-  val frozen = requireNotNull(repository(local).pending()); val preservedId = requireNotNull(local.baseline())
+  val frozen = requireNotNull(repository(local).pending())
   assertEquals("resolution", frozen.commit.kind); assertEquals(base.snapshot.files, frozen.commit.snapshot.files)
-  assertEquals((comparison.observedTips - base.id) + preservedId, frozen.commit.parents.toSet())
-  assertEquals("base", content(local)); assertTrue(local.retryablePending()); assertEquals(3, store.commits.size)
+  assertEquals(comparison.observedTips, frozen.commit.parents.toSet())
+  assertEquals("base", content(local)); assertTrue(local.retryablePending()); assertEquals(2, store.commits.size)
   assertFalse(local.directory.resolve("append-v2/apply-required.txt").exists())
-  edit(local, "newer"); store.failWrites = false
+  edit(local, "newer"); store.failCommitWrites = false
   val done = assertIs<AppendPushResult.Success>(local.onboardingUpload(compare(local, store), store) { true })
   assertEquals(frozen.commit, done.commit); assertTrue(done.localDirty); assertEquals("newer", content(local))
-  assertEquals(4, store.commits.size); assertFalse(local.hasPending())
+  assertEquals(3, store.commits.size); assertFalse(local.hasPending())
   assertContentEquals(frozen.manifestBytes, store.commits.getValue(done.commit.id))
   assertContentEquals(frozen.zip, store.objects.getValue(done.commit.snapshot.id))
  }
 
- @Test fun selectedBaselineLocalEditDuringPreservationNeverRestoresOverNewerBytes() {
+ @Test fun selectedBaselineLocalEditDuringVerificationNeverRestoresOverNewerBytes() {
   val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
-  store.beforeObject = { edit(local, "newer") }
+  store.afterReadObject = { store.afterReadObject = null; edit(local, "newer") }
   assertFails { local.onboardingRestore(comparison, base.snapshot.id, store) { true } }
-  val graph = repository(local).discover(store); val preserved = graph.commits.getValue(requireNotNull(local.baseline()))
-  assertEquals("newer", content(local)); assertEquals(comparison.localFiles, preserved.snapshot.files)
-  assertEquals(listOf(base.id), preserved.parents); assertEquals(3, store.commits.size); assertFalse(local.hasPending())
+  assertEquals("newer", content(local)); assertEquals(base.id, local.baseline())
+  assertEquals(2, store.commits.size); assertEquals(4, store.writes); assertFalse(local.hasPending())
  }
 
- @Test fun selectedBaselineLateTipDuringPreservationOrChoiceVerificationNeverGetsAbsorbed() {
-  listOf(false, true).forEach { duringChoiceVerification ->
+ @Test fun selectedBaselineLateTipDuringVerificationNeverGetsAbsorbed() {
+  listOf(1, 2).forEach { readToChange ->
    val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
    val other = Memory(); val late = publish(session("late"), other); var selectedReads = 0
-   val addLate = { store.commits.putAll(other.commits); store.objects.putAll(other.objects) }
-   store.afterCommit = {
-    if (!duringChoiceVerification) addLate()
-    else store.afterReadObject = { id ->
-     // D's publication and onboarding discovery read A first; the third read verifies the
-     // retained choice just before the final pre-apply graph check.
-     if (id == base.snapshot.id && ++selectedReads == 3) { store.afterReadObject = null; addLate() }
+   store.afterReadObject = { id ->
+    if (id == base.snapshot.id && ++selectedReads == readToChange) {
+     store.afterReadObject = null; store.commits.putAll(other.commits); store.objects.putAll(other.objects)
     }
    }
-   val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, base.snapshot.id, store) { true })
-   val conflict = assertIs<AppendPushResult.Diverged>(result.result).conflict
-   val preservedId = requireNotNull(local.baseline())
-   assertEquals((comparison.observedTips - base.id) + preservedId + late.id, conflict.observedTips)
-   assertEquals("dirty", content(local)); assertEquals(4, store.commits.size); assertFalse(local.hasPending())
-   assertTrue(repository(local).discover(store).commits.values.none { it.kind == "resolution" })
-   if (duringChoiceVerification) assertEquals(3, selectedReads)
+   assertFails { local.onboardingRestore(comparison, base.snapshot.id, store) { true } }
+   assertEquals(readToChange, selectedReads); assertEquals("dirty", content(local))
+   assertEquals(3, store.commits.size); assertEquals(4, store.writes); assertFalse(local.hasPending())
+   val graph = repository(local).discover(store)
+   assertTrue(late.id in graph.tips); assertTrue(graph.commits.values.none { it.kind == "resolution" })
   }
+ }
+
+ @Test fun lateSiblingDuringResolutionPublicationRemainsAnIndependentBranch() {
+  val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
+  val other = Memory(); val late = publish(session("late"), other)
+  store.afterCommit = { store.commits.putAll(other.commits); store.objects.putAll(other.objects) }
+  val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, base.snapshot.id, store) { true })
+  val conflict = assertIs<AppendPushResult.Diverged>(result.result).conflict
+  val resolution = repository(local).discover(store).commits.getValue(requireNotNull(local.baseline()))
+  assertEquals("resolution", resolution.kind); assertEquals(comparison.observedTips, resolution.parents.toSet())
+  assertEquals(setOf(resolution.id, late.id), conflict.observedTips)
+  assertEquals("base", content(local)); assertEquals(4, store.commits.size); assertEquals(6, store.writes)
+  assertFalse(local.hasPending())
  }
 
  @Test fun selectedBaselineImmutableCommitOrObjectChangeBeforeApplyIsRejected() {
@@ -376,14 +372,13 @@ class OnboardingComparisonTest {
   changes.forEach { change ->
    val (store, local, base) = dirtyBranchedBaseline(); val comparison = compare(local, store)
    val original = store.objects.getValue(base.snapshot.id).copyOf(); var selectedReads = 0
-   store.afterCommit = {
-    store.afterReadObject = { id ->
-     if (id == base.snapshot.id && ++selectedReads == 3) { store.afterReadObject = null; change(store, base) }
-    }
+   store.afterReadObject = { id ->
+    if (id == base.snapshot.id) { selectedReads++; store.afterReadObject = null; change(store, base) }
    }
    assertFails { local.onboardingRestore(comparison, base.snapshot.id, store) { true } }
-   assertEquals(3, selectedReads); assertEquals("dirty", content(local)); assertEquals(3, store.commits.size)
-   assertFalse(local.hasPending()); assertFalse(local.directory.resolve("append-v2/apply-required.txt").exists())
+   assertEquals(1, selectedReads); assertEquals("dirty", content(local)); assertEquals(2, store.commits.size)
+   assertEquals(4, store.writes); assertFalse(local.hasPending())
+   assertFalse(local.directory.resolve("append-v2/apply-required.txt").exists())
    assertContentEquals(original, local.loadSnapshot(base.snapshot.id).zip)
   }
  }
@@ -399,22 +394,24 @@ class OnboardingComparisonTest {
   assertEquals("dirty", content(local)); assertEquals(3, store.commits.size); assertFalse(local.hasPending())
  }
 
- @Test fun lateSiblingDuringLocalPreservationReturnsFreshConflictWithoutRestore() {
+ @Test fun lateSiblingDuringVerificationRejectsSoleTipRestoreWithoutPublication() {
   val store = Memory(); val chosen = publish(session("remote"), store)
   val other = Memory(); val late = publish(session("late"), other)
   val local = session("local"); val comparison = compare(local, store)
-  store.afterCommit = { store.commits.putAll(other.commits); store.objects.putAll(other.objects) }
-  val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, chosen.snapshot.id, store) { true })
-  val conflict = assertIs<AppendPushResult.Diverged>(result.result).conflict
-  assertTrue(late.id in conflict.observedTips); assertEquals(3, conflict.observedTips.size)
-  assertEquals("local", content(local)); assertEquals(3, store.commits.size); assertFalse(local.hasPending())
+  store.afterReadObject = {
+   store.afterReadObject = null; store.commits.putAll(other.commits); store.objects.putAll(other.objects)
+  }
+  assertFails { local.onboardingRestore(comparison, chosen.snapshot.id, store) { true } }
+  assertEquals("local", content(local)); assertEquals(2, store.commits.size); assertEquals(2, store.writes)
+  assertNull(local.baseline()); assertFalse(local.hasPending()); assertTrue(late.id in repository(local).discover(store).tips)
  }
 
- @Test fun editDuringLocalPreservationNeverOverwritesNewerLocalBytes() {
+ @Test fun editDuringRemoteVerificationNeverOverwritesNewerLocalBytes() {
   val store = Memory(); val chosen = publish(session("remote"), store); val local = session("local")
-  val comparison = compare(local, store); store.beforeObject = { edit(local, "newer") }
+  val comparison = compare(local, store)
+  store.afterReadObject = { store.afterReadObject = null; edit(local, "newer") }
   assertFails { local.onboardingRestore(comparison, chosen.snapshot.id, store) { true } }
-  assertEquals("newer", content(local)); assertEquals(2, store.commits.size)
+  assertEquals("newer", content(local)); assertEquals(1, store.commits.size); assertEquals(2, store.writes)
  }
 
  @Test fun frozenPendingRetryIsExplicitAndRetainsOriginalBytesAfterLaterEdits() {
