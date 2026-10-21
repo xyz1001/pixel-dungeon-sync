@@ -17,6 +17,19 @@ import kotlin.test.*
 import pdsync.DiagnosticDetails.Field
 
 class DiagnosticDetailsTest {
+ @Test fun transportEvidenceIsClosedAndNeverIncludesExceptionText() {
+  val wrapped=java.io.IOException("password=SECRET https://private.invalid",java.net.SocketException("SECRET"))
+  val details=DiagnosticDetails.builder().number(Field.TRANSPORT_CLIENT_ID,7)
+   .transportFailure(wrapped,true,false).build()
+  assertEquals(details,roundTrip(details))
+  assertEquals("IO",details.values[Field.TRANSPORT_FAILURE_KIND])
+  assertEquals("SOCKET",details.values[Field.TRANSPORT_CAUSE_KIND])
+  assertEquals("true",details.values[Field.TRANSPORT_CANCELED])
+  assertFalse(codec.encodeToString(details).contains("SECRET"))
+  assertFalse(codec.encodeToString(details).contains("private.invalid"))
+  assertTrue(DiagnosticDetails.builder().number(Field.TRANSPORT_CLIENT_ID,0).build().isEmpty())
+ }
+
  @TempDir lateinit var directory: Path
  private val codec = Json { encodeDefaults = true }
  private val secret = "SECRET https://private.invalid/path user@example.invalid package.name save.dat password=private\nraw exception"

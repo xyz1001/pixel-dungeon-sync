@@ -46,6 +46,7 @@ class AppendOnlyWebDav(
  client: OkHttpClient = OkHttpClient(),
  private val beforeRequest: WebDavRequestCheck = WebDavRequestCheck {}
 ): AppendStore {
+ private val diagnosticClientId = nextDiagnosticClientId.incrementAndGet()
  private val client = client.newBuilder().retryOnConnectionFailure(false).followRedirects(false)
   .followSslRedirects(false).callTimeout(30, TimeUnit.SECONDS)
   .addNetworkInterceptor { chain -> beforeRequest.check(); chain.proceed(chain.request()) }.build()
@@ -302,10 +303,12 @@ class AppendOnlyWebDav(
   cancellation?.checkActive()
   beforeRequest.check()
   val requestStarted = System.nanoTime()
-  // Elapsed until response headers (or the observed transport failure), never request data.
-  fun context() = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
-   .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0)).build()
   val call = requestClient.newCall(request)
+  // Elapsed until response headers (or the observed transport failure), never request data.
+  fun context(error:IOException? = null) = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
+   .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0))
+   .number(DiagnosticDetails.Field.TRANSPORT_CLIENT_ID,diagnosticClientId)
+   .apply { if(error!=null) transportFailure(error,call.isCanceled(),Thread.currentThread().isInterrupted) }.build()
   val registration = cancellation?.register { call.cancel() }
   return try {
   cancellation?.checkActive()
@@ -326,7 +329,7 @@ class AppendOnlyWebDav(
  }
  catch (error: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw error }
  catch (error: IOException) {
-  DiagnosticLog.networkFailure(error, context())
+  DiagnosticLog.networkFailure(error, context(error))
   // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
   // Never copy transport text, causes or suppressed exceptions, which can contain credentials/URLs.
   val category = when (error) {
@@ -505,6 +508,7 @@ class AppendOnlyWebDav(
  private fun Element.elements(): List<Element> = (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }
 
  companion object {
+  private val nextDiagnosticClientId = java.util.concurrent.atomic.AtomicLong()
   private const val DAV = "DAV:"
   private const val LEGACY_COMMIT_PREFIX = "pdsync-v2-commit-"
   private const val HASH_COMMIT_PREFIX = "pdsync-v3-commit-"

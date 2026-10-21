@@ -50,6 +50,11 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("contentBytes") CONTENT_BYTES,
   @SerialName("networkTarget") NETWORK_TARGET,
   @SerialName("requestDurationMs") REQUEST_DURATION_MS,
+  @SerialName("transportClientId") TRANSPORT_CLIENT_ID,
+  @SerialName("transportFailureKind") TRANSPORT_FAILURE_KIND,
+  @SerialName("transportCauseKind") TRANSPORT_CAUSE_KIND,
+  @SerialName("transportCanceled") TRANSPORT_CANCELED,
+  @SerialName("transportThreadInterrupted") TRANSPORT_THREAD_INTERRUPTED,
   @SerialName("bridgeStage") BRIDGE_STAGE,
   @SerialName("failureSource") FAILURE_SOURCE,
   @SerialName("syncCompare") SYNC_COMPARE,
@@ -137,6 +142,12 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   fun failureSource(value: String?): Builder = token(Field.FAILURE_SOURCE, value)
   fun observationState(value: String?): Builder = token(Field.OBSERVATION_STATE, value)
   fun observationReliable(value: Boolean): Builder = flag(Field.OBSERVATION_RELIABLE, value)
+  fun transportFailure(error:Throwable,canceled:Boolean,interrupted:Boolean):Builder = apply {
+   token(Field.TRANSPORT_FAILURE_KIND,TransportFailureKind.of(error).name)
+   token(Field.TRANSPORT_CAUSE_KIND,TransportFailureKind.deepest(error).name)
+   flag(Field.TRANSPORT_CANCELED,canceled)
+   flag(Field.TRANSPORT_THREAD_INTERRUPTED,interrupted)
+  }
   fun networkTarget(value: NetworkTarget): Builder = token(Field.NETWORK_TARGET, value.name)
   fun syncCompare(value: String?): Builder = token(Field.SYNC_COMPARE, value)
   fun syncDecision(value: String?): Builder = token(Field.SYNC_DECISION, value)
@@ -200,7 +211,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @JvmStatic fun builder(): Builder = Builder()
   private val layoutCounts = setOf(Field.SAVE_LAYOUT_INCLUDED, Field.SAVE_LAYOUT_EXCLUDED, Field.SAVE_LAYOUT_UNRECOGNIZED)
   private val booleanFields = setOf(Field.IDENTITY_VERIFIED, Field.SYSTEM_REQUEST_ACTIVE,
-   Field.RESTORE_PENDING, Field.SAVE_LAYOUT_TRUNCATED, Field.SAVE_LAYOUT_VALID, Field.OBSERVATION_RELIABLE)
+   Field.TRANSPORT_CANCELED, Field.TRANSPORT_THREAD_INTERRUPTED, Field.RESTORE_PENDING, Field.SAVE_LAYOUT_TRUNCATED, Field.SAVE_LAYOUT_VALID, Field.OBSERVATION_RELIABLE)
   // BridgeDiagnostics.CODES plus MainActivity's real READY/NOT_CHECKED observations.
   // A parity test requires changes to the protocol allowlist to be reviewed here too.
   private val readinessCodes = setOf(
@@ -260,6 +271,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.ROOT_CATEGORY -> rootCategories
    Field.BRIDGE_STAGE -> bridgeStages
    Field.OBSERVATION_STATE -> setOf("FOREGROUND", "BACKGROUND", "CACHED", "ABSENT", "UNKNOWN")
+   Field.TRANSPORT_FAILURE_KIND, Field.TRANSPORT_CAUSE_KIND -> TransportFailureKind.values().map { it.name }.toSet()
    Field.NETWORK_TARGET -> NetworkTarget.entries.map { it.name }.toSet()
    Field.FAILURE_SOURCE -> FailureSource.entries.map { it.name }.toSet()
    Field.SYNC_COMPARE, Field.SYNC_DECISION -> compareStates
@@ -273,6 +285,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.FILE_COUNT, Field.LOCAL_FILE_COUNT, Field.REMOTE_FILE_COUNT -> 0L..MAX_FILE_COUNT
    Field.CONTENT_BYTES -> 0L..MAX_CONTENT_BYTES
    Field.REQUEST_DURATION_MS, Field.INSTALLATION_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
+   Field.TRANSPORT_CLIENT_ID -> 1L..Long.MAX_VALUE
    Field.GAME_VERSION_CODE -> 0L..Long.MAX_VALUE
    Field.SAVE_VERSION, Field.HELPER_ACCESS_PROTOCOL_VERSION, Field.HELPER_SINGLE_PASS_READ_VERSION,
    Field.HELPER_READ_SNAPSHOT_VERSION, Field.HELPER_RESTORE_RESULT_VERSION -> 0L..Int.MAX_VALUE.toLong()

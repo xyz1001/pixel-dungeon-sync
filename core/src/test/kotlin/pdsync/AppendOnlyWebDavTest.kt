@@ -12,6 +12,17 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class AppendOnlyWebDavTest {
+ @Test fun explicitReadRecoversAfterDisconnectWithoutReplayingFailedRequest() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_START))
+  server.enqueue(MockResponse().setResponseCode(404))
+  server.start()
+  val dav=store(server)
+  assertFailsWith<java.io.IOException> { dav.readCommit(id) }
+  assertEquals(1,server.requestCount,"failed request must not replay")
+  assertNull(dav.readCommit(id))
+  assertEquals(2,server.requestCount,"explicit retry uses same store successfully")
+ }
+
  private val id = "11111111-1111-4111-8111-111111111111"
  private val id2 = "22222222-2222-4222-8222-222222222222"
  private val hash = "ab".repeat(32)
