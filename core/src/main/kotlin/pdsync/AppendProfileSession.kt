@@ -33,10 +33,17 @@ internal class HomeReadResult(val context:HomeReadContext,val metadata:DetachedM
 internal class VerifiedSelectedRestore(
  val owner:Any,val graph:CommitMetadataGraph,val selected:AppendCommit?,val verified:VerifiedSnapshot,
  val before:Map<String,String>,val baseline:String?,val readOnly:Boolean,val historical:Boolean=false
-)
+) {
+ // Equal bytes are a no-op only for the current single tip. Historical/branch selections still
+ // carry an explicit publication/metadata choice, even when their game bytes happen to match.
+ val unchanged:Boolean get() = !historical && selected!=null && graph.tips==setOf(selected.id) &&
+  before==verified.snapshot.manifest.files &&
+  (baseline==null || graph.displayGraph.descendsFrom(selected.id,baseline))
+}
 internal class SelectedRestoreStage(
  val selection:VerifiedSelectedRestore,val verified:VerifiedSnapshot,val graph:CommitMetadataGraph,
- val plan:VerifiedUploadPlan?=null,val applied:Boolean=true,val localResult:RestoreResult?=null
+ val plan:VerifiedUploadPlan?=null,val applied:Boolean=true,val localResult:RestoreResult?=null,
+ val unchanged:Boolean=false
 )
 sealed interface AppendPushResult {
  data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
@@ -355,9 +362,12 @@ class AppendProfileSession(
   }
   VerifiedSelectedRestore(comparisonOwner,graph,selected,verified,comparison.localFiles,comparison.baselineId,readOnly,historical)
  }
- private fun publishSelectedPlan(plan:VerifiedUploadPlan,graph:CommitMetadataGraph,store:AppendStore):CommitMetadataGraph {
+ private fun publishSelectedPlan(plan:VerifiedUploadPlan,graph:CommitMetadataGraph,store:AppendStore,refreshGraph:Boolean=true):CommitMetadataGraph {
   repository.publishVerified(store,plan,graph)
-  val latest=discoverMetadata(store)
+  // Successful immutable object/commit readbacks prove our own delta. Keep the original remote
+  // parent set during the operation; one final discovery reports concurrent external branches.
+  val latest=if(refreshGraph)discoverMetadata(store)
+   else CommitMetadataGraph(graph.displayGraph.copy(commits=graph.commits+(plan.plan.commit.id to plan.plan.commit)))
   require(latest.commits[plan.plan.commit.id]==plan.plan.commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
   local.remember(plan.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.plan.commit.kind),repository.observedAt(plan.plan.commit.id))
   repository.setSelectedBaseline(plan.plan.commit,latest,plan.verified)
@@ -368,23 +378,25 @@ class AppendProfileSession(
   require(selection.owner===comparisonOwner)
   local.guard(stopped);noLegacyPending();appliedOnly()
   require(repository.pending()==null && repository.baseline()==selection.baseline)
-  var graph=discoverMetadata(store)
-  require(graph==selection.graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
+  // Preparation already read the current graph after the fresh game export. Publications use
+  // these exact parents; completion discovers any concurrent branches without absorbing them.
+  var graph=selection.graph
+  require(currentFiles()==selection.before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
   val selected=selection.selected
   var chosen=selection.verified
+  if(selection.unchanged)return@readLocked SelectedRestoreStage(selection,chosen,graph,unchanged=true)
   local.remember(chosen,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),selected?.let {repository.observedAt(it.id)})
   val isTip=!selection.historical && selected!=null && selected.id in graph.tips
   val before=selection.before
   val baselineFiles=selection.baseline?.let {graph.commits.getValue(it).snapshot.files}
-  val preserveLocal=!selection.readOnly && isTip && before.isNotEmpty() && (selection.baseline==null || before!=baselineFiles)
+  val preserveLocal=!selection.readOnly && isTip && before.isNotEmpty() && before!=chosen.snapshot.manifest.files &&
+   (selection.baseline==null || before!=baselineFiles)
   if(preserveLocal) {
    val captured=VerifiedSnapshot.read(local.capture(stopped,null),adapter)
    require(captured.snapshot.manifest.files==before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
    val preservation=repository.prepareVerified(captured,listOfNotNull(selection.baseline),operation=local.operationMetadata())
    local.remember(preservation.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text("snapshot"))
-   val expectedTips=(graph.tips-preservation.plan.commit.parents.toSet())+preservation.plan.commit.id
-   graph=publishSelectedPlan(preservation,graph,store)
-   if(graph.tips!=expectedTips)return@readLocked SelectedRestoreStage(selection,chosen,graph,applied=false)
+   graph=publishSelectedPlan(preservation,graph,store,refreshGraph=false)
   }
   if(selection.readOnly) {
    val prior=(local.directoryMetadata.read() as? SidecarRead.Valid)?.value
@@ -399,8 +411,8 @@ class AppendProfileSession(
    val metadata=DirectorySnapshotMetadata(displayName=source?.displayName ?: "",contentSha256=contentSha256(chosen.snapshot.manifest.files),runs=runs).validated(chosen.snapshot.manifest.files)
    chosen=chosen.withManifest(chosen.snapshot.manifest.copy(directoryMetadata=metadata))
   }
-  // The last structural observation binds the exact chosen parents before any local replacement.
-  require(discoverMetadata(store)==graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
+  // Keep the selected parents fixed. A later cloud branch is never silently adopted as a parent;
+  // completion refreshes its observation after the verified game receipt and any publication.
   val direct=selection.readOnly || isTip && !preserveLocal && graph.tips.size==1 &&
    (selection.baseline==null&&before.isEmpty() || before==baselineFiles&&graph.displayGraph.descendsFrom(requireNotNull(selected).id,requireNotNull(selection.baseline)))
   if(direct) {
@@ -430,7 +442,10 @@ class AppendProfileSession(
  }
  internal fun finishSelectedRestore(stage:SelectedRestoreStage,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
   require(stage.selection.owner===comparisonOwner);local.guard(stopped);appliedOnly()
-  val graph=if(stage.plan!=null)publishSelectedPlan(stage.plan,stage.graph,store) else stage.graph
+  val graph=when {
+   stage.plan!=null->publishSelectedPlan(stage.plan,stage.graph,store)
+   else->discoverMetadata(store)
+  }
   val files=if(stage.applied)stage.verified.snapshot.manifest.files else stage.selection.before
   val baseline=repository.baseline()
   val lineage=when {

@@ -253,11 +253,15 @@ class AndroidSyncFacade internal constructor(
  }
  private fun restoreOtherSelection(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean,readOnly:Boolean):OperationResult {
   val observed=presentationChecked(inspection)
-  val selection=session.prepareSelectedRestore(observed,snapshotId,store,allowUniqueReplacement,readOnly,mirrorStopped)
   val before=inspection.homeObservation?.materializedReceipt ?: checkActualUnchanged(observed.localFiles)
+  val selection=session.prepareSelectedRestore(observed,snapshotId,store,allowUniqueReplacement,readOnly,mirrorStopped)
   val after=selection.verified.snapshot.manifest.files
   var stage:SelectedRestoreStage?=null
-  val applied=prepareGameRestore(observed.localFiles,after,if(readOnly)"read-only-restore" else "restore",
+  val applied=if(selection.unchanged) {
+   // A complete selected archive and one fresh actual-game export prove this no-op. Do not
+   // create a journal, replace the mirror, publish, or turn equality into a sync baseline.
+   stage=session.stageSelectedRestore(selection,store,mirrorStopped);null
+  } else prepareGameRestore(observed.localFiles,after,if(readOnly)"read-only-restore" else "restore",
    verifiedProvider={stage?.verified}) {stage=session.stageSelectedRestore(selection,store,mirrorStopped)}
   val staged=requireNotNull(stage)
   if(staged.applied) {
@@ -273,6 +277,7 @@ class AndroidSyncFacade internal constructor(
   val complete=staged.applied && completed.kind==OnboardingKind.IDENTICAL && completed.baselineLineage==OnboardingLineage.SAME_TIP
   val message=when {
    !staged.applied || conflict->CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text()
+   staged.unchanged->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVE_BYTES_MATCH.text()
    staged.plan!=null->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_VERIFIED_IN_THE_GAME_AND_PUBLISHED.text()
    readOnly->CoreMessages.ANDROID_SELECTED_VERSION_DOWNLOADED_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
    else->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text()

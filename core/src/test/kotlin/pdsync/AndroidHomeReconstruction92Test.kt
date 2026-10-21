@@ -135,14 +135,18 @@ class AndroidHomeReconstruction92Test {
   assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }
 
- @Test fun lateBranchDuringDirtyPreservationDoesNotReplaceGameFiles() {
+ @Test fun lateBranchDuringDirtyPreservationRemainsSeparateAndReportsConflictAfterRestore() {
   val store=Store();publish(store);val chosen=store.latest()
   val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
   val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome()
-  store.afterCommit={store.afterCommit=null;store.child(chosen)}
+  var late:AppendCommit?=null
+  store.afterCommit={store.afterCommit=null;late=store.child(chosen)}
   val result=rig.facade.restoreSelected(home,chosen.snapshot.id,true)
   assertTrue(result.isConflict);assertFalse(result.configurationComplete)
-  assertEquals(0,bridge.restores);assertEquals(before,bridge.content.mapValues {hash(it.value)})
+  assertEquals(1,bridge.restores);assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
+  assertTrue(store.commits.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}.any {it.snapshot.files==before})
+  assertFalse(requireNotNull(late).id in store.latest().parents)
+  assertEquals(setOf(store.latest().id,requireNotNull(late).id),result.refreshedInspection?.comparison?.observedTips)
   assertFalse(rig.facade.hasUnresolvedRestore())
  }
 

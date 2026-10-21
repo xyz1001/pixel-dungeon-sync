@@ -440,12 +440,13 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   observeVerified(plan.commit.id)
   return plan.commit
  }
- /** Upload verification remains complete; only unrelated ancestor object downloads are omitted. */
+ /** Publish against this operation's already-read parents. New remote siblings are observed at
+  * completion, never silently absorbed into the frozen restore/resolution. Immutable write
+  * verification remains complete; repeating discovery here cannot lock the remote graph. */
  internal fun publishVerified(store:AppendStore,verified:VerifiedUploadPlan,expected:CommitMetadataGraph):AppendCommit {
   requireFrozen(verified)
   val plan=verified.plan
-  val graph=discoverMetadata(store);graph.requireSettled()
-  require(graph==expected) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
+  val graph=expected;graph.requireSettled()
   require(plan.commit.parents.all {it in graph.commits}) { CoreSessionMessages.PARENT_COMMITS_HAVE_NOT_BEEN_FULLY_VERIFIED_NOTHING_WAS_PUBLISHED.text() }
   store.withFreshReads {
    putVerified({store.readObject(plan.commit.snapshot.id)},{store.writeObject(plan.commit.snapshot.id,plan.zip)},plan.zip)

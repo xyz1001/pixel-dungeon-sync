@@ -133,14 +133,20 @@ public class MainActivity {
         noMarker.run(incomplete);check(noMarker.markers==0 && noMarker.reads==0,"receipt fabricated completion");
         MainActivity fallback=new MainActivity();fallback.run(new AndroidSyncFacade.OperationResult(null));
         check(fallback.reads==1 && fallback.facade.completions==1,"legacy/null receipt lost old path");
-        for(int reason=0;reason<4;reason++){
+        MainActivity conflicted=new MainActivity();AndroidSyncFacade.OperationResult conflict=result();conflict.conflict=true;
+        OperationOutcome conflictReceipt=conflicted.run(conflict);
+        check(conflicted.reads==0 && conflicted.facade.historyReads==1 && conflicted.markers==0
+                && conflicted.facade.completions==0,"verified conflict repeated full inspect/export or marked completion");
+        conflicted.m55x8211a061("restored with concurrent branch",conflictReceipt);
+        check(conflicted.inspection==conflict.refreshed && conflicted.history==conflicted.facade.receiptHistory
+                && conflicted.page==SyncPage.CONFLICT,"verified conflict receipt hid the existing branch-choice state");
+        for(int reason=0;reason<3;reason++){
             MainActivity guarded=new MainActivity();AndroidSyncFacade.OperationResult guardedResult=result();
             if(reason==0)guardedResult.pending=true;
-            if(reason==1)guardedResult.conflict=true;
-            if(reason==2)guardedResult.refreshed.recovery=true;
-            if(reason==3)guarded.journal=true;
+            if(reason==1)guardedResult.refreshed.recovery=true;
+            if(reason==2)guarded.journal=true;
             guarded.run(guardedResult);
-            check(guarded.reads==1 && guarded.facade.historyReads==0,"receipt bypassed pending/conflict/recovery gate");
+            check(guarded.reads==1 && guarded.facade.historyReads==0,"receipt bypassed pending/recovery gate");
         }
         MainActivity legacy=new MainActivity();legacy.prepared=new GamePreparationService.PreparedPair();
         legacy.prepared.legacyUnboundHelper=true;legacy.journal=true;

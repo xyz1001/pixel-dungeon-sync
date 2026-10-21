@@ -4231,11 +4231,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         final AndroidSyncFacade.Inspection refreshed = outcome.result.getRefreshedInspection();
         if (refreshed == null) return false;
         if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
-        if (outcome.result.isPending() || outcome.result.isConflict() || refreshed.getNeedsRestoreRecovery()
+        if (outcome.result.isPending() || refreshed.getNeedsRestoreRecovery()
                 || hasAnyRestoreJournal()) return false;
         final SyncHistory refreshedHistory = context.facade.historyPresentation(refreshed);
         if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
-        if (outcome.result.getConfigurationComplete())
+        if (!outcome.result.isConflict() && outcome.result.getConfigurationComplete())
             SyncRuntime.setOnboardingProgress(this, context.account, OnboardingProgress.COMPLETE);
         if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
         outcome.receipt = new OperationReceipt(context, refreshed, refreshedHistory);
