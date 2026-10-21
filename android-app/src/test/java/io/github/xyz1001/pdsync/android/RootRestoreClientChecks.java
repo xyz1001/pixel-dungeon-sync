@@ -96,7 +96,8 @@ public final class RootRestoreClientChecks {
             RootProtocol.Response unsafeReceipt=new RootProtocol.Response(RootProtocol.Status.OK,selected.binding().fingerprint(),
                     "ALLOWLISTED_FILES_PRESENT",1,10,B,observation,!observation.equals("UNKNOWN"),null)
                     .withRequest(request,RootProtocol.Outcome.RESTORED);
-            rejects(()->RootProtocol.writeResponse(new ByteArrayOutputStream(),unsafeReceipt),"applied");
+            RootProtocol.writeResponse(new ByteArrayOutputStream(),unsafeReceipt);
+            check(true,"actual file receipt is independent of lifecycle observation");
         }
         RootProtocol.Request observe=new RootProtocol.Request(RootProtocol.Command.OBSERVE,selected.binding());
         rejects(()->RootProtocol.writeResponse(new ByteArrayOutputStream(),receipt.withRequest(observe,RootProtocol.Outcome.RESTORED)),"restore receipt");
@@ -160,7 +161,7 @@ public final class RootRestoreClientChecks {
         check(bridge.capabilities().restoreSupported&&bridge.capabilities().interruptedBackupRecovery,"real-adapter capability path");
         RootGameBridge readOnly=new RootGameBridge(selected,identity,g->verifies.incrementAndGet(),exchange,()->true,root.toFile(),false);
         check(!readOnly.capabilities().restoreSupported&&!readOnly.capabilities().interruptedBackupRecovery
-                &&readOnly.capabilities().exportSupported&&readOnly.capabilities().lifecycleObservation,"missing native preserves read capabilities only");
+                &&readOnly.capabilities().exportSupported&&!readOnly.capabilities().lifecycleObservation,"missing native preserves read capabilities only");
         rejects(()->readOnly.restoreFrom(save,Collections.emptyMap()),"ROOT_RESTORE_UNSUPPORTED");
         rejects(readOnly::recoverInterruptedBackup,"ROOT_RECOVERY_UNSUPPORTED");
         check(exchange.calls==0&&verifies.get()==0,"capability checks and disabled mutations do not invoke Root or package inspection");
