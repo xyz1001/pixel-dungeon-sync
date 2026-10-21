@@ -17,8 +17,11 @@ public final class TransportReconnectHostChecks {
         try(MockWebServer server=new MockWebServer()) {
             server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST));
             server.enqueue(new MockResponse().setResponseCode(200).setBody("ok"));
-            server.start();
+            // Isolate reconnect behavior from dual-stack localhost DNS fallback.
+            InetAddress loopback=InetAddress.getByName("127.0.0.1");
+            server.start(loopback,0);
             OkHttpClient client=new OkHttpClient.Builder().retryOnConnectionFailure(false)
+                .dns(hostname -> java.util.Collections.singletonList(loopback))
                 .followRedirects(false).followSslRedirects(false).callTimeout(5,TimeUnit.SECONDS).build();
             Request request=new Request.Builder().url(server.url("/synthetic")).build();
             try { client.newCall(request).execute().close(); throw new AssertionError("disconnect should fail"); }

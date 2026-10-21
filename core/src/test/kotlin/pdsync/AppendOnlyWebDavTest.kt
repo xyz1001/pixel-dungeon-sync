@@ -15,8 +15,10 @@ class AppendOnlyWebDavTest {
  @Test fun explicitReadRecoversAfterDisconnectWithoutReplayingFailedRequest() = MockWebServer().use { server ->
   server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
   server.enqueue(MockResponse().setResponseCode(404))
-  server.start()
-  val dav=store(server)
+  // One fixture route: a failed IPv4 socket must not leave an unbound localhost IPv6 route.
+  val loopback=java.net.InetAddress.getByName("127.0.0.1")
+  server.start(loopback,0)
+  val dav=store(server,OkHttpClient.Builder().dns { listOf(loopback) }.build())
   assertFailsWith<java.io.IOException> { dav.readCommit(id) }
   assertEquals(1,server.requestCount,"failed request must not replay")
   assertNull(dav.readCommit(id))
