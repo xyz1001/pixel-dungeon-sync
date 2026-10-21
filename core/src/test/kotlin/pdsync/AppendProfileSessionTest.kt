@@ -92,7 +92,7 @@ class AppendProfileSessionTest {
   assertFails { b.restoreRemote(entry.entry.manifest.id, store) { true } }
   assertEquals("dirty", content(b)); assertNotEquals(next.id, b.baseline())
   edit(b, "alive"); val restored = b.restoreRemote(entry.entry.manifest.id, store) { true }
-  assertEquals("next", content(b)); assertEquals(next.id, b.baseline()); assertTrue(restored.backupPath.exists())
+  assertEquals("next", content(b)); assertEquals(next.id, b.baseline()); assertEquals(restored.restored.files, Snapshots.fileHashes(b.root, Shattered))
  }
 
  @Test fun retryReusesFrozenBytesAndEditsDuringPublicationRemainDirty() {
@@ -119,7 +119,7 @@ class AppendProfileSessionTest {
   val store = Memory(); val local = session(); val first = published(local, store)
   edit(local, "second"); val second = published(local, store)
   val restored = local.restoreHistory(first.snapshot.id) { true }
-  assertEquals("alive", content(local)); assertTrue(restored.backupPath.exists()); assertEquals(second.id, local.baseline())
+  assertEquals("alive", content(local)); assertEquals(restored.restored.files, Snapshots.fileHashes(local.root, Shattered)); assertEquals(second.id, local.baseline())
   edit(local, "post-restore-edit")
   val result = assertIs<AppendPushResult.Success>(local.push(store) { true })
   assertEquals("restore", result.commit.kind); assertEquals(listOf(second.id), result.commit.parents)
@@ -143,7 +143,8 @@ class AppendProfileSessionTest {
   val result = assertIs<AppendPushResult.Success>(c.resolve(conflict, choice.snapshot.manifest.id, store) { true })
   assertEquals("resolution", result.commit.kind); assertEquals(conflict.observedTips, result.commit.parents.toSet())
   assertEquals("b", content(c)); assertEquals(4, store.commits.size)
-  assertTrue(c.history().any { it.reason == "恢复前自动备份" && it.manifest.files["game1/game.dat"] == hash("c".encodeToByteArray()) })
+  assertFalse(c.history().any { it.reason == "恢复前自动备份" })
+  assertTrue(c.history().any { it.manifest.files["game1/game.dat"] == hash("c".encodeToByteArray()) }) // Already published branch remains readable.
   assertEquals(setOf(result.commit.id), graph(c, store).tips)
  }
 

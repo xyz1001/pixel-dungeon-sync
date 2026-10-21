@@ -47,8 +47,8 @@ class EmptyArchiveCompatibilityTest {
  @Test fun emptyArchivesRestoreAndBackUpWithoutDummyFiles() {
   val root=temp.resolve("restore").createDirectory();root.resolve("game1").createDirectory();root.resolve("game1/game.dat").writeText("alive")
   val snapshot=Snapshots.fromFiles(emptyMap(),Shattered,"test","v1")
-  val backup=Snapshots.restore(snapshot,root,temp.resolve("backups"),Shattered,"v1",{true})
+  Snapshots.restore(snapshot,root,temp.resolve("backups"),Shattered,"v1",{true})
   assertTrue(root.listDirectoryEntries().isEmpty())
-  ZipFile(backup.toFile()).use { assertEquals("game1/game.dat",it.entries().nextElement().name) }
+  assertFalse(temp.resolve("backups").exists())
  }
 }

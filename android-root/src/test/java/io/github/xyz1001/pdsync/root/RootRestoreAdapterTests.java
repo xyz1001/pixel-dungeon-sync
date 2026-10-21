@@ -32,7 +32,7 @@ public final class RootRestoreAdapterTests {
             check(new String(os.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("after-"+i),"restored bytes");
             check(!os.workspace().children.containsKey("journal"),"journal removed after success");
             FakeMutationOs.Node active=os.workspace().children.get("active");
-            for(String area:new String[]{"incoming","displaced","backup","cleanup"})check(active.children.get(area).children.isEmpty(),"successful private area reclaimed");
+            for(String area:new String[]{"incoming","cleanup"})check(active.children.get(area).children.isEmpty(),"successful private area reclaimed");
             try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){check(!adapter.pending(),"successful backend remains reusable");}
         }
         FakeMutationOs unsupported=fixture();unsupported.noRename=true;
@@ -41,7 +41,7 @@ public final class RootRestoreAdapterTests {
         unsupported.noRename=false;
         try(RootRestoreAdapter adapter=new RootRestoreAdapter(unsupported,binding(),GATE)){check(!adapter.pending(),"failed preflight cleans private prep");}
         check(restore(unsupported,Collections.singletonMap("rankings.dat",data("retry")))==Outcome.RESTORED,"successful retry after unsupported preflight");
-        singlePassReads(); activeWriterBackup(); preparationCrash(); cleanupCrash(); racedSource(); racedDestination(); rejectedGate();
+        singlePassReads(); noBackupFailure(); partialRemoval(); legacyPreparationRetained(); preparationCrash(); cleanupCrash(); rejectedGate();
         FakeMutationOs labels=fixture();labels.noXattr=true;
         try{restore(labels,Collections.singletonMap("rankings.dat",data("new")));throw new AssertionError("missing labels accepted");}catch(IOException expected){checks++;}
         check(new String(labels.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("before"),"label refusal never writes live");
@@ -51,21 +51,54 @@ public final class RootRestoreAdapterTests {
         FakeMutationOs os=fixture();FakeMutationOs.Node before=os.files.children.get("rankings.dat");
         check(restore(os,Collections.singletonMap("rankings.dat",data("new")))==Outcome.RESTORED,"single-pass restore result");
         FakeMutationOs.Node after=os.files.children.get("rankings.dat");
-        check(os.dataReads.getOrDefault(before.inode,0)==1,"old save read once for capture and independent backup");
+        check(os.dataReads.getOrDefault(before.inode,0)==2,"old save captured and revalidated before removal");
         check(os.dataReads.getOrDefault(after.inode,0)==1,"final save read once for actual receipt");
     }
-    static void activeWriterBackup()throws Exception {
-        FakeMutationOs os=fixture();FakeMutationOs.Node oldOpenFile=os.files.children.get("rankings.dat");
-        Outcome outcome=restoreWithGate(os,hook(os,true,()->{oldOpenFile.bytes=data("game-kept-writing");os.noSync=true;}));
-        check(outcome==Outcome.RESTORED_CLEANUP_PENDING,"old open-file writer does not invalidate committed result");
-        FakeMutationOs.Node backup=os.workspace().children.get("active").children.get("backup").children.get("rankings.dat");
-        check(backup.inode!=oldOpenFile.inode&&Arrays.equals(backup.bytes,data("before")),"backup independent of old open-file writes");
-        check(Arrays.equals(os.files.children.get("rankings.dat").bytes,data("new")),"old open-file writes do not alter restored inode");
-        os.noSync=false;
-        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){
-            check(new RootRestoreTransaction().recover(adapter,adapter.target())==Outcome.RESTORED,"terminal journal cleans modified displaced inode");
-            check(!adapter.pending(),"terminal cleanup remains reusable");
+    static void noBackupFailure()throws Exception {
+        FakeMutationOs os=fixture();
+        try { restoreWithGate(os,hook(os,false,()->{throw new RuntimeException("crash after original removal");})); throw new AssertionError("crash missing"); }
+        catch(RuntimeException expected){checks++;}
+        FakeMutationOs.Node active=os.workspace().children.get("active");
+        check(!active.children.containsKey("backup"),"no insurance backup created");
+        check(!active.children.containsKey("displaced"),"no rollback old-data created");
+        check(!os.files.children.containsKey("rankings.dat"),"failure does not falsely restore original");
+        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)) {
+            check(new RootRestoreTransaction().recover(adapter,adapter.target())==Outcome.RESTORED,"resume overwrite from durable deletion");
         }
+        check(Arrays.equals(os.files.children.get("rankings.dat").bytes,data("new")),"resume installs incoming data");
+    }
+    static void partialRemoval()throws Exception {
+        FakeMutationOs os=fixture();
+        FakeMutationOs.Node slot=os.dir(os.files,"game1",0700,10001,10001);
+        os.file(slot,"game.dat","run");os.file(slot,"level.dat","level");
+        RootRestoreAdapter.Gate gate=new RootRestoreAdapter.Gate(){boolean armed;public void quietWait(){}public void requireSafe(RootBinding b){
+            if(!armed&&journal(os)!=null){armed=true;os.afterUnlink=()->os.noSync=true;}
+        }};
+        try{restoreWithGate(os,gate);throw new AssertionError("partial removal accepted");}
+        catch(Failure expected){check(expected.code==Code.RECOVERY_REQUIRED,"partial removal never claims rollback");}
+        check(slot.children.size()==1,"partial subtree removal represented honestly");
+        check(!os.workspace().children.get("active").children.containsKey("backup"),"partial removal creates no backup");
+        os.noSync=false;int mutations=os.mutations;
+        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){
+            try{new RootRestoreTransaction().recover(adapter,adapter.target());throw new AssertionError("partial subtree guessed");}
+            catch(Failure expected){check(expected.code==Code.CONCURRENT_MUTATION,"partial subtree fails closed");}
+        }
+        check(os.mutations==mutations,"uncertain partial recovery makes no writes");
+    }
+    static void legacyPreparationRetained()throws Exception {
+        FakeMutationOs os=fixture();os.beforeRename=()->{throw new SimulatedDeath();};
+        try{restore(os,Collections.singletonMap("rankings.dat",data("new")));}catch(SimulatedDeath expected){}
+        // Recover initial phase first, then model a legacy PREPARING backup left on disk.
+        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){adapter.resumePrepared();}
+        FakeMutationOs.Node active=os.workspace().children.get("active");
+        String phase=new String(active.children.get("phase").bytes,StandardCharsets.US_ASCII);
+        active.children.get("phase").bytes=data(phase.replace("CLEAN:","PREPARING:"));
+        FakeMutationOs.Node backup=os.dir(active,"backup",0700,0,0);
+        FakeMutationOs.Node retained=os.file(backup,"rankings.dat","legacy-original");
+        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){
+            try{adapter.resumePrepared();throw new AssertionError("legacy backup removed");}catch(Failure expected){checks++;}
+        }
+        check(backup.children.get("rankings.dat")==retained&&Arrays.equals(retained.bytes,data("legacy-original")),"legacy backup inode and bytes preserved");
     }
     static void preparationCrash()throws Exception {
         FakeMutationOs os=fixture();os.beforeRename=()->{throw new SimulatedDeath();};
@@ -85,28 +118,10 @@ public final class RootRestoreAdapterTests {
         Outcome outcome=restoreWithGate(os,hook(os,true,()->os.noSync=true));
         check(outcome==Outcome.RESTORED_CLEANUP_PENDING,"cleanup fsync failure preserves definite commit");
         check(journal(os).phase==Phase.COMMITTED,"cleanup failure retains terminal journal");
-        check(!os.workspace().children.get("active").children.get("cleanup").children.isEmpty(),"moved cleanup entry retained");
+        check(!os.workspace().children.get("active").children.containsKey("backup"),"cleanup failure has no old save backup");
         os.noSync=false;
         try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){check(new RootRestoreTransaction().recover(adapter,adapter.target())==Outcome.RESTORED,"resume terminal cleanup");check(!adapter.pending(),"cleanup restart reusable");}
         check(restore(os,Collections.singletonMap("rankings.dat",data("next")))==Outcome.RESTORED,"restore after interrupted cleanup");
-    }
-    static void racedSource()throws Exception {
-        FakeMutationOs os=fixture();FakeMutationOs.Node original=os.files.children.get("rankings.dat");
-        try{restoreWithGate(os,hook(os,false,()->os.file(os.files,"rankings.dat","raced")));throw new AssertionError("raced source accepted");}catch(IOException expected){checks++;}
-        FakeMutationOs.Node active=os.workspace().children.get("active");
-        check(new String(active.children.get("displaced").children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("raced"),"unexpected moved source preserved");
-        check(new String(active.children.get("backup").children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("before"),"independent original backup preserved");
-        check(active.children.get("backup").children.get("rankings.dat").inode!=original.inode,"backup is fresh independent inode");
-        int writes=os.mutations;
-        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){try{new RootRestoreTransaction().recover(adapter,adapter.target());throw new AssertionError("unknown source recovered");}catch(IOException expected){checks++;}}
-        check(os.mutations==writes,"unknown recovery performs zero writes");
-    }
-    static void racedDestination()throws Exception {
-        FakeMutationOs os=fixture();
-        try{restoreWithGate(os,hook(os,false,()->os.file(os.workspace().children.get("active").children.get("displaced"),"rankings.dat","intruder")));throw new AssertionError("destination race accepted");}catch(IOException expected){checks++;}
-        check(new String(os.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("before"),"no-replace keeps original live source");
-        check(new String(os.workspace().children.get("active").children.get("displaced").children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("intruder"),"no-replace preserves raced destination");
-        check(journal(os)!=null,"destination conflict retains journal");
     }
     static void rejectedGate()throws Exception {
         FakeMutationOs os=fixture();int initial=os.mutations;

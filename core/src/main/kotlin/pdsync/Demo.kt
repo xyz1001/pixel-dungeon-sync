@@ -27,16 +27,16 @@ fun main() {
   check(repository.discover(store).tips == setOf(second.id))
   val downloaded = repository.download(store, second)
   root.resolve("game1/game.dat").writeText("modified")
-  val backupPath = Snapshots.restore(downloaded, root, backup, Shattered, "synthetic-v1", { true })
+  Snapshots.restore(downloaded, root, backup, Shattered, "synthetic-v1", { true })
   check(root.resolve("game1/game.dat").readText() == "synthetic-run")
   check(root.resolve("journal.dat").readText() == "synthetic-journal")
-  check(backupPath.exists())
+  check(backup.listDirectoryEntries().isEmpty())
   val sibling = publish(listOf(first.id))
   check(repository.discover(store).tips == setOf(second.id, sibling.id))
   val resolution = publish(listOf(second.id, sibling.id), "resolution")
   check(repository.discover(store).tips == setOf(resolution.id))
   check(!store.legacyPresent())
-  println("PDSYNC_E2E_OK immutable-upload/readback/parent-DAG/restore/backup/retained-branches/resolution/no-head")
+  println("PDSYNC_E2E_OK immutable-upload/readback/parent-DAG/restore/no-backup/retained-branches/resolution/no-head")
  } finally {
   listOf(root, backup, state).forEach { path -> Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } } }
  }

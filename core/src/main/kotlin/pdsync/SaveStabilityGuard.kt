@@ -55,7 +55,7 @@ class SaveStabilityGuard(
   captureContextProvider: (() -> SnapshotCaptureContext)? = null): Snapshot =
   captureStable(profile, version, parent, captureContext, captureContextProvider).snapshot
 
- /** Keep this exact fingerprint for the final restore check after backup registration. */
+ /** Keep this exact fingerprint for the final restore check before replacement. */
  fun captureStable(profile: String, version: String, parent: String?, captureContext: SnapshotCaptureContext? = null,
   captureContextProvider: (() -> SnapshotCaptureContext)? = null): StableSaveCapture {
   requireContext()

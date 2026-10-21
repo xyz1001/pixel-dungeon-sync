@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * Pure restore state machine. This class neither opens paths nor elevates privileges.
- * The Android adapter is deliberately not implemented: see FileAccess's security contract.
+ * RootRestoreAdapter implements FileAccess's descriptor-relative security contract.
  * Incoming bytes must first pass the existing SaveArchive parser and schema checks.
  */
 public final class RootRestoreTransaction {
@@ -30,7 +30,7 @@ public final class RootRestoreTransaction {
     public enum Outcome { UNCHANGED, RESTORED, RESTORED_CLEANUP_PENDING,
         RECOVERED, RECOVERED_CLEANUP_PENDING }
     public enum Phase { FORWARD, ROLLBACK, COMMITTED, ROLLED_BACK }
-    public enum Area { LIVE, INCOMING, DISPLACED }
+    public enum Area { LIVE, INCOMING, DISPLACED, REMOVED }
 
     public static final class Failure extends IOException {
         private static final long serialVersionUID = 1;
@@ -252,7 +252,8 @@ public final class RootRestoreTransaction {
 
     /** Validating constructor is also the adapter's journal-deserialization boundary. */
     public static final class Journal {
-        public static final int SCHEMA = 1;
+        public static final int SCHEMA = 2;
+        public final int schema;
         public final Workspace workspace;
         public final Tree before, desired;
         public final Phase phase;
@@ -260,17 +261,19 @@ public final class RootRestoreTransaction {
         public final int cursor;
         private final List<Move> moves;
         public Journal(int schema, Workspace workspace, Tree before, Tree desired, Phase phase, int cursor) throws IOException {
-            require(schema == SCHEMA && workspace != null && before != null && desired != null && phase != null,
+            require((schema == 1 || schema == SCHEMA) && workspace != null && before != null && desired != null && phase != null,
                     Code.INVALID_INPUT, "Invalid restore journal");
             requireOwned(before, workspace.target.gameUid); requireOwned(desired, workspace.target.gameUid);
-            this.moves = plan(before, desired);
+            this.schema = schema;
+            require(schema == 1 || (phase != Phase.ROLLBACK && phase != Phase.ROLLED_BACK), Code.INVALID_INPUT, "Overwrite-only transaction cannot roll back");
+            this.moves = plan(before, desired, schema);
             require(cursor >= 0 && cursor <= moves.size()
                     && (phase != Phase.COMMITTED || cursor == moves.size())
                     && (phase != Phase.ROLLED_BACK || cursor == 0), Code.INVALID_INPUT, "Invalid restore journal position");
             this.workspace = workspace; this.before = before; this.desired = desired; this.phase = phase; this.cursor = cursor;
         }
         public List<Move> moves() { return moves; }
-        Journal at(Phase phase, int cursor) throws IOException { return new Journal(SCHEMA, workspace, before, desired, phase, cursor); }
+        Journal at(Phase phase, int cursor) throws IOException { return new Journal(schema, workspace, before, desired, phase, cursor); }
         public Layout expectedLayout(int count) throws IOException {
             require(count >= 0 && count <= moves.size(), Code.INVALID_INPUT, "Invalid move count");
             TreeMap<String, Entry> live = new TreeMap<>(before.entries);
@@ -281,19 +284,19 @@ public final class RootRestoreTransaction {
                 Map<String, Entry> from = move.from == Area.LIVE ? live : incoming;
                 Map<String, Entry> to = move.to == Area.LIVE ? live : displaced;
                 for (Map.Entry<String, Entry> item : move.expectedEntry.entries.entrySet()) {
-                    require(from.remove(item.getKey()) != null && to.put(item.getKey(), item.getValue()) == null,
+                    require(from.remove(item.getKey()) != null && (move.to == Area.REMOVED || to.put(item.getKey(), item.getValue()) == null),
                             Code.INVALID_INPUT, "Invalid move plan");
                 }
             }
-            return new Layout(new Tree(live), new Tree(incoming), new Tree(displaced), before);
+            return new Layout(new Tree(live), new Tree(incoming), new Tree(displaced), schema == 1 ? before : new Tree(Collections.emptyMap()));
         }
         @Override public boolean equals(Object value) {
             if (!(value instanceof Journal)) return false;
             Journal other = (Journal) value;
-            return workspace.equals(other.workspace) && before.equals(other.before) && desired.equals(other.desired)
+            return schema == other.schema && workspace.equals(other.workspace) && before.equals(other.before) && desired.equals(other.desired)
                     && phase == other.phase && cursor == other.cursor;
         }
-        @Override public int hashCode() { return Objects.hash(workspace, before, desired, phase, cursor); }
+        @Override public int hashCode() { return Objects.hash(schema, workspace, before, desired, phase, cursor); }
     }
 
     public interface Lease extends AutoCloseable { @Override void close() throws IOException; }
@@ -316,7 +319,7 @@ public final class RootRestoreTransaction {
         /**
          * Before any live mutation: create root-private same-device staging under pinned dataDir;
          * re-read validated incoming bytes, apply desired local UID/GID/mode/security.selinux,
-         * copy and verify an independent original backup, fsync everything and the exact receipt.
+         * stage only incoming data, fsync everything and the exact receipt. Never copy old saves.
          * No archive ownership, labels, symlinks or paths are honored. Failure retains/cleans only
          * its own exact receipt; it must never mutate LIVE or leave an untracked workspace.
          */
@@ -329,7 +332,8 @@ public final class RootRestoreTransaction {
                     "Final live save does not match the transaction");
         }
         /**
-         * Recheck source contents/metadata/identity and destination absence, then one atomic
+         * REMOVED operations delete only verified original entries without retaining a copy.
+         * For publication, recheck source contents/metadata/identity and destination absence, then one atomic
          * no-replace top-level rename; fsync both parents. Android requires a proven atomic
          * RENAME_NOREPLACE primitive; ordinary rename/Files.move is not a valid fallback.
          * Equal st_dev alone is insufficient across bind mounts: preflight actual parents.
@@ -344,7 +348,7 @@ public final class RootRestoreTransaction {
         /** Durable compare-and-replace journal; expected=null only for first publication. */
         void saveJournal(Journal expected, Journal next) throws IOException;
         /**
-         * Terminal journal only. Retain a verified finalized backup per local retention policy.
+         * Terminal journal only. Preserve all existing legacy backup data.
          * Remove only this exact workspace; remove journal last, after durable cleanup. Never
          * inspect untrusted names to choose paths, recurse outside pins, or modify live saves.
          */
@@ -393,7 +397,7 @@ public final class RootRestoreTransaction {
                 try { durable = files.readJournal(target); }
                 catch (IOException unavailable) {
                     original.addSuppressed(unavailable);
-                    throw new Failure(Code.RECOVERY_REQUIRED, "Cannot establish durable restore state; backup retained", original);
+                    throw new Failure(Code.RECOVERY_REQUIRED, "Cannot establish durable restore state; overwrite may be incomplete", original);
                 }
                 if (durable == null) {
                     // saveJournal(null, ...) failed before publication. No move has been attempted.
@@ -406,6 +410,8 @@ public final class RootRestoreTransaction {
                 }
                 requireSameTransaction(journal, durable);
                 if (durable.phase == Phase.COMMITTED) return finish(files, durable);
+                if (durable.schema >= 2) throw new Failure(Code.RECOVERY_REQUIRED,
+                        "Overwrite interrupted; original data was not backed up and may be partially replaced", original);
                 try {
                     rollback(files, durable);
                 } catch (IOException uncertain) {
@@ -417,7 +423,7 @@ public final class RootRestoreTransaction {
         }
     }
 
-    /** Explicit recovery always restores the original, unless a durable COMMITTED record exists. */
+    /** Recovery resumes overwrite-only transactions; legacy transactions may restore existing displaced originals. */
     @SuppressWarnings("try")
     public Outcome recover(FileAccess files, Target target) throws IOException {
         require(files != null && target != null, Code.INVALID_INPUT, "Recovery arguments required");
@@ -427,6 +433,14 @@ public final class RootRestoreTransaction {
             require(durable != null, Code.RECOVERY_REQUIRED, "No recoverable transaction record");
             require(durable.workspace.target.equals(target), Code.TARGET_CHANGED, "Recovery belongs to another target");
             if (durable.phase == Phase.COMMITTED || durable.phase == Phase.ROLLED_BACK) return finish(files, durable);
+            if (durable.schema >= 2) {
+                Journal resumed = reconcile(files, durable);
+                while (resumed.cursor < resumed.moves.size()) resumed = advance(files, resumed);
+                files.verifyFinal(resumed.workspace, resumed.desired);
+                Journal terminal = resumed.at(Phase.COMMITTED, resumed.cursor);
+                files.saveJournal(resumed, terminal);
+                return finish(files, terminal);
+            }
             return rollback(files, durable);
         }
     }
@@ -545,20 +559,20 @@ public final class RootRestoreTransaction {
         return local.rootAttributes.privateMode(directory);
     }
 
-    private static List<Move> plan(Tree before, Tree desired) throws IOException {
+    private static List<Move> plan(Tree before, Tree desired, int schema) throws IOException {
         TreeSet<String> all = new TreeSet<>(before.topNames()); all.addAll(desired.topNames());
         List<Move> old = new ArrayList<>(), fresh = new ArrayList<>();
         for (String name : all) {
             Tree prior = before.part(name), next = desired.part(name);
             if (prior.equals(next)) continue;
-            if (!prior.entries.isEmpty()) old.add(new Move(Area.LIVE, Area.DISPLACED, name, prior));
+            if (!prior.entries.isEmpty()) old.add(new Move(Area.LIVE, schema == 1 ? Area.DISPLACED : Area.REMOVED, name, prior));
             if (!next.entries.isEmpty()) fresh.add(new Move(Area.INCOMING, Area.LIVE, name, next));
         }
         old.addAll(fresh); return Collections.unmodifiableList(old);
     }
 
     private static void requireSameTransaction(Journal original, Journal durable) throws IOException {
-        require(original.workspace.equals(durable.workspace) && original.before.equals(durable.before)
+        require(original.schema == durable.schema && original.workspace.equals(durable.workspace) && original.before.equals(durable.before)
                 && original.desired.equals(durable.desired), Code.RECOVERY_REQUIRED, "Journal changed transaction identity");
     }
     private static void requireOwned(Tree tree, int uid) throws IOException {

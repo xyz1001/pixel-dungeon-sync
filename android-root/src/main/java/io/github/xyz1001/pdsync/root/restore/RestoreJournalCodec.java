@@ -44,7 +44,7 @@ public final class RestoreJournalCodec {
                 bytes.write(value, offset, length);
             }
         });
-        output.writeLong(MAGIC); output.writeInt(Journal.SCHEMA);
+        output.writeLong(MAGIC); output.writeInt(journal.schema);
         Workspace workspace = journal.workspace; Target target = workspace.target;
         string(output, workspace.transactionId); string(output, workspace.identityFingerprint);
         string(output, target.bindingFingerprint); string(output, target.canonicalDataDir);

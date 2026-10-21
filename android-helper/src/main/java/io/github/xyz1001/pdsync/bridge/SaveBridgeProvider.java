@@ -47,9 +47,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.UUID;
 
 
 public final class SaveBridgeProvider extends ContentProvider {
@@ -153,6 +151,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         reply.putInt("singlePassReadVersion", 1);
         reply.putInt("readSnapshotVersion", 1);
         reply.putInt("restoreResultVersion", 1);
+        reply.putInt("restoreWithoutBackupVersion", 1);
         return reply;
     }
 
@@ -172,12 +171,12 @@ public final class SaveBridgeProvider extends ContentProvider {
         if (!Files.exists(this.workspaceBase.toPath(), LinkOption.NOFOLLOW_LINKS))
             Files.createDirectory(this.workspaceBase.toPath());
         SafeSaveTree.checkDirectory(this.workspaceBase);
-        if (!this.backups.isDirectory() && !this.backups.mkdirs()) {
+        if (!Files.exists(this.area.toPath(), LinkOption.NOFOLLOW_LINKS) && !this.area.mkdir()) {
             throw new IOException("Cannot create bridge-private workspace");
         }
         SafeSaveTree.checkDirectory(this.area);
-        SafeSaveTree.checkDirectory(this.backups);
-        cleanupFinalizedBackups();
+        if (Files.exists(this.backups.toPath(), LinkOption.NOFOLLOW_LINKS))
+            SafeSaveTree.checkDirectory(this.backups);
         if (!pendingPresent() && Files.exists(new File(this.area, "restore-workspace.properties").toPath(), LinkOption.NOFOLLOW_LINKS)) {
             this.stage = FileFailureDetails.Stage.CLEANUP;
             restoreWorkspace().cleanupRecorded();
@@ -395,8 +394,6 @@ public final class SaveBridgeProvider extends ContentProvider {
         try (ParcelFileDescriptor descriptor = (ParcelFileDescriptor) value;
              RestoreSession session = newRestoreSession()) {
             boolean[] mutated = {false};
-            boolean journalWritten = false;
-            String backupId = null;
             SafeSaveTree tree = null;
             Map<String,String> currentHashes = null;
             try {
@@ -424,54 +421,22 @@ public final class SaveBridgeProvider extends ContentProvider {
                 if (!SafeSaveTree.identity(descriptorBefore).equals(SafeSaveTree.identity(Os.fstat(descriptor.getFileDescriptor()))))
                     throw new BridgeFailure("ARCHIVE_CHANGED", "Restore archive changed while reading");
                 session.handle.validate(); this.stage = FileFailureDetails.Stage.CAPTURE;
-                File original = mkdir(new File(session.handle.file(), "original"));
                 tree = new SafeSaveTree(transferRoot(), this.guard);
-                SafeSaveTree.State captured = tree.scan(original, true);
+                SafeSaveTree.State captured = tree.scan(null, true);
                 if (captured.inventory.hashes.equals(requested.hashes)) {
                     Bundle result = describe(captured.inventory); result.putBoolean("unchanged", true); result.putInt("restoreResultVersion", 1); return result;
                 }
                 if (!expected.equals(captured.inventory.fingerprint()))
                     throw new BridgeFailure("STALE_EXPORT", "Game save no longer matches the exported copy; refresh before restoring");
-                backupId = UUID.randomUUID().toString();
-                this.stage = FileFailureDetails.Stage.WRITE_BACKUP; session.handle.validate();
-                writeArchive(original, captured.inventory, new File(this.backups, backupId + ".zip"));
-                syncDirectory(this.backups);
-                this.stage = FileFailureDetails.Stage.WRITE_JOURNAL;
-                writePending(backupId, captured.inventory.fingerprint());
-                journalWritten = true;
                 currentHashes = new TreeMap<>(captured.inventory.hashes);
-                replace(tree, incoming, requested, session.handle, "removed", true, currentHashes, mutated);
-                this.stage = FileFailureDetails.Stage.FINALIZE;
-                finalizeBackup(backupId); session.committed = true;
-                Bundle result = describe(requested); result.putInt("restoreResultVersion", 1); describeFinalizedBackup(result, backupId); return result;
+                replace(tree, incoming, requested, session.handle, currentHashes, mutated);
+                Bundle result = describe(requested); result.putInt("restoreResultVersion", 1);
+                session.committed = true; return result;
             } catch (IOException | ErrnoException error) {
                 rememberFailure(error);
-                if (session.committed || (backupId != null && !pendingPresent() && finalizedMarkerValid(backupId))) {
-                    session.committed = true;
-                    throw new BridgeFailure("RESTORE_COMMITTED_CLEANUP_PENDING", "Save was verified and committed; retained temporary backup cleanup will retry", error);
-                }
-                if (pendingPresent() && !mutated[0]) {
-                    Properties journal = readPending();
-                    if (backupId == null || !backupId.equals(journal.getProperty("backupId")) || !this.pending.delete())
-                        throw new BridgeFailure("RECOVERY_REQUIRED", "Save was not modified, but its unused restore journal could not be cleared", error);
-                    syncDirectory(this.area); deleteUnusedBackup(backupId); throw error;
-                }
-                if (pendingPresent()) {
-                    try {
-
-                        if (tree == null || currentHashes == null || !currentHashes.equals(tree.scan(null, false).inventory.hashes))
-                            throw new BridgeFailure("GAME_SAVE_RACE", "A background writer changed the save; automatic rollback would overwrite it");
-                        restorePending(session.handle, "rollback"); session.committed = true;
-                    } catch (IOException | ErrnoException rollbackError) {
-                        error.addSuppressed(rollbackError);
-                        throw new BridgeFailure("RECOVERY_REQUIRED", "Restore and rollback could not finish; original backup retained", error);
-                    }
-                    throw new BridgeFailure("RESTORE_ROLLED_BACK", "Restore failed; the original save was restored", error);
-                }
-                deleteUnusedBackup(backupId); throw error;
-            } finally {
-                // Once a journal was written, retain its backup across uncertain fsync outcomes.
-                if (!journalWritten && !pendingPresent() && !session.committed) deleteUnusedBackup(backupId);
+                if (mutated[0])
+                    throw new BridgeFailure("RESTORE_INCOMPLETE", "Restore did not finish; save files may be partially replaced", error);
+                throw error;
             }
         }
     }
@@ -534,9 +499,9 @@ public final class SaveBridgeProvider extends ContentProvider {
             handle.validate();
             SafeSaveTree safeSaveTree = new SafeSaveTree(transferRoot(), this.guard);
             SafeSaveTree.State stateStable = safeSaveTree.scan(null, false);
-            replace(safeSaveTree, fileMkdir, inventoryExtract, handle, str + "-removed", false, new TreeMap((SortedMap) stateStable.inventory.hashes), new boolean[]{false});
+            replace(safeSaveTree, fileMkdir, inventoryExtract, handle, new TreeMap<>(stateStable.inventory.hashes), new boolean[]{false});
             this.stage = FileFailureDetails.Stage.FINALIZE;
-            finalizeBackup(property);
+            finishLegacyRecovery(property);
             Bundle bundleDescribe = describe(inventoryExtract);
             describeFinalizedBackup(bundleDescribe, property);
             bundleDescribe.putBoolean("recovered", true);
@@ -562,11 +527,10 @@ public final class SaveBridgeProvider extends ContentProvider {
         }
     }
 
-    private void replace(SafeSaveTree safeSaveTree, File file, SaveArchive.Inventory inventory, RestoreWorkspace.Handle handle, String str, boolean z, Map<String, String> map, boolean[] zArr) throws IOException, ErrnoException {
+    private void replace(SafeSaveTree safeSaveTree, File file, SaveArchive.Inventory inventory, RestoreWorkspace.Handle handle, Map<String, String> map, boolean[] zArr) throws IOException, ErrnoException {
         handle.validate();
 
         syncTreeDirectories(file);
-        File fileMkdir = mkdir(new File(handle.file(), str));
         File[] fileArrListFiles = safeSaveTree.root.listFiles();
         if (fileArrListFiles == null) {
             throw new IOException("Cannot enumerate restore target");
@@ -586,16 +550,17 @@ public final class SaveBridgeProvider extends ContentProvider {
                 }
 
                 handle.validate();
-                SafeSaveTree.checkDirectory(fileMkdir);
+                if (!map.equals(safeSaveTree.scan(null, false).inventory.hashes))
+                    throw new BridgeFailure("SAVE_CHANGED", "Save changed before replacement");
                 this.stage = FileFailureDetails.Stage.MOVE_OLD;
-                Files.move(file3.toPath(), new File(fileMkdir, file3.getName()).toPath(), StandardCopyOption.ATOMIC_MOVE);
-                zArr[0] = true;
+                // No copy, quarantine, or rollback of old save data is created.
+                zArr[0] = true; // A failed recursive delete may already have changed the target.
+                SafeSaveTree.deleteEntry(file3, safeSaveTree.root, sessionValidation(handle));
                 Iterator<String> it = map.keySet().iterator();
                 while (it.hasNext()) {
                     String next = it.next();
                     if (next.equals(file3.getName()) || next.startsWith(file3.getName() + "/")) it.remove();
                 }
-                syncDirectory(fileMkdir);
                 syncDirectory(safeSaveTree.root);
 
             }
@@ -647,141 +612,22 @@ public final class SaveBridgeProvider extends ContentProvider {
 
     }
 
-    private void writePending(String str, String str2) throws IOException, ErrnoException {
-        Properties properties = new Properties();
-        properties.setProperty("backupId", str);
-        properties.setProperty("fingerprint", str2);
-        File file = new File(this.area, "pending.new");
-        Files.deleteIfExists(file.toPath());
-        OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 384));
-        try {
-            FileOutputStream fileOutputStream = new FileOutputStream(ownedDescriptor.fd);
-            try {
-                properties.store(fileOutputStream, "Private bridge restore recovery record");
-                fileOutputStream.getFD().sync();
-                fileOutputStream.close();
-                ownedDescriptor.close();
-                Files.move(file.toPath(), this.pending.toPath(), StandardCopyOption.ATOMIC_MOVE);
-                syncDirectory(this.area);
-            } finally {
-            }
-        } catch (Throwable th) {
-            try {
-                ownedDescriptor.close();
-            } catch (Throwable th2) {
-                th.addSuppressed(th2);
-            }
-            throw th;
-        }
+    private static SafeSaveTree.Validation sessionValidation(final RestoreWorkspace.Handle handle) {
+        return new SafeSaveTree.Validation() {
+            @Override public void validate() throws IOException { handle.validate(); }
+        };
     }
 
-    private void finalizeBackup(String str) throws IOException, ErrnoException {
-        Properties pending = readPending();
-        if (!str.equals(pending.getProperty("backupId"))) {
+    // Compatibility only: consume an already-existing journal, preserving its original archive.
+    private void finishLegacyRecovery(String id) throws IOException, ErrnoException {
+        if (!id.equals(readPending().getProperty("backupId")))
             throw new IOException("Recovery journal changed");
-        }
-        File file = new File(this.backups, str + ".finalized");
-        if (!file.exists()) {
-            File file2 = new File(this.backups, str + ".finalizing");
-            Files.deleteIfExists(file2.toPath());
-            OwnedDescriptor ownedDescriptor = new OwnedDescriptor(Os.open(file2.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | AndroidApiCompat.closeOnExecFlag(), 384));
-            try {
-                FileOutputStream fileOutputStream = new FileOutputStream(ownedDescriptor.fd);
-                try {
-                    pending.setProperty("state", "verified-finalized");
-                    pending.store(fileOutputStream, "Verified bridge transaction completion");
-                    fileOutputStream.getFD().sync();
-                    fileOutputStream.close();
-                    ownedDescriptor.close();
-                    Files.move(file2.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE);
-                } finally {
-                }
-            } catch (Throwable th) {
-                try {
-                    ownedDescriptor.close();
-                } catch (Throwable th2) {
-                    th.addSuppressed(th2);
-                }
-                throw th;
-            }
-        }
-        if (!finalizedMarkerValid(str)) {
-            throw new IOException("Invalid finalized transaction marker");
-        }
-        syncDirectory(this.backups);
-        if (!this.pending.delete()) {
-            throw new IOException("Cannot finalize restore journal");
-        }
+        Files.delete(this.pending.toPath());
         syncDirectory(this.area);
-        try {
-            cleanupFinalized(str);
-        } catch (ErrnoException | IOException unused) {
-        }
-    }
-
-    private boolean finalizedMarkerValid(String str) throws IOException {
-        if (!validBackupId(str)) {
-            return false;
-        }
-        File file = new File(this.backups, str + ".finalized");
-        if (Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-            return BackupCleanupPolicy.validFinalizedMarker(str, readRecord(file));
-        }
-        return false;
-    }
-
-    private void cleanupFinalizedBackups() throws IOException {
-        File[] fileArrListFiles = this.backups.listFiles();
-        if (fileArrListFiles == null) {
-            throw new IOException("Cannot inspect finalized transaction records");
-        }
-        int i = 0;
-        for (File file : fileArrListFiles) {
-            String name = file.getName();
-            if (name.endsWith(".finalized")) {
-                i++;
-                if (i > 16) {
-                    return;
-                }
-                String strSubstring = name.substring(0, name.length() - 10);
-                if (validBackupId(strSubstring)) {
-                    try {
-                        cleanupFinalized(strSubstring);
-                    } catch (ErrnoException | IOException unused) {
-                    }
-                }
-            }
-        }
-    }
-
-    private void cleanupFinalized(String str) throws IOException, ErrnoException {
-        if (validBackupId(str)) {
-            File file = new File(this.backups, str + ".finalized");
-            if (Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS) && BackupCleanupPolicy.mayReclaim(str, readRecord(file), pendingPresent())) {
-                syncDirectory(this.area);
-                syncDirectory(this.backups);
-                Files.deleteIfExists(new File(this.backups, str + ".zip").toPath());
-                syncDirectory(this.backups);
-                Files.deleteIfExists(new File(this.backups, str + ".finalized").toPath());
-                syncDirectory(this.backups);
-            }
-        }
-    }
-
-    private void deleteUnusedBackup(String str) throws IOException {
-        if (!validBackupId(str) || pendingPresent()) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(new File(this.backups, str + ".zip").toPath());
-            Files.deleteIfExists(new File(this.backups, str + ".finalized").toPath());
-            syncDirectory(this.backups);
-        } catch (ErrnoException | IOException unused) {
-        }
     }
 
     private static boolean validBackupId(String str) {
-        return BackupCleanupPolicy.validId(str);
+        return str != null && str.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     private void describeFinalizedBackup(Bundle bundle, String str) {
@@ -1010,6 +856,7 @@ public final class SaveBridgeProvider extends ContentProvider {
     }
 
     private void describeBinding(Bundle bundle) throws IOException {
+        bundle.putInt("restoreWithoutBackupVersion", 1);
         GameBinding gameBindingBinding = this.guard.binding();
         bundle.putString("bridgeMode", gameBindingBinding.embedded ? GameBinding.EMBEDDED_MODE : "legacy-helper");
         bundle.putString("bridgeRuntimeVersion", gameBindingBinding.runtimeVersion);

@@ -21,8 +21,8 @@ public final class RootRestoreHostTests {
 
     public static void main(String[] args) throws Exception {
         successAndNoop(); invalidInput(); metadataPolicy(); codec();
-        exceptionsRollBack(); crashEveryForwardBoundary(); crashEveryRecoveryBoundary();
-        concurrentMutationBlocks(); targetAndWorkspaceChanges(); terminalCleanup();
+        overwriteFailures(); crashEveryForwardBoundary(); crashEveryRecoveryBoundary();
+        overwriteMutationBlocks(); targetAndWorkspaceChanges(); terminalCleanup(); legacyRecovery();
         System.out.println("Root restore host checks passed: " + assertions + " assertions (pure fake filesystem; not Android validation)");
     }
 
@@ -30,7 +30,7 @@ public final class RootRestoreHostTests {
         Memory files = new Memory();
         equal(Outcome.RESTORED, restore(files), "normal restore");
         equal(files.desired, files.live, "desired tree restored with local metadata");
-        equal(files.initial, files.retainedBackup, "independent original backup retained");
+        check(files.retainedBackup.entries.isEmpty(), "no original backup created");
         check(files.journal == null && !files.locked, "cleaned journal and released lock");
         check(files.operations > 0, "file operations executed");
         check(files.live.entries.containsKey("game3/game.dat"), "new slot installed");
@@ -98,22 +98,23 @@ public final class RootRestoreHostTests {
         byte[] changed = encoded.clone(); changed[changed.length / 2] ^= 1;
         rejects(() -> RestoreJournalCodec.decode(changed), "checksum corruption");
         rejects(() -> RestoreJournalCodec.decode(new byte[RestoreJournalCodec.MAX_BYTES + 1]), "oversize journal");
-        rejects(() -> new Journal(2, journal.workspace, journal.before, journal.desired, Phase.FORWARD, 0), "unknown schema");
+        rejects(() -> new Journal(3, journal.workspace, journal.before, journal.desired, Phase.FORWARD, 0), "unknown schema");
         rejects(() -> new Journal(1, journal.workspace, journal.before, journal.desired, Phase.FORWARD, -1), "negative cursor");
         rejects(() -> new Journal(1, journal.workspace, journal.before, journal.desired, Phase.COMMITTED, 0), "premature committed marker");
         rejects(() -> new Journal(1, journal.workspace, journal.before, journal.desired, Phase.ROLLED_BACK, 1), "invalid rollback marker");
         rejects(() -> new Workspace(journal.workspace.transactionId, hash('c'), files.target, files.target.device + 1), "cross-device stage");
     }
 
-    private static void exceptionsRollBack() throws Exception {
+    private static void overwriteFailures() throws Exception {
         Memory baseline = new Memory(); restore(baseline);
         int moveCount = baseline.operations;
         for (int move = 1; move <= moveCount; move++) {
             for (boolean after : new boolean[]{false, true}) {
                 Memory files = new Memory(); files.failLabel = "move." + move + (after ? ".after" : ".before");
-                expectCode(Code.RESTORE_ROLLED_BACK, () -> restore(files));
-                equal(files.initial, files.live, "IO failure restores original at move " + move + " after=" + after);
-                check(files.journal == null, "rollback terminal cleanup removes journal");
+                expectCode(Code.RECOVERY_REQUIRED, () -> restore(files));
+                check(files.backup.entries.isEmpty() && files.displaced.entries.isEmpty(), "failure retains no old-data copy");
+                equal(Outcome.RESTORED, ENGINE.recover(files,files.target), "resume failed overwrite");
+                equal(files.desired,files.live,"resumed desired bytes");
             }
         }
         Memory writeBefore = new Memory(); writeBefore.failLabel = "journal.1.before";
@@ -121,7 +122,7 @@ public final class RootRestoreHostTests {
         equal(writeBefore.initial, writeBefore.live, "initial write failure leaves live untouched");
         check(writeBefore.journal == null && writeBefore.workspace == null, "unused staging removed after definite initial failure");
         Memory writeAfter = new Memory(); writeAfter.failLabel = "journal.1.after";
-        expectCode(Code.RESTORE_ROLLED_BACK, () -> restore(writeAfter));
+        expectCode(Code.RECOVERY_REQUIRED, () -> restore(writeAfter));
         equal(writeAfter.initial, writeAfter.live, "uncertain initial durable write reconciles without guessing");
     }
 
@@ -137,8 +138,8 @@ public final class RootRestoreHostTests {
             } else {
                 boolean committed = files.journal.phase == Phase.COMMITTED;
                 Outcome result = ENGINE.recover(files, files.target);
-                equal(committed ? Outcome.RESTORED : Outcome.RECOVERED, result, "crash recovery result at " + point);
-                equal(committed ? files.desired : files.initial, files.live, "crash recovery content at " + point);
+                equal(Outcome.RESTORED, result, "crash recovery result at " + point);
+                equal(files.desired, files.live, "crash recovery content at " + point);
                 check(files.journal == null, "finite crash recovery clears terminal journal");
             }
         }
@@ -153,52 +154,23 @@ public final class RootRestoreHostTests {
             try { ENGINE.recover(files, files.target); throw new AssertionError("recovery crash point missed"); } catch (Crash expected) { }
             files.disableFaults();
             if (files.journal != null) {
-                equal(Outcome.RECOVERED, ENGINE.recover(files, files.target), "retry crashed recovery");
+                equal(Outcome.RESTORED, ENGINE.recover(files, files.target), "retry crashed recovery");
             }
-            equal(files.initial, files.live, "every interrupted rollback ends at original");
+            equal(files.desired, files.live, "every interrupted overwrite resumes desired content");
         }
-        check(boundaries > 30, "recovery crash matrix spans reverse moves and persistence");
+        check(boundaries > 30, "recovery crash matrix spans resumed operations and persistence");
     }
 
-    private static void concurrentMutationBlocks() throws Exception {
-        Memory running = new Memory(); running.quiet = false;
-        rejects(() -> restore(running), "running or unknown process state");
-        equal(0, running.preparations, "busy game fails before staging");
-
+    private static void overwriteMutationBlocks() throws Exception {
         Memory race = new Memory(); race.injectMutationAtMove = 1;
         expectCode(Code.RECOVERY_REQUIRED, () -> restore(race));
-        check(race.live.entries.containsKey("journal.dat"), "concurrent writer data retained");
-        check(race.journal != null && race.backup.equals(race.initial), "race keeps original backup and journal");
         int operations = race.operations;
-        expectCode(Code.CONCURRENT_MUTATION, () -> ENGINE.recover(race, race.target));
-        equal(operations, race.operations, "recovery never writes unknown game state");
-
-        Memory destinationRace = new Memory(); destinationRace.injectDestinationRace = true;
-        expectCode(Code.RECOVERY_REQUIRED, () -> restore(destinationRace));
-        equal(hash('f'), destinationRace.live.hashes().get("badges.dat"), "atomic no-replace preserves racing destination");
-        check(destinationRace.backup.equals(destinationRace.initial), "destination race retains independent original backup");
-
-        Memory sourceRace = new Memory(); sourceRace.injectSourceRace = true;
-        expectCode(Code.RECOVERY_REQUIRED, () -> restore(sourceRace));
-        equal(hash('f'), sourceRace.displaced.hashes().get("badges.dat"), "unknown captured source remains preserved");
-        check(sourceRace.backup.equals(sourceRace.initial), "source race does not modify independent baseline backup");
-        int sourceMoves = sourceRace.operations;
-        expectCode(Code.CONCURRENT_MUTATION, () -> ENGINE.recover(sourceRace, sourceRace.target));
-        equal(sourceMoves, sourceRace.operations, "unknown captured source is not guessed back into live");
-
-        Memory backupRace = stoppedAfterMove(1);
-        backupRace.backup = tree("badges.dat", 'f');
-        int moved = backupRace.operations;
-        expectCode(Code.CONCURRENT_MUTATION, () -> ENGINE.recover(backupRace, backupRace.target));
-        equal(moved, backupRace.operations, "corrupt backup blocks recovery before mutation");
-
-        Memory attributeRace = stoppedAfterMove(1);
-        TreeMap<String, Entry> changed = new TreeMap<>(attributeRace.incoming.entries);
-        Entry entry = changed.get("game1/game.dat");
-        changed.put("game1/game.dat", new Entry(attrs(UID, FILE.gid, 0600, FILE.selinux), entry.content));
-        attributeRace.incoming = new Tree(changed);
-        expectCode(Code.CONCURRENT_MUTATION, () -> ENGINE.recover(attributeRace, attributeRace.target));
-        check(attributeRace.journal != null, "metadata mismatch retains journal");
+        expectCode(Code.CONCURRENT_MUTATION, () -> ENGINE.recover(race,race.target));
+        equal(operations,race.operations,"unknown save state receives no recovery writes");
+        check(race.backup.entries.isEmpty() && race.displaced.entries.isEmpty(),"no backup on failure");
+        Journal legacy = new Journal(1,race.journal.workspace,race.initial,race.desired,Phase.FORWARD,0);
+        equal(1,RestoreJournalCodec.decode(RestoreJournalCodec.encode(legacy)).schema,"legacy schema preserved");
+        rejects(() -> new Journal(2,legacy.workspace,legacy.before,legacy.desired,Phase.ROLLBACK,0),"new overwrite cannot claim rollback");
     }
 
     private static void targetAndWorkspaceChanges() throws Exception {
@@ -221,9 +193,21 @@ public final class RootRestoreHostTests {
         equal(Outcome.RESTORED, ENGINE.recover(cleanup, cleanup.target), "retry committed cleanup only");
         equal(mutations, cleanup.operations, "completed restore never rolls back during cleanup retry");
         Memory rollbackCleanup = stoppedAfterMove(1); rollbackCleanup.failLabel = "cleanup.before";
-        equal(Outcome.RECOVERED_CLEANUP_PENDING, ENGINE.recover(rollbackCleanup, rollbackCleanup.target), "rollback cleanup failure distinguished");
-        equal(Phase.ROLLED_BACK, rollbackCleanup.journal.phase, "rollback committed marker");
-        equal(Outcome.RECOVERED, ENGINE.recover(rollbackCleanup, rollbackCleanup.target), "retry rollback cleanup only");
+        equal(Outcome.RESTORED_CLEANUP_PENDING, ENGINE.recover(rollbackCleanup, rollbackCleanup.target), "overwrite cleanup failure distinguished");
+        equal(Phase.COMMITTED, rollbackCleanup.journal.phase, "overwrite committed marker");
+        equal(Outcome.RESTORED, ENGINE.recover(rollbackCleanup, rollbackCleanup.target), "retry overwrite cleanup only");
+    }
+
+    private static void legacyRecovery() throws Exception {
+        Memory files = new Memory();
+        files.desired = RootRestoreTransaction.desired(new LocalSnapshot(files.initial,DIR),requested(),UID);
+        files.workspace = new Workspace("11111111-1111-1111-1111-111111111111",hash('b'),files.target,files.target.device);
+        files.journal = new Journal(1,files.workspace,files.initial,files.desired,Phase.FORWARD,1);
+        Layout layout = files.journal.expectedLayout(1);
+        files.live=layout.live; files.incoming=layout.incoming; files.displaced=layout.displaced; files.backup=layout.backup;
+        equal(Outcome.RECOVERED,ENGINE.recover(files,files.target),"legacy existing original can recover");
+        equal(files.initial,files.live,"legacy original restored using existing displaced tree");
+        equal(files.initial,files.retainedBackup,"legacy backup remains intact");
     }
 
     private static Memory stoppedAfterMove(int number) throws Exception {
@@ -311,7 +295,7 @@ public final class RootRestoreHostTests {
         }
         @Override public Workspace prepare(Target target, String transaction, Incoming contents, Tree desired, Tree before) throws IOException {
             event("prepare.before"); preparations++;
-            this.desired = desired; this.incoming = desired; this.displaced = new Tree(Collections.emptyMap()); this.backup = before;
+            this.desired = desired; this.incoming = desired; this.displaced = new Tree(Collections.emptyMap()); this.backup = new Tree(Collections.emptyMap());
             workspace = new Workspace(transaction, hash('b'), target, target.device);
             event("prepare.after"); return workspace;
         }
@@ -323,7 +307,7 @@ public final class RootRestoreHostTests {
         @Override public void move(Workspace expected, Move move) throws IOException {
             int number = ++operations; event("move." + number + ".before");
             if (!expected.equals(workspace) || !workspaceValid) throw new IOException("Invalid workspace");
-            Tree source = area(move.from), destination = area(move.to);
+            Tree source = area(move.from), destination = move.to == Area.REMOVED ? new Tree(Collections.emptyMap()) : area(move.to);
             if (!move.expectedEntry.equals(source.part(move.topName))) throw new IOException("Source changed before move");
             if (!destination.part(move.topName).entries.isEmpty()) throw new IOException("Destination already present");
             if (injectDestinationRace && move.to == Area.LIVE) {
@@ -341,7 +325,7 @@ public final class RootRestoreHostTests {
             Tree actualSource = source.part(move.topName);
             Map<String, Entry> from = new TreeMap<>(source.entries), to = new TreeMap<>(destination.entries);
             for (Map.Entry<String, Entry> item : actualSource.entries.entrySet()) { from.remove(item.getKey()); to.put(item.getKey(), item.getValue()); }
-            set(move.from, new Tree(from)); set(move.to, new Tree(to));
+            set(move.from, new Tree(from)); if (move.to != Area.REMOVED) set(move.to, new Tree(to));
             if (!move.expectedEntry.equals(actualSource)) throw new IOException("Captured source changed; preserve unknown entry");
             if (number == injectMutationAtMove) {
                 Map<String, Entry> changed = new TreeMap<>(live.entries); changed.put("journal.dat", file('f')); live = new Tree(changed);

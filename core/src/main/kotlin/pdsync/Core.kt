@@ -182,57 +182,45 @@ object Snapshots {
   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { require("$it/game.dat" in files) }
   return files
  }
+ /** Replaces the selected save set without retaining overwritten bytes or rolling them back. */
  fun restore(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {}, onBackupReady: (Snapshot, Path) -> Unit = { _, _ -> },
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
   captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
-  beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) : Path =
-  restoreImpl(snapshot,root,backupRoot,adapter,version,guard,beforeWrite,afterFileWrite,onBackupReady,validateCompatibility,captureBackup,beforeReplacement,afterRestore,null)
+  beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) {
+  // Legacy arguments remain source-compatible; no backup path, capture or callback is used.
+  restoreImpl(snapshot,root,adapter,version,guard,beforeWrite,afterFileWrite,validateCompatibility,beforeReplacement,afterRestore,null)
+ }
+ internal fun restoreVerified(verified: VerifiedSnapshot, root: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
+  validateCompatibility: (Snapshot, String) -> Unit, beforeReplacement: () -> Unit, afterRestore: () -> Unit) =
+  restoreImpl(verified.snapshot,root,adapter,version,guard,{},{},validateCompatibility,beforeReplacement,afterRestore,verified)
 
- internal fun restoreVerified(verified: VerifiedSnapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
-  onBackupReady: (Snapshot, Path) -> Unit, validateCompatibility: (Snapshot, String) -> Unit,
-  captureBackup: (Path) -> Snapshot, beforeReplacement: () -> Unit, afterRestore: () -> Unit): Path =
-  restoreImpl(verified.snapshot,root,backupRoot,adapter,version,guard,{},{},onBackupReady,validateCompatibility,captureBackup,beforeReplacement,afterRestore,verified)
-
- private fun restoreImpl(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
-  beforeWrite: () -> Unit, afterFileWrite: (String) -> Unit, onBackupReady: (Snapshot, Path) -> Unit,
-  validateCompatibility: (Snapshot, String) -> Unit, captureBackup: (Path) -> Snapshot,
-  beforeReplacement: () -> Unit, afterRestore: () -> Unit, verified: VerifiedSnapshot?): Path {
-  guard() // Existing callers may verify package/authorization here; running state does not gate I/O.
+ private fun restoreImpl(snapshot: Snapshot, root: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
+  beforeWrite: () -> Unit, afterFileWrite: (String) -> Unit,
+  validateCompatibility: (Snapshot, String) -> Unit,
+  beforeReplacement: () -> Unit, afterRestore: () -> Unit, verified: VerifiedSnapshot?) {
+  guard()
   if (Thread.currentThread().isInterrupted) throw InterruptedException()
-  SafePaths.directory(root); SafePaths.checked(backupRoot)
+  SafePaths.directory(root)
   validateCompatibility(snapshot, version)
   val files = verified?.entries ?: verify(snapshot,adapter)
   Files.walk(root).use { entries -> require(entries.noneMatch { Files.isSymbolicLink(it) }) { CoreValidationMessages.RESTORE_TARGET_CONTAINS_SYMLINKS.text() } }
-  require(!Files.isSymbolicLink(root) && !Files.isSymbolicLink(backupRoot))
-  backupRoot.createDirectories()
-  val actualRoot = root.toRealPath()
-  val actualBackup = backupRoot.toRealPath()
-  require(!actualRoot.startsWith(actualBackup) && !actualBackup.startsWith(actualRoot)) { CoreValidationMessages.BACKUP_MUST_BE_OUTSIDE_SAVE_DIRECTORY.text() }
-  val backup = captureBackup(root)
-  verify(backup, adapter)
-  backupRoot.createDirectories(); val backupPath = backupRoot.resolve("${backup.manifest.id}.zip")
-  backupPath.writeBytes(backup.zip); backupRoot.resolve("${backup.manifest.id}.json").writeText(json.encodeToString(backup.manifest))
-  fun replace(data: Map<String,ByteArray>, notify: Boolean = false) {
-   Files.walk(root).use { s -> s.sorted(Comparator.reverseOrder()).forEach { p -> val name=root.relativize(p).toString().replace('\\','/'); if(p != root && adapter.includes(name) && !isDirectoryMetadata(name)) { require(!Files.isSymbolicLink(p)); Files.delete(p) } } }
-   data.forEach { (name,bytes) -> val p = root.resolve(name); p.parent.createDirectories(); p.writeBytes(bytes); if(notify) afterFileWrite(name) }
-  }
-  onBackupReady(backup, backupPath)
-  // No restore mutation has occurred yet. A restarted game must not trigger rollback.
+  val stability = SaveStabilityGuard(root,adapter,guard)
+  val before = stability.fingerprint()
   guard()
   if (Thread.currentThread().isInterrupted) throw InterruptedException()
-  require(fileHashes(root,adapter) == backup.manifest.files) { CoreValidationMessages.SAVE_FILES_CHANGED_AFTER_BACKUP_RESTORE_CANCELLED_WITHOUT_ROLLBACK.text() }
-  // Final metadata/process check stays outside rollback: no target mutation has happened yet.
   beforeReplacement()
-  try {
-   replace(emptyMap()); beforeWrite(); replace(files,true)
-   require(fileHashes(root, adapter) == snapshot.manifest.files) { CoreValidationMessages.RESTORED_FILES_FAILED_VERIFICATION.text() }
-   afterRestore()
-  } catch(e: Exception) {
-   try { replace(verify(backup,adapter)) } catch(rollback: Exception) { val failed = IllegalStateException(CoreValidationMessages.RESTORE_AND_ROLLBACK_FAILED_BACKUP_RETAINED_AT.text(backupPath),e); failed.addSuppressed(rollback); throw failed }
-   throw e
-  }
-  return backupPath
+  stability.requireUnchanged(before)
+  // Failures after this boundary leave the actual partial result; old bytes are never restored.
+  Files.walk(root).use { entries -> entries.sorted(Comparator.reverseOrder()).forEach { p ->
+   val name=root.relativize(p).toString().replace('\\','/')
+   if(p != root && adapter.includes(name) && !isDirectoryMetadata(name)) { require(!Files.isSymbolicLink(p)); Files.delete(p) }
+  } }
+  beforeWrite()
+  files.forEach { (name,bytes) -> val p = root.resolve(name); SafePaths.checked(p); p.parent.createDirectories(); p.writeBytes(bytes); afterFileWrite(name) }
+  require(fileHashes(root, adapter) == snapshot.manifest.files) { CoreValidationMessages.RESTORED_FILES_FAILED_VERIFICATION.text() }
+  afterRestore()
  }
+
 }
 data class RemoteHead(val manifest: Manifest, val etag: String?)
 interface Store { fun head(): RemoteHead?; fun upload(snapshot: Snapshot); fun download(manifest: Manifest): Snapshot; fun publish(manifest: Manifest, expected: RemoteHead?) }

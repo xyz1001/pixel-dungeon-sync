@@ -43,7 +43,7 @@ class VersionControllerTest {
   val older = manager.createSnapshot { true }
   save.resolve("game1/game.dat").writeText("""{"version":922,"init_ver":850}""")
   val restored = manager.restoreHistory(older.manifest.id) { true }
-  assertEquals(922, restored.backup.manifest.saveVersions!!.runs["game1"])
+  assertFalse(manager.directory.resolve("backups").exists())
   assertEquals(850, manager.loadSnapshot(older.manifest.id).manifest.saveVersions!!.runs["game1"])
   assertEquals(850, manager.currentVersions()!!.runs["game1"])
   assertEquals("local-settings", save.resolve("settings.xml").readText())

@@ -131,7 +131,7 @@ class AndroidHomeReconstruction92Test {
   assertEquals(1,bridge.restores);assertTrue(result.configurationComplete)
   assertEquals(writes,store.writes);assertEquals(chosen,store.latest())
   val backups=Files.walk(rig.root).use {paths->paths.filter {it.parent?.fileName.toString()=="backups"&&it.fileName.toString().endsWith(".json")}.toList()}
-  assertTrue(backups.map {json.decodeFromString<Manifest>(it.readText())}.any {it.files==before})
+  assertTrue(backups.isEmpty())
   assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }
 

@@ -25,6 +25,12 @@ public final class HelperHostTests {
     }
     static Path dir(Path base, String name) throws IOException { return Files.createDirectory(base.resolve(name)); }
     static void archiveTests(Path base) throws Exception {
+        String legacyId="12345678-1234-1234-1234-123456789abc";
+        Properties legacyMarker=new Properties();
+        legacyMarker.setProperty("backupId",legacyId);
+        legacyMarker.setProperty("state","verified-finalized");
+        legacyMarker.setProperty("fingerprint","a".repeat(64));
+        check(!BackupCleanupPolicy.mayReclaim(legacyId,legacyMarker,false),"legacy backup is never auto-reclaimed");
         for (String n : List.of("rankings.dat", "badges.dat", "journal.dat", "game1/game.dat", "game10/levels/level1.dat")) check(SaveArchive.safeName(n), n);
         for (String n : List.of("../rankings.dat", "game1/../x", "game1/CON", "game1/foo.", "game1/a\\b", "game1//game.dat", "/rankings.dat", "settings.dat")) check(!SaveArchive.safeName(n), "reject " + n);
         Path extract = dir(base,"extract");

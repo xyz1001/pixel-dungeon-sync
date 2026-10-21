@@ -20,7 +20,7 @@ object IsolatedGameTransfer {
   val result = to.restoreRemote(remote.manifest.id, store) { true }
   val actual = Snapshots.capture(target, Shattered, "demo", "verification", null)
   check(actual.manifest.files == remote.manifest.files)
-  println("REAL_COPY_TRANSFER_OK ${remote.manifest.id} files=${actual.manifest.files.size} backup=${result.backupPath}")
+  println("REAL_COPY_TRANSFER_OK ${remote.manifest.id} files=${actual.manifest.files.size} backup=none")
   println(remote.manifest.toJson())
  }
 }

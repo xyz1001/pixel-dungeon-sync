@@ -129,18 +129,21 @@ considered; runtime markers and unknown files are not copied or deleted.
 
 The adapter pins the selected game's data and files directories, and keeps a
 UID-0/0700 workspace beside `files`. It serializes jobs with a nonblocking lock,
-creates a separate verified durable original backup, stages validated bytes, and
+stages only validated incoming bytes, creates no original backup or rollback copy, and
 preserves owner/group/mode/SELinux attributes learned locally. Archive data cannot
 supply those attributes. Each top-level publication uses the single native
 `renameat2(RENAME_NOREPLACE)` primitive. Unsupported kernels and cross-mount moves
 return explicit errors; there is no overwrite-rename fallback.
 
 A write-ahead journal and inode receipt admit only the recorded layout or its one
-permitted adjacent move after interruption. Recovery rolls back that known prefix.
+permitted adjacent operation after interruption. New schema-2 recovery resumes the
+requested overwrite. A partial subtree deletion that does not match either recorded
+state is reported as recovery-required, never as rolled back.
 Unexpected new files, substituted inodes or conflicting destinations are preserved
 and reported rather than overwritten. Verified successful cleanup reclaims the
-private backup, staging and displaced copies; no fixed number-of-restores limit is
-imposed. Cleanup failures retain a resumable terminal receipt.
+incoming staging only. Existing schema-1 backups and displaced originals are
+preserved; legacy recovery uses existing files only and leaves cleanup pending
+when a backup must remain. Cleanup failures retain a resumable terminal receipt.
 
 Read/inspect/export/observe operations hold a read guard against an existing
 workspace and reject pending recovery or concurrent mutation. The guard creates no
@@ -152,7 +155,7 @@ so the same APK is not rehashed for every moved file. The metadata cache is neve
 persisted or accepted in place of the final full hash. Foreground, active background
 or unknown lifecycle states refuse mutation; reliably CACHED/ABSENT states plus
 stable scans permit a normal game exit without force-stopping it. Repeated checks
-cannot prevent every external new launch; detected interference retains backups.
+cannot prevent every external new launch; detected interference retains the journal and incoming staging.
 
 ## Wire v2
 

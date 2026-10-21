@@ -89,9 +89,7 @@ class ProfileSessionTest {
   assertEquals("alive", save.resolve("game1/game.dat").readText()); assertEquals("rank-alive", save.resolve("rankings.dat").readText())
   assertFalse(save.resolve("game2").exists()); assertEquals("new device settings", save.resolve("settings.xml").readText())
   assertEquals("excluded-bones", save.resolve("bones.dat").readText()); assertFalse("bones.dat" in first.manifest.files)
-  assertTrue(restored.backupPath.exists()); assertEquals(2, manager.history().size)
-  manager.restoreHistory(restored.backup.manifest.id) { true }
-  assertEquals("new", save.resolve("game1/game.dat").readText()); assertTrue(save.resolve("game2/game.dat").exists())
+  assertFalse(manager.directory.resolve("backups").exists()); assertEquals(1, manager.history().size)
  }
  @Test fun restartKeepsHistoryPendingAndFrozenBytes() {
   val save = root(); val state = Files.createTempDirectory("state"); val manager = session(save, state); val store = Memory(); store.fail = true
@@ -129,15 +127,12 @@ class ProfileSessionTest {
   }) }
   assertEquals("external-new", target.resolve("game1/game.dat").readText())
  }
- @Test fun backupRegistrationOccursBeforeMutationAndFailureLeavesTargetUntouched() {
+ @Test fun legacyBackupCallbacksAreNeverInvokedAndNoBackupIsCreated() {
   val target = root("current"); val snapshot = Snapshots.capture(root("old"), Shattered, "demo", "v1", null)
-  var ready = false
-  assertFails { Snapshots.restore(snapshot, target, Files.createTempDirectory("backup"), Shattered, "v1", { true }, onBackupReady = { backup, path ->
-   assertTrue(path.exists()); assertEquals("current", target.resolve("game1/game.dat").readText())
-   assertEquals("current", Snapshots.verify(backup, Shattered).getValue("game1/game.dat").decodeToString())
-   ready = true; error("cannot persist history")
-  }) }
-  assertTrue(ready); assertEquals("current", target.resolve("game1/game.dat").readText())
+  val backupRoot=Files.createTempDirectory("unused-backup").resolve("absent")
+  Snapshots.restore(snapshot,target,backupRoot,Shattered,"v1",{true},
+   onBackupReady={_,_->error("must not register backup")}, captureBackup={error("must not capture backup")})
+  assertFalse(backupRoot.exists()); assertEquals("old",target.resolve("game1/game.dat").readText())
  }
  @Test fun conflictPreservesBothAndLocalChoiceCreatesChild() {
   val (manager, store, conflict) = divergent()
@@ -153,8 +148,8 @@ class ProfileSessionTest {
   manager.root.resolve("game1/game.dat").writeText("local-newer-than-conflict")
   val result = manager.chooseRemote(conflict, store) { true }.first!!
   assertEquals("remote", manager.root.resolve("game1/game.dat").readText())
-  val backup = manager.loadSnapshot(result.backup.manifest.id)
-  assertEquals("local-newer-than-conflict", Snapshots.verify(backup, Shattered).getValue("game1/game.dat").decodeToString())
+  assertFalse(manager.directory.resolve("backups").exists())
+  assertTrue(manager.history().none { it.manifest.files["game1/game.dat"] == hash("local-newer-than-conflict".encodeToByteArray()) })
   assertTrue(manager.history().map { it.manifest.id }.containsAll(listOf(conflict.local.manifest.id, conflict.remote.manifest.id)))
   assertTrue(manager.push(store) { true } is PushResult.Success)
  }

@@ -41,6 +41,7 @@ public class BridgeCapabilityChecks {
   boolean getBoolean(String k,boolean fallback){Object v=get(k);return v instanceof Boolean?(Boolean)v:fallback;}
  }
  static class Failure extends Exception {final String code;Failure(String code,Throwable cause){super(cause);this.code=code;}}
+ static Failure upgradeRequired(Throwable cause){return new Failure("PURE_HANDSHAKE_REQUIRED",cause);}
  boolean isEmbedded=true; Bundle response; Exception error,closeError; int calls,closes;
  boolean embedded(){return isEmbedded;}
  Bundle call(String method,Bundle extras)throws Exception {check(method.equals("authenticate")&&extras==null,"original handshake only");calls++;if(error!=null)throw error;return response;}
@@ -52,7 +53,7 @@ public class BridgeCapabilityChecks {
   DiagnosticCapabilities.state=null;DiagnosticCapabilities.versions=null;
   BridgeCapabilityChecks c=new BridgeCapabilityChecks();c.response=new Bundle();
   c.response.put("accessProtocolVersion",1);c.response.put("metadataOnly",true);c.response.put("accessAuthenticated",true);
-  c.response.put("readSnapshotVersion",1);c.response.put("singlePassReadVersion",1);c.response.put("restoreResultVersion",1);return c;
+  c.response.put("readSnapshotVersion",1);c.response.put("singlePassReadVersion",1);c.response.put("restoreResultVersion",1);c.response.put("restoreWithoutBackupVersion",1);return c;
  }
  static void decision(BridgeCapabilityChecks c,DiagnosticCapabilityState expected)throws Exception {
   check(c.supportsCapability(DiagnosticCapability.READ_SNAPSHOT)==(expected==DiagnosticCapabilityState.SUPPORTED),"support result");
@@ -74,6 +75,14 @@ public class BridgeCapabilityChecks {
   c=rig();c.response.put("accessAuthenticated",false);decision(c,DiagnosticCapabilityState.AUTHENTICATION_UNVERIFIED);
   c=rig();c.response.put("accessAuthenticated",false);c.response.put("authenticated",true);decision(c,DiagnosticCapabilityState.SUPPORTED);
   c=rig();check(c.supportsCapability(DiagnosticCapability.RESTORE_RESULT),"restore capability supported");check(c.calls==1,"no diagnostic probe");
+  for(Object version:new Object[]{null,0,-1,"1",1L}) {
+   c=rig();if(version==null)c.response.remove("restoreWithoutBackupVersion");else c.response.put("restoreWithoutBackupVersion",version);
+   int writes=0;
+   try{if(c.supportsCapability(DiagnosticCapability.RESTORE_RESULT))writes++;throw new AssertionError("old helper allowed");}
+   catch(Failure expected){check(expected.code.equals("PURE_HANDSHAKE_REQUIRED"),"existing upgrade error");}
+   check(writes==0&&c.calls==1&&c.closes==1,"old helper rejected before write with single probe");
+  }
+  c=rig();c.response.put("restoreWithoutBackupVersion",2);check(c.supportsCapability(DiagnosticCapability.RESTORE_RESULT),"future compatible no-backup version");
   c=rig();c.isEmbedded=false;check(!c.supportsCapability(DiagnosticCapability.READ_SNAPSHOT),"legacy fallback");
   check(c.calls==0&&c.closes==0&&DiagnosticCapabilities.state==DiagnosticCapabilityState.NOT_EMBEDDED,"legacy does not authenticate");
   for(Failure failure:List.of(new Failure("UNKNOWN_METHOD",null),new Failure("UNSUPPORTED_METHOD",null),new Failure("IPC_CALL_FAILED",new IllegalArgumentException()))) {
@@ -113,6 +122,11 @@ public class BridgeCapabilityChecks {
         for signature in ('public AndroidRestoreReceipt restoreVerified(', 'public void restoreFrom('):
             body = method(source, signature)
             self.assertIn('DiagnosticTiming.measure(DiagnosticPhase.BRIDGE_RESTORE_WRITE, () -> call("restore",', body)
+        for signature in ('public AndroidRestoreReceipt restoreVerified(', 'public void restoreFrom('):
+            write = method(source, signature)
+            self.assertIn('if (!supportsCapability(DiagnosticCapability.RESTORE_RESULT)) throw upgradeRequired(null);', write)
+            self.assertLess(write.index('supportsCapability('), write.index('File.createTempFile('))
+            self.assertLess(write.index('supportsCapability('), write.index('call("restore",'))
         capability = method(source, 'private boolean supportsCapability(')
         self.assertEqual(1, capability.count('call("authenticate", null)'))
         self.assertNotIn('DiagnosticLog.record', capability)

@@ -91,6 +91,7 @@ public final class ProviderAccessChecks {
         Bundle reply=provider.call("authenticate",null,null);
         check(reply.getBoolean("ok",false)&&reply.getBoolean("accessAuthenticated",false),"pure handshake success");
         check(reply.getInt("accessProtocolVersion",0)==1&&reply.getBoolean("metadataOnly",false),"pure protocol identified");
+        check(reply.getInt("restoreWithoutBackupVersion",0)==1,"handshake advertises backup-free restore");
         check(Os.opens==0&&Os.stats==0&&!Files.exists(data),"handshake never touches nonexistent game data");
         check(c.manager.running==null,"handshake does not need game process observation");
         Bundle extras=new Bundle();extras.putString("packageName",MainCallerPolicy.MAIN);

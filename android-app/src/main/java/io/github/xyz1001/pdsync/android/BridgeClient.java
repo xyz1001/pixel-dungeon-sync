@@ -477,7 +477,7 @@ public final class BridgeClient implements GameAccessBackend {
         File archive = null;
         try {
             if (homeIdentity != null) homeIdentity.requireNoReadScope();
-            if (!supportsCapability(DiagnosticCapability.RESTORE_RESULT)) return null;
+            if (!supportsCapability(DiagnosticCapability.RESTORE_RESULT)) throw upgradeRequired(null);
             AndroidGameTarget target = targetGame();
             Map<String,String> desired = new java.util.TreeMap<>(snapshot.getManifest().getFiles());
             if (desired.size() > MAX_FILES) throw new IOException("Restore inventory exceeds the file limit");
@@ -535,6 +535,11 @@ public final class BridgeClient implements GameAccessBackend {
                 DiagnosticCapabilities.reply(capabilityVersion(reply, "accessProtocolVersion"),
                         capabilityVersion(reply, "singlePassReadVersion"), capabilityVersion(reply, "readSnapshotVersion"),
                         capabilityVersion(reply, "restoreResultVersion"));
+                // New writes must never silently fall back to runtimes that retain backups.
+                // Reuse this authenticated reply; reading/recovering an existing journal is unchanged.
+                if (capability == DiagnosticCapability.RESTORE_RESULT
+                        && capabilityVersion(reply, "restoreWithoutBackupVersion") < 1)
+                    throw upgradeRequired(null);
                 String key = capability == DiagnosticCapability.READ_SNAPSHOT ? "readSnapshotVersion" : "restoreResultVersion";
                 DiagnosticCapabilityState state;
                 if (reply.getInt("accessProtocolVersion", 0) != 1)
@@ -568,6 +573,7 @@ public final class BridgeClient implements GameAccessBackend {
         File archive=null;
         try {
             if (homeIdentity != null) homeIdentity.requireNoReadScope();
+            if (!supportsCapability(DiagnosticCapability.RESTORE_RESULT)) throw upgradeRequired(null);
             targetGame();
             String expected=DirectoryMetadataKt.contentSha256(expectedHashes);
             archive=File.createTempFile("restore-",".zip",context.getNoBackupFilesDir());

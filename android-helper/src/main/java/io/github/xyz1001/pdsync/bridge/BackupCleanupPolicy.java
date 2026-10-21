@@ -16,6 +16,7 @@ public final class BackupCleanupPolicy {
     }
 
     public static boolean mayReclaim(String str, Properties properties, boolean z) {
-        return !z && validFinalizedMarker(str, properties);
+        // Historical archives are retained; new restores create no backups.
+        return false;
     }
 }

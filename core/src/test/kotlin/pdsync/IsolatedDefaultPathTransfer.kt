@@ -30,9 +30,9 @@ object IsolatedDefaultPathTransfer {
   val restored = target.restoreRemote(remote.manifest.id, store) { true }
   check(Snapshots.capture(toRoot, Shattered, "demo", "fixture", null).manifest.files == before.manifest.files)
   check(Snapshots.capture(fromRoot, Shattered, "demo", "fixture", null).manifest.files == before.manifest.files)
-  check(target.history().any { it.manifest.id == restored.backup.manifest.id })
+  check(target.history().none { it.reason == "恢复前自动备份" })
   println("DEFAULT_PATH_REAL_FIXTURE_TRANSFER_OK files=${remote.manifest.files.size} versions=${remote.manifest.saveVersions?.summary()}")
-  println("source=${source.root}\ntarget=${target.root}\nremote=${remote.manifest.id}\nbackup=${restored.backup.manifest.id}")
+  println("source=${source.root}\ntarget=${target.root}\nremote=${remote.manifest.id}\nbackup=none")
   println("Source/target bytes match; original fixture untouched. Native game launch and UI are not covered by this driver.")
  }
 }

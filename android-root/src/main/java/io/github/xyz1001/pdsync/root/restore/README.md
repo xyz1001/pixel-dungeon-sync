@@ -38,8 +38,8 @@ chown/relabel the game, or disable SELinux.
 3. Place staging under the PM dataDir, outside `files`, with UID 0 and mode 0700.
    Pin directory descriptors/identities. Reject links, special entries, aliases
    and traversal. Verify target game attributes on staged payload before exposure.
-4. Preserve a separate verified, durable original backup before any mutation.
-   It must not be a hard link to a file the game can change.
+4. Stage incoming data only. Never copy old saves or create rollback old-data.
+   Existing backups from legacy transactions must not be deleted.
 5. The exact bounded workspace receipt must bind payload and directory inode
    identities. `Tree` is a content/security-attribute model, not an inode ledger:
    matching content on a substituted inode never waives physical identity checks.
@@ -53,30 +53,30 @@ chown/relabel the game, or disable SELinux.
    then remove only those exact entries.
 8. No-replace prevents destination clobbering, but not source substitution. Recheck
    source identity immediately before moving and captured identity afterward. Keep
-   an unexpected captured inode and original backup; report recovery-required.
+   an unexpected captured incoming inode; report recovery-required.
    Do not overwrite an unknown live destination to put a captured file back.
 9. Fsync payloads, journal replacements and affected directories. Durable journal
    updates are compare-and-replace. A failed call may have taken effect.
 
 ## Finite recovery
 
-The deterministic plan moves changed top-level old entries into `DISPLACED`, then
-verified incoming entries into `LIVE`. Each step is one no-replace rename. Before
-a step, the durable journal cursor permits that step. After it, a full layout
-check precedes durable cursor advancement.
+New schema-2 journals remove changed allowlisted original entries, then publish
+verified staged incoming entries with no-replace rename. Removal checks content,
+metadata and pinned identities and deletes children before directories. No original
+backup, displaced copy or rollback snapshot is created.
 
-Only the recorded layout or its single permitted adjacent move may be accepted
-after a crash. The adapter checks physical identities as well as tree equality.
-A different live/staged/backup/metadata state is not a retry signal: preserve all
-recoverable data and the journal without guessed writes. Explicit recovery rolls
-back the known prefix in reverse; it never resumes an uncommitted forward restore.
+Only the recorded layout or its permitted adjacent operation may be accepted
+after interruption. Recovery resumes the requested overwrite; it never claims
+the original was restored. A partially removed subtree or unexpected external
+mutation fails closed, retaining the journal and incoming staging for review.
 
-`COMMITTED` and `ROLLED_BACK` are durable terminal markers. Cleanup failures are
-distinct from uncertain mutation outcomes. Cleanup never changes live saves,
-reclaims a verified finalized backup according to adapter policy, and removes
-the exact transaction journal last. The Android adapter reclaims successful private
-backups rather than accumulating an arbitrary fixed-count limit. Interrupted or
-conflicting operations retain their recoverable data.
+Schema-1 journals remain readable for legacy recovery using existing files only.
+Existing backup and displaced data are preserved, so terminal cleanup remains
+pending when retaining them prevents safely reusing the workspace.
+
+`COMMITTED` is a durable terminal marker for new transactions. Cleanup failures
+are distinct from uncertain mutation outcomes. Cleanup never changes live saves,
+removes only verified incoming staging and removes the journal last.
 
 `RestoreJournalCodec` is a deterministic strict-schema local format with a 16 MiB
 bound. It rejects corruption, trailing data, duplicate/unsorted paths, malformed
@@ -87,7 +87,7 @@ and cloud archives must never be decoded as local journals.
 ## Host validation
 
 Run `bash android-root/src/test/run-restore-host-tests.sh` from the repository.
-The fake filesystem injects exceptions/crashes before and after forward/reverse
+The fake filesystem injects exceptions/crashes before and after overwrite/recovery
 operations, journal publication and cleanup. Tests cover stale expected hashes,
 unknown mutations, changed attributes/backup/target/workspace, metadata derivation
 and malformed journals. They do not establish Linux syscall semantics, Android

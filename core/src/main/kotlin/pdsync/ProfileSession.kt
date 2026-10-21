@@ -132,7 +132,7 @@ sealed interface PushResult {
  data class Success(val manifest: Manifest): PushResult
  data class Diverged(val conflict: PreservedConflict): PushResult
 }
-data class RestoreResult(val restored: Manifest, val backup: HistoryEntry, val backupPath: Path)
+data class RestoreResult(val restored: Manifest)
 
 /** Version handling belongs to the selected game, not the WebDAV protocol. */
 interface ProfileVersions {
@@ -358,27 +358,19 @@ class ProfileSession(
   restore(verified.snapshot,stopped,expectedFiles,verified)
  private fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>?, verified: VerifiedSnapshot?): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
-  var entry: HistoryEntry? = null
   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
-  var backupFingerprint: SaveFingerprint? = null
-  val onBackupReady: (Snapshot,Path)->Unit = { backup, _ -> entry = remember(backup, CoreSessionMessages.AUTOMATIC_BACKUP_BEFORE_RESTORE.text()) }
+  val before = stability.fingerprint()
+  require(expectedFiles==null || before.files==expectedFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_RESTORING_SELECT_AGAIN.text() }
   val compatibility: (Snapshot,String)->Unit = { candidate, _ ->
    if(verified==null)versions.checkRestore(candidate,config.targetGame) else versions.checkRestore(verified,config.targetGame)
   }
-  val captureBackup: (Path)->Snapshot = { current ->
-    require(current == root)
-    val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
-    require(expectedFiles==null || captured.snapshot.manifest.files==expectedFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_RESTORING_SELECT_AGAIN.text() }
-    backupFingerprint = captured.fingerprint
-    versions.annotate(captured.snapshot).let { it.copy(manifest=it.manifest.copy(directoryMetadata=directoryMetadata.observe(it.manifest.files,initialImport=!historyRoot.exists()))) }
-   }
-  val beforeReplacement: ()->Unit = { stability.requireUnchanged(requireNotNull(backupFingerprint)) }
+  val beforeReplacement: ()->Unit = { stability.requireUnchanged(before) }
   val afterRestore: ()->Unit = { directoryMetadata.adopt(snapshot.manifest.directoryMetadata,snapshot.manifest.files) }
-  val backupPath = if(verified==null)
-   Snapshots.restore(snapshot,root,backupRoot,adapter,"自动识别",stopped,onBackupReady=onBackupReady,
-    validateCompatibility=compatibility,captureBackup=captureBackup,beforeReplacement=beforeReplacement,afterRestore=afterRestore)
-  else Snapshots.restoreVerified(verified,root,backupRoot,adapter,"自动识别",stopped,onBackupReady,compatibility,captureBackup,beforeReplacement,afterRestore)
-  return RestoreResult(snapshot.manifest, requireNotNull(entry), backupPath)
+  if(verified==null)
+   Snapshots.restore(snapshot,root,backupRoot,adapter,"自动识别",stopped,
+    validateCompatibility=compatibility,beforeReplacement=beforeReplacement,afterRestore=afterRestore)
+  else Snapshots.restoreVerified(verified,root,adapter,"自动识别",stopped,compatibility,beforeReplacement,afterRestore)
+  return RestoreResult(snapshot.manifest)
  }
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = locked {
   require(queue.load(queueKey) == null) { CoreSessionMessages.AN_UPLOAD_OR_CONFLICT_SNAPSHOT_IS_PENDING_RETRY_OR_EXPLICITLY.text() }

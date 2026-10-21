@@ -34,9 +34,9 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     /** One job owns the session lock. Reuse its capture until the first live mutation. */
     private LocalSnapshot captured;
     private Scan capturedScan;
-    private Map<String,byte[]> capturedBytes;
     private boolean finalReadback;
-    private static final String[] PRIVATE_AREAS = {"incoming", "displaced", "backup", "cleanup"};
+    private static final String[] PRIVATE_AREAS = {"incoming", "cleanup"};
+    private static final String[] LEGACY_AREAS = {"incoming", "displaced", "backup", "cleanup"};
     private RootProtocol.DiagnosticStage stage = RootProtocol.DiagnosticStage.NONE;
     public RootProtocol.DiagnosticStage stage() { return stage; }
 
@@ -146,8 +146,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         stage = RootProtocol.DiagnosticStage.LAYOUT_SCAN;
         verifyBindingAndQuiescent(expected);
         if (captured != null) return captured;
-        capturedBytes = new TreeMap<>();
-        capturedScan = scan(session.filesHandle(), true, capturedBytes);
+        capturedScan = scan(session.filesHandle(), true);
         SaveArchive.requireCompleteRuns(capturedScan.tree.hashes().keySet());
         captured = new LocalSnapshot(capturedScan.tree, attributes(session.filesHandle()));
         return captured;
@@ -162,7 +161,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             if (!receiving && !cleanState()) throw new Failure(Code.RECOVERY_REQUIRED,"Private preparation already exists");
             for (String name : new String[]{RECEIPT,PREPARED,"terminal"}) removeRecordIfPresent(active,name);
         }
-        if (capturedScan == null || capturedBytes == null || !capturedScan.tree.equals(before))
+        if (capturedScan == null || !capturedScan.tree.equals(before))
             throw new IOException("Restore preparation has no matching captured source");
         Scan live = capturedScan;
         // The receipt is persisted before any live save mutation. All directories are created privately.
@@ -179,12 +178,10 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             stage = RootProtocol.DiagnosticStage.MUTATION_PREFLIGHT; preflight();
             stage = RootProtocol.DiagnosticStage.STAGE_PREPARE;
             Scan staged = writeTree(areas.get("incoming"), desired, incomingSource);
-            stage = RootProtocol.DiagnosticStage.BACKUP_COPY;
-            Scan backup = writeTree(areas.get("backup"), before, name -> capturedBytes.get(name));
+            // Old save bytes are never copied or retained for new overwrites.
             incomingSource = null;
-            capturedBytes = null;
             if (archiveInput != null) { archiveInput.close(); archiveInput=null; clearFresh(active,"archive-input",new int[]{0}); }
-            receipt = new Receipt(transactionId, target, stable(os.stat(active)), areaIdentities(), live.ids, staged.ids, backup.ids);
+            receipt = new Receipt(transactionId, target, stable(os.stat(active)), areaIdentities(), live.ids, staged.ids, Collections.emptyMap());
             byte[] encoded = receipt.encode();
             writeNew(active, RECEIPT, encoded, null, 0);
             Workspace workspace = new Workspace(transactionId, SaveArchive.sha256(encoded), target, target.device);
@@ -215,7 +212,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         Receipt loaded = Receipt.decode(bytes);
         if (!loaded.transactionId.equals(workspace.transactionId) || !loaded.target.equals(target)
                 || !loaded.active.equals(stable(os.stat(active)))) throw new Failure(Code.UNSAFE_WORKSPACE, "Private workspace changed");
-        for (String name : PRIVATE_AREAS) {
+        for (String name : loaded.areas.keySet()) {
             if (!areas.containsKey(name)) areas.put(name, os.openDirectory(active, name));
             privateRoot(areas.get(name));
             if (!loaded.areas.get(name).equals(stable(os.stat(areas.get(name))))) throw new Failure(Code.UNSAFE_WORKSPACE, "Private area changed");
@@ -225,12 +222,17 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     @Override public Layout inspect(Workspace workspace) throws IOException {
         verifyBindingAndQuiescent(target); load(workspace);
         Scan live = scan(session.filesHandle(), true), incoming = scan(areas.get("incoming"), false);
-        Scan displaced = scan(areas.get("displaced"), false), backup = scan(areas.get("backup"), false);
+        Scan displaced = legacyScan("displaced"), backup = legacyScan("backup");
         known(live.ids, receipt.before, receipt.desired); known(incoming.ids, receipt.desired, null);
         known(displaced.ids, receipt.before, null); known(backup.ids, receipt.backup, null);
         if (!backup.ids.equals(receipt.backup)) throw new Failure(Code.UNSAFE_WORKSPACE, "Independent backup is incomplete");
         verifyBindingAndQuiescent(target);
         return new Layout(live.tree, incoming.tree, displaced.tree, backup.tree);
+    }
+    private Scan legacyScan(String name) throws IOException {
+        if (areas.containsKey(name)) return scan(areas.get(name),false);
+        if (optional(active,name) != null) throw new Failure(Code.UNSAFE_WORKSPACE,"Unexpected legacy data retained");
+        return new Scan(new Tree(Collections.emptyMap()),Collections.emptyMap());
     }
     /** Normal completion hashes LIVE once. Full-area inspection is reserved for recovery. */
     @Override public void verifyFinal(Workspace workspace, Tree expected) throws IOException {
@@ -242,7 +244,6 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         known(live.ids, receipt.before, receipt.desired);
         capturedScan = live;
         captured = new LocalSnapshot(live.tree, attributes(session.filesHandle()));
-        capturedBytes = null;
         finalReadback = true;
     }
     private static void known(Map<String,String> actual, Map<String,String> first, Map<String,String> second) throws IOException {
@@ -255,6 +256,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     }
     @Override public void move(Workspace workspace, Move move) throws IOException {
         verifyBindingAndQuiescent(target); load(workspace);
+        if (move.to == Area.REMOVED) { removeOriginal(move); return; }
         MutationOs.Handle from = area(move.from), to = area(move.to);
         Stat source = os.childStat(from, move.topName); gameOwned(source);
         Entry expected = move.expectedEntry.entries.get(move.topName);
@@ -269,7 +271,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
         if (optional(to, move.topName) != null) throw new Failure(Code.CONCURRENT_MUTATION, "Move destination already exists");
         verifyBindingAndQuiescent(target);
         stage = move.to == Area.LIVE ? RootProtocol.DiagnosticStage.MOVE_NEW : RootProtocol.DiagnosticStage.MOVE_OLD;
-        captured = null; capturedScan = null; capturedBytes = null; finalReadback = false;
+        captured = null; capturedScan = null; finalReadback = false;
         os.renameNoReplace(from, move.topName, to, move.topName);
         try {
             os.sync(from); os.sync(to);
@@ -277,6 +279,24 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
                 throw new Failure(Code.CONCURRENT_MUTATION, "Raced move source is preserved");
             verifyBindingAndQuiescent(target);
         } catch (IOException failure) { unknown = true; throw failure; }
+    }
+    /** Delete only the captured allowlisted tree; never create an old-data/rollback copy. */
+    private void removeOriginal(Move move) throws IOException {
+        stage = RootProtocol.DiagnosticStage.MOVE_OLD;
+        Scan current = scanPart(session.filesHandle(), move.topName);
+        if (!current.tree.equals(move.expectedEntry)) throw new Failure(Code.CONCURRENT_MUTATION,"Overwrite source changed");
+        known(current.ids,receipt.before,receipt.desired);
+        List<String> paths = new ArrayList<>(move.expectedEntry.entries.keySet()); Collections.reverse(paths);
+        captured = null; capturedScan = null; finalReadback = false;
+        for (String path : paths) {
+            verifyBindingAndQuiescent(target);
+            try (Parent parent = parent(session.filesHandle(),path)) {
+                Entry entry = move.expectedEntry.entries.get(path);
+                verifyCleanupNode(parent.handle,basename(path),entry,receipt.before.get(path));
+                if (entry.directory()) os.rmdir(parent.handle,basename(path)); else os.unlink(parent.handle,basename(path));
+                os.sync(parent.handle);
+            }
+        }
     }
     @Override public void sync(Workspace workspace) throws IOException {
         session.revalidate(); if (active != null) os.sync(active);
@@ -306,8 +326,9 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             throw new Failure(Code.UNSAFE_WORKSPACE,"Terminal receipt differs");
         // Deterministic private quarantine slots make each cleanup rename/remove resumable.
         cleanupArea("incoming",expected.incoming,receipt.desired);
-        cleanupArea("displaced",expected.displaced,receipt.before);
-        cleanupArea("backup",expected.backup,receipt.backup);
+        // Existing legacy originals/backups must remain untouched, even after recovery.
+        if (!expected.displaced.entries.isEmpty() || !expected.backup.entries.isEmpty())
+            throw new Failure(Code.RECOVERY_REQUIRED,"Legacy backup retained; cleanup remains pending");
         if (!os.children(areas.get("cleanup"),1).isEmpty()) throw new Failure(Code.CONCURRENT_MUTATION,"Unknown cleanup entry retained");
         setPhase("CLEAN",terminal.workspace.transactionId);
         try (RootMutationSession.PrivateFile journal = session.readJournal()) {
@@ -361,7 +382,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
     private boolean cleanState()throws IOException {
         if(optional(active,"phase")==null)return false;
         if(!phase().startsWith("CLEAN:"))return false;
-        for(String area:PRIVATE_AREAS)if(optional(active,area)!=null)try(MutationOs.Handle dir=os.openDirectory(active,area)){privateRoot(dir);if(!os.children(dir,1).isEmpty())return false;}
+        for(String area:LEGACY_AREAS)if(optional(active,area)!=null)try(MutationOs.Handle dir=os.openDirectory(active,area)){privateRoot(dir);if(!os.children(dir,1).isEmpty())return false;}
         for(String name:os.children(active,32))if(!Arrays.asList("phase",RECEIPT,PREPARED,"terminal","incoming","displaced","backup","cleanup").contains(name))return false;
         return true;
     }
@@ -405,6 +426,11 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             if(name.equals("phase"))continue;
             if(!Arrays.asList("incoming","displaced","backup","cleanup","archive-input",RECEIPT,PREPARED,"probe-a","probe-b","probe-c").contains(name))
                 throw new Failure(Code.UNSAFE_WORKSPACE,"Unknown preparation entry retained");
+            if (name.equals("backup") || name.equals("displaced")) {
+                try (MutationOs.Handle retained = os.openDirectory(active,name)) {
+                    if (!os.children(retained,1).isEmpty()) throw new Failure(Code.RECOVERY_REQUIRED,"Existing backup retained");
+                }
+            }
             clearFresh(active,name,cleanupCount);
         }
         for(MutationOs.Handle handle:areas.values())handle.close();areas.clear();
@@ -617,7 +643,7 @@ public final class RootRestoreAdapter implements FileAccess, AutoCloseable {
             List<Map<String,String>> maps=new ArrayList<>();
             for(int index=0;index<4;index++){int count=in.readInt();if(count<0||count>SaveArchive.MAX_ENTRIES)throw new IOException("Invalid receipt count");Map<String,String> map=new TreeMap<>();
                 for(int i=0;i<count;i++){String key=in.readUTF(),value=in.readUTF();if(key.length()>1024||value.length()>160||map.put(key,value)!=null)throw new IOException("Invalid receipt entry");}maps.add(map);}
-            if(in.read()!=-1||!maps.get(0).keySet().equals(new TreeSet<>(Arrays.asList(PRIVATE_AREAS))))throw new IOException("Invalid receipt fields");
+            if(in.read()!=-1||(!maps.get(0).keySet().equals(new TreeSet<>(Arrays.asList(PRIVATE_AREAS))) && !maps.get(0).keySet().equals(new TreeSet<>(Arrays.asList(LEGACY_AREAS)))))throw new IOException("Invalid receipt fields");
             return new Receipt(id,target,active,maps.get(0),maps.get(1),maps.get(2),maps.get(3));
         }
     }

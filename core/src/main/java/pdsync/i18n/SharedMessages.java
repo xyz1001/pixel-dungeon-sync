@@ -12,7 +12,7 @@ public final class SharedMessages {
     public static final UiText CONFIRM_RUN_IDENTITY = new UiText("shared.confirm_run_identity", "确认单局身份", "Confirm run identity");
     public static final UiText CONFLICT_TITLE = new UiText("shared.conflict_title", "如何处理冲突？", "How should this conflict be resolved?");
     public static final UiText SELECTED_SAVE = new UiText("shared.selected_save", "所选存档：%1$s", "Selected save: %1$s");
-    public static final UiText USE_SELECTED_WARNING = new UiText("shared.use_selected_warning", "将先备份，再将所选存档设为本机和云端当前进度。所选存档中没有的进度会移除。请退出游戏，并暂停其他存档同步。", "A backup will be made before setting the selected save as the current local and cloud progress. Progress missing from this save will be removed. Close the game and pause other save syncing first.");
+    public static final UiText USE_SELECTED_WARNING = new UiText("shared.use_selected_warning", "将直接采用所选存档，不创建备份。所选存档中没有的进度会移除。请退出游戏，并暂停其他存档同步。", "The selected save will be used without creating a backup. Progress missing from this save will be removed. Close the game and pause other save syncing first.");
     public static final UiText USE_SELECTED = new UiText("shared.use_selected", "使用所选进度", "Use selected progress");
     public static final UiText MERGE = new UiText("shared.merge", "合并", "Merge");
     public static final UiText READ_FAILED = new UiText("shared.read_failed", "无法读取存档，请重试。", "Unable to read saves. Please try again.");

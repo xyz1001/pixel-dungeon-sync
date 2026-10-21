@@ -219,7 +219,7 @@ class AppendProfileSession(
   val staged=chosen.copy(manifest=chosen.manifest.copy(directoryMetadata=metadata))
   graph=revalidateComparison(comparison,store,stopped)
   SafePaths.atomicWrite(applyMarker,"read-only-restore".encodeToByteArray())
-  // Any failed/uncertain local apply retains this real recovery gate and original backup. There
+  // Any failed/uncertain local apply retains this real recovery gate and incomplete-state marker. There
   // is deliberately no pending upload to archive, retry or publish after an expired-account read.
   val restored=local.restore(staged,stopped,comparison.localFiles)
   if(selected!=null && selected.id in graph.tips) {
@@ -571,7 +571,7 @@ class AppendProfileSession(
   local.checkRestore(chosen.manifest.id)
   require(currentFiles() == before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_DURING_VERIFICATION_NOTHING_WAS_RESTORED.text() }
   SafePaths.atomicWrite(applyMarker, "remote-restore".encodeToByteArray())
-  // Keep the restart gate on any uncertain apply or baseline-write failure, even after rollback.
+  // Keep the restart gate on any uncertain apply or baseline-write failure, without rollback.
   val restored = local.restore(chosen, stopped,before)
   repository.setBaseline(commit.id, graph)
   markDirectorySynced(commit)
@@ -591,7 +591,7 @@ class AppendProfileSession(
    SafePaths.checked(applyMarker).deleteExisting()
    return plan
   } catch (failure: Exception) {
-   // A failed apply may include failed rollback. Keep the gate until explicit archive/review.
+   // A failed apply may leave a partial target. Keep the gate until explicit archive/review.
    plan?.let { preserve(it, CoreSessionMessages.INCOMPLETE_LOCAL_RESTORE_ARCHIVED.text()) }
    repository.clearPending()
    throw failure

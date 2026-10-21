@@ -191,9 +191,9 @@ class SnapshotMetadataTest {
   val target = session(root("target current")); target.remember(sourceSnapshot, "downloaded")
   val restored = target.restoreHistory(saved.manifest.id) { true }
   assertEquals(source.deviceIdentity(), restored.restored.metadata!!.device)
-  assertEquals(target.deviceIdentity(), restored.backup.manifest.metadata!!.device)
+  assertFalse(target.directory.resolve("backups").exists())
   assertNotEquals(source.deviceIdentity().id, target.deviceIdentity().id)
-  assertEquals("target current", Snapshots.verify(target.loadSnapshot(restored.backup.manifest.id), Shattered).getValue("game1/game.dat").decodeToString())
+  assertEquals(1,target.history().size)
   assertEquals(sourceSnapshot.manifest.metadata, target.loadSnapshot(saved.manifest.id).manifest.metadata)
  }
 
@@ -226,7 +226,7 @@ class SnapshotMetadataTest {
   val later = assertIs<AppendPushResult.Success>(b.push(remote) { true }).commit
   val restored = b.restoreHistory(initial.snapshot.id) { true }
   assertEquals(a.deviceIdentity(), restored.restored.metadata!!.device)
-  assertEquals(b.deviceIdentity(), restored.backup.manifest.metadata!!.device)
+  assertFalse(b.directory.resolve("backups").exists())
   val plan = AppendRepository(b.directory.resolve("append-v2"), Shattered, "demo").pending()!!
   assertEquals("restore", plan.commit.kind); assertEquals(listOf(later.id), plan.commit.parents)
   assertEquals(initial.snapshot.metadata, plan.commit.snapshot.metadata)
@@ -261,55 +261,30 @@ class SnapshotMetadataTest {
   assertNotNull(b.history().single { it.manifest.id == resolved.snapshot.id }.remoteObservedAt)
  }
 
- @Test fun metadataOnlyWriteAfterStableBackupCancelsBeforeReplacementAndNeverRollsBack() {
-  val source = root("old source"); val target = root("current target")
-  val backup = directory("backup"); val guard = SaveStabilityGuard(target, Shattered, { true }, quietMillis = 0)
-  val replacement = snapshot(save = source)
-  val externalTime = FileTime.from(Instant.parse("2026-10-10T10:11:12Z"))
-  var expected: SaveFingerprint? = null; var attemptedReplacement = false; var retainedBackup: Path? = null
+ @Test fun metadataOnlyWriteAtReplacementBoundaryCancelsWithoutAnyBackup() {
+  val source=root("old source"); val target=root("current target")
+  val backup=directory("backup").resolve("absent")
+  val externalTime=FileTime.from(Instant.parse("2026-10-10T10:11:12Z"))
+  var attempted=false
   assertFailsWith<SaveNotStableException> {
-   Snapshots.restore(replacement, target, backup, Shattered, "v1", { true },
-    beforeWrite = { attemptedReplacement = true },
-    onBackupReady = { _, path ->
-     retainedBackup = path
-     // Same bytes defeat a content-only recheck; the changed mtime must still cancel replacement.
-     target.resolve("game1/game.dat").writeText("current target")
-     Files.setLastModifiedTime(target.resolve("game1/game.dat"), externalTime)
-    },
-    captureBackup = {
-     val captured = guard.captureStable("demo", "v1", null)
-     expected = captured.fingerprint; captured.snapshot
-    },
-    beforeReplacement = { guard.requireUnchanged(requireNotNull(expected)) })
+   Snapshots.restore(snapshot(save=source),target,backup,Shattered,"v1",{true},beforeWrite={attempted=true},
+    beforeReplacement={Files.setLastModifiedTime(target.resolve("game1/game.dat"),externalTime)})
   }
-  assertFalse(attemptedReplacement)
-  assertTrue(requireNotNull(retainedBackup).exists())
-  assertEquals("current target", target.resolve("game1/game.dat").readText())
-  assertEquals(externalTime, Files.getLastModifiedTime(target.resolve("game1/game.dat")))
-  assertEquals("excluded", target.resolve("settings.xml").readText())
+  assertFalse(attempted);assertFalse(backup.exists())
+  assertEquals("current target",target.resolve("game1/game.dat").readText())
+  assertEquals(externalTime,Files.getLastModifiedTime(target.resolve("game1/game.dat")))
  }
-
- @Test fun profileRestoreWiresFinalBackupFingerprintCheckBeforeAnyReplacement() {
-  val manager = session(root("old")); val original = manager.createSnapshot { true }
+ @Test fun profileRestoreChecksOriginalFingerprintBeforeReplacement() {
+  val manager=session(root("old")); val original=manager.createSnapshot {true}
   manager.root.resolve("game1/game.dat").writeText("current")
-  val externalTime = FileTime.from(Instant.parse("2026-10-10T11:12:13Z"))
-  var injected = false
+  var calls=0
   assertFailsWith<SaveNotStableException> {
    manager.restoreHistory(original.manifest.id) {
-    val backups = manager.directory.resolve("backups")
-    if (!injected && backups.exists() && Files.list(backups).use { paths -> paths.anyMatch { it.fileName.toString().endsWith(".zip") } }) {
-     injected = true
-     manager.root.resolve("game1/game.dat").writeText("current")
-     Files.setLastModifiedTime(manager.root.resolve("game1/game.dat"), externalTime)
-    }
+    calls++; if(calls==3)manager.root.resolve("game1/game.dat").writeText("external-new")
     true
    }
   }
-  assertTrue(injected)
-  assertEquals("current", manager.root.resolve("game1/game.dat").readText())
-  assertEquals(externalTime, Files.getLastModifiedTime(manager.root.resolve("game1/game.dat")))
-  assertEquals(2, manager.history().size)
-  assertEquals("current", Snapshots.verify(manager.loadSnapshot(manager.history().first { it.manifest.id != original.manifest.id }.manifest.id), Shattered).getValue("game1/game.dat").decodeToString())
+  assertEquals("external-new",manager.root.resolve("game1/game.dat").readText())
+  assertEquals(1,manager.history().size);assertFalse(manager.directory.resolve("backups").exists())
  }
-
 }

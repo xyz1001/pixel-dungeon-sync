@@ -121,6 +121,25 @@ class SaveLayoutSnapshotTests(unittest.TestCase):
                             check(observation.payloads.size()==2 && !observation.payloads.containsKey("game1/depth1.dat"),"level bytes excluded from observation transport");
                             check(observation.modifiedMillis.get("game1/game.dat")==1234567890123L,"actual source millisecond timestamp retained");
                             check(new String(observation.payloads.get("game1/game.dat"),java.nio.charset.StandardCharsets.UTF_8).equals("unchanged-game-progress"),"summary receives real captured bytes");
+                            Path legacyBackup=Files.writeString(base.resolve("legacy.zip"),"existing backup");
+                            SafeSaveTree.deleteEntry(slot.toFile(),root.toFile(),()->{});
+                            check(!Files.exists(slot),"old slot removed directly without rollback copy");
+                            check(Files.readString(legacyBackup).equals("existing backup"),"existing backup untouched");
+                            check(Files.exists(root.resolve("keybinds.dat")),"non-save data untouched by replacement");
+                            Path outside=Files.writeString(base.resolve("outside"),"do not touch");
+                            Path linked=Files.createSymbolicLink(root.resolve("game2"),outside);
+                            try { SafeSaveTree.deleteEntry(linked.toFile(),root.toFile(),()->{}); throw new AssertionError("linked target accepted"); }
+                            catch(BridgeFailure denied) { check("UNSAFE_SAVE_PATH".equals(denied.code),"linked target rejected"); }
+                            check(Files.readString(outside).equals("do not touch"),"symlink target preserved");
+                            Files.delete(linked);
+                            Path interrupted=Files.createDirectory(root.resolve("game3"));
+                            Files.writeString(interrupted.resolve("game.dat"),"fixture");
+                            final int[] checks={0};
+                            try { SafeSaveTree.deleteEntry(interrupted.toFile(),root.toFile(),()->{
+                                if(++checks[0]==3) throw new java.io.IOException("injected deletion failure");
+                            }); throw new AssertionError("injected failure ignored"); }
+                            catch(java.io.IOException expected) { check(Files.exists(interrupted),"failed deletion remains observable without rollback"); }
+                            check(!Files.exists(base.resolve("backups")) && !Files.exists(base.resolve("removed")),"delete path creates no backup directories");
                             System.out.println("PASS: "+assertions+" production save scanner assertions with host-only Android adapters.");
                         }
                     }

@@ -30,7 +30,7 @@ public final class FakeMutationOs implements MutationOs {
     }
     public int uid = 0, touches, mutations, maxWrite = Integer.MAX_VALUE, maxRead = Integer.MAX_VALUE;
     public boolean noXattr, noSync, noLink, noRename, zeroWrite, zeroRead;
-    public Runnable beforeRename, beforeLink, beforeRead;
+    public Runnable beforeRename, beforeLink, beforeRead, afterUnlink;
     public SaveDirectoryPolicy.Content contentResult;
     public String canonical = "/data/user/0";
     public final List<String> log = new ArrayList<>();
@@ -209,6 +209,7 @@ public final class FakeMutationOs implements MutationOs {
     @Override public void unlink(Handle parent, String name) throws IOException {
         Node p = n(parent), c = child(parent, name); if (c.directory()) throw new Failure(Error.IO);
         p.children.remove(name); c.links--; c.ctime++; mutation("unlink", p, name);
+        if (afterUnlink != null) { Runnable hook=afterUnlink; afterUnlink=null; hook.run(); }
     }
     @Override public void rmdir(Handle parent, String name) throws IOException {
         Node p = n(parent), c = child(parent, name); if (!c.directory() || !c.children.isEmpty()) throw new Failure(Error.IO);

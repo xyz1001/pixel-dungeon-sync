@@ -170,6 +170,37 @@ final class SafeSaveTree {
         }
     }
 
+    interface Validation { void validate() throws IOException; }
+
+    static void deleteEntry(File entry, File parent, Validation validation) throws IOException {
+        validation.validate();
+        StructStat parentBefore = SafeSaveTree.checkDirectory(parent);
+        StructStat before = SafeSaveTree.stat(entry);
+        SafeSaveTree.requireOwner(before);
+        if (OsConstants.S_ISDIR(before.st_mode)) {
+            File[] children = entry.listFiles();
+            if (children == null) throw new IOException("Cannot inspect save directory before replacement");
+            for (File child : children) {
+                requireSameDirectory(entry, before);
+                deleteEntry(child, entry, validation);
+            }
+            requireSameDirectory(entry, before);
+        } else {
+            SafeSaveTree.requireRegular(before);
+            if (!SafeSaveTree.identity(before).equals(SafeSaveTree.identity(SafeSaveTree.stat(entry))))
+                throw new BridgeFailure("SAVE_CHANGED", "Save entry changed before replacement");
+        }
+        validation.validate();
+        requireSameDirectory(parent, parentBefore);
+        Files.delete(entry.toPath());
+    }
+
+    private static void requireSameDirectory(File directory, StructStat before) throws IOException {
+        StructStat now = SafeSaveTree.checkDirectory(directory);
+        if (before.st_dev != now.st_dev || before.st_ino != now.st_ino || before.st_uid != now.st_uid)
+            throw new BridgeFailure("SAVE_CHANGED", "Save directory changed during replacement");
+    }
+
     static StructStat stat(File file) throws IOException {
         try {
             return Os.lstat(file.getPath());

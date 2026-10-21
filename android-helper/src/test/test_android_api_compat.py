@@ -581,7 +581,14 @@ class AndroidApiCompatTests(unittest.TestCase):
         self.assertLess(block.index("ARCHIVE_DESCRIPTOR_RECHECK"), block.index("SaveArchive.extract"))
         self.assertLess(block.index("SaveArchive.extract"), block.index("Restore archive changed while reading"))
         self.assertLess(block.index("Restore archive changed while reading"), block.index("SafeSaveTree.State captured"))
-        self.assertLess(block.index("expected.equals(captured.inventory.fingerprint())"), block.index("this.stage = FileFailureDetails.Stage.WRITE_BACKUP"))
+        self.assertLess(block.index("expected.equals(captured.inventory.fingerprint())"), block.index("replace(tree, incoming"))
+        for forbidden in ('writePending(', 'writeArchive(', 'restorePending(', '"original"', '"removed"', 'WRITE_BACKUP', 'WRITE_JOURNAL', 'RESTORE_ROLLED_BACK'):
+            self.assertNotIn(forbidden, block)
+        self.assertIn('tree.scan(null, true)', block)
+        self.assertIn('RESTORE_INCOMPLETE', block)
+        self.assertNotIn('cleanupFinalizedBackups', source)
+        self.assertNotIn('deleteUnusedBackup', source)
+        self.assertNotIn('Files.deleteIfExists(new File(this.backups', source)
         self.assertIn("READ_ARCHIVE", (PRODUCTION / "FileFailureDetails.java").read_text())
 
 

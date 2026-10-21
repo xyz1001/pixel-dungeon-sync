@@ -65,12 +65,12 @@ class DirectoryMetadataTest {
   assertFails { metadata.copy(schema=2).validated(old.manifest.files) }
   assertFails { metadata.copy(runs=emptyMap()).validated(old.manifest.files) }
  }
- @Test fun sidecarAdoptionFailureRollsBackGameBytes() {
+ @Test fun sidecarAdoptionFailureRetainsActualNewBytesWithoutRollback() {
   val root=root();val before=Snapshots.capture(root,Shattered,"demo","1",null)
   val target=root();target.resolve("game1/game.dat").writeText("changed")
   val incoming=Snapshots.capture(target,Shattered,"demo","1",null)
   assertFails { Snapshots.restore(incoming,root,temp.resolve("backups"),Shattered,"1",{true},afterRestore={throw java.io.IOException("sidecar failure")}) }
-  assertEquals(before.manifest.files,Snapshots.capture(root,Shattered,"demo","1",null).manifest.files)
+  assertEquals(incoming.manifest.files,Snapshots.capture(root,Shattered,"demo","1",null).manifest.files)
  }
  @Test fun realSessionOnlyMarksBaselineAfterVerifiedPublicationAndTransfersMetadata() {
   val policy=object:ProfileVersions {
