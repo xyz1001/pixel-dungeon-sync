@@ -574,7 +574,7 @@ class AppendProfileSession(
   SafePaths.atomicWrite(applyMarker,"history-restore".encodeToByteArray())
   val restored=local.restore(chosen,stopped)
   if(selected!=null) {
-   repository.setSelectedBaseline(selected,CommitMetadataGraph(graph),chosen)
+   repository.setSelectedBaseline(selected,CommitMetadataGraph(graph.copy(verification=RemoteVerification.METADATA_ONLY)),chosen)
    markDirectorySynced(selected)
   }
   SafePaths.checked(applyMarker).deleteExisting()
