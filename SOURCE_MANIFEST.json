@@ -2517,8 +2517,8 @@
       "sha256": "aed6c14aa563120fdf6528ed3bd59e870341422a070baba1098110a0c772f037"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidSyncFacade.kt": {
-      "size": 50530,
-      "sha256": "2a343f1964f9ccac1a94013f1513b33a7820b0d695e7a0387227978b21d6537b"
+      "size": 50411,
+      "sha256": "c9f24988a3e6394d4646be63dc1bfd82c3b837ad3ec208a3753a04e1d058f1cc"
     },
     "core/src/main/kotlin/pdsync/presentation/AppPresentation.kt": {
       "size": 1012,
