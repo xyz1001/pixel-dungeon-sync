@@ -2605,8 +2605,8 @@
       "sha256": "0e938a14ff2f52c0dd3231ae3a64bb09ea95c2b3320caf322cac61cc06151ee8"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
-      "size": 19690,
-      "sha256": "629e494dbe9676418f8ebc2254558993353d5663f2f433deef46d0ebf5875d5c"
+      "size": 19752,
+      "sha256": "92ab7c1e0b50f70806bb249c3cfe97dc6e3f69debc5f123bf1f26c0f81959d37"
     },
     "core/src/test/kotlin/pdsync/AppendProfileSessionTest.kt": {
       "size": 21332,

@@ -18,7 +18,9 @@ class AppendOnlyWebDavTest {
   // One fixture route: a failed IPv4 socket must not leave an unbound localhost IPv6 route.
   val loopback=java.net.InetAddress.getByName("127.0.0.1")
   server.start(loopback,0)
-  val dav=store(server,OkHttpClient.Builder().dns { listOf(loopback) }.build())
+  val dav=store(server,OkHttpClient.Builder().dns(object:okhttp3.Dns {
+   override fun lookup(hostname:String)=listOf(loopback)
+  }).build())
   assertFailsWith<java.io.IOException> { dav.readCommit(id) }
   assertEquals(1,server.requestCount,"failed request must not replay")
   assertNull(dav.readCommit(id))
