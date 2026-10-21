@@ -337,7 +337,7 @@ class SharedHomeRenderTest {
             "the measured action + 32px padding + 1px divider is omitted with the footer")
     }
 
-    @Test fun archiveLoadingCoversViewportBlocksClicksAndClearsForCompletionOrNavigation() {
+    @Test fun archiveLoadingCoversViewportAllowsNavigationAndClearsForCompletionOrNavigation() {
         for ((width, fontScale) in listOf(320 to 1f, 320 to 2f, 1165 to 1f)) {
             for (populated in listOf(false, true)) {
                 val observed = Observation()
@@ -362,7 +362,8 @@ class SharedHomeRenderTest {
                             click(scene, observed.elements.getValue(name).center)
                         }
                     }
-                    assertTrue(host.calls.isEmpty(), "overlay never lets repeated clicks reach actions")
+                    assertEquals(List(3) { "settings" }, host.calls, "only navigation is available while archives load")
+                    host.calls.clear()
                     observed.elements.clear()
                     host.state = base.copy(busy = true, pending = SharedHomeOperation.UPLOAD)
                     render(scene, "home-archive-complete-other-busy-$width-$fontScale-$populated")

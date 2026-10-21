@@ -145,7 +145,8 @@ class SharedHomeArchiveAvailabilityRenderTest {
                         click(scene, bounds.elements.getValue("settings").center)
                         click(scene, bounds.elements.getValue("launch").center)
                     }
-                    assertTrue(host.calls.isEmpty(), "The existing overlay blocks every repeated action during $phase")
+                    assertEquals(List(3) { "settings" }, host.calls, "Read loading preserves navigation during $phase")
+                    host.calls.clear()
                     bounds.elements.clear()
                     host.state = next
                     render(scene, "sequence-$phase-$width")

@@ -3,10 +3,7 @@ package io.github.xyz1001.pdsync.android
 import pdsync.i18n.SharedMessages
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
@@ -60,7 +57,7 @@ fun SharedHomeScreen(state: SharedHomeState, actions: SharedHomeActions, naming:
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val loading = state.pageActive && state.archiveLoading
             val narrow = maxWidth <= 600.dp
-            Box(if (loading) Modifier.clearAndSetSemantics {} else Modifier) {
+            Box(Modifier) {
                 SharedHomeContent(state, actions, narrow = narrow, naming = naming)
             }
             if (loading) SharedHomeLoadingOverlay()
@@ -68,17 +65,12 @@ fun SharedHomeScreen(state: SharedHomeState, actions: SharedHomeActions, naming:
     }
 }
 
-/** In-page modal: no extra window, delayed timer, dismiss button or unrelated busy state. */
+/** Existing loading presentation; navigation remains available and action capabilities block writes. */
 @Composable
 private fun SharedHomeLoadingOverlay() {
     val observer = LocalSharedHomeLayoutObserver.current
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f))
-        .onGloballyPositioned { observer?.element("archive-loading-scrim", it.boundsInRoot()) }
-        .pointerInput(Unit) {
-            awaitPointerEventScope {
-                while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-            }
-        }, contentAlignment = Alignment.Center) {
+        .onGloballyPositioned { observer?.element("archive-loading-scrim", it.boundsInRoot()) }, contentAlignment = Alignment.Center) {
         Surface(Modifier.padding(24.dp)
             .onGloballyPositioned { observer?.element("archive-loading-panel", it.boundsInRoot()) },
             color = MaterialTheme.colors.surface, shape = RoundedCornerShape(24.dp), elevation = 8.dp) {
@@ -103,7 +95,7 @@ private fun SharedHomeContent(state: SharedHomeState, actions: SharedHomeActions
     fun observed(name: String) = Modifier.onGloballyPositioned { observer?.element(name, it.boundsInRoot()) }
     SharedAppShell(title = SharedMessages.PIXEL_DUNGEON.text(), eyebrow = SharedMessages.SAVE_SYNC.text(), game = state.game,
         headerActions = {
-            SharedActionButton(SharedMessages.SETTINGS.text(), interactions::settings, enabled = state.canInteract,
+            SharedActionButton(SharedMessages.SETTINGS.text(), interactions::settings, enabled = state.navigationAllowed,
                 style = SharedButtonStyle.TEXT, icon = "settings", modifier = Modifier.padding(start = 20.dp).then(observed("settings")))
         }) {
         if (state.status.isNotBlank()) {

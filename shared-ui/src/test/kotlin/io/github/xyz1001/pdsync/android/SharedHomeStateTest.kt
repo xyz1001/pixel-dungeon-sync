@@ -61,7 +61,7 @@ class SharedHomeStateTest {
         val retained = host.interactions::appreciate
         for (blocked in listOf(expired.copy(canAppreciate = false), expired.copy(statusKind = SharedHomeStatusKind.WARNING),
             expired.copy(statusKind = SharedHomeStatusKind.NEUTRAL), expired.copy(busy = true),
-            expired.copy(archiveLoading = true), expired.copy(pageActive = false))) {
+            expired.copy(pageActive = false))) {
             host.state = blocked
             retained()
             assertTrue(host.calls.isEmpty())
@@ -92,13 +92,23 @@ class SharedHomeStateTest {
     }
 
     @Test fun busyAndInactiveBlockEveryHostActionAndRetainedCallbacks() {
-        for (blocked in listOf(ready().copy(busy = true), ready().copy(archiveLoading = true), ready().copy(pageActive = false))) {
+        for (blocked in listOf(ready().copy(busy = true), ready().copy(pageActive = false))) {
             val host = Host(ready())
             val delayed = host.interactions::restore
             host.state = blocked
             host.all(); delayed()
             assertTrue(host.calls.isEmpty())
         }
+    }
+
+    @Test fun archiveReadAllowsExistingNavigationButKeepsMutationsDisabled() {
+        val host = Host(ready().copy(archiveLoading = true))
+        host.all()
+        assertEquals(listOf("settings"), host.calls)
+        host.calls.clear()
+        host.state = host.state.copy(statusKind = SharedHomeStatusKind.EXPIRED, canAppreciate = true)
+        host.interactions.appreciate()
+        assertEquals(listOf("appreciate"), host.calls)
     }
 
     @Test fun allActionsUseOnlyRealSnapshotIdsAndInRangeHistoryPages() {

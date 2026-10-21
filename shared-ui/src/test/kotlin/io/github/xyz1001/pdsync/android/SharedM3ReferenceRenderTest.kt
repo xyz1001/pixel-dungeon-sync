@@ -182,7 +182,7 @@ class SharedM3ReferenceRenderTest {
                 for (key in listOf("settings", "status", "upload", "restore", "launch")) {
                     session.assertVisible(bounds.getValue(key), "$name/$key")
                 }
-                val expected = linkedMapOf("settings" to initial.canInteract,
+                val expected = linkedMapOf("settings" to initial.navigationAllowed,
                     "upload" to initial.uploadEnabled, "restore" to initial.restoreEnabled,
                     "launch" to initial.launchEnabled)
                 for ((key, enabled) in expected) {

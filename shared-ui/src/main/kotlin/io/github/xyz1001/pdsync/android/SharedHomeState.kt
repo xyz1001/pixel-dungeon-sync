@@ -60,14 +60,15 @@ interface SharedHomeActions {
     fun refreshHistory() {}
 }
 
-internal val SharedHomeState.canInteract: Boolean get() = pageActive && !busy && !archiveLoading
+internal val SharedHomeState.navigationAllowed: Boolean get() = pageActive && !busy
+internal val SharedHomeState.canInteract: Boolean get() = navigationAllowed && !archiveLoading
 internal val SharedHomeState.uploadEnabled: Boolean get() = canInteract && canUpload
 internal val SharedHomeState.restoreEnabled: Boolean get() = canInteract && canRestore
 internal val SharedHomeState.launchEnabled: Boolean get() = canInteract && canLaunch
 internal val SharedHomeState.refreshHistoryEnabled: Boolean get() = canInteract && canRefreshHistory
 internal val SharedHomeState.showAppreciation: Boolean
     get() = statusKind == SharedHomeStatusKind.EXPIRED && canAppreciate
-internal val SharedHomeState.appreciationEnabled: Boolean get() = canInteract && showAppreciation
+internal val SharedHomeState.appreciationEnabled: Boolean get() = navigationAllowed && showAppreciation
 internal val SharedHomeState.targetTitle: String
     get() = if (selectedSnapshotId == null) SharedMessages.DEFAULT_RESTORE.text() else SharedMessages.SELECTED_SAVE_TITLE.text()
 internal val SharedHomeRestoreTarget.summary: String
@@ -78,7 +79,7 @@ internal class SharedHomeInteractions(
     private val state: () -> SharedHomeState,
     private val actions: () -> SharedHomeActions,
 ) {
-    fun settings() { if (state().canInteract) actions().settings() }
+    fun settings() { if (state().navigationAllowed) actions().settings() }
     fun appreciate() { if (state().appreciationEnabled) actions().appreciate() }
     fun upload() { if (state().uploadEnabled) actions().upload() }
     fun restore() { if (state().restoreEnabled) actions().restore() }
