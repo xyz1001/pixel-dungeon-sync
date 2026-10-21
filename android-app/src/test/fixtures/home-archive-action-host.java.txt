@@ -34,12 +34,20 @@ public final class MainActivity {
         boolean uploadUnnecessary, restoreUnnecessary, matchesCloudTip, protectedLocal = true;
         SyncHistory(boolean upload, boolean restore) { uploadSource = upload; restoreSource = restore; }
         boolean getCurrentProtected() { return protectedLocal; }
-        java.util.List<AppendCommit> getCloud() { return java.util.List.of(); }
+        java.util.List<AppendCommit> getCloud() { return restoreSource ? java.util.List.of(new AppendCommit("cloud-snapshot"), new AppendCommit("different-history")) : java.util.List.of(); }
         java.util.Map<String,String> getCurrentFiles() { return java.util.Map.of(); }
         int getLocalNodeCount() { return uploadSource ? 1 : 0; }
     }
-    static final class AppendCommit { Snapshot getSnapshot() { return new Snapshot(); } }
-    static final class Snapshot { java.util.Map<String,String> getFiles() { return java.util.Map.of(); } }
+    static final class AppendCommit {
+        final Snapshot snapshot;
+        AppendCommit(String id) { snapshot = new Snapshot(id); }
+        Snapshot getSnapshot() { return snapshot; }
+    }
+    static final class Snapshot {
+        final String id; Snapshot(String id) { this.id = id; }
+        String getId() { return id; }
+        java.util.Map<String,String> getFiles() { return java.util.Map.of(); }
+    }
     static final class SharedHomeArchiveAvailability {
         final boolean upload, restore;
         SharedHomeArchiveAvailability(boolean up, boolean down) { upload = up; restore = down; }
@@ -161,7 +169,6 @@ public final class MainActivity {
     boolean automaticObservationSupported() { return true; }
     boolean currentAutomaticHistory(Object t, Object c) { return automaticHistoryState.connection == connection; }
     boolean allowRestoreAction() { return restoreAllowed; }
-    boolean hasHomeSnapshot(String id) { return history != null && history.restoreSource && java.util.Set.of("cloud-snapshot", "different-history").contains(id); }
     String selectedGamePackage() { return gamePackage; }
     Object selectedGameIdentity() { return gamePackage; }
     String automaticStatusBrief() { return ""; }

@@ -741,8 +741,8 @@
       "sha256": "5210009249973a9fbc5128ea1e8d9ea43ac390c0279b7d0d52ba876af1b99e28"
     },
     "android-app/src/test/fixtures/home-archive-action-host.java.txt": {
-      "size": 31530,
-      "sha256": "ef50369c27529939b309e336c7879a54983ec3d8bde5bc5cc1b1a71fb09bf6f8"
+      "size": 31694,
+      "sha256": "544c286c671fdd31cfe3c70bcd6ebb7284649c1f8e58d153196bf8d5fe143bde"
     },
     "android-app/src/test/fixtures/home-history-read-host.java.txt": {
       "size": 10384,
@@ -1629,8 +1629,8 @@
       "sha256": "a63939403d29ef1f73ce3b05196b12e5d066480ed4a5835205147f1f329095b8"
     },
     "android-app/src/test/python/test_home_archive_action_execution.py": {
-      "size": 7424,
-      "sha256": "0b7dcc96c70f3a3982e65375554135d53d8c20cb22e1763f1e4f9b278cdb9959"
+      "size": 7464,
+      "sha256": "aedb4277c8e2b635be513280933b4dd53a0befa4b7fbae2787a1d64562fd6314"
     },
     "android-app/src/test/python/test_home_history_read_execution.py": {
       "size": 1657,

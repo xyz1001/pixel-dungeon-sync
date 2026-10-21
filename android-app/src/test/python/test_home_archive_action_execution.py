@@ -26,6 +26,7 @@ METHODS = (
     'private SharedHomeArchiveAvailability homeArchiveAvailability()',
     'private boolean canHomeUpload()',
     'private boolean canHomeRestore()',
+    'private boolean hasHomeSnapshot(',
     'private boolean canRefreshHomeHistory()',
     'private boolean isForegroundHome()',
     'private HomeActionContext currentHomeContext(',
