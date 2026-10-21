@@ -1597,8 +1597,8 @@
       "sha256": "9f5a9719ddb5591ee47321d5f1c5e4960a08d4c938f8d366a7e1c1f053847f73"
     },
     "android-app/src/test/python/test_diagnostic_export_contract.py": {
-      "size": 12870,
-      "sha256": "210bf2313972767cd4216b561b5e42e4b45757d7b2a20ba7346607cbb2588c5f"
+      "size": 14378,
+      "sha256": "e33c31d21f5bd72fd827bfa278411ca4f611803b5f3dccc2af0453a820a6ef44"
     },
     "android-app/src/test/python/test_embedded_install_contract.py": {
       "size": 10485,
