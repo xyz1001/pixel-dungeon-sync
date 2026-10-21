@@ -57,6 +57,11 @@ final class AndroidDiagnosticLogging {
         }
     }
     static DiagnosticFailure classify(Throwable error) {
+        Throwable accountFailure = error;
+        for (int depth = 0; depth < 8 && accountFailure != null; depth++, accountFailure = accountFailure.getCause()) {
+            if (accountFailure instanceof ManagedAccountClient.ManagedAccountException)
+                return ((ManagedAccountClient.ManagedAccountException) accountFailure).diagnosticFailure();
+        }
         if (io.github.xyz1001.pdsync.android.prepare.PreparationDiagnostics.find(error) != null)
             return DiagnosticFailure.VALIDATION;
         String code = BridgeDiagnostics.code(error);

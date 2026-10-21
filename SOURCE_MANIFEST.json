@@ -133,8 +133,8 @@
       "sha256": "3326761d576439764f018aa27a379a46760fd16fb22442ba04203ff2e4c7c598"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/AndroidDiagnosticLogging.java": {
-      "size": 12388,
-      "sha256": "03b9fed2e2d01fddcf80bb06da30a7fe821d5319e5985dfb44a955cacfcad739"
+      "size": 12756,
+      "sha256": "ff6aff643202b3b5e34c53dbb01b0595fc853455fe4023736945f48295f64b65"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/AndroidUiFlowPolicy.java": {
       "size": 2705,
@@ -1437,8 +1437,8 @@
       "sha256": "acb8f0d1e15a75324fa2de47811b5852dfa7ca02132b4a1d8c075fdfe4966686"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/ManagedAccountClientChecks.java": {
-      "size": 35205,
-      "sha256": "be904442b5fe70b901c51e20f7a0876e5b2d532bcfd504319eed9862b5111bc8"
+      "size": 36698,
+      "sha256": "3e5349216369af88d67d7a11f9f9ecd1ea65af78deeb185818133f1e1d9be42f"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/ManagedAccountFlowChecks.java": {
       "size": 24163,
@@ -2237,8 +2237,8 @@
       "sha256": "2e1fb6a9d55461015e45545a5c139c512e3fa1e2dc579eb07efd1f585d7f7d65"
     },
     "core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountClient.java": {
-      "size": 31346,
-      "sha256": "b6cf9c9e22ca98916cdc1f6c13e341ad56f522130810686d31339fb7a6f0e531"
+      "size": 35133,
+      "sha256": "d8c29bb5db1ade4a220ae00b23c139f0489193962beb3ce67a05c6aa35bcc9d5"
     },
     "core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountFlow.java": {
       "size": 8898,

@@ -56,7 +56,29 @@ public final class ManagedAccountClientChecks {
         imagePolicy();
         transportPolicy();
         cancellation();
+        explicitEntitlementAfterNetworkFailure();
         System.out.println("Managed official account client: " + checks + " host checks passed; no network used.");
+    }
+
+    private static void explicitEntitlementAfterNetworkFailure() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        OkHttpClient http = newHttpClient().newBuilder().addInterceptor(chain -> {
+            if (attempts.incrementAndGet() <= 2) throw new java.net.SocketException("PRIVATE_SENTINEL");
+            return json(chain.request(), VALID);
+        }).build();
+        ManagedAccountClient account = new ManagedAccountClient(DAV_URL, USER, PASSWORD, httpTransport(http));
+        for (int i = 0; i < 2; i++) {
+            try { account.entitlement(); throw new AssertionError("expected synthetic disconnect"); }
+            catch (ManagedAccountException failure) {
+                check(failure.kind == FailureKind.NETWORK_ERROR, "network category preserved");
+                check(failure.diagnosticFailure() == pdsync.DiagnosticFailure.NETWORK_IO, "diagnostic category mapped");
+                check(failure.getCause() == null && failure.getSuppressed().length == 0, "raw cause remains private");
+                check(!failure.toString().contains("PRIVATE_SENTINEL"), "transport text excluded");
+            }
+        }
+        check(USER.equals(account.entitlement().username), "same production client recovers on explicit entitlement");
+        check(attempts.get() == 3, "no automatic request replay");
+        http.connectionPool().evictAll(); http.dispatcher().executorService().shutdown();
     }
 
     private static void constructionAndEntitlement() throws Exception {

@@ -82,6 +82,18 @@ final class ManagedAccountClient {
             // Never preserve a transport message, response, cause, or suppressed diagnostic.
         }
         String userMessage() { return getMessage(); }
+        pdsync.DiagnosticFailure diagnosticFailure() {
+            switch (kind) {
+                case NETWORK_ERROR: return pdsync.DiagnosticFailure.NETWORK_IO;
+                case TIMEOUT: return pdsync.DiagnosticFailure.TIMEOUT;
+                case TLS_ERROR: return pdsync.DiagnosticFailure.TLS;
+                case AUTHENTICATION_REQUIRED: return pdsync.DiagnosticFailure.AUTHENTICATION;
+                case ACCOUNT_EXPIRED: case ACCOUNT_INACTIVE: case FORBIDDEN: return pdsync.DiagnosticFailure.AUTHORIZATION;
+                case SERVER_ERROR: case RATE_LIMITED: case REQUEST_REJECTED: case REDIRECT_REJECTED: return pdsync.DiagnosticFailure.HTTP;
+                case NOT_AVAILABLE: return pdsync.DiagnosticFailure.UNAVAILABLE;
+                default: return pdsync.DiagnosticFailure.VALIDATION;
+            }
+        }
     }
 
     static final class Entitlement {
@@ -195,13 +207,41 @@ final class ManagedAccountClient {
     private static final class SingleAttempt { final AtomicBoolean used = new AtomicBoolean(); }
 
     private static Transport defaultTransport() {
-        OkHttpClient client = newHttpClient();
+        return httpTransport(newHttpClient());
+    }
+
+    private static final java.util.concurrent.atomic.AtomicLong transportIds = new java.util.concurrent.atomic.AtomicLong();
+    /** Package-private injection seam uses the same production Call/diagnostic path in host tests. */
+    static Transport httpTransport(OkHttpClient client) {
+        final long id = transportIds.incrementAndGet();
         return new Transport() {
             @Override public Response execute(Request request) throws IOException {
-                return client.newCall(request).execute();
+                okhttp3.Call call = client.newCall(request);
+                long started = System.nanoTime();
+                try {
+                    Response response = call.execute();
+                    pdsync.DiagnosticLog.http(pdsync.DiagnosticHttpMethod.GET, response.code(),
+                            transportDetails(request, id, started, null, call.isCanceled()));
+                    return response;
+                } catch (IOException failure) {
+                    pdsync.DiagnosticLog.networkFailure(failure,
+                            transportDetails(request, id, started, failure, call.isCanceled()));
+                    throw failure; // executeRequest sanitizes before any exception leaves this client.
+                }
             }
             @Override public void cancelPending() { client.dispatcher().cancelAll(); }
         };
+    }
+
+    private static pdsync.DiagnosticDetails transportDetails(Request request, long id, long started,
+                                                              IOException failure, boolean canceled) {
+        pdsync.DiagnosticDetails.Builder details = pdsync.DiagnosticDetails.builder()
+                .networkTarget(ENTITLEMENT_URL.equals(request.url().toString())
+                        ? pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT : pdsync.DiagnosticDetails.NetworkTarget.ASSET)
+                .number(pdsync.DiagnosticDetails.Field.TRANSPORT_CLIENT_ID, id)
+                .requestDurationMs(Math.max(0, (System.nanoTime() - started) / 1000000));
+        if (failure != null) details.transportFailure(failure, canceled, Thread.currentThread().isInterrupted());
+        return details.build();
     }
 
     /** Cancellation can race completion; callers must also invalidate their UI generation. */
@@ -287,6 +327,24 @@ final class ManagedAccountClient {
     private interface Decoder<T> { T decode(Response response) throws IOException; }
 
     private <T> T execute(Request request, Decoder<T> decoder) throws ManagedAccountException {
+        boolean entitlement = ENTITLEMENT_URL.equals(request.url().toString());
+        pdsync.DiagnosticDetails details = pdsync.DiagnosticDetails.builder()
+                .networkTarget(pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT).build();
+        if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
+                pdsync.DiagnosticResult.STARTED, pdsync.DiagnosticFailure.NONE, details);
+        try {
+            T result = executeRequest(request, decoder);
+            if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
+                    pdsync.DiagnosticResult.SUCCEEDED, pdsync.DiagnosticFailure.NONE, details);
+            return result;
+        } catch (ManagedAccountException failure) {
+            if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
+                    pdsync.DiagnosticResult.FAILED, failure.diagnosticFailure(), details);
+            throw failure;
+        }
+    }
+
+    private <T> T executeRequest(Request request, Decoder<T> decoder) throws ManagedAccountException {
         try (Response response = transport.execute(request)) {
             if (response == null) throw invalid();
             if (!request.url().equals(response.request().url()) || response.priorResponse() != null) {
