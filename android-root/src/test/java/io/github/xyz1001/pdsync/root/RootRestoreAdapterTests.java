@@ -41,11 +41,18 @@ public final class RootRestoreAdapterTests {
         unsupported.noRename=false;
         try(RootRestoreAdapter adapter=new RootRestoreAdapter(unsupported,binding(),GATE)){check(!adapter.pending(),"failed preflight cleans private prep");}
         check(restore(unsupported,Collections.singletonMap("rankings.dat",data("retry")))==Outcome.RESTORED,"successful retry after unsupported preflight");
-        preparationCrash(); cleanupCrash(); racedSource(); racedDestination(); rejectedGate();
+        singlePassReads(); preparationCrash(); cleanupCrash(); racedSource(); racedDestination(); rejectedGate();
         FakeMutationOs labels=fixture();labels.noXattr=true;
         try{restore(labels,Collections.singletonMap("rankings.dat",data("new")));throw new AssertionError("missing labels accepted");}catch(IOException expected){checks++;}
         check(new String(labels.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("before"),"label refusal never writes live");
         System.out.println("Root adapter host tests passed: "+checks+" assertions; Android runtime not executed");
+    }
+    static void singlePassReads()throws Exception {
+        FakeMutationOs os=fixture();FakeMutationOs.Node before=os.files.children.get("rankings.dat");
+        check(restore(os,Collections.singletonMap("rankings.dat",data("new")))==Outcome.RESTORED,"single-pass restore result");
+        FakeMutationOs.Node after=os.files.children.get("rankings.dat");
+        check(os.dataReads.getOrDefault(before.inode,0)==1,"old save read once for capture and independent backup");
+        check(os.dataReads.getOrDefault(after.inode,0)==1,"final save read once for actual receipt");
     }
     static void preparationCrash()throws Exception {
         FakeMutationOs os=fixture();os.beforeRename=()->{throw new SimulatedDeath();};

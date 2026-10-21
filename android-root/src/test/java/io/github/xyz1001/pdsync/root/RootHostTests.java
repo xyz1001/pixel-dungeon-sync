@@ -160,7 +160,7 @@ public final class RootHostTests {
     }
     private static final class FakeFs implements RootFileSystem {
         final Node data = new Node(1, Stat.DIRECTORY, null), files = new Node(2, Stat.DIRECTORY, null);
-        long next = 3; int operations, scans; boolean rootReplacement;
+        long next = 3; int operations, scans, sourceReads; boolean rootReplacement;
         String beforeOpenMutation, duringReadMutation; boolean grownRead;
         FakeFs() { data.children.put("files", files); }
         Node put(String path, int type, byte[] bytes) {
@@ -178,7 +178,7 @@ public final class RootHostTests {
             public Stat stat() { operations++; return node.stat(); }
             public void close() { }
             public InputStream input() {
-                operations++;
+                operations++; sourceReads++;
                 byte[] bytes = node.bytes == null ? new byte[0] : node.bytes;
                 if (grownRead) bytes = Arrays.copyOf(bytes, bytes.length + 1);
                 if (name.equals(duringReadMutation)) node.revision++;
@@ -292,7 +292,7 @@ public final class RootHostTests {
         bad(() -> tree(shrink).scan(true), "short read");
     }
     private static final class FakeRuntime implements RootRuntime {
-        final FakeFs fs = new FakeFs(); int euid, pmCalls, observeCalls;
+        final FakeFs fs = new FakeFs(); int euid, pmCalls, observeCalls, quietWaits;
         RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
         int guardOpens, guardChecks, guardRevalidates, guardCloses;
         IOException guardFailure;
@@ -322,7 +322,7 @@ public final class RootHostTests {
             if (mutateAfterExport && observeCalls == 3) fs.rootReplacement=true;
             return unreliable ? RootUidState.Observation.unknown() : RootHostTests.observe(26,foreground ? "2 (TOP)\n" : "17 (CACHED_EMPTY)\n");
         }
-        public void quietWait() { if (mutateQuiet) fs.files.children.get("rankings.dat").bytes="different".getBytes(StandardCharsets.UTF_8); }
+        public void quietWait() { quietWaits++; if (mutateQuiet) fs.files.children.get("rankings.dat").bytes="different".getBytes(StandardCharsets.UTF_8); }
     }
     private static FakeRuntime guardedRuntime() throws IOException {
         FakeRuntime runtime=new FakeRuntime();runtime.readOs=new FakeMutationOs();
@@ -375,7 +375,7 @@ public final class RootHostTests {
                 check(decoded.outcome==RootProtocol.Outcome.READ_ONLY,"absent workspace read-only reply "+command);
                 check(decoded.contentFingerprint.equals(SaveArchive.fingerprint(Collections.singletonMap("rankings.dat",
                         SaveArchive.sha256("synthetic".getBytes(StandardCharsets.UTF_8))))),"complete save scan "+command);
-                check(runtime.pmCalls==2&&runtime.observeCalls==3&&runtime.fs.scans>=3,"full read job completed "+command);
+                check(runtime.pmCalls==2&&runtime.observeCalls==0&&runtime.quietWaits==0&&runtime.fs.sourceReads==1,"single-pass read job completed "+command);
                 check(boundary.missingLookups>=5,"actual workspace absence checked at opening and final boundaries "+command);
                 try(java.util.stream.Stream<Path> entries=Files.list(boundary.directory)) {
                     check(entries.count()==0,"host data directory remains empty "+command);
@@ -454,7 +454,8 @@ public final class RootHostTests {
         check(new RootService(mismatch).execute(request(RootProtocol.Command.INSPECT)).status==RootProtocol.Status.BINDING_MISMATCH,"wrong initial APK");
         check(mismatch.fs.operations==0,"wrong APK never touches saves");
         FakeRuntime mutate=new FakeRuntime(); mutate.mutateQuiet=true;
-        check(new RootService(mutate).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.CHANGED,"quiet interval mutation");
+        check(new RootService(mutate).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.OK,"export has no quiet interval");
+        check(mutate.quietWaits==0&&mutate.fs.sourceReads==1,"one source read and zero fixed waits");
         FakeRuntime unavailable=new FakeRuntime(); unavailable.unreliable=true;
         check(new RootService(unavailable).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.UNRELIABLE,"unknown lifecycle blocks export");
         check(unavailable.fs.operations==0,"unknown lifecycle reads no saves");

@@ -34,6 +34,7 @@ public final class FakeMutationOs implements MutationOs {
     public SaveDirectoryPolicy.Content contentResult;
     public String canonical = "/data/user/0";
     public final List<String> log = new ArrayList<>();
+    public final Map<Long, Integer> dataReads = new LinkedHashMap<>();
     private static final java.util.concurrent.atomic.AtomicLong NEXT_INODE = new java.util.concurrent.atomic.AtomicLong(1000);
     public final Node root = fresh(Stat.DIRECTORY | 0755, 0, 0);
     public final Node data, files;
@@ -170,6 +171,7 @@ public final class FakeMutationOs implements MutationOs {
         if (beforeRead != null) { Runnable hook = beforeRead; beforeRead = null; hook.run(); }
         Node n = n(h); if (zeroRead || position >= n.bytes.length) return 0;
         int size = Math.min(Math.min(length, n.bytes.length - (int) position), maxRead);
+        if (size > 0) dataReads.put(n.inode, dataReads.getOrDefault(n.inode, 0) + 1);
         System.arraycopy(n.bytes, (int) position, bytes, offset, size); return size;
     }
     @Override public int write(Handle h, byte[] bytes, int offset, int length, long position) throws IOException {
