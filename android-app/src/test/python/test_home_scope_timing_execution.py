@@ -42,7 +42,8 @@ class HomeScopeTimingExecution(unittest.TestCase):
         ))
         self.run_java(r"""
 class MainActivity {
- enum DiagnosticAction{RESTORE,RESOLVE,PUSH}
+ enum DiagnosticAction{RESTORE,RESOLVE,MERGE,PUSH}
+ DiagnosticAction activeWorkAction;
  enum SyncPage{HOME,CONFIRM}
  boolean busy,destroyed; int settingsConfirmationToken;
  SyncPage page=SyncPage.HOME,confirmationReturn=SyncPage.HOME;
@@ -84,21 +85,21 @@ class MainActivity {
  Object diagnosticWorkDetails(){return null;}OnboardingKind kind(){return OnboardingKind.IDENTICAL;}
  AndroidSyncFacade sync(){return facade;}
  void readComparison(boolean prepare,boolean preview) throws Exception{
-  check(prepare && !preview,"post-action used metadata preview");
+  check(prepare==(activeWorkAction==DiagnosticAction.PUSH) && !preview,"restore refresh may not prepare cloud namespace");
   check(facade.active==facade.expected,"post-action read outside scope");reads++;
   if(failRefresh)throw new java.io.IOException("refresh unavailable");
  }
- <T>void work(DiagnosticAction action,String label,Task<T> task,Done<T> done){try{done.accept(task.run());}catch(Exception e){throw new RuntimeException(e);}}
+ <T>void work(DiagnosticAction action,String label,Task<T> task,Done<T> done){activeWorkAction=action;try{done.accept(task.run());}catch(Exception e){throw new RuntimeException(e);}}
  void m55x8211a061(String label,OperationOutcome result){outcome=result;}
  /* METHODS */
  static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
  public static void main(String[] args){
   for(DiagnosticAction action:DiagnosticAction.values())for(boolean failed:new boolean[]{false,true}){
-   MainActivity a=new MainActivity();a.facade.expected=action!=DiagnosticAction.PUSH;a.failRefresh=failed;
+   MainActivity a=new MainActivity();a.facade.expected=action==DiagnosticAction.RESTORE || action==DiagnosticAction.RESOLVE;a.failRefresh=failed;
    a.operation(action,"existing progress",()->{check(a.facade.active==a.facade.expected,"restore action outside scope");return new AndroidSyncFacade.OperationResult();},"existing success");
    check(a.reads==1,"post-action read missing");
    check(a.facade.opened==(a.facade.expected?1:0) && a.facade.closed==a.facade.opened && !a.facade.active,"scope leaked");
-   check(a.facade.completed==(failed?0:1),"onboarding completion mismatch");
+   check(a.facade.completed==(failed || action!=DiagnosticAction.PUSH ? 0 : 1),"restore must not publish onboarding; upload keeps completion");
    if(failed)check(a.outcome.refreshFailure!=null && a.history==null && a.inspection==null && !a.cloudVerified,"failed refresh retained proof");
   }
  }

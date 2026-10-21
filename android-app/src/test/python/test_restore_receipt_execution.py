@@ -28,6 +28,8 @@ package io.github.xyz1001.pdsync.android;
 import java.io.IOException;
 import java.util.*;
 public class MainActivity {
+    enum DiagnosticAction { RESTORE, RESOLVE, PUSH }
+    DiagnosticAction activeWorkAction=DiagnosticAction.RESTORE;
     enum DiagnosticFailure { NONE, FAILED }
     enum DiagnosticStage { VERIFY, REFRESH }
     enum DiagnosticResult { CONFLICT, PENDING, SUCCEEDED, REJECTED }
@@ -105,7 +107,7 @@ public class MainActivity {
     Object diagnosticWorkDetails(){return null;} OnboardingKind kind(){return journal?OnboardingKind.UNKNOWN:OnboardingKind.IDENTICAL;}
     AndroidSyncFacade sync(){return facade;}
     void readComparison(boolean prepare, boolean preview) throws IOException {
-        check(prepare && !preview,"fallback must preserve full comparison");reads++;
+        check(!prepare && !preview,"restore fallback must be full but cloud read-only");reads++;
         if(failure!=null)throw new IOException(failure);
         if(journal){cloudVerified=false;history=null;}
     }
@@ -133,7 +135,7 @@ public class MainActivity {
         MainActivity noMarker=new MainActivity();AndroidSyncFacade.OperationResult incomplete=result();incomplete.complete=false;
         noMarker.run(incomplete);check(noMarker.markers==0 && noMarker.reads==0,"receipt fabricated completion");
         MainActivity fallback=new MainActivity();fallback.run(new AndroidSyncFacade.OperationResult(null));
-        check(fallback.reads==1 && fallback.facade.completions==1,"legacy/null receipt lost old path");
+        check(fallback.reads==1 && fallback.facade.completions==0,"restore fallback published onboarding");
         MainActivity conflicted=new MainActivity();AndroidSyncFacade.OperationResult conflict=result();conflict.conflict=true;
         OperationOutcome conflictReceipt=conflicted.run(conflict);
         check(conflicted.reads==0 && conflicted.facade.historyReads==1 && conflicted.markers==0

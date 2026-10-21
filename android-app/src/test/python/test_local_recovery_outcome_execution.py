@@ -16,6 +16,8 @@ class LocalRecoveryOutcomeExecution(unittest.TestCase):
         fixture = r'''
 import java.io.IOException;
 class Check {
+    enum DiagnosticAction { RESTORE, RESOLVE, PUSH }
+    DiagnosticAction activeWorkAction=DiagnosticAction.RESTORE;
     enum DiagnosticFailure { NONE, FAILED }
     enum DiagnosticStage { VERIFY, REFRESH }
     enum DiagnosticResult { CONFLICT, PENDING, SUCCEEDED, REJECTED }
@@ -66,7 +68,7 @@ class Check {
     String safeText(String s){return s;} String safeError(Exception e){return e.getMessage();}
     Object diagnosticWorkDetails(){return null;} OnboardingKind kind(){return OnboardingKind.UNKNOWN;}
     AndroidSyncFacade sync(){return facade;}
-    void readComparison(boolean prepare, boolean preview) throws IOException {check(prepare && !preview); reads++;if(failure!=null)throw new IOException(failure);}
+    void readComparison(boolean prepare, boolean preview) throws IOException {check(!prepare && !preview); reads++;if(failure!=null)throw new IOException(failure);}
     /* METHODS */
     static void check(boolean b){if(!b)throw new AssertionError();}
     public static void main(String[] args) throws Exception {

@@ -3705,14 +3705,14 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                             AndroidDiagnosticLogging.inspectionResult(inspectionInspect.getKind(), false),
                             inspectionInspect.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
                             diagnosticInspectionDetails(inspectionInspect));
-                    if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
+                    if (!prepareNamespace && allowHomePreview && !isForegroundHome()) throw new StaleArchiveReadException();
                     if ("BLOCKED".equals(inspectionInspect.getKind())) observedHistory = null;
                     else {
                         stage = SyncInspectionDiagnostics.Stage.HISTORY;
                         observedHistory = activeFacade.historyPresentation(inspectionInspect);
                     }
                 }
-                if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
+                if (!prepareNamespace && allowHomePreview && !isForegroundHome()) throw new StaleArchiveReadException();
                 requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                 if ("BLOCKED".equals(inspectionInspect.getKind())) {
                     invalidatePreparedOfficialNamespace();
@@ -3740,7 +3740,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 }
             } catch (Exception error) {
                 // Keep existing structured details and recovery handling exactly as they were.
-                if (!prepareNamespace && !isForegroundHome()) throw new StaleArchiveReadException();
+                if (!prepareNamespace && allowHomePreview && !isForegroundHome()) throw new StaleArchiveReadException();
                 if (error instanceof StaleArchiveReadException) throw error;
                 requireCurrentArchiveRead(archiveRead, archiveAccount, archiveSelection, archiveNamespace, archivePage);
                 invalidatePreparedOfficialNamespace();
@@ -4347,8 +4347,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         try {
             if (prepareOperationReceipt(operationOutcome, receiptContext)) return operationOutcome;
-            readComparison(true, false);
-            if (this.cloudVerified && kind() == OnboardingKind.IDENTICAL && (syncHistory = this.history) != null && syncHistory.getBaselineCommit() != null && !operationOutcome.result.isPending() && !operationOutcome.result.isConflict()) {
+            // Restore completion is cloud read-only, including fallback refresh/recovery.
+            // Namespace creation and onboarding publication belong to their independent actions.
+            final boolean restoring = this.activeWorkAction != DiagnosticAction.PUSH;
+            readComparison(!restoring, false);
+            if (!restoring && this.cloudVerified && kind() == OnboardingKind.IDENTICAL && (syncHistory = this.history) != null && syncHistory.getBaselineCommit() != null && !operationOutcome.result.isPending() && !operationOutcome.result.isConflict()) {
                 sync().completeOnboarding(this.inspection);
                 SyncRuntime.setOnboardingProgress(this, this.connection, OnboardingProgress.COMPLETE);
             }
