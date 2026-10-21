@@ -2257,8 +2257,8 @@
       "sha256": "b7bbeb6710be8d31ebf37a152569464cf4633a5c35fc44716eff2d55ced6b863"
     },
     "core/src/main/java/pdsync/TransportFailureKind.java": {
-      "size": 1429,
-      "sha256": "ae13e8824bf717e504fcf5a7c6b623178f5e207ea74163844bcaccb84442032e"
+      "size": 1400,
+      "sha256": "ff12ec9598dc04b9f8204461085f710b9ba40329ee4fca6e40b9e42fec797945"
     },
     "core/src/main/java/pdsync/WebDavRequestCheck.java": {
       "size": 236,
@@ -2541,8 +2541,8 @@
       "sha256": "6eec2165fc59582756bb78d7ba128a62be658573061cf5d087af46ae5eeb2ee0"
     },
     "core/src/test/java/pdsync/TransportReconnectHostChecks.java": {
-      "size": 2613,
-      "sha256": "ceba73bd7b5c711df5242ea2e7ff25def8c623244c9bf90b4653e0726d63eef1"
+      "size": 2618,
+      "sha256": "35ef1f528f073413e1dc8a37ca25593879fc1bda4bcbbf3e3fbc16d874ab3634"
     },
     "core/src/test/java/pdsync/i18n/AndroidHostMessagesChecks.java": {
       "size": 2457,
@@ -2605,8 +2605,8 @@
       "sha256": "0e938a14ff2f52c0dd3231ae3a64bb09ea95c2b3320caf322cac61cc06151ee8"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
-      "size": 19467,
-      "sha256": "87c0f318583d737403b4e98b339b1ae99a3eb670fc25a631eac83c643c87e996"
+      "size": 19472,
+      "sha256": "6fececbbf05ce77ef35e3b1632f5e75cbaf83b7a66a2f266b646bd7a77717e23"
     },
     "core/src/test/kotlin/pdsync/AppendProfileSessionTest.kt": {
       "size": 21332,

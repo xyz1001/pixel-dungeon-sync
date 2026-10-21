@@ -15,7 +15,7 @@ public final class TransportReconnectHostChecks {
         IOException a=new IOException("secret"), b=new IOException("secret"); a.initCause(b); b.initCause(a);
         check(TransportFailureKind.deepest(a)==TransportFailureKind.IO,"cyclic causes terminate");
         try(MockWebServer server=new MockWebServer()) {
-            server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+            server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST));
             server.enqueue(new MockResponse().setResponseCode(200).setBody("ok"));
             server.start();
             OkHttpClient client=new OkHttpClient.Builder().retryOnConnectionFailure(false)

@@ -13,7 +13,7 @@ import kotlin.test.*
 
 class AppendOnlyWebDavTest {
  @Test fun explicitReadRecoversAfterDisconnectWithoutReplayingFailedRequest() = MockWebServer().use { server ->
-  server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_START))
+  server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
   server.enqueue(MockResponse().setResponseCode(404))
   server.start()
   val dav=store(server)
