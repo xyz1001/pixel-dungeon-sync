@@ -1741,8 +1741,8 @@
       "sha256": "a881c3446f8ee0531332973f45c94c5e7e1a06f7c24372a2aa02ceba2d4bdc0e"
     },
     "android-app/src/test/python/test_shared_home_android_contract.py": {
-      "size": 23271,
-      "sha256": "6a159daa9db645ce3c92932caadb3fb3f8662ac0f1eb9cb710f941f9adc92d97"
+      "size": 23338,
+      "sha256": "7e62b4ac6eb84d5b21e3d8287aa864dc61271d18e989857374ad1dccd549d759"
     },
     "android-app/src/test/python/test_shared_save_path_android_contract.py": {
       "size": 13623,

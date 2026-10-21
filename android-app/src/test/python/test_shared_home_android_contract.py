@@ -220,7 +220,8 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('this.archiveReads.close()', body(MAIN, 'protected void onDestroy()'))
         self.assertIn('this.archiveReads.invalidate()', body(MAIN, 'private void navigate('))
         automatic = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
-        self.assertLess(automatic.index('state.inFlight = true'), automatic.index('work(DiagnosticAction.INSPECT'))
+        self.assertLess(automatic.index('state.inFlight = true'), automatic.index('startDetachedHomeRead('))
+        self.assertIn('state.refresh.deferBeforeRead(ticket)', automatic)
         self.assertIn('this.automaticHistoryState.inFlight = false', body(MAIN, 'private void finishDetachedHomeRead('))
 
     def test_home_status_uses_display_equality_without_granting_transfer_or_object_proof(self):
