@@ -333,8 +333,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 304199,
-      "sha256": "c5c4a2565b51a06913073dd1aac272654fd85bf44179a7ec0d4a26016938992f"
+      "size": 308449,
+      "sha256": "3d9193793355c3f013cd1970fee511c41f32e08679ab5f091dd8b949c4133dc4"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -741,8 +741,8 @@
       "sha256": "5210009249973a9fbc5128ea1e8d9ea43ac390c0279b7d0d52ba876af1b99e28"
     },
     "android-app/src/test/fixtures/home-archive-action-host.java.txt": {
-      "size": 31694,
-      "sha256": "544c286c671fdd31cfe3c70bcd6ebb7284649c1f8e58d153196bf8d5fe143bde"
+      "size": 31808,
+      "sha256": "ddf490b91ad87dcc7abddbd1871801acbd219267810d2615cf207b8214a78a08"
     },
     "android-app/src/test/fixtures/home-history-read-host.java.txt": {
       "size": 10384,
@@ -1749,8 +1749,8 @@
       "sha256": "a881c3446f8ee0531332973f45c94c5e7e1a06f7c24372a2aa02ceba2d4bdc0e"
     },
     "android-app/src/test/python/test_shared_home_android_contract.py": {
-      "size": 23342,
-      "sha256": "78106eea33276f165cd8c40409347f72841a766853c3f1eccd4355150b0bb4f1"
+      "size": 24344,
+      "sha256": "013c9bcfbd69f9d941fda2c32f2564ee796900caab643d1077b3531e710547c8"
     },
     "android-app/src/test/python/test_shared_save_path_android_contract.py": {
       "size": 13623,
@@ -2345,16 +2345,16 @@
       "sha256": "b82002bdc6f8b5fd0dc7c7ae1c8dc5f27db52370f422ed7ce36dc9fe4ebb9f1d"
     },
     "core/src/main/kotlin/pdsync/DiagnosticDetails.kt": {
-      "size": 19210,
-      "sha256": "393d8def37a813b1520f6f8f0412ea3e6093d80e50f637b76999ffcbf05902f3"
+      "size": 19676,
+      "sha256": "359930e3a550ba1d3a3bab89573a018e03d278b63db134786888376972c32c51"
     },
     "core/src/main/kotlin/pdsync/DiagnosticEnvironment.kt": {
       "size": 4559,
       "sha256": "90f53e1474d284deb452339ca0eb019ff9607975e58e779866edcc3665414548"
     },
     "core/src/main/kotlin/pdsync/DiagnosticLog.kt": {
-      "size": 31755,
-      "sha256": "de89113e081e2133668d1d8b736fb4c40692ff683f6e4322d83c8eb816159478"
+      "size": 32351,
+      "sha256": "b58b9312cdcaacb054bcb92ed97fbdb9af33fc3b7b372bd2108195731a3824ad"
     },
     "core/src/main/kotlin/pdsync/DiagnosticTiming.kt": {
       "size": 4071,
@@ -2383,6 +2383,10 @@
     "core/src/main/kotlin/pdsync/GlobalRecordMerge.kt": {
       "size": 4266,
       "sha256": "62a1b1d8ee1f75abbc2638bd36cee82bdb75817d4f22cc04523b72ede56e4b8d"
+    },
+    "core/src/main/kotlin/pdsync/HomeRestoreDiagnosticEvidence.kt": {
+      "size": 6185,
+      "sha256": "5f83d49782c4623c4151bd845a77dbb76fb917213248ada0d84ef8871979616a"
     },
     "core/src/main/kotlin/pdsync/InstalledGameDiscovery.kt": {
       "size": 11876,
@@ -2529,8 +2533,8 @@
       "sha256": "f83e6539122107735730dacd9f99c051f1b93bf2a500a6ad2decba70dac5c60e"
     },
     "core/src/test/java/pdsync/DiagnosticDetailsJavaTest.java": {
-      "size": 1385,
-      "sha256": "a294bc5212ea8d20d9711c02fb2bfd7b16868263fff2c663ed5f214da6bcd669"
+      "size": 2634,
+      "sha256": "6eec2165fc59582756bb78d7ba128a62be658573061cf5d087af46ae5eeb2ee0"
     },
     "core/src/test/java/pdsync/i18n/AndroidHostMessagesChecks.java": {
       "size": 2457,
@@ -2695,6 +2699,10 @@
     "core/src/test/kotlin/pdsync/HistoryPresentationTest.kt": {
       "size": 29302,
       "sha256": "26551c843fcbfaf0bb6f528f8cc0f5dcd0878c777c81e2f46b2320b59ab33e79"
+    },
+    "core/src/test/kotlin/pdsync/HomeRestoreDiagnosticEvidenceTest.kt": {
+      "size": 10911,
+      "sha256": "86c215463131084ae51d6607b8c25dc8c3fa6644961aabcc97806b0447e5365d"
     },
     "core/src/test/kotlin/pdsync/InstalledGameDiscoveryTest.kt": {
       "size": 11689,
@@ -7153,8 +7161,8 @@
       "sha256": "2b04cf0282fcb8a9ec3f3102d191489d276efe73b0e0179881b4835f49bbb61c"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHomeArchiveAvailabilityRenderTest.kt": {
-      "size": 16360,
-      "sha256": "842903290f50f9bc1936e3adf459ef6a708239be20abe6ae9e6c919c8b07c292"
+      "size": 23115,
+      "sha256": "212090efdcc36a6048794972650d1590e296c8146fa9f9b4af8873554aec0f82"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHomeArchiveAvailabilityTest.kt": {
       "size": 5952,

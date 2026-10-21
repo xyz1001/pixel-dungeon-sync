@@ -107,6 +107,11 @@ object DiagnosticLog {
  @JvmStatic fun begin(action: DiagnosticAction, automatic: Boolean): DiagnosticTrace =
   DiagnosticTrace(UUID.randomUUID().toString(), action, automatic).also { it.record(DiagnosticStage.QUEUED, DiagnosticResult.STARTED) }
 
+ /** One user-observation record, without begin's QUEUED event or changing the bound operation. */
+ @JvmStatic fun recordStandalone(action: DiagnosticAction, stage: DiagnosticStage, result: DiagnosticResult,
+                                failure: DiagnosticFailure, details: DiagnosticDetails): Boolean =
+  write(DiagnosticTrace(UUID.randomUUID().toString(), action, false), stage, result, failure, details = details)
+
  /** Restores nesting; closing a scope twice or from another thread cannot change another context. */
  @JvmStatic fun bind(trace: DiagnosticTrace): AutoCloseable {
   val thread = Thread.currentThread(); val previous = current.get(); current.set(trace)
@@ -254,6 +259,8 @@ object DiagnosticLog {
    record.details?.values?.toSortedMap(compareBy { it.ordinal })?.forEach { (field, value) ->
     if (field == DiagnosticDetails.Field.PREPARATION) {
      PreparationDiagnosticEvidence.decode(value)?.forEach { (key, fact) -> append(" prep.$key=$fact") }
+    } else if (field == DiagnosticDetails.Field.HOME_RESTORE) {
+     HomeRestoreDiagnosticEvidence.decode(value)?.forEach { (key, fact) -> append(" homeRestore.$key=$fact") }
     } else if(field == DiagnosticDetails.Field.PHASE_TIMINGS) {
      DiagnosticTimingEvidence.decode(value)?.forEach { (key,fact)->
       append(" phase.$key.inclusiveMs=${fact.durationMs} phase.$key.count=${fact.count}")

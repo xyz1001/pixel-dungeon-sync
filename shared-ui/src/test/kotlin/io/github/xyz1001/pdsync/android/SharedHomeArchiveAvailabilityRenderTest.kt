@@ -28,7 +28,9 @@ import kotlin.test.assertTrue
 import org.jetbrains.skia.EncodedImageFormat
 import pdsync.AppendCommit
 import pdsync.CommitGraph
+import pdsync.DeviceIdentity
 import pdsync.Manifest
+import pdsync.SnapshotMetadata
 import pdsync.SyncHistory
 import pdsync.presentation.HistoryPresentation
 
@@ -58,16 +60,97 @@ class SharedHomeArchiveAvailabilityRenderTest {
     private class Host(initial: SharedHomeState) : SharedHomeActions {
         var state by mutableStateOf(initial)
         val calls = mutableListOf<String>()
+        var onSelect: (String) -> Unit = {}
+        var onRestore: () -> Unit = {}
         override fun upload() { calls += "upload" }
-        override fun restore() { calls += "restore" }
+        override fun restore() { calls += "restore"; onRestore() }
         override fun launch() { calls += "launch" }
         override fun settings() { calls += "settings" }
-        override fun selectSnapshot(snapshotId: String) { calls += "select:$snapshotId" }
+        override fun selectSnapshot(snapshotId: String) { calls += "select:$snapshotId"; onSelect(snapshotId) }
         override fun rename(snapshotId: String?) { calls += "rename:$snapshotId" }
         override fun changeHistoryPage(page: Int) { calls += "page:$page" }
     }
 
     private data class Case(val name: String, val state: SharedHomeState, val expected: List<String>)
+
+    @Test fun selectedHistoryPointersRecomputeRealPoliciesAndRestoreExactTargetsAcrossReceipts() {
+        val tipFiles = mapOf("game1/game.dat" to "a".repeat(64), "game1/depth1.dat" to "b".repeat(64),
+            "badges.dat" to "c".repeat(64))
+        val oldFiles = tipFiles + ("game1/depth1.dat" to "d".repeat(64))
+        val device = DeviceIdentity("12345678-1234-1234-1234-123456789abc", "History pointer fixture")
+        fun record(id: String, files: Map<String, String>, time: String, parents: List<String>) =
+            commit(id, files).let { it.copy(parents = parents, snapshot = it.snapshot.copy(
+                metadata = SnapshotMetadata(device = device, capturedAt = time,
+                    fileModifiedAt = files.keys.associateWith { time }))) }
+        val old = record("old-a", oldFiles, "2026-10-19T01:00:00Z", emptyList())
+        val sameBytesOlder = record("same-b-older", tipFiles, "2026-10-20T01:00:00Z", listOf(old.id))
+        val tip = record("tip-b", tipFiles, "2026-10-21T01:00:00Z", listOf(sameBytesOlder.id))
+        val complete = history(tipFiles, listOf(old, sameBytesOlder, tip))
+        assertEquals(setOf(tip.id), complete.graph.tips, "This is one history chain, not a branch chooser")
+        assertEquals(oldFiles.keys, tipFiles.keys, "Only actual bytes differ; counts and paths cannot identify the target")
+
+        for (width in listOf(1165, 320)) for (metadataOnly in listOf(true, false)) {
+            var observed = if (metadataOnly) complete.copy(verifiedCommitIds = emptySet()) else complete
+            val initialProof = observed.verifiedCommitIds
+            val host = Host(state(observed))
+            val bounds = Observation()
+            val requestedTargets = mutableListOf<String>()
+            host.onSelect = { selectedId -> host.state = state(observed, selectedId) }
+            host.onRestore = { requestedTargets += checkNotNull(host.state.selectedSnapshotId) }
+            val scene = scene(width, host, bounds, height = 1800)
+            val label = "selected-history-$width-${if (metadataOnly) "metadata" else "objects"}"
+            try {
+                render(scene, "$label-initial")
+                assertArchiveButtonEnabled(scene, bounds, "upload", false)
+                assertArchiveButtonEnabled(scene, bounds, "restore", false)
+                clickArchives(scene, bounds)
+                assertTrue(host.calls.isEmpty(), "Initial equality disables transfer, but must not disable choosing another target")
+
+                fun select(target: AppendCommit, expectedRestore: Boolean, phase: String) {
+                    val point = bounds.origin + bounds.layout!!.cards.getValue(target.id).center
+                    assertTrue(point.x in 0f..width.toFloat() && point.y in 0f..1800f,
+                        "The actual history card must receive the pointer: $label/$phase")
+                    click(scene, point)
+                    render(scene, "$label-$phase")
+                    assertEquals(target.snapshot.id, host.state.selectedSnapshotId)
+                    val selectedCards = semanticsNodes(scene).filter {
+                        it.config.getOrNull(SemanticsProperties.Selected) == true
+                    }
+                    assertEquals(1, selectedCards.size, "Exactly the requested snapshot card is selected")
+                    assertTrue(texts(descendants(selectedCards.single())).contains(
+                        host.state.history!!.nodes.single { it.id == target.id }.name))
+                    assertArchiveButtonEnabled(scene, bounds, "restore", expectedRestore)
+                }
+
+                select(old, true, "old-selected")
+                assertArchiveButtonEnabled(scene, bounds, "upload", false)
+                select(tip, false, "tip-selected")
+                // Metadata equality for a non-tip is deliberately not object verification.
+                // A separately verified same-byte older record remains a disabled no-op.
+                select(sameBytesOlder, metadataOnly, "same-bytes-different-time")
+                assertEquals(initialProof, observed.verifiedCommitIds, "Selection must not manufacture object proof")
+                assertTrue(requestedTargets.isEmpty(), "Selecting a card never requests restoration")
+
+                for ((index, target) in listOf(old, tip, old).withIndex()) {
+                    select(target, true, "roundtrip-$index-selected")
+                    click(scene, bounds.elements.getValue("restore").center)
+                    assertEquals(listOf(old, tip, old).take(index + 1).map { it.snapshot.id }, requestedTargets,
+                        "The real restore pointer must request the selected ID, not the tip or previous target")
+                    // The host receives a successful apply receipt. Only observation facts are supplied;
+                    // both capabilities are recomputed by the production content/availability policies.
+                    observed = observed.copy(currentFiles = target.snapshot.files, baseline = target.id,
+                        baselineDirection = "restore", verifiedCommitIds = observed.verifiedCommitIds + target.id)
+                    host.state = state(observed, target.snapshot.id)
+                    render(scene, "$label-roundtrip-$index-receipt")
+                    assertArchiveButtonEnabled(scene, bounds, "restore", false)
+                    repeat(2) { click(scene, bounds.elements.getValue("restore").center) }
+                    assertEquals(index + 1, requestedTargets.size, "An applied target cannot be dispatched again")
+                }
+                assertEquals(listOf(old.snapshot.id, tip.snapshot.id, old.snapshot.id), requestedTargets)
+                assertEquals(oldFiles, observed.currentFiles)
+            } finally { scene.close() }
+        }
+    }
 
     @Test fun archiveMatrixRendersDisabledButtonsAndNeverDispatchesTheirRepeatedPointers() {
         val observed = history()
@@ -225,15 +308,28 @@ class SharedHomeArchiveAvailabilityRenderTest {
         assertEquals(listOf("restore"), host.calls)
     }
 
-    private class Observation : SharedHomeLayoutObserver {
+    private class Observation : SharedHomeLayoutObserver, SharedHistoryLayoutObserver {
         val elements = mutableMapOf<String, Rect>()
+        var origin = Offset.Zero
+        var layout: SharedHistoryCanvasLayout? = null
         override fun element(name: String, boundsInRoot: Rect) { elements[name] = boundsInRoot }
+        override fun canvas(positionInRoot: Offset, layout: SharedHistoryCanvasLayout) {
+            origin = positionInRoot; this.layout = layout
+        }
     }
 
-    private fun scene(width: Int, host: Host, bounds: Observation) =
-        ImageComposeScene(width = width, height = 757, density = Density(1f)) {
-            CompositionLocalProvider(LocalSharedHomeLayoutObserver provides bounds) { SharedHomeScreen(host.state, host) }
+    private fun scene(width: Int, host: Host, bounds: Observation, height: Int = 757) =
+        ImageComposeScene(width = width, height = height, density = Density(1f)) {
+            CompositionLocalProvider(LocalSharedHomeLayoutObserver provides bounds,
+                LocalSharedHistoryLayoutObserver provides bounds) { SharedHomeScreen(host.state, host) }
         }
+
+    private fun assertArchiveButtonEnabled(scene: ImageComposeScene, bounds: Observation, action: String, enabled: Boolean) {
+        val button = semanticsNodes(scene).single {
+            it.config.contains(SemanticsActions.OnClick) && it.boundsInRoot == bounds.elements.getValue(action)
+        }
+        assertEquals(!enabled, button.config.contains(SemanticsProperties.Disabled), "$action capability")
+    }
 
     private fun clickArchives(scene: ImageComposeScene, bounds: Observation) {
         click(scene, bounds.elements.getValue("upload").center)

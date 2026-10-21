@@ -13,6 +13,18 @@ SCREEN = (REPO / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/Sha
 
 
 class SharedHomeAndroidContract(unittest.TestCase):
+    def test_selection_diagnostics_are_single_event_and_observed_memory_only(self):
+        home = body(MAIN, 'private void renderHome()')
+        selection = body(home, 'public void selectSnapshot(String snapshotId)')
+        self.assertEqual(1, selection.count('recordHomeRestoreSelection()'))
+        self.assertLess(selection.index('explicitHomeSelection = snapshotId'), selection.index('recordHomeRestoreSelection()'))
+        diagnostics = body(MAIN, 'private void recordHomeRestoreSelection()')
+        self.assertEqual(1, diagnostics.count('DiagnosticLog.recordStandalone('))
+        for forbidden in ('DiagnosticLog.begin(', 'Thread.sleep', '.inspect(', '.readComparison(', '.restore(', '.upload(', 'Snapshots.capture(', 'Files.', 'MessageDigest', '.getPassword('):
+            self.assertNotIn(forbidden, diagnostics)
+        for required in ('getCurrentFiles()', 'getSnapshot().getFiles()', 'canHomeRestore()', 'catch (Exception ignored)'):
+            self.assertIn(required, diagnostics)
+
     def test_official_account_button_eligibility_uses_current_trusted_metadata(self):
         gate = body(MAIN, 'private boolean homeAccountAccessAvailable()')
         self.assertIn('!isOfficialAccount(this.connection)', gate)

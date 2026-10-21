@@ -177,6 +177,7 @@ public final class MainActivity {
     OnboardingKind kind() { return observedKind; }
     SharedHomeOperation homeOperation() { return SharedHomeOperation.NONE; }
     void launchGame() {} void rename(String id) {} void previewMerge() {}
+    void recordHomeRestoreSelection() { } // Diagnostic I/O is tested separately; host selection stays unchanged.
     void render() { renders++; }
     void navigate(SyncPage target) { navigations++; page = target; }
     void refreshComparison(SyncPage target) { refreshes++; }

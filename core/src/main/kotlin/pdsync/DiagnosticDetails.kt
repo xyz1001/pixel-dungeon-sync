@@ -14,7 +14,8 @@ import java.util.Collections
 /**
  * Small, closed diagnostic evidence shared by Java Android adapters and Kotlin desktop/core code.
  * Most values are fixed tokens, booleans or bounded integers. Preparation evidence has its own
- * bounded, typed allowlist for APK hashes/package metadata, verifier issues and code locations. No arbitrary
+ * bounded, typed allowlist for APK hashes/package metadata, verifier issues and code locations. Home
+ * restore evidence carries only canonical map digests, counts, a hashed UUID and closed gates. No arbitrary
  * text, exception, URL, account, package name, path, filename, version label or identifier field.
  * Missing evidence stays absent. Unknown tokens become UNKNOWN; invalid numbers are omitted.
  * Deserialization rejects invalid on-disk values instead of sanitizing them into exportable data.
@@ -59,6 +60,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("gameVersionCode") GAME_VERSION_CODE,
   @SerialName("saveVersion") SAVE_VERSION,
   @SerialName("preparation") PREPARATION,
+  @SerialName("homeRestore") HOME_RESTORE,
   @SerialName("installationPhase") INSTALLATION_PHASE,
   @SerialName("installationCache") INSTALLATION_CACHE,
   @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS,
@@ -98,6 +100,10 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   /** No arbitrary string setter is exposed. Every token method selects its own allowlist. */
   fun preparationEvidence(evidence: Map<String, String>?): Builder = apply {
    PreparationDiagnosticEvidence.encode(evidence)?.let { values[Field.PREPARATION] = it } ?: values.remove(Field.PREPARATION)
+  }
+  fun homeRestoreEvidence(evidence: HomeRestoreDiagnosticEvidence?): Builder = apply {
+   if (evidence == null) values.remove(Field.HOME_RESTORE)
+   else values[Field.HOME_RESTORE] = HomeRestoreDiagnosticEvidence.encode(evidence)
   }
   fun helperCapability(capability:DiagnosticCapability,state:DiagnosticCapabilityState):Builder = token(
    if(capability==DiagnosticCapability.READ_SNAPSHOT)Field.HELPER_READ_SNAPSHOT_CAPABILITY else Field.HELPER_RESTORE_RESULT_CAPABILITY,state.name)
@@ -275,6 +281,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   private fun valid(field: Field, value: String): Boolean {
    if (field == Field.PHASE_TIMINGS) return DiagnosticTimingEvidence.isValid(value)
    if (field == Field.PREPARATION) return PreparationDiagnosticEvidence.isValid(value)
+   if (field == Field.HOME_RESTORE) return HomeRestoreDiagnosticEvidence.isValid(value)
    if (field in booleanFields) return value == "true" || value == "false"
    numberRange(field)?.let { range ->
     val number = value.toLongOrNull() ?: return false

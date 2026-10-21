@@ -1625,6 +1625,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         if (!isCurrentHomeAction(owner) || !hasHomeSnapshot(snapshotId)) return;
                         selected = snapshotId;
                         explicitHomeSelection = snapshotId;
+                        recordHomeRestoreSelection();
                         render();
                     }
                     @Override public void rename(String snapshotId) {
@@ -1739,6 +1740,52 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 && this.connection != null && !restoreNeedsAttention()
                 && this.inspection != null && !this.inspection.isRetryablePending()
                 && homeArchiveAvailability().getRestoreSourceAvailable() && !homeContent().getRestoreUnnecessary();
+    }
+
+    /** One bounded diagnostic event per accepted selection; only already-observed maps are hashed. */
+    private void recordHomeRestoreSelection() {
+        try {
+            java.util.Map<pdsync.HomeRestoreDiagnosticEvidence.Gate, Boolean> gates =
+                    new java.util.EnumMap<>(pdsync.HomeRestoreDiagnosticEvidence.Gate.class);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.ACCOUNT_ACCESS, homeAccountAccessAvailable());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.FOREGROUND, isForegroundHome());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.IDLE, !this.busy);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.RESTORE_SUPPORTED, restoreSupported());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.SAVE_ACCESS, canRequestSaveAccess());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.CONNECTED, this.connection != null);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.NO_RECOVERY, !restoreNeedsAttention());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.INSPECTED, this.inspection != null);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.NO_PENDING,
+                    this.inspection != null && !this.inspection.isRetryablePending());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.OBSERVATION_CURRENT,
+                    this.homeObservationOwner != null && this.homeObservationOwner.accepts(currentHomeContext(0), true, false));
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.CLOUD_VERIFIED, this.cloudVerified);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.FACADE_AVAILABLE, this.facade != null);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.GAME_SELECTED, selectedGamePackage() != null);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.RUNTIME_ACCOUNT_CURRENT,
+                    this.connection != null && this.connection == SyncRuntime.currentConnection());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.SETUP_COMPLETE, this.progress == OnboardingProgress.COMPLETE);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.READY_FOR_SAVES, readyForSaves());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.INSPECTION_NOT_BLOCKED, kind() != OnboardingKind.BLOCKED);
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.ARCHIVE_IDLE, !this.archiveReads.loading() && !isHomeArchiveLoading());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.GRAPH_NO_PENDING,
+                    this.history != null && this.history.getGraph().getPending().isEmpty());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.SOURCE_AVAILABLE, homeArchiveAvailability().getRestoreSourceAvailable());
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.CONTENT_NEEDED, !homeContent().getRestoreUnnecessary());
+            final boolean allowed = canHomeRestore();
+            gates.put(pdsync.HomeRestoreDiagnosticEvidence.Gate.RESTORE_ALLOWED, allowed);
+            AppendCommit target = null;
+            if (this.history != null) for (AppendCommit commit : this.history.getGraph().getCommits().values())
+                if (commit.getSnapshot().getId().equals(this.selected)) { target = commit; break; }
+            DiagnosticDetails details = DiagnosticDetails.builder().homeRestoreEvidence(
+                    pdsync.HomeRestoreDiagnosticEvidence.capture(
+                            this.history == null ? null : this.history.getCurrentFiles(),
+                            target == null ? null : target.getSnapshot().getFiles(),
+                            target == null ? null : target.getId(),
+                            target != null && this.history.getGraph().getTips().contains(target.getId()), gates)).build();
+            DiagnosticLog.recordStandalone(DiagnosticAction.HISTORY, DiagnosticStage.GUARD,
+                    allowed ? DiagnosticResult.SUCCEEDED : DiagnosticResult.REJECTED, DiagnosticFailure.NONE, details);
+        } catch (Exception ignored) { /* Diagnostics must never alter selection or authorize a transfer. */ }
     }
 
     private boolean isForegroundHome() {
