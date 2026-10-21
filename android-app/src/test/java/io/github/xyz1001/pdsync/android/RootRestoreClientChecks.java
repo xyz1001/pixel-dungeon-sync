@@ -181,7 +181,7 @@ public final class RootRestoreClientChecks {
         try{bridge.restoreFrom(save,Collections.emptyMap());throw new AssertionError("native unavailable accepted");}
         catch(BridgeDiagnostics.Failure failure){check(failure.code.equals("ROOT_MUTATION_UNAVAILABLE")&&failure.stage==BridgeDiagnostics.Stage.RESTORE,"native typed unavailable");}
         exchange.mode=5;rejects(()->bridge.restoreFrom(save,Collections.emptyMap()),"ROOT_REPLY_MISMATCH");
-        exchange.mode=7;rejects(()->bridge.restoreFrom(save,Collections.emptyMap()),"ROOT_RESTORE_RECEIPT_INVALID");
+        exchange.mode=7;bridge.restoreFrom(save,Collections.emptyMap());check(true,"already-applied desired inventory accepted");
         exchange.mode=0;bridge.recoverInterruptedBackup();check(exchange.uploads==7,"recover uploads no archive or credentials");
         exchange.mode=6;rejects(bridge::recoverInterruptedBackup,"ROOT_RECOVERY_COMMITTED_CLEANUP_PENDING");
         exchange.mode=2;rejects(bridge::recoverInterruptedBackup,"ROOT_RECOVERY_RECEIPT_INVALID");

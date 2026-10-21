@@ -46,6 +46,7 @@ public final class RootRestoreJobTests {
         try(RootMutationReadGuard guard=RootMutationReadGuard.open(runtime.os,RootRestoreAdapterTests.binding())){guard.requireClear();checks++;}
         RuntimeStub noOp=new RuntimeStub();Response same=run(noOp,wire(zip("before"),fingerprint("before"),fingerprint("before")));check(same.status==Status.OK&&same.outcome==RootProtocol.Outcome.UNCHANGED,"same bytes no-op");
         try(RootMutationReadGuard guard=RootMutationReadGuard.open(noOp.os,RootRestoreAdapterTests.binding())){guard.requireClear();checks++;}
+        RuntimeStub applied=new RuntimeStub();Response already=run(applied,wire(zip("before"),fingerprint("older"),fingerprint("before")));check(already.status==Status.OK&&already.outcome==RootProtocol.Outcome.UNCHANGED,"already-applied retry needs no stale before match");
         RuntimeStub stale=new RuntimeStub();Response staleResult=run(stale,wire(zip("after"),fingerprint("stale"),fingerprint("after")));check(staleResult.status==Status.RESTORE_CONFLICT,"stale expected refused");unchanged(stale,"stale leaves live");
         try(RootMutationReadGuard guard=RootMutationReadGuard.open(stale.os,RootRestoreAdapterTests.binding())){guard.requireClear();checks++;}
         RuntimeStub mismatch=new RuntimeStub();Response mismatchResult=run(mismatch,wire(zip("after"),fingerprint("before"),fingerprint("other")));check(mismatchResult.status==Status.INVALID_REQUEST,"desired mismatch rejected before mutation");unchanged(mismatch,"desired mismatch leaves live");
