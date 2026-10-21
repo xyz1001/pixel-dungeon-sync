@@ -164,6 +164,9 @@ internal fun runSyncApplication(
   var directoryName by remember { mutableStateOf("") }
   var directoryNotice by remember { mutableStateOf<String?>(null) }
   var confirm by remember { mutableStateOf<OperationTrace?>(null) }
+  var confirmationManifest by remember { mutableStateOf<Manifest?>(null) }
+  var confirmationSelected by remember { mutableStateOf<String?>(null) }
+  var confirmationOwner by remember { mutableStateOf<DesktopSelectedRestoreConfirmation?>(null) }
   var confirmationFiles by remember { mutableStateOf<Map<String,String>?>(null) }
   val operationEvents = remember { OperationEvents(workspace.resolve(".local/operation-events.log")) }
   val diagnosticExport = remember { DesktopDiagnosticExport() }
@@ -261,6 +264,16 @@ internal fun runSyncApplication(
   fun requestConfirmation(action: Action) {
    if (busy || connectingAtStartup || appClosed) return
    if (!desktopHomeTransferAllowed(action, homeState())) return
+   val ownerSession = session
+   val ownerConfig = config
+   val ownerHistory = graphHistory
+   val target = selected
+   val explicitHistory = action == Action.CLOUD_HISTORY &&
+    desktopHasExplicitCloudRestoreSelection(ownerHistory, target, selectedByUser)
+   confirmationManifest = selection?.manifest
+   confirmationSelected = target.takeIf { explicitHistory }
+   confirmationOwner = if (explicitHistory) DesktopSelectedRestoreConfirmation(
+    requireNotNull(target), ownerSession, ownerConfig, ownerHistory) else null
    confirmationFiles=graphHistory?.currentFiles
    confirm = operationEvents.begin(action); confirmationNotice = null; navigate(Page.CONFIRM)
   }
@@ -439,7 +452,8 @@ internal fun runSyncApplication(
    val manager = requireNotNull(session)
    val operationConfig = config
    val operationHistory = graphHistory
-   val chosen = selected; val branchChoice = conflictSelection; val divergence = conflict; val secret = password
+   val chosen = if (confirm === trace && confirmationSelected != null) confirmationSelected else selected
+   val branchChoice = conflictSelection; val divergence = conflict; val secret = password
    val allowUniqueReplacement=confirm===trace
    val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
    busy = true; homeOperation = desktopHomeOperation(action); confirm = null; confirmationNotice = null; navigate(Page.HOME)
@@ -653,6 +667,11 @@ internal fun runSyncApplication(
   fun hasRemoteBranches() = remoteTips.size > 1 || (graphHistory?.graph?.tips?.size ?: 0) > 1
   fun openRestore() {
    if (!homeState().restoreEnabled) return
+   // An explicit, still-present history card is already the user's source choice.
+   if (desktopHasExplicitCloudRestoreSelection(graphHistory, selected, selectedByUser)) {
+    requestConfirmation(Action.CLOUD_HISTORY)
+    return
+   }
    if (conflict != null && (selected==null || conflict!!.branches.any {it.snapshot.manifest.id==selected})) { navigate(Page.CONFLICT); return }
    if (hasRemoteBranches() && (selected==null || selected in remoteTips)) {
     val manager = session ?: return
@@ -1316,10 +1335,12 @@ internal fun runSyncApplication(
          override fun selectSnapshot(snapshotId: String) = Unit; override fun rename(snapshotId: String?) = Unit
          override fun changeHistoryPage(page: Int) = Unit
         })
-        ConfirmationPage(trace.id.hashCode().toLong(), trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else selection?.manifest, busy || connectingAtStartup, confirmationNotice,
-         onBack = { cancelConfirmation(trace) },
-         onConfirm = { execute(trace) },
-         onMerge = if(trace.action==Action.CLOUD_HISTORY)({execute(operationEvents.begin(Action.MERGE_CURRENT))}) else null)
+        ConfirmationPage(trace.id.hashCode().toLong(), trace.action, session?.root?.toString(), pending, conflictSelection, if (trace.action == Action.RESOLVE) conflict?.branches?.firstOrNull { it.snapshot.manifest.id == conflictSelection }?.snapshot?.manifest else confirmationManifest, busy || connectingAtStartup, confirmationNotice,
+         onBack = { if (confirm === trace && page == Page.CONFIRM) cancelConfirmation(trace) },
+         onConfirm = {
+          if (confirm === trace && page == Page.CONFIRM && confirmationOwner?.isCurrent(session, config, graphHistory, selected, selectedByUser) != false) execute(trace)
+         },
+         onMerge = if(trace.action==Action.CLOUD_HISTORY && confirmationSelected == null)({execute(operationEvents.begin(Action.MERGE_CURRENT))}) else null)
        }
       }
      }

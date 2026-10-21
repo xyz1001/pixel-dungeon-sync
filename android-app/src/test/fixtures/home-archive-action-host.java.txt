@@ -81,7 +81,7 @@ public final class MainActivity {
         void removeAllViews() {} void setPadding(int a, int b, int c, int d) {}
         void setOnApplyWindowInsetsListener(Object listener) {} void addView(Object v, LayoutParams lp) {}
     }
-    static final class SharedConfirmationState { SharedConfirmationState(Object... args) {} }
+    static final class SharedConfirmationState { final Object[] args; SharedConfirmationState(Object... args) { this.args = args; } }
     static final class AndroidOnboardingComposition {
         static void showHome(MainActivity a, SyncHistory history, int historyPage, Object identity,
                 String status, SharedHomeStatusKind statusKind, boolean foreground, boolean busy, boolean upload, boolean restore,
@@ -96,7 +96,10 @@ public final class MainActivity {
         static Object confirmationView(MainActivity a, SharedConfirmationState state, SyncHistory history,
                 int historyPage, Object identity, String status, SharedHomeStatusKind statusKind, String explicit, Object backdrop,
                 Runnable confirm, Runnable merge, Runnable cancel) {
-            a.confirmClick = confirm; return new Object();
+            a.confirmClick = confirm; a.cancelClick = cancel;
+            a.renderedConfirmationTitle = (String) state.args[1];
+            a.renderedSecondaryLabel = (String) state.args[5];
+            return new Object();
         }
     }
     static final class SyncRuntime {
@@ -137,6 +140,7 @@ public final class MainActivity {
     boolean restoreAllowed = true, saveAccess = true, recovery, scopeUnavailable, onboardingActive;
     boolean confirmationDestructive;
     boolean feedbackError, renderedUpload, renderedRestore, renderedRefresh;
+    String restoredSnapshot; boolean replacedLocal;
     String selected = "cloud-snapshot", explicitHomeSelection, gamePackage = "isolated.game";
     String selectionToken = "embedded:isolated.game", namespace = "test-only";
     String notice = "", confirmationTitle, confirmationText, confirmationButton;
@@ -146,7 +150,8 @@ public final class MainActivity {
     Object status, body, footer, scroll, confirmationSettingsBackdrop;
     SharedHistoryNamingController homeNaming;
     SharedHomeActions homeActions;
-    Runnable confirmedAction, confirmationMerge, confirmClick;
+    Runnable confirmedAction, confirmationMerge, confirmClick, cancelClick;
+    String renderedConfirmationTitle, renderedSecondaryLabel;
 
     boolean isDestroyed() { return destroyed; }
     boolean readyForSaves() { return readinessState.ready; }
@@ -156,7 +161,7 @@ public final class MainActivity {
     boolean automaticObservationSupported() { return true; }
     boolean currentAutomaticHistory(Object t, Object c) { return automaticHistoryState.connection == connection; }
     boolean allowRestoreAction() { return restoreAllowed; }
-    boolean hasHomeSnapshot(String id) { return history != null && history.restoreSource; }
+    boolean hasHomeSnapshot(String id) { return history != null && history.restoreSource && java.util.Set.of("cloud-snapshot", "different-history").contains(id); }
     String selectedGamePackage() { return gamePackage; }
     Object selectedGameIdentity() { return gamePackage; }
     String automaticStatusBrief() { return ""; }
@@ -173,7 +178,7 @@ public final class MainActivity {
     void requireRestoreSupport() { if (!restoreAllowed) throw new AssertionError("Unsupported restore reached I/O"); }
     AndroidSyncFacade.OperationResult restoreForCurrentAccount(AndroidSyncFacade.Inspection observed,
             String snapshot, boolean replace) {
-        restores++; return new AndroidSyncFacade.OperationResult();
+        restores++; restoredSnapshot = snapshot; replacedLocal = replace; return new AndroidSyncFacade.OperationResult();
     }
     void operation(DiagnosticAction action, String label, Task work, String success) {
         operations++;
@@ -227,6 +232,8 @@ public final class MainActivity {
     }
     static void confirmationBlocked(Consumer<MainActivity> change, String label) {
         MainActivity a = fresh(true, true); a.history.protectedLocal = false;
+        a.explicitHomeSelection = a.selected;
+        a.observedKind = OnboardingKind.BRANCHED;
         a.requestRestore();
         check(a.confirmations == 1 && a.operations == 0, label + ": confirmation must be required");
         a.renderConfirmation(); Runnable oldClick = a.confirmClick;
@@ -414,6 +421,49 @@ public final class MainActivity {
         check(a.appreciations == 0, "navigation rejects stale appreciation callback");
         a.page = SyncPage.HOME; a.renderHome(); old = a.homeActions; a.connection = new Object(); old.appreciate();
         check(a.appreciations == 0, "account switch rejects stale appreciation callback");
+        // Selected history is a source choice, including a selected sibling tip. Protection
+        // of current bytes must not silently remove the overwrite-consent boundary.
+        for (boolean protectedLocal : new boolean[] { false, true }) {
+            for (OnboardingKind kind : new OnboardingKind[] { OnboardingKind.READY, OnboardingKind.BRANCHED }) {
+                a = fresh(true, true); a.history.protectedLocal = protectedLocal; a.observedKind = kind;
+                a.selected = "different-history"; a.explicitHomeSelection = a.selected;
+                a.requestRestore();
+                check(a.page == SyncPage.CONFIRM && a.confirmations == 1 && a.operations == 0,
+                        "explicit history always asks once before overwrite");
+                check(a.confirmationMerge == null, "explicit history must not ask for another source or merge");
+                a.renderConfirmation();
+                check(RESTORE_SAVE_154.text().equals(a.renderedConfirmationTitle) && a.renderedSecondaryLabel == null,
+                        "rendered selected restore has overwrite warning without another choice");
+                Runnable click = a.confirmClick; click.run(); click.run();
+                check(a.operations == 1 && a.restores == 1 && a.replacedLocal && "different-history".equals(a.restoredSnapshot),
+                        "explicit history confirms exact target only once");
+            }
+        }
+        a = fresh(true, true); a.explicitHomeSelection = a.selected;
+        a.requestRestore(); a.renderConfirmation(); Runnable canceledClick = a.confirmClick;
+        a.cancelClick.run(); canceledClick.run();
+        check(a.page == SyncPage.HOME && a.operations == 0 && a.restores == 0,
+                "rendered cancel preserves local progress and invalidates old confirm");
+        a.selected = "different-history"; a.explicitHomeSelection = a.selected;
+        a.requestRestore(); a.renderConfirmation(); canceledClick.run();
+        check(a.operations == 0, "reopened confirmation rejects old target callback");
+        a.confirmClick.run();
+        check(a.operations == 1 && "different-history".equals(a.restoredSnapshot),
+                "reopened confirmation restores only newly selected target");
+        a = fresh(true, true); a.observedKind = OnboardingKind.BRANCHED;
+        a.requestRestore();
+        check(a.page == SyncPage.CONFLICT && a.confirmations == 0 && a.operations == 0,
+                "default selected tip still needs real branch choice");
+        a = fresh(true, true); a.observedKind = OnboardingKind.BRANCHED;
+        a.selected = "missing-history"; a.explicitHomeSelection = a.selected; a.requestRestore();
+        check(a.page == SyncPage.CONFLICT && a.confirmations == 0 && a.operations == 0,
+                "missing explicit history must not bypass real branch choice");
+        a = fresh(true, true); a.history.matchesCloudTip = true;
+        a.selected = "different-history"; a.explicitHomeSelection = a.selected; a.requestRestore();
+        check(a.confirmations == 1 && a.operations == 0,
+                "samehash HOME fix still permits confirming a different history save");
+        confirmationBlocked(x -> x.expired = true, "confirmation account expired");
+        confirmationBlocked(x -> x.restoreAllowed = false, "confirmation restore capability changed");
         System.out.println("home archive action execution passed: " + checks + " checks");
     }
 }

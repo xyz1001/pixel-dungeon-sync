@@ -3918,6 +3918,17 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             refreshComparison(SyncPage.HOME);
             return;
         }
+        // A card explicitly selected in HOME already identifies the restore source, even
+        // when the cloud has siblings. Ask only for permission to replace local progress.
+        if (this.selected != null && this.selected.equals(this.explicitHomeSelection)
+                && hasHomeSnapshot(this.selected)) {
+            final String target = this.selected;
+            final AndroidSyncFacade.Inspection observed = this.inspection;
+            showDestructiveConfirmation(RESTORE_SAVE_154.text(),
+                    SELECTED_SAVE_155.text() + selectedName() + N_NLOCAL_SAVES_WILL_BE_BACKED_156.text(),
+                    OVERWRITE_LOCAL_SAVES_157.text(), () -> m143x7dd3dfcf(observed, target), null);
+            return;
+        }
         if (kind() == OnboardingKind.BRANCHED) {
             navigate(SyncPage.CONFLICT);
             return;
@@ -4007,7 +4018,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* renamed from: lambda$requestRestore$75$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m143x7dd3dfcf(final AndroidSyncFacade.Inspection inspection, final String str) {
         if (this.busy || this.inspection != inspection || !java.util.Objects.equals(this.selected, str)
+                || !homeAccountAccessAvailable() || !restoreSupported()
                 || !homeArchiveAvailability().getRestoreSourceAvailable()) return;
+        ++this.settingsConfirmationToken;
+        this.confirmedAction = null;
+        this.confirmationMerge = null;
         operation(DiagnosticAction.RESTORE, VALIDATING_BACKING_UP_AND_RESTORING_THE_152.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda91
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
