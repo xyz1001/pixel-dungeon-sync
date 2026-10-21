@@ -18,7 +18,7 @@ public final class RootRestoreJobTests {
         final FakeMutationOs os;
         RuntimeStub(){this(RootRestoreAdapterTests.fixture());}
         RuntimeStub(FakeMutationOs os){this.os=os;}
-        int full,metadata,observations;boolean changedFinal;
+        int full,metadata,observations,waits;boolean changedFinal;
         RootUidState.Observation observation=RootUidState.parse(26,0,false,data("17 (CACHED_EMPTY)\n"));
         public int effectiveUid(){return os.uid;}
         public RootBinding installed(RootBinding requested)throws IOException{full++;if(changedFinal&&full>1)throw new RootFailure(Status.BINDING_MISMATCH);return requested;}
@@ -27,7 +27,7 @@ public final class RootRestoreJobTests {
         public MutationOs readMutationOs(RootBinding requested){return os;}
         public RootFileSystem fileSystem(){throw new AssertionError("job must use injectable mutation adapter");}
         public RootUidState.Observation observe(int uid){observations++;return observation;}
-        public void quietWait(){}
+        public void quietWait(){waits++;}
     }
     static byte[] wire(byte[] archive,String expected,String desired)throws IOException {
         Request request=new Request(Command.RESTORE,RootRestoreAdapterTests.binding(),expected,desired,archive.length);
@@ -40,7 +40,7 @@ public final class RootRestoreJobTests {
         RuntimeStub runtime=new RuntimeStub();Response response=run(runtime,valid);
         check(response.status==Status.OK,"restore integration status "+response.status+" stage "+response.diagnosticStage);
         check(response.outcome==RootProtocol.Outcome.RESTORED,"actual restored outcome");check(response.contentFingerprint.equals(fingerprint("after")),"verified content receipt");
-        check(response.desiredFingerprint.equals(fingerprint("after")),"desired echo");check(runtime.full==2,"only start/end full APK verification");check(runtime.metadata>10&&runtime.metadata<200,"finite cheap intermediate gates "+runtime.metadata);
+        check(response.desiredFingerprint.equals(fingerprint("after")),"desired echo");check(runtime.full==2,"only start/end full APK verification");check(runtime.metadata>10&&runtime.metadata<200,"finite cheap intermediate gates "+runtime.metadata);check(runtime.observations==0&&runtime.waits==0,"restore has no lifecycle calls or quiet waits");
         check(new String(runtime.os.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("after"),"actual adapter changed bytes");
         check(!runtime.os.workspace().children.containsKey("journal"),"completed journal cleared");
         try(RootMutationReadGuard guard=RootMutationReadGuard.open(runtime.os,RootRestoreAdapterTests.binding())){guard.requireClear();checks++;}
@@ -52,8 +52,8 @@ public final class RootRestoreJobTests {
         byte[] trailing=Arrays.copyOf(valid,valid.length+1);RuntimeStub extra=new RuntimeStub();Response extraResult=run(extra,trailing);check(extraResult.status!=Status.OK,"trailing protocol byte rejected");unchanged(extra,"protocol trailing leaves live");
         byte[] zipTrailing=Arrays.copyOf(zip("after"),zip("after").length+1);RuntimeStub badZip=new RuntimeStub();check(run(badZip,wire(zipTrailing,fingerprint("before"),fingerprint("after"))).status!=Status.OK,"ZIP trailing rejected");unchanged(badZip,"ZIP trailing leaves live");
         byte[] wrongCentral=zip("after");wrongCentral[wrongCentral.length-6]++;RuntimeStub central=new RuntimeStub();check(run(central,wire(wrongCentral,fingerprint("before"),fingerprint("after"))).status!=Status.OK,"central offset rejected");unchanged(central,"central corruption leaves live");
-        RuntimeStub active=new RuntimeStub();active.observation=RootUidState.parse(26,0,false,data("2 (TOP)\n"));check(run(active,valid).status==Status.BUSY,"active game refused");check(active.os.mutations==0,"active game no private or live writes");
-        RuntimeStub unknown=new RuntimeStub();unknown.observation=RootUidState.Observation.unknown();check(run(unknown,valid).status==Status.UNRELIABLE,"unknown lifecycle refused");check(unknown.os.mutations==0,"unknown lifecycle no writes");
+        RuntimeStub active=new RuntimeStub();active.observation=RootUidState.parse(26,0,false,data("2 (TOP)\n"));check(run(active,valid).status==Status.OK,"active game does not gate restore");check(active.observations==0&&active.waits==0,"active state never queried");
+        RuntimeStub unknown=new RuntimeStub();unknown.observation=RootUidState.Observation.unknown();check(run(unknown,valid).status==Status.OK,"unknown lifecycle does not gate restore");check(unknown.observations==0&&unknown.waits==0,"unknown state never queried");
         RuntimeStub unroot=new RuntimeStub();unroot.os.uid=1000;check(run(unroot,valid).status==Status.NOT_ROOT,"non-root refused");check(unroot.os.touches==0,"non-root no target accesses");
         RuntimeStub unsupported=new RuntimeStub();unsupported.os.noRename=true;Response uns=run(unsupported,valid);check(uns.status==Status.MUTATION_UNAVAILABLE,"native unavailable typed");check(uns.diagnosticCategory==DiagnosticCategory.UNSUPPORTED,"unsupported category");unchanged(unsupported,"native unsupported no live writes");
         try(RootMutationReadGuard guard=RootMutationReadGuard.open(unsupported.os,RootRestoreAdapterTests.binding())){guard.requireClear();checks++;}

@@ -98,8 +98,8 @@ public final class RootRestoreAdapterTests {
     static void rejectedGate()throws Exception {
         FakeMutationOs os=fixture();int initial=os.mutations;
         RootRestoreAdapter.Gate reject=new RootRestoreAdapter.Gate(){public void quietWait(){}public void requireSafe(RootBinding b)throws IOException{throw new RootFailure(RootProtocol.Status.BUSY);}};
-        try{new RootRestoreAdapter(os,binding(),reject);throw new AssertionError("active game allowed");}catch(RootFailure expected){check(expected.status==RootProtocol.Status.BUSY,"active game rejected");}
-        check(os.mutations==initial,"active game no filesystem mutation");
+        try{new RootRestoreAdapter(os,binding(),reject);throw new AssertionError("access gate ignored");}catch(RootFailure expected){check(expected.status==RootProtocol.Status.BUSY,"access gate preserved");}
+        check(os.mutations==initial,"access gate prevents filesystem mutation");
         try(RootRestoreAdapter first=new RootRestoreAdapter(os,binding(),GATE)){
             try{new RootRestoreAdapter(os,binding(),GATE);throw new AssertionError("concurrent restore allowed");}catch(RootMutationSession.Failure expected){check(expected.code==RootMutationSession.Code.BUSY,"concurrent job lock busy");}}
     }
