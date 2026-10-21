@@ -181,7 +181,8 @@ class DesktopSharedHomeAdapterTest {
 
  @Test fun explicitChoiceSurvivesPagingRefreshAndAChangedUniqueTip() {
   val commits = (0..40).map { index -> commit("commit-%03d".format(index),
-   if (index > 0) listOf("commit-%03d".format(index - 1)) else emptyList()) }
+   if (index > 0) listOf("commit-%03d".format(index - 1)) else emptyList(),
+   content = mapOf("game1/game.dat" to hash("content-$index".encodeToByteArray()))) }
   val history = history(commits)
   val selected = "snapshot-commit-040"
   for (page in 0..2) {
@@ -198,8 +199,30 @@ class DesktopSharedHomeAdapterTest {
   assertEquals(DesktopHomeSelection("snapshot-new-tip", false), desktopHomeSelection(refreshed, "missing", true))
  }
 
+ @Test fun duplicateContentMapsOnlyTheVisibleSelectionAndPreservesTheActualRestoreTarget() {
+  val old = commit("old")
+  val tip = commit("tip", listOf(old.id))
+  val observed = history(listOf(old, tip))
+  val context = ready(observed).copy(selectedId = old.snapshot.id, selectedByUser = true)
+  val state = DesktopSharedHomeAdapter.state(context)
+  assertEquals(1, state.history!!.cloudCount)
+  assertEquals(tip.snapshot.id, state.selectedSnapshotId)
+  assertEquals(old.snapshot.id, state.restoreTarget!!.snapshotId)
+  assertEquals(old.snapshot.id, context.selectedId)
+  assertFalse(state.restoreEnabled)
+  assertFalse(state.uploadEnabled)
+  assertEquals(2, observed.graph.commits.size)
+  assertNull(observed.baseline)
+  val different = commit("different", parents = listOf(old.id), content = mapOf("game1/game.dat" to "e".repeat(64)))
+  val refreshed = history(listOf(old, different, tip.copy(parents = listOf(different.id))))
+  val selectedDifferent = DesktopSharedHomeAdapter.state(ready(refreshed).copy(
+   selectedId = different.snapshot.id, selectedByUser = true))
+  assertEquals(different.snapshot.id, selectedDifferent.selectedSnapshotId)
+  assertTrue(selectedDifferent.restoreEnabled)
+ }
+
  @Test fun multiHeadHistoryNeverInventsADefaultOrHidesBranchSelection() {
-  val history = history(listOf(commit("left"), commit("right")))
+  val history = history(listOf(commit("left"), commit("right", content = mapOf("game1/game.dat" to "e".repeat(64)))))
   val state = DesktopSharedHomeAdapter.state(ready(history).copy(remoteTips = setOf("snapshot-left", "snapshot-right")))
   assertNull(state.restoreTarget)
   assertNull(state.selectedSnapshotId)

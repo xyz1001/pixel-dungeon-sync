@@ -133,7 +133,8 @@ class SharedHistoryRenderTest {
 
     @Test fun pagingSelectionRenameAndBusyStateUseRealSnapshotIdsWithoutLosingSelection() {
         val commits = (0..23).map { index -> commit("commit-%02d".format(index),
-            java.time.Instant.parse("2026-10-01T00:00:00Z").plusSeconds(index * 3600L).toString()) }
+            java.time.Instant.parse("2026-10-01T00:00:00Z").plusSeconds(index * 3600L).toString(),
+            files = mapOf("game1/game.dat" to "%064x".format(index + 1))) }
         val state = SyncHistory(CommitGraph(commits.associateBy { it.id }, emptyMap()), null,
             emptyMap(), "", null, emptyMap())
         var page by mutableStateOf(0)
@@ -246,19 +247,22 @@ class SharedHistoryRenderTest {
     }
 
     private fun history(): SyncHistory {
-        val commits = listOf(commit("newest", "2026-10-10T00:00:00Z", listOf("middle")),
-            commit("middle", "2026-10-08T00:00:00Z", listOf("base")),
+        val commits = listOf(commit("newest", "2026-10-10T00:00:00Z", listOf("middle"),
+                files = mapOf("game1/game.dat" to "c".repeat(64))),
+            commit("middle", "2026-10-08T00:00:00Z", listOf("base"),
+                files = mapOf("game1/game.dat" to "d".repeat(64))),
             commit("base", "2026-10-07T00:00:00Z"))
         return SyncHistory(CommitGraph(commits.associateBy { it.id }, emptyMap()), "base", newFiles,
             longName, SaveSummary(mapOf("game1" to "2026-10-09T00:00:00Z"), 28, 1),
             mapOf("snapshot-newest" to longName), "restore")
     }
 
-    private fun commit(id: String, time: String, parents: List<String> = emptyList()) = AppendCommit(
+    private fun commit(id: String, time: String, parents: List<String> = emptyList(),
+        files: Map<String, String> = oldFiles) = AppendCommit(
         id = id, parents = parents, objectBytes = 1,
         operation = CommitOperationMetadata(device = DeviceIdentity("source-device", "MacBook"), preparedAt = time),
         snapshot = Manifest(game = "shattered", profile = "test", version = "922", id = "snapshot-$id",
-            parent = null, sha256 = "c".repeat(64), files = oldFiles, saveVersions = SaveVersions(mapOf("game1" to 922)),
+            parent = null, sha256 = "c".repeat(64), files = files, saveVersions = SaveVersions(mapOf("game1" to 922)),
             metadata = SnapshotMetadata(device = DeviceIdentity("source-device", if (id == "newest" || id == "base")
                 "A real device label with enough text to wrap within the readable card" else "MacBook"),
                 capturedAt = "2026-10-15T00:00:00Z", fileModifiedAt = mapOf("game1/game.dat" to time))))

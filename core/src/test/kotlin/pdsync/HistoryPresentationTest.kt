@@ -8,6 +8,7 @@ import pdsync.presentation.HistoryPresentation
 class HistoryPresentationTest {
  private val oldFiles = mapOf("game1/game.dat" to "a".repeat(64))
  private val newFiles = mapOf("game1/game.dat" to "b".repeat(64))
+ private fun uniqueFiles(id: String) = mapOf("game1/game.dat" to hash(id.encodeToByteArray()))
  private fun commit(id: String, parents: List<String> = emptyList(), files: Map<String,String> = oldFiles) = AppendCommit(
   id = id, parents = parents, objectBytes = 1,
   snapshot = Manifest(game="shattered", profile="test", version="922", id="snapshot-$id", parent=null,
@@ -124,19 +125,19 @@ class HistoryPresentationTest {
  }
 
  @Test fun realDagEdgesPointFromParentsToChildren() {
-  val view=HistoryPresentation.from(state(listOf(commit("root"),commit("left",listOf("root")),commit("right",listOf("root")))),0)
+  val view=HistoryPresentation.from(state(listOf(commit("root"),commit("left",listOf("root"), newFiles),commit("right",listOf("root"), uniqueFiles("right")))),0)
   assertEquals(setOf(HistoryEdge("root","left"),HistoryEdge("root","right")),view.edges.toSet())
   assertEquals(setOf("left","right"),view.nodes.filter {it.status=="云端当前分支"}.map {it.id}.toSet())
  }
 
  @Test fun branchHistoryDoesNotChooseAWinner() {
-  val history=state(listOf(commit("left"),commit("right")))
+  val history=state(listOf(commit("left"),commit("right", files=newFiles)))
   assertNull(history.defaultSnapshot)
   assertEquals(2,HistoryPresentation.from(history,0).nodes.count {it.selectable})
  }
 
  @Test fun paginationClampsAndKeepsNodesBounded() {
-  val history=state((0..40).map {commit("commit-%03d".format(it))})
+  val history=state((0..40).map {commit("commit-%03d".format(it), files=uniqueFiles("$it"))})
   val first=HistoryPresentation.from(history,-1); val last=HistoryPresentation.from(history,99)
   assertEquals(0,first.page); assertEquals(20,first.nodes.size)
   assertEquals(2,last.page); assertEquals(1,last.nodes.size); assertEquals(3,last.pages); assertEquals(41,last.cloudCount)
@@ -178,7 +179,7 @@ class HistoryPresentationTest {
  }
 
  @Test fun repeatedRenderingPagingSelectionAndDismissalArePure() {
-  val history=state((0..24).map {commit("commit-%03d".format(it))},"commit-000",newFiles,"upload")
+  val history=state((0..24).map {commit("commit-%03d".format(it), files=uniqueFiles("$it"))},"commit-000",newFiles,"upload")
   val before=history.copy(graph=history.graph.copy(commits=history.graph.commits.toMap()),currentFiles=history.currentFiles.toMap())
   val first=HistoryPresentation.from(history,0)
   repeat(20) {
@@ -191,7 +192,7 @@ class HistoryPresentationTest {
  }
 
  @Test fun rowsAndDisplayedTimesUseRecordGenerationInsteadOfSaveContentOrCaptureTime() {
-  fun at(id: String, time: String, parents: List<String> = emptyList()) = recorded(id, time, parents,
+  fun at(id: String, time: String, parents: List<String> = emptyList()) = recorded(id, time, parents, files=if(id == "base") oldFiles else uniqueFiles(id),
    capturedAt = "2026-10-15T00:00:00Z", modifiedAt = "2026-09-01T00:00:00Z")
   val history = state(listOf(
    at("newest", "2026-10-12T00:00:00Z", listOf("middle")),
@@ -215,7 +216,7 @@ class HistoryPresentationTest {
 
  @Test fun equalTimeNodesShareOnlyOppositeLanesAndOrderIsStableAcrossGraphInsertionOrder() {
   val stamp = "2026-10-10T00:00:00Z"
-  fun at(id: String) = commit(id).let { it.copy(snapshot = it.snapshot.copy(metadata = SnapshotMetadata(
+  fun at(id: String) = commit(id, files=if(id == "zeta") oldFiles else uniqueFiles(id)).let { it.copy(snapshot = it.snapshot.copy(metadata = SnapshotMetadata(
    device = DeviceIdentity("source-device", "来源"), capturedAt = stamp,
    fileModifiedAt = mapOf("game1/game.dat" to stamp)))) }
   val commits = listOf(at("zeta"), at("alpha"), at("omega"))
@@ -233,7 +234,7 @@ class HistoryPresentationTest {
   val known = commit("known").let { it.copy(snapshot = it.snapshot.copy(metadata = SnapshotMetadata(
    device = DeviceIdentity("source-device", "来源"), capturedAt = "2026-01-01T00:00:00Z",
    fileModifiedAt = mapOf("game1/game.dat" to "2026-01-01T00:00:00Z")))) }
-  val unknown = commit("unknown").copy(operation = CommitOperationMetadata(
+  val unknown = commit("unknown", files=newFiles).copy(operation = CommitOperationMetadata(
    device = DeviceIdentity("source-device", "来源"), preparedAt = "2026-12-31T00:00:00Z"))
   val view = HistoryPresentation.from(state(listOf(unknown, known)), 0)
   assertEquals(listOf("unknown", "known"), view.nodes.map { it.id })
@@ -244,7 +245,7 @@ class HistoryPresentationTest {
  @Test fun completeRowPagingKeepsAllNodesReachableOnceAndEqualTimePairsTogether() {
   fun at(index: Int) = recorded("commit-%03d".format(index),
    java.time.Instant.parse("2026-10-01T00:00:00Z").plusSeconds(index.toLong() * 3600).toString(),
-   capturedAt = "2026-09-01T00:00:00Z", modifiedAt = "2026-08-01T00:00:00Z")
+   files=if(index == 0) oldFiles else uniqueFiles("$index"), capturedAt = "2026-09-01T00:00:00Z", modifiedAt = "2026-08-01T00:00:00Z")
   val history = state((0..40).map(::at), "commit-000", newFiles, "restore").copy(
    summary = SaveSummary(mapOf("game1" to "2026-09-01T00:00:00Z"), 7, 1))
   val pages = (0 until HistoryPresentation.from(history, 0).pages).map { HistoryPresentation.from(history, it) }
@@ -338,12 +339,12 @@ class HistoryPresentationTest {
   val history = state(listOf(otherBranch, olderSave, resolution), resolution.id, oldFiles, "upload")
   val before = history.copy(graph = history.graph.copy(commits = history.graph.commits.toMap()))
   val view = HistoryPresentation.from(history, 0)
-  assertEquals(listOf("92cf9d", "5cf2d7", "6c50d1"), view.nodes.filter { it.column == 0 }.map { it.id })
+  assertEquals(listOf("92cf9d", "6c50d1"), view.nodes.filter { it.column == 0 }.map { it.id })
   val nodes = view.nodes.associateBy { it.id }
   assertEquals(HistoryPresentation.time("2026-10-20T06:50:19.830460100Z"), nodes.getValue("92cf9d").time)
   assertEquals(nodes.getValue("92cf9d").time, nodes.getValue("local-current").time)
   assertEquals(nodes.getValue("92cf9d").row, nodes.getValue("local-current").row)
-  assertEquals(setOf(HistoryEdge("5cf2d7", "92cf9d"), HistoryEdge("6c50d1", "92cf9d"),
+  assertEquals(setOf(HistoryEdge("6c50d1", "92cf9d"),
    HistoryEdge("local-current", "92cf9d")), view.edges.toSet())
   assertEquals(setOf("92cf9d"), view.nodes.filter { it.cloudHead }.map { it.id }.toSet())
   assertEquals(before, history)
@@ -354,10 +355,10 @@ class HistoryPresentationTest {
  @Test fun equalTimeChildrenPrecedeParentsAndBranchOrderingDoesNotDependOnDiscoveryOrder() {
   val stamp = "2026-10-20T14:49:00Z"
   val commits = listOf(
-   recorded("a-root", stamp),
-   recorded("b-left", stamp, listOf("a-root")),
-   recorded("c-right", stamp, listOf("a-root")),
-   recorded("z-resolution", stamp, listOf("b-left", "c-right"), kind = "resolution"))
+   recorded("a-root", stamp, files=uniqueFiles("a-root")),
+   recorded("b-left", stamp, listOf("a-root"), files=uniqueFiles("b-left")),
+   recorded("c-right", stamp, listOf("a-root"), files=uniqueFiles("c-right")),
+   recorded("z-resolution", stamp, listOf("b-left", "c-right"), files=uniqueFiles("z-resolution"), kind = "resolution"))
   val expected = HistoryPresentation.from(state(commits), 0)
   assertEquals(listOf("z-resolution", "b-left", "c-right", "a-root"), expected.nodes.map { it.id })
   assertEquals(setOf(HistoryEdge("a-root", "b-left"), HistoryEdge("a-root", "c-right"),
@@ -369,7 +370,7 @@ class HistoryPresentationTest {
 
  @Test fun differentRecordTimesRemainPrimaryEvenWhenAParentClockIsAhead() {
   val parent = recorded("parent", "2026-10-21T00:00:00Z")
-  val child = recorded("child", "2026-10-20T00:00:00Z", listOf(parent.id))
+  val child = recorded("child", "2026-10-20T00:00:00Z", listOf(parent.id), files=newFiles)
   val view = HistoryPresentation.from(state(listOf(child, parent)), 0)
   assertEquals(listOf("parent", "child"), view.nodes.map { it.id })
   assertEquals(listOf(HistoryEdge("parent", "child")), view.edges)
@@ -379,9 +380,12 @@ class HistoryPresentationTest {
   val source = recorded("a-source", "2026-10-19T00:00:00Z",
    capturedAt = "2026-10-18T00:00:00Z", modifiedAt = "2030-01-01T00:00:00Z").copy(operation = null)
   val other = commit("b-other", files = newFiles)
-  val resolution = source.copy(id = "z-resolution", kind = "resolution", parents = listOf(source.id, other.id))
-  val restore = source.copy(id = "y-restore", kind = "restore", parents = listOf(resolution.id))
-  val imported = source.copy(id = "x-import", kind = "legacy-import")
+  val resolution = source.copy(id = "z-resolution", kind = "resolution", parents = listOf(source.id, other.id),
+   snapshot = source.snapshot.copy(id="snapshot-z-resolution", files=uniqueFiles("resolution")))
+  val restore = source.copy(id = "y-restore", kind = "restore", parents = listOf(resolution.id),
+   snapshot = source.snapshot.copy(id="snapshot-y-restore", files=uniqueFiles("restore")))
+  val imported = source.copy(id = "x-import", kind = "legacy-import",
+   snapshot = source.snapshot.copy(id="snapshot-x-import", files=uniqueFiles("import")))
   val view = HistoryPresentation.from(state(listOf(other, resolution, restore, imported, source)), 0)
   assertEquals(listOf("a-source", "x-import", "y-restore", "z-resolution", "b-other"), view.nodes.map { it.id })
   assertEquals(HistoryPresentation.time("2026-10-18T00:00:00Z"), view.nodes.first().time)
@@ -391,11 +395,11 @@ class HistoryPresentationTest {
  }
 
  @Test fun malformedOperationOrLegacyCaptureStaysUnknownWithoutUsingFileTime() {
-  val invalidOperation = recorded("invalid-operation", "bad-operation",
+  val invalidOperation = recorded("invalid-operation", "bad-operation", files=uniqueFiles("invalid-operation"),
    capturedAt = "2026-10-19T00:00:00Z", modifiedAt = "2026-10-20T00:00:00Z")
-  val invalidCapture = recorded("invalid-capture", "2026-10-20T00:00:00Z",
+  val invalidCapture = recorded("invalid-capture", "2026-10-20T00:00:00Z", files=uniqueFiles("invalid-capture"),
    capturedAt = "bad-capture", modifiedAt = "2026-10-21T00:00:00Z").copy(operation = null)
-  val missing = commit("missing")
+  val missing = commit("missing", files=uniqueFiles("missing"))
   val valid = recorded("valid", "2026-10-01T00:00:00Z", capturedAt = "bad-capture", modifiedAt = "bad-mtime")
   val view = HistoryPresentation.from(state(listOf(missing, invalidOperation, valid, invalidCapture)), 0)
   assertEquals(listOf("valid", "invalid-capture", "invalid-operation", "missing"), view.nodes.map { it.id })
@@ -403,20 +407,16 @@ class HistoryPresentationTest {
   assertEquals(HistoryPresentation.time("2026-10-01T00:00:00Z"), view.nodes.first().time)
  }
 
- @Test fun identicalCurrentContentUsesEstablishedBaselineTimeEvenWhenNewerCopiesExist() {
+ @Test fun identicalCurrentContentUsesNewestGroupTimeWithoutRewritingEstablishedBaseline() {
   val baseline = recorded("baseline", "2026-10-01T00:00:00Z")
   val duplicate = recorded("newer-copy", "2026-10-20T00:00:00Z", listOf(baseline.id))
   for (direction in listOf("upload", "restore", null)) {
    val view = HistoryPresentation.from(state(listOf(duplicate, baseline), baseline.id, oldFiles, direction), 0)
    val nodes = view.nodes.associateBy { it.id }
-   assertEquals(nodes.getValue("baseline").row, nodes.getValue("local-current").row)
-   assertEquals(nodes.getValue("baseline").time, nodes.getValue("local-current").time)
-   val expected = when (direction) {
-    "upload" -> HistoryEdge("local-current", "baseline")
-    "restore" -> HistoryEdge("baseline", "local-current")
-    else -> HistoryEdge("local-current", "baseline", sameContent = true)
-   }
-   assertEquals(setOf(HistoryEdge("baseline", "newer-copy"), expected), view.edges.toSet())
+   assertEquals(nodes.getValue("newer-copy").row, nodes.getValue("local-current").row)
+   assertEquals(nodes.getValue("newer-copy").time, nodes.getValue("local-current").time)
+   assertEquals(HistoryPresentation.time("2026-10-20T00:00:00Z"), nodes.getValue("newer-copy").time)
+   assertEquals(setOf(HistoryEdge("local-current", "newer-copy", sameContent = true)), view.edges.toSet())
   }
  }
 
@@ -442,7 +442,8 @@ class HistoryPresentationTest {
  @Test fun equalTimeAncestryPagingKeepsMatchedBaselineAtBoundaryAndOmitsOnlyOffPageEdges() {
   val commits = (0..40).map { index ->
    recorded("node-%03d".format(index), "2026-10-20T00:00:00Z",
-    if (index == 0) emptyList() else listOf("node-%03d".format(index - 1)))
+    if (index == 0) emptyList() else listOf("node-%03d".format(index - 1)),
+    files=if(index == 21) oldFiles else uniqueFiles("$index"))
   }
   val history = state(commits, "node-021", oldFiles, "restore")
   val pages = (0..2).map { HistoryPresentation.from(history, it) }
@@ -475,8 +476,7 @@ class HistoryPresentationTest {
    currentFiles = refreshed.currentFiles.toMap())
   val view = HistoryPresentation.from(refreshed, 99)
   assertEquals("published", view.nodes.first().id)
-  assertEquals(setOf(HistoryEdge("initial", "published"),
-   HistoryEdge("local-current", "published", sameContent = true)), view.edges.toSet())
+  assertEquals(setOf(HistoryEdge("local-current", "published", sameContent = true)), view.edges.toSet())
   assertEquals(view.nodes.single { it.id == "published" }.time, view.nodes.single { it.id == "local-current" }.time)
   repeat(20) {
    assertEquals(view, HistoryPresentation.from(refreshed, 0))

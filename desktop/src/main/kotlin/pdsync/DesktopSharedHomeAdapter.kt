@@ -155,7 +155,9 @@ internal object DesktopSharedHomeAdapter {
      noticeError = restoreProblem != null)
    },
    // The actual restore target can be the unique default without becoming a user selection.
-   selectedSnapshotId = current.selectedId.takeIf { current.selectedByUser },
+   selectedSnapshotId = current.selectedId.takeIf { current.selectedByUser }?.let { selected ->
+    history?.let { HistoryPresentation.representativeSnapshotId(it, selected) } ?: selected
+   },
    emptyTargetMessage = when {
     history == null -> DesktopMessages.READING_CLOUD_SAVES.text()
     history.graph.tips.size > 1 -> DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_SELECT_A_SAVE_FIRST.text()

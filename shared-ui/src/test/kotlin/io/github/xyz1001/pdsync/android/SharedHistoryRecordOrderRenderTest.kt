@@ -74,10 +74,11 @@ class SharedHistoryRecordOrderRenderTest {
                     try {
                         render(scene, "record-order-${locale.language}-$width-$scale")
                         val layout = assertNotNull(observed.layout)
-                        assertEquals(listOf("resolution", "branch", "original"),
+                        assertEquals(listOf("resolution", "branch"),
                             view.nodes.filter { it.column == 0 }.map { it.id })
-                        assertEquals(3, view.cloudCount, "resolution does not collapse the reused snapshot's original record")
-                        recordTimes.forEach { (id, time) ->
+                        assertEquals(2, view.cloudCount, "The reused snapshot is one displayed save, while its original commit stays in the DAG")
+                        assertFalse("original" in layout.cards)
+                        recordTimes.filterKeys { it != "original" }.forEach { (id, time) ->
                             assertEquals(HistoryPresentation.time(time), view.nodes.single { it.id == id }.time)
                             assertTrue(HistoryPresentation.time(time) in visibleTexts(scene),
                                 "the actual component renders $id's record time")
@@ -89,13 +90,14 @@ class SharedHistoryRecordOrderRenderTest {
                         assertFalse(local.dirty)
                         assertEquals(layout.cards.getValue("resolution").center.y,
                             layout.cards.getValue("local-current").center.y)
-                        assertCloudTopOrder(layout, listOf("resolution", "branch", "original"))
+                        assertCloudTopOrder(layout, listOf("resolution", "branch"))
                         assertEquals(setOf(
-                            HistoryEdge("original", "branch"),
-                            HistoryEdge("original", "resolution"),
                             HistoryEdge("branch", "resolution"),
                             HistoryEdge("resolution", "local-current"),
                         ), layout.arrows.map { it.edge }.toSet())
+                        assertEquals(listOf("original"), state.graph.commits.getValue("branch").parents,
+                            "A hidden parent is never redirected into a new reverse edge")
+                        assertEquals(3, state.graph.commits.size)
                         assertArrowOutsideTargets(layout)
                         val restore = layout.arrows.single { it.edge.toId == "local-current" }
                         assertTrue(restore.tip.x > restore.start.x, "the restore arrow continues to point toward local")
@@ -161,7 +163,7 @@ class SharedHistoryRecordOrderRenderTest {
         }
     }
 
-    @Test fun equalRecordTimeResolution92StaysAboveParents5And6WithoutReversingTheirArrows() {
+    @Test fun equalRecordTimeResolution92GroupsMatchingParentAndKeepsTheDifferentParentArrow() {
         val time = "2026-10-20T12:00:00Z"
         val parent5 = commit("5", time, "2026-10-19T12:00:00Z")
         val parent6 = commit("6", time, "2026-10-20T12:00:00Z", files = otherFiles)
@@ -178,11 +180,14 @@ class SharedHistoryRecordOrderRenderTest {
             try {
                 render(scene, "record-order-resolution92-tie-$index")
                 val layout = assertNotNull(observed.layout)
-                assertEquals(listOf("92", "5", "6"), view.nodes.map { it.id },
-                    "same-time child precedes parents; unrelated parents keep stable ID order")
-                assertCloudTopOrder(layout, listOf("92", "5", "6"))
-                assertEquals(setOf(HistoryEdge("5", "92"), HistoryEdge("6", "92")),
+                assertEquals(listOf("92", "6"), view.nodes.map { it.id },
+                    "Same-content parent 5 is represented by its real tip; the different parent remains below")
+                assertCloudTopOrder(layout, listOf("92", "6"))
+                assertFalse("5" in layout.cards)
+                assertEquals(setOf(HistoryEdge("6", "92")),
                     layout.arrows.map { it.edge }.toSet())
+                assertEquals(listOf("5", "6"), state.graph.commits.getValue("92").parents)
+                assertEquals(3, state.graph.commits.size)
                 layout.arrows.forEach { arrow ->
                     assertTrue(arrow.tip.y < arrow.start.y, "the parent-to-child arrow points up to the newer row")
                     assertEquals(layout.cards.getValue("92").center.x, arrow.tip.x)

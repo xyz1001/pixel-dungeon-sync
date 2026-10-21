@@ -143,7 +143,9 @@ object AndroidOnboardingComposition {
                         THIS_DEVICE_ALREADY_HAS_THIS_PROGRESS_NO.text() else "",
                 )
             },
-            selectedSnapshotId = explicitSelection?.takeIf { it == selectedId },
+            selectedSnapshotId = explicitSelection?.takeIf { it == selectedId }?.let { selected ->
+                history?.let { HistoryPresentation.representativeSnapshotId(it, selected) } ?: selected
+            },
             emptyTargetMessage = when {
                 selectedId != null -> THE_SELECTED_SAVE_IS_NOT_IN_THE.text()
                 history == null -> READING_RESTORE_TARGETS.text()

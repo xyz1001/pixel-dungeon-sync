@@ -54,7 +54,8 @@ class SharedHomeArchiveAvailabilityRenderTest {
             pageActive = true, canLaunch = true,
             canUpload = available.uploadSourceAvailable && !unchanged.uploadUnnecessary,
             canRestore = available.restoreSourceAvailable && !unchanged.restoreUnnecessary,
-            selectedSnapshotId = selectedId, history = history?.let { HistoryPresentation.from(it, 0) })
+            selectedSnapshotId = history?.let { HistoryPresentation.representativeSnapshotId(it, selectedId) } ?: selectedId,
+            history = history?.let { HistoryPresentation.from(it, 0) })
     }
 
     private class Host(initial: SharedHomeState) : SharedHomeActions {
@@ -95,12 +96,17 @@ class SharedHomeArchiveAvailabilityRenderTest {
             val host = Host(state(observed))
             val bounds = Observation()
             val requestedTargets = mutableListOf<String>()
-            host.onSelect = { selectedId -> host.state = state(observed, selectedId) }
-            host.onRestore = { requestedTargets += checkNotNull(host.state.selectedSnapshotId) }
+            var selectedTargetId: String? = null
+            host.onSelect = { selectedId -> selectedTargetId = selectedId; host.state = state(observed, selectedId) }
+            host.onRestore = { requestedTargets += checkNotNull(selectedTargetId) }
             val scene = scene(width, host, bounds, height = 1800)
             val label = "selected-history-$width-${if (metadataOnly) "metadata" else "objects"}"
             try {
                 render(scene, "$label-initial")
+                assertEquals(2, host.state.history!!.cloudCount, "Different snapshot UUIDs with identical complete maps share one cloud card")
+                assertEquals(setOf(old.id, tip.id), host.state.history!!.nodes.filter { it.selectable }.map { it.id }.toSet())
+                assertFalse(sameBytesOlder.id in bounds.layout!!.cards, "The older duplicate must not remain an extra selectable save")
+                assertEquals(tip.snapshot.id, HistoryPresentation.representativeSnapshotId(observed, sameBytesOlder.snapshot.id))
                 assertArchiveButtonEnabled(scene, bounds, "upload", false)
                 assertArchiveButtonEnabled(scene, bounds, "restore", false)
                 clickArchives(scene, bounds)
@@ -125,10 +131,12 @@ class SharedHomeArchiveAvailabilityRenderTest {
                 select(old, true, "old-selected")
                 assertArchiveButtonEnabled(scene, bounds, "upload", false)
                 select(tip, false, "tip-selected")
-                // Metadata equality for a non-tip is deliberately not object verification.
-                // A separately verified same-byte older record remains a disabled no-op.
-                select(sameBytesOlder, metadataOnly, "same-bytes-different-time")
+                // Hiding the older duplicate changes presentation only. Its original operation
+                // policy still distinguishes metadata equality from verified object equality.
+                assertEquals(!metadataOnly, SharedHomeContent.fromHome(observed, sameBytesOlder.snapshot.id,
+                    true, false, false).restoreUnnecessary)
                 assertEquals(initialProof, observed.verifiedCommitIds, "Selection must not manufacture object proof")
+                assertEquals(complete.graph, observed.graph, "Grouping must preserve all original commits and parent links")
                 assertTrue(requestedTargets.isEmpty(), "Selecting a card never requests restoration")
 
                 for ((index, target) in listOf(old, tip, old).withIndex()) {
@@ -148,6 +156,54 @@ class SharedHomeArchiveAvailabilityRenderTest {
                 }
                 assertEquals(listOf(old.snapshot.id, tip.snapshot.id, old.snapshot.id), requestedTargets)
                 assertEquals(oldFiles, observed.currentFiles)
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun hiddenSelectedSnapshotHighlightsItsRepresentativeWithoutChangingTheRestoreTarget() {
+        val hidden = commit("hidden-old")
+        val representative = commit("visible-tip").copy(parents = listOf(hidden.id))
+        val observed = history(commits = listOf(hidden, representative))
+        for (width in listOf(1165, 320)) {
+            var actualTarget = hidden.snapshot.id
+            val host = Host(state(observed, actualTarget))
+            val bounds = Observation()
+            val requested = mutableListOf<String>()
+            host.onSelect = { actualTarget = it; host.state = state(observed, actualTarget) }
+            host.onRestore = { requested += actualTarget }
+            val scene = scene(width, host, bounds, height = 1800)
+            try {
+                render(scene, "grouped-hidden-selection-$width")
+                assertEquals(1, host.state.history!!.cloudCount)
+                assertFalse(hidden.id in bounds.layout!!.cards)
+                assertEquals(representative.snapshot.id, host.state.selectedSnapshotId)
+                val highlighted = semanticsNodes(scene).filter { it.config.getOrNull(SemanticsProperties.Selected) == true }
+                assertEquals(1, highlighted.size)
+                assertTrue(texts(descendants(highlighted.single())).contains(
+                    host.state.history!!.nodes.single { it.id == representative.id }.name))
+                assertEquals(hidden.snapshot.id, actualTarget, "A retained hidden ID is only mapped for highlight")
+                assertArchiveButtonEnabled(scene, bounds, "restore", true)
+                click(scene, bounds.elements.getValue("restore").center)
+                assertEquals(listOf(hidden.snapshot.id), requested, "Display grouping cannot redirect a retained restore request")
+
+                click(scene, bounds.origin + bounds.layout!!.cards.getValue(representative.id).center)
+                render(scene, "grouped-representative-selected-$width")
+                assertEquals(representative.snapshot.id, actualTarget, "A new pointer selects the actual visible representative")
+                click(scene, bounds.elements.getValue("restore").center)
+                assertEquals(listOf(hidden.snapshot.id, representative.snapshot.id), requested)
+
+                actualTarget = "missing-snapshot"
+                host.state = state(observed, actualTarget)
+                render(scene, "grouped-unknown-selection-$width")
+                assertEquals("missing-snapshot", host.state.selectedSnapshotId)
+                assertTrue(semanticsNodes(scene).none { it.config.getOrNull(SemanticsProperties.Selected) == true },
+                    "An unknown ID must not silently select the content representative")
+                assertArchiveButtonEnabled(scene, bounds, "restore", false)
+                repeat(2) { click(scene, bounds.elements.getValue("restore").center) }
+                assertEquals(2, requested.size)
+                assertEquals(setOf(hidden.id, representative.id), observed.graph.commits.keys)
+                assertEquals(listOf(hidden.id), observed.graph.commits.getValue(representative.id).parents)
+                assertEquals(localFiles, observed.currentFiles)
             } finally { scene.close() }
         }
     }

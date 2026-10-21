@@ -99,6 +99,16 @@ class SharedHomeAndroidContract(unittest.TestCase):
                           'SaveSummary(', 'DirectorySnapshotMetadata(', 'SnapshotMetadata(', '.copy('):
             self.assertNotIn(forbidden, adapter)
 
+    def test_content_grouping_maps_display_selection_without_replacing_real_action_target(self):
+        adapter = body(ADAPTER, 'fun showHome(')
+        self.assertIn('HistoryPresentation.representativeSnapshotId(it, selected)', adapter)
+        self.assertIn('val targetId = selectedId ?: history?.defaultSnapshot', adapter)
+        self.assertIn('snapshotId = snapshot.id', adapter)
+        self.assertNotIn('selectedId = HistoryPresentation', adapter)
+        selection = body(body(MAIN, 'private void renderHome()'), 'public void selectSnapshot(')
+        self.assertIn('selected = snapshotId', selection)
+        self.assertIn('hasHomeSnapshot(snapshotId)', selection)
+
     def test_default_target_and_explicit_selection_are_distinct_and_rotation_retained(self):
         self.assertIn('selectedSnapshotId = explicitSelection?.takeIf { it == selectedId }', body(ADAPTER, 'fun showHome('))
         self.assertIn('this.explicitHomeSelection = bundle.getString("home.explicitSelection")', body(MAIN, 'public void onCreate('))

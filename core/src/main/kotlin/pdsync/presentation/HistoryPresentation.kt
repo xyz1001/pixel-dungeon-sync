@@ -5,6 +5,8 @@ import pdsync.i18n.UiLocale
 import java.time.format.FormatStyle
 import pdsync.AppendCommit
 import pdsync.SyncHistory
+import pdsync.contentSha256
+import pdsync.Shattered
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -70,33 +72,81 @@ data class HistoryPresentation(
     ordered + group.filter { it.id !in emitted }.sortedBy { it.id }
    }
 
+  /** A rendering key only: never a snapshot, commit, protection proof or restore authority. */
+  private data class ContentIdentity(val game: String, val profile: String,
+   val sha256: String, val files: Map<String, String>)
+
+  private data class CloudGroup(val representative: AppendCommit, val members: List<AppendCommit>,
+   val instant: Instant?, val cloudHead: Boolean, val content: ContentIdentity?)
+
+  private fun contentIdentity(commit: AppendCommit): ContentIdentity? = runCatching {
+   val snapshot = commit.snapshot
+   val files = snapshot.files.toMap()
+   require(files.isNotEmpty() && files.keys.all(Shattered::includes))
+   // Do not turn an empty, malformed or partial run inventory into an equivalence class.
+   val digest = contentSha256(files)
+   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach {
+    require("$it/game.dat" in files)
+   }
+   ContentIdentity(snapshot.game, snapshot.profile, digest, files)
+  }.getOrNull()
+
+  /** Global content groups precede paging; every retained handle is an actual original commit. */
+  private fun cloudGroups(state: SyncHistory): List<CloudGroup> {
+   val ordered = orderedRecords(state.graph.commits.values)
+   val groups = linkedMapOf<Any, MutableList<AppendCommit>>()
+   ordered.forEach { commit ->
+    // Invalid inventories are visible individually, never collapsed through a null key.
+    val key: Any = contentIdentity(commit) ?: commit.id
+    groups.getOrPut(key) { mutableListOf() }.add(commit)
+   }
+   val tips = state.graph.tips
+   val matchingBaseline = state.baselineCommit?.takeIf { it.snapshot.files == state.currentFiles }?.id
+   return groups.map { (key, members) ->
+    val representative = members.firstOrNull { it.id in tips }
+     ?: members.firstOrNull { it.id == matchingBaseline } ?: members.first()
+    CloudGroup(representative, members, recordTime(members.first()), members.any { it.id in tips }, key as? ContentIdentity)
+   }
+  }
+
+  /** Map a saved selection for display only. Callers must retain its original operation target. */
+  @JvmStatic fun representativeSnapshotId(state: SyncHistory, snapshotId: String?): String? {
+   if (snapshotId == null) return null
+   return cloudGroups(state).firstOrNull { group -> group.members.any { it.snapshot.id == snapshotId } }
+    ?.representative?.snapshot?.id ?: snapshotId
+  }
+
   /** Missing counts display as zero without changing the nullable save summary or game data. */
   @JvmStatic fun plays(value: Int?): String = if (value == 1) CoreMessages.ONE_GAME_PLAYED.text() else CoreMessages.TEXT_1_S_GAMES_PLAYED.text(value ?: 0)
 
   /**
    * Assign global newest-first history-record rows before paging. Equal-time children precede
    * parents with stable IDs for unrelated branches. Opposite lanes can share a row, while two
-   * nodes in one lane cannot. A local copy with identical cloud manifest file hashes is paired with
-   * its established baseline, or otherwise the newest matching record, and displays that record's
-   * time. Only unmatched local progress uses its own save-file time. Unknown times sort last.
+   * nodes in one lane cannot. Exact complete file maps share one cloud card, displaying the newest
+   * member's record time. Local content is paired with the matching card. Only unmatched local
+   * progress uses its own save-file time. Unknown times sort last.
    *
    * The history supplied by the facade is the sole source of nodes and true graph edges.
-   * An edge whose other endpoint is on another page is omitted, never redirected to a visible node.
+   * True edges with hidden or off-page endpoints are omitted, never redirected to representatives.
+   * Content equality is not ancestry: quotienting an A(X) -> B(Y) -> C(X) DAG would create a cycle.
    */
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
    data class TimedNode(val node: HistoryNode, val instant: Instant?)
-   val allCloud = orderedRecords(state.graph.commits.values)
+   val groups = cloudGroups(state)
+   val allCloud = groups.map { it.representative }
    val cloudOrder = allCloud.mapIndexed { index, commit -> commit.id to index }.toMap()
    val baseline = state.baselineCommit
+   val baselineGroup = baseline?.let { original -> groups.firstOrNull { group -> group.members.any { it.id == original.id } } }
    // File-map equality permits display association even after reinstall loses verification caches.
    // It does not prove cloud protection, establish a baseline, or authorize any operation.
    val matchingCurrent = if (state.currentFiles.isEmpty()) null else
-    baseline?.takeIf { it.snapshot.files == state.currentFiles }
-     ?: allCloud.firstOrNull { it.snapshot.files == state.currentFiles }
+    baselineGroup?.takeIf { it.content != null && it.representative.snapshot.files == state.currentFiles }
+     ?: groups.firstOrNull { it.content != null && it.representative.snapshot.files == state.currentFiles }
    val all = mutableListOf<TimedNode>()
-   allCloud.forEach { commit ->
+   groups.forEach { group ->
+    val commit = group.representative
     val snapshot = commit.snapshot
-    val recordedAt = recordTime(commit)
+    val recordedAt = group.instant
     all += TimedNode(HistoryNode(
      commit.id, snapshot.id,
      state.aliases[snapshot.id]?.takeIf(String::isNotBlank)
@@ -104,12 +154,12 @@ data class HistoryPresentation(
       ?: CoreMessages.SAVE_1_S.text(commit.id.take(6)),
      time(recordedAt?.toString()),
      CoreMessages.SOURCE_AND_SLOTS.text(snapshot.metadata?.device?.label ?: CoreMessages.UNKNOWN_SOURCE.text(), slots(snapshot.saveVersions?.runs?.size)),
-     if (commit.id in state.graph.tips) CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
-     0, 0, selectable = true, cloudHead = commit.id in state.graph.tips
+     if (group.cloudHead) CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
+     0, 0, selectable = true, cloudHead = group.cloudHead
     ), recordedAt)
    }
    if (state.localNodeCount > 0) {
-    val recordedAt = if (matchingCurrent != null) recordTime(matchingCurrent)
+    val recordedAt = if (matchingCurrent != null) matchingCurrent.instant
      else state.summary?.slots?.values?.mapNotNull(::instant)?.maxOrNull()
     all += TimedNode(HistoryNode(
      "local-current", null, state.currentName.ifBlank { CoreMessages.CURRENT_LOCAL.text() }, time(recordedAt?.toString()),
@@ -119,7 +169,7 @@ data class HistoryPresentation(
    }
    if (state.localNodeCount == 2 && baseline != null) {
     val snapshot = baseline.snapshot
-    val recordedAt = recordTime(baseline)
+    val recordedAt = baselineGroup?.instant ?: recordTime(baseline)
     all += TimedNode(HistoryNode(
      "local-baseline", snapshot.id,
      state.aliases[snapshot.id]?.takeIf(String::isNotBlank)
@@ -140,8 +190,8 @@ data class HistoryPresentation(
     // Identical file contents share the cloud row despite device timestamp precision differences.
     // This is a visual pairing only, never an invented upload/restore edge or baseline mutation.
     val matchingId = when (entry.node.id) {
-     "local-current" -> matchingCurrent?.id
-     "local-baseline" -> baseline?.id
+     "local-current" -> matchingCurrent?.representative?.id
+     "local-baseline" -> baselineGroup?.representative?.id
      else -> null
     }
     val matchedRow = matchingId?.let { id ->
@@ -174,7 +224,8 @@ data class HistoryPresentation(
    }
    // Exact file-map equality is the canonical content hash input (no time/name/device metadata).
    // Show a local-to-cloud content match, never infer an upload/restore event or mutate the DAG.
-   for ((localId, cloud) in listOf("local-current" to matchingCurrent, "local-baseline" to baseline)) {
+   for ((localId, cloud) in listOf("local-current" to matchingCurrent?.representative,
+    "local-baseline" to baselineGroup?.representative)) {
     if (cloud != null && localId in visible && cloud.id in visible &&
      edges.none { setOf(it.fromId, it.toId) == setOf(localId, cloud.id) }) {
      edges += HistoryEdge(localId, cloud.id, sameContent = true)
