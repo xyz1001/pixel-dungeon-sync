@@ -38,11 +38,11 @@ class AutoStatusContract(unittest.TestCase):
         for field in ('"token"', '"state"', '"result"', '"gameSelection"', '"gameNamespace"', '"startedAt"'):
             self.assertIn(field, record)
 
-    def test_unknown_observation_remains_terminal_and_no_new_status_text(self):
+    def test_unknown_observation_is_not_a_gate_and_no_new_status_text(self):
         poll = body(SERVICE, 'public void poll()')
-        stop = body(poll, 'if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN)')
-        self.assertIn('finish("BLOCKED", AutoSyncStatusPolicy.IDLE_FAILURE)', stop)
-        self.assertIn('return;', stop)
+        self.assertNotIn("STOP_UNKNOWN", poll)
+        self.assertNotIn("observeLifecycle", poll)
+        self.assertIn("if (this.returned)", poll)
         brief = body(MAIN, 'private String automaticStatusBrief()')
         self.assertIn('AutoSyncService.status(this)', brief)
         self.assertNotIn('已重新检查', MAIN)

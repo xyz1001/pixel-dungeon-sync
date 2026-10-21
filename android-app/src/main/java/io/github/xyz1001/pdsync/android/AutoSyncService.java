@@ -39,7 +39,6 @@ public final class AutoSyncService extends Service {
     private DiagnosticTrace diagnosticTrace;
     private boolean diagnosticFinished;
     private volatile DiagnosticFailure lastDiagnosticFailure = DiagnosticFailure.NONE;
-    private GameAccessBackend bridge;
     private SecureConnectionStore.Connection connection;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private AndroidSyncFacade facade;
@@ -160,7 +159,7 @@ public final class AutoSyncService extends Service {
         return AutoSyncHistoryRefresh.unconsumed(record, context.getSharedPreferences(PREFS, 0).getString(READ_HISTORY, ""));
     }
 
-    /** Persist the exact consumed terminal result before I/O, so restart cannot replay it. */
+    /** Persist the exact terminal result when its completed read is accepted; cancellation stays pending. */
     static synchronized boolean claimHistoryRefresh(Context context, AutoSyncHistoryRefresh.Ticket ticket) {
         SharedPreferences preferences = context.getSharedPreferences(PREFS, 0);
         AutoSyncStatusPolicy.Record current = statusRecord(preferences);
@@ -300,9 +299,6 @@ public final class AutoSyncService extends Service {
             if (!this.selectedGameToken.equals(this.prefs.getString("gameSelection", "")) || !this.selectedNamespace.equals(this.prefs.getString("gameNamespace", "")) || !SyncRuntime.connectionScope(this, this.connection).equals(this.prefs.getString("connectionScope", "")) || !SyncRuntime.automaticAllowed(this, this.connection)) {
                 throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_18.text());
             }
-            this.bridge = SyncRuntime.backend(this);
-            if (!this.bridge.capabilities().lifecycleObservation)
-                throw new IllegalStateException(AndroidMessages.AUTO_SYNC_SERVICE_19.text());
             this.facade = SyncRuntime.facade(this, this.connection);
             poll();
         } catch (Exception unused) {
@@ -321,37 +317,16 @@ public final class AutoSyncService extends Service {
                 finish("PAUSED", AndroidMessages.AUTO_SYNC_SERVICE_21.text());
                 return;
             }
+            // Returning to this app after departure is an existing passive trigger.
+            // Do not query game processes or fabricate foreground/session evidence.
+            // Keep the trigger set so existing transient retries can finish publication.
             if (this.returned) {
-                this.policy.knownReturn();
-                this.returned = false;
-            }
-            AndroidSyncFacade.ControlledObservation controlledObservation = this.facade.beginControlledObservation(this.token);
-            GameAccessBackend.Observation observationObserveLifecycle = this.bridge.observeLifecycle();
-            this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground);
-            // Root can reliably report an active background process. It is not yet a quiet exit.
-            // CACHED or ABSENT produces ready=true; process absence alone is never required.
-            boolean reliableForAutomatic = reliableForAutomaticObservation(this.bridge.mode(), observationObserveLifecycle);
-            AutoSyncPolicy.Step stepObserve = this.policy.observe(reliableForAutomatic, observationObserveLifecycle.foreground, System.currentTimeMillis());
-            if (stepObserve == AutoSyncPolicy.Step.STOP_UNKNOWN) {
-                this.lastDiagnosticFailure = DiagnosticFailure.NOT_READY;
-                automaticTrace().record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED, DiagnosticFailure.NOT_READY);
-                finish("BLOCKED", AutoSyncStatusPolicy.IDLE_FAILURE);
-                return;
-            }
-            if (stepObserve == AutoSyncPolicy.Step.STOP_UNOBSERVED) {
-                this.lastDiagnosticFailure = DiagnosticFailure.NOT_READY;
-                automaticTrace().record(DiagnosticStage.GUARD, DiagnosticResult.REJECTED, DiagnosticFailure.NOT_READY);
-                finish("BLOCKED", AndroidMessages.AUTO_SYNC_SERVICE_22.text());
-                return;
-            }
-            if (stepObserve == AutoSyncPolicy.Step.UPLOAD) {
                 attemptUpload();
                 return;
             }
-            if (observationObserveLifecycle.reliable && observationObserveLifecycle.foreground) {
-                if (!"PLAYING".equals(this.prefs.getString("state", "")))
-                    automaticTrace().record(DiagnosticStage.GAME_LAUNCH, DiagnosticResult.SUCCEEDED);
-                this.prefs.edit().putBoolean("foregroundSeen", true).putString("state", "PLAYING").putString("result", StoredAndroidText.store(AndroidMessages.AUTO_SYNC_SERVICE_23.text())).commit();
+            if (System.currentTimeMillis() - this.prefs.getLong("startedAt", 0L) > 21600000L) {
+                finish("EXPIRED", AndroidMessages.AUTO_SYNC_SERVICE_07.text());
+                return;
             }
             schedule(1500L);
         }
@@ -361,11 +336,6 @@ public final class AutoSyncService extends Service {
             failDiagnostics(failure);
             throw failure;
         }
-    }
-
-    static boolean reliableForAutomaticObservation(GameAccessBackend.Mode mode, GameAccessBackend.Observation observation) {
-        return observation.reliable && (mode != GameAccessBackend.Mode.ROOT_DIRECT
-                || observation.foreground || observation.ready);
     }
 
     private void schedule(long j) {

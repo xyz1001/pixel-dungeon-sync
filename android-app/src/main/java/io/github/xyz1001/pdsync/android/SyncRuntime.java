@@ -415,7 +415,7 @@ final class SyncRuntime {
 
     static boolean backendSupportsAutomatic(GameAccessBackend.Mode mode, GameAccessBackend.Capabilities capabilities) {
         return mode != null && mode != GameAccessBackend.Mode.LEGACY_HELPER_BRIDGE && capabilities != null
-                && capabilities.exportSupported && capabilities.lifecycleObservation;
+                && capabilities.exportSupported;
     }
 
     static boolean automaticAllowed(Context context, SecureConnectionStore.Connection connection2) {
