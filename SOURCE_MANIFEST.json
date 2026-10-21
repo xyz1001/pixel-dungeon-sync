@@ -918,7 +918,7 @@
     },
     "android-app/src/test/fixtures/manual-home-history-refresh-host.java.txt": {
       "size": 22452,
-      "sha256": "0234a65065ca5be43d7847a0c37659b30fd106118c00e8d4c5bf62dbfa72d90b"
+      "sha256": "42f8a24a4ad09371d16b5aef574abcf5360416c45aebdbd2eab604cd44e4e69c"
     },
     "android-app/src/test/fixtures/picker-host-checks/AndroidPickerHostChecks.kt": {
       "size": 4562,

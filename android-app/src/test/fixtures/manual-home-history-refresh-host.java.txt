@@ -346,7 +346,7 @@ class MainActivity {
         terminal(replacement); check(replacement.cloudVerified, "replacement HOME must independently refresh after rotation");
     }
     public static void main(String[] args) throws Exception {
-        guards(); unavailableCacheCanRetry(); emptyUnknownHistoryAndRepeatedClicks(); manualConsumesPendingRenewal();
+        guards(); emptyUnknownHistoryAndRepeatedClicks(); unavailableCacheCanRetry(); manualConsumesPendingRenewal();
         staleBeforeWorkerAndBeforeCompletion(); staleDuringRead(); failureAfterLeavingScope(); failureBlockedReadinessAndRetry();
         System.out.println("Manual HOME history refresh execution passed");
     }
