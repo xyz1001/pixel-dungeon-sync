@@ -1437,8 +1437,8 @@
       "sha256": "acb8f0d1e15a75324fa2de47811b5852dfa7ca02132b4a1d8c075fdfe4966686"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/ManagedAccountClientChecks.java": {
-      "size": 36698,
-      "sha256": "3e5349216369af88d67d7a11f9f9ecd1ea65af78deeb185818133f1e1d9be42f"
+      "size": 46459,
+      "sha256": "32486e27ce9a2abdc777308f92bbb1852cb2d198609f9b9e9fe89c1121d246b3"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/ManagedAccountFlowChecks.java": {
       "size": 24163,
@@ -2237,8 +2237,8 @@
       "sha256": "2e1fb6a9d55461015e45545a5c139c512e3fa1e2dc579eb07efd1f585d7f7d65"
     },
     "core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountClient.java": {
-      "size": 35133,
-      "sha256": "d8c29bb5db1ade4a220ae00b23c139f0489193962beb3ce67a05c6aa35bcc9d5"
+      "size": 37569,
+      "sha256": "5126729305e28f9904e949bcc62e0945f45b6d7e463ee4949ae90f28103410cb"
     },
     "core/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountFlow.java": {
       "size": 8898,

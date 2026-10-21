@@ -41,8 +41,9 @@ import pdsync.AppendOnlyKt;
 
 /**
  * Read-only official account metadata and public appreciation assets;
- * construction performs no I/O. Invoke reads on a background thread. This client never logs,
- * stores credentials, registers accounts, contacts DAV, creates orders, or uploads anything.
+ * construction performs no network I/O. Invoke reads on a background thread. Diagnostics contain
+ * closed categories only, never credentials or payloads. This client never registers accounts,
+ * contacts DAV, creates orders, or uploads anything.
  * Entitlement.active gates all official-account DAV synchronization, including downloads.
  * Public appreciation reads never send credentials. A 401 alone does not prove expiry.
  */
@@ -162,6 +163,8 @@ final class ManagedAccountClient {
                 || !username.matches("[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")
                 || password.isEmpty() || password.length() > 512 || hasControl(password)
                 || unpairedSurrogate(password) || password.getBytes(StandardCharsets.UTF_8).length > 512) {
+            recordEntitlement(pdsync.DiagnosticResult.STARTED, pdsync.DiagnosticFailure.NONE);
+            recordEntitlement(pdsync.DiagnosticResult.FAILED, pdsync.DiagnosticFailure.VALIDATION);
             throw failure(FailureKind.INVALID_INPUT);
         }
         this.username = username;
@@ -220,17 +223,51 @@ final class ManagedAccountClient {
                 long started = System.nanoTime();
                 try {
                     Response response = call.execute();
-                    pdsync.DiagnosticLog.http(pdsync.DiagnosticHttpMethod.GET, response.code(),
-                            transportDetails(request, id, started, null, call.isCanceled()));
-                    return response;
+                    diagnostic(() -> pdsync.DiagnosticLog.http(pdsync.DiagnosticHttpMethod.GET, response.code(),
+                            transportDetails(request, id, started, null, call.isCanceled())));
+                    ResponseBody body = response.body();
+                    if (body == null) return response;
+                    // execute() completes at headers. Preserve safe evidence for later body I/O too.
+                    return response.newBuilder().body(new ResponseBody() {
+                        private okio.BufferedSource source;
+                        private final AtomicBoolean recorded = new AtomicBoolean();
+                        @Override public MediaType contentType() { return body.contentType(); }
+                        @Override public long contentLength() { return body.contentLength(); }
+                        @Override public okio.BufferedSource source() {
+                            if (source == null) source = okio.Okio.buffer(new okio.ForwardingSource(body.source()) {
+                                @Override public long read(okio.Buffer sink, long byteCount) throws IOException {
+                                    try { return super.read(sink, byteCount); }
+                                    catch (IOException failure) {
+                                        if (recorded.compareAndSet(false, true))
+                                            recordTransportFailure(request, id, started, failure, call.isCanceled());
+                                        throw failure;
+                                    }
+                                }
+                            });
+                            return source;
+                        }
+                    }).build();
                 } catch (IOException failure) {
-                    pdsync.DiagnosticLog.networkFailure(failure,
-                            transportDetails(request, id, started, failure, call.isCanceled()));
-                    throw failure; // executeRequest sanitizes before any exception leaves this client.
+                    recordTransportFailure(request, id, started, failure, call.isCanceled());
+                    throw failure; // execute() sanitizes before any exception leaves this client.
                 }
             }
             @Override public void cancelPending() { client.dispatcher().cancelAll(); }
         };
+    }
+
+    private static void recordTransportFailure(Request request, long id, long started,
+                                               IOException failure, boolean canceled) {
+        // Capture the original interrupt state before the diagnostic-only disk write.
+        pdsync.DiagnosticDetails details = transportDetails(request, id, started, failure, canceled);
+        diagnostic(() -> pdsync.DiagnosticLog.networkFailure(failure, details));
+    }
+
+    private static void diagnostic(Runnable event) {
+        // FileChannel rejects an interrupted thread. Restore the flag before any operation resumes.
+        boolean interrupted = Thread.interrupted();
+        try { event.run(); }
+        finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
 
     private static pdsync.DiagnosticDetails transportDetails(Request request, long id, long started,
@@ -251,6 +288,26 @@ final class ManagedAccountClient {
     }
 
     Entitlement entitlement() throws ManagedAccountException {
+        recordEntitlement(pdsync.DiagnosticResult.STARTED, pdsync.DiagnosticFailure.NONE);
+        try {
+            Entitlement result = readEntitlement();
+            recordEntitlement(pdsync.DiagnosticResult.SUCCEEDED, pdsync.DiagnosticFailure.NONE);
+            return result;
+        } catch (ManagedAccountException failure) {
+            recordEntitlement(pdsync.DiagnosticResult.FAILED, failure.diagnosticFailure());
+            throw failure;
+        } catch (RuntimeException malformed) {
+            recordEntitlement(pdsync.DiagnosticResult.FAILED, pdsync.DiagnosticFailure.VALIDATION);
+            throw invalid();
+        }
+    }
+
+    private static void recordEntitlement(pdsync.DiagnosticResult result, pdsync.DiagnosticFailure failure) {
+        diagnostic(() -> pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION, result, failure,
+                pdsync.DiagnosticDetails.builder().networkTarget(pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT).build()));
+    }
+
+    private Entitlement readEntitlement() throws ManagedAccountException {
         if (!canReadEntitlement()) throw failure(FailureKind.AUTHENTICATION_REQUIRED);
         return execute(request(ENTITLEMENT_URL, true, "application/json"), response -> {
             JsonObject data = data(response);
@@ -327,24 +384,6 @@ final class ManagedAccountClient {
     private interface Decoder<T> { T decode(Response response) throws IOException; }
 
     private <T> T execute(Request request, Decoder<T> decoder) throws ManagedAccountException {
-        boolean entitlement = ENTITLEMENT_URL.equals(request.url().toString());
-        pdsync.DiagnosticDetails details = pdsync.DiagnosticDetails.builder()
-                .networkTarget(pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT).build();
-        if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
-                pdsync.DiagnosticResult.STARTED, pdsync.DiagnosticFailure.NONE, details);
-        try {
-            T result = executeRequest(request, decoder);
-            if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
-                    pdsync.DiagnosticResult.SUCCEEDED, pdsync.DiagnosticFailure.NONE, details);
-            return result;
-        } catch (ManagedAccountException failure) {
-            if (entitlement) pdsync.DiagnosticLog.record(pdsync.DiagnosticStage.CONNECTION,
-                    pdsync.DiagnosticResult.FAILED, failure.diagnosticFailure(), details);
-            throw failure;
-        }
-    }
-
-    private <T> T executeRequest(Request request, Decoder<T> decoder) throws ManagedAccountException {
         try (Response response = transport.execute(request)) {
             if (response == null) throw invalid();
             if (!request.url().equals(response.request().url()) || response.priorResponse() != null) {

@@ -57,6 +57,7 @@ public final class ManagedAccountClientChecks {
         transportPolicy();
         cancellation();
         explicitEntitlementAfterNetworkFailure();
+        entitlementDiagnosticCoverage();
         System.out.println("Managed official account client: " + checks + " host checks passed; no network used.");
     }
 
@@ -79,6 +80,145 @@ public final class ManagedAccountClientChecks {
         check(USER.equals(account.entitlement().username), "same production client recovers on explicit entitlement");
         check(attempts.get() == 3, "no automatic request replay");
         http.connectionPool().evictAll(); http.dispatcher().executorService().shutdown();
+    }
+
+    private static void entitlementDiagnosticCoverage() throws Exception {
+        String early = recorded("invalid-construction", () -> fail(
+                () -> new ManagedAccountClient(DAV_URL, "invalid user", PASSWORD, r -> {
+                    throw new AssertionError("Invalid construction must not execute");
+                }), FailureKind.INVALID_INPUT));
+        paired(early, "FAILED", "VALIDATION");
+        String noAuth = recorded("missing-authentication", () -> fail(
+                () -> publicAppreciation(r -> { throw new AssertionError("No unauthenticated request"); }).entitlement(),
+                FailureKind.AUTHENTICATION_REQUIRED));
+        paired(noAuth, "FAILED", "AUTHENTICATION");
+        AtomicInteger attempts = new AtomicInteger();
+        OkHttpClient successful = newHttpClient().newBuilder().addInterceptor(chain -> {
+            attempts.incrementAndGet(); return json(chain.request(), VALID);
+        }).build();
+        try {
+            String ok = recorded("success", () -> client(httpTransport(successful)).entitlement());
+            paired(ok, "SUCCEEDED", "NONE");
+            check(ok.contains("\"httpStatus\":200") && ok.contains("\"transportClientId\":"), "HTTP success retains client evidence");
+            check(attempts.get() == 1, "successful diagnostic read performs one request");
+        } finally { shutdown(successful); }
+        IOException[] failures = {new java.net.SocketException("PRIVATE_SENTINEL"),
+                new SocketTimeoutException("PRIVATE_SENTINEL"), new SSLHandshakeException("PRIVATE_SENTINEL"),
+                new IOException("PRIVATE_SENTINEL", new java.io.EOFException("PRIVATE_SENTINEL"))};
+        FailureKind[] kinds = {FailureKind.NETWORK_ERROR, FailureKind.TIMEOUT, FailureKind.TLS_ERROR, FailureKind.NETWORK_ERROR};
+        String[] categories = {"NETWORK_IO", "TIMEOUT", "TLS", "NETWORK_IO"};
+        for (int i = 0; i < failures.length; i++) {
+            IOException failure = failures[i]; FailureKind kind = kinds[i];
+            for (boolean body : new boolean[] {false, true}) {
+                AtomicInteger count = new AtomicInteger();
+                OkHttpClient http = newHttpClient().newBuilder().addInterceptor(chain -> {
+                    count.incrementAndGet();
+                    if (!body) throw failure;
+                    return response(chain.request(), 200, failingBody(failure, null));
+                }).build();
+                try {
+                    String events = recorded((body ? "body-" : "headers-") + i,
+                            () -> fail(() -> client(httpTransport(http)).entitlement(), kind));
+                    paired(events, "FAILED", categories[i]);
+                    check(count.get() == 1, "transport/body failure never replays a request");
+                    check(count(events, "\"stage\":\"HTTP\",\"result\":\"FAILED\"") == 1, "one transport failure record");
+                    check(events.contains("\"transportFailureKind\":") && events.contains("\"transportCauseKind\":"), "closed cause survives export");
+                    check(events.contains("\"transportCanceled\":\"false\"") && events.contains("\"transportThreadInterrupted\":\"false\""), "cancel and interrupt flags survive export");
+                    if (body) check(events.contains("\"httpStatus\":200"), "successful headers precede body failure");
+                    if (i == 3) check(events.contains("\"transportCauseKind\":\"EOF\""), "deepest body/transport cause retained");
+                } finally { shutdown(http); }
+            }
+        }
+        OkHttpClient cancel = newHttpClient().newBuilder().addInterceptor(chain ->
+                response(chain.request(), 200, failingBody(new IOException("PRIVATE_SENTINEL"), chain.call()::cancel))).build();
+        try {
+            String events = recorded("body-canceled", () -> fail(
+                    () -> client(httpTransport(cancel)).entitlement(), FailureKind.NETWORK_ERROR));
+            paired(events, "FAILED", "NETWORK_IO");
+            check(events.contains("\"transportCanceled\":\"true\""), "body cancellation reflects the original call");
+        } finally { shutdown(cancel); }
+        OkHttpClient newCallFailure = newHttpClient().newBuilder().eventListenerFactory(call -> {
+            throw new IllegalStateException("PRIVATE_SENTINEL");
+        }).build();
+        try {
+            String events = recorded("new-call-runtime", () -> fail(
+                    () -> client(httpTransport(newCallFailure)).entitlement(), FailureKind.INVALID_RESPONSE));
+            paired(events, "FAILED", "VALIDATION");
+            check(!events.contains("\"stage\":\"HTTP\""), "newCall runtime failure is classified before HTTP starts");
+        } finally { shutdown(newCallFailure); }
+        OkHttpClient interrupted = newHttpClient().newBuilder().addInterceptor(chain ->
+                response(chain.request(), 200, failingBody(new java.io.InterruptedIOException("PRIVATE_SENTINEL"),
+                        Thread.currentThread()::interrupt))).build();
+        try {
+            String events = recorded("body-interrupted", () -> {
+                try { fail(() -> client(httpTransport(interrupted)).entitlement(), FailureKind.TIMEOUT); }
+                finally { check(Thread.interrupted(), "diagnostics preserve the original thread interruption"); }
+            });
+            paired(events, "FAILED", "TIMEOUT");
+            check(events.contains("\"transportThreadInterrupted\":\"true\""), "interrupted body evidence survives export");
+        } finally { Thread.interrupted(); shutdown(interrupted); }
+        OkHttpClient malformed = newHttpClient().newBuilder().addInterceptor(chain -> response(chain.request(), 200,
+                ResponseBody.create(new byte[] {(byte) 0xc3, 0x28}, MediaType.get("application/json")))).build();
+        try {
+            String events = recorded("malformed-utf8", () -> fail(
+                    () -> client(httpTransport(malformed)).entitlement(), FailureKind.INVALID_RESPONSE));
+            paired(events, "FAILED", "VALIDATION");
+            check(!events.contains("\"transportFailureKind\":"), "decoder validation is not a transport failure");
+        } finally { shutdown(malformed); }
+    }
+    private static ResponseBody failingBody(IOException failure, Runnable beforeFailure) {
+        return new ResponseBody() {
+            private final BufferedSource source = Okio.buffer(new Source() {
+                @Override public long read(Buffer sink, long count) throws IOException {
+                    if (beforeFailure != null) beforeFailure.run();
+                    throw failure;
+                }
+                @Override public Timeout timeout() { return Timeout.NONE; }
+                @Override public void close() { }
+            });
+            @Override public MediaType contentType() { return MediaType.get("application/json"); }
+            @Override public long contentLength() { return -1; }
+            @Override public BufferedSource source() { return source; }
+        };
+    }
+    private static void shutdown(OkHttpClient http) {
+        http.connectionPool().evictAll(); http.dispatcher().executorService().shutdown();
+    }
+    private static String recorded(String name, Checked work) throws Exception {
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("pdsync-entitlement-diagnostic-");
+        try {
+            pdsync.DiagnosticLog.configure(directory, "0.5.81-test+102", "android");
+            pdsync.DiagnosticTrace trace = pdsync.DiagnosticLog.begin(pdsync.DiagnosticAction.CONNECT, false);
+            try (AutoCloseable ignored = pdsync.DiagnosticLog.bind(trace)) { work.run(); }
+            byte[] export = pdsync.DiagnosticLog.snapshotExport();
+            String evidence = System.getProperty("pdsync.diagnosticEvidence");
+            if (evidence != null) java.nio.file.Files.write(java.nio.file.Path.of(evidence, name + ".zip"), export);
+            try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(export))) {
+                java.util.zip.ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) if (entry.getName().equals("events.jsonl")) {
+                    String events = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+                    check(!events.contains(USER) && !events.contains(PASSWORD) && !events.contains(AUTH)
+                            && !events.contains(ORIGIN) && !events.contains("PRIVATE_SENTINEL"), "export omits credentials, URL and exception text");
+                    return events;
+                }
+            }
+            throw new AssertionError("Missing exported events");
+        } finally {
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(directory)) {
+                for (java.nio.file.Path file : files.sorted(java.util.Comparator.reverseOrder()).toList()) java.nio.file.Files.delete(file);
+            }
+        }
+    }
+    private static void paired(String events, String result, String failure) {
+        check(count(events, "\"stage\":\"CONNECTION\",\"result\":\"STARTED\"") == 1, "one entitlement STARTED");
+        check(count(events, "\"stage\":\"CONNECTION\",\"result\":\"" + result + "\",\"failure\":\"" + failure + "\"") == 1,
+                "one matching entitlement terminal category");
+        check(count(events, "\"networkTarget\":\"ENTITLEMENT\"") >= 2, "start and finish retain entitlement target");
+    }
+    private static int count(String text, String token) {
+        int result = 0, at = 0;
+        while ((at = text.indexOf(token, at)) >= 0) { result++; at += token.length(); }
+        return result;
     }
 
     private static void constructionAndEntitlement() throws Exception {
