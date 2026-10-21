@@ -41,7 +41,7 @@ public final class RootRestoreAdapterTests {
         unsupported.noRename=false;
         try(RootRestoreAdapter adapter=new RootRestoreAdapter(unsupported,binding(),GATE)){check(!adapter.pending(),"failed preflight cleans private prep");}
         check(restore(unsupported,Collections.singletonMap("rankings.dat",data("retry")))==Outcome.RESTORED,"successful retry after unsupported preflight");
-        singlePassReads(); preparationCrash(); cleanupCrash(); racedSource(); racedDestination(); rejectedGate();
+        singlePassReads(); activeWriterBackup(); preparationCrash(); cleanupCrash(); racedSource(); racedDestination(); rejectedGate();
         FakeMutationOs labels=fixture();labels.noXattr=true;
         try{restore(labels,Collections.singletonMap("rankings.dat",data("new")));throw new AssertionError("missing labels accepted");}catch(IOException expected){checks++;}
         check(new String(labels.files.children.get("rankings.dat").bytes,StandardCharsets.US_ASCII).equals("before"),"label refusal never writes live");
@@ -53,6 +53,19 @@ public final class RootRestoreAdapterTests {
         FakeMutationOs.Node after=os.files.children.get("rankings.dat");
         check(os.dataReads.getOrDefault(before.inode,0)==1,"old save read once for capture and independent backup");
         check(os.dataReads.getOrDefault(after.inode,0)==1,"final save read once for actual receipt");
+    }
+    static void activeWriterBackup()throws Exception {
+        FakeMutationOs os=fixture();FakeMutationOs.Node oldOpenFile=os.files.children.get("rankings.dat");
+        Outcome outcome=restoreWithGate(os,hook(os,true,()->{oldOpenFile.bytes=data("game-kept-writing");os.noSync=true;}));
+        check(outcome==Outcome.RESTORED_CLEANUP_PENDING,"old open-file writer does not invalidate committed result");
+        FakeMutationOs.Node backup=os.workspace().children.get("active").children.get("backup").children.get("rankings.dat");
+        check(backup.inode!=oldOpenFile.inode&&Arrays.equals(backup.bytes,data("before")),"backup independent of old open-file writes");
+        check(Arrays.equals(os.files.children.get("rankings.dat").bytes,data("new")),"old open-file writes do not alter restored inode");
+        os.noSync=false;
+        try(RootRestoreAdapter adapter=new RootRestoreAdapter(os,binding(),GATE)){
+            check(new RootRestoreTransaction().recover(adapter,adapter.target())==Outcome.RESTORED,"terminal journal cleans modified displaced inode");
+            check(!adapter.pending(),"terminal cleanup remains reusable");
+        }
     }
     static void preparationCrash()throws Exception {
         FakeMutationOs os=fixture();os.beforeRename=()->{throw new SimulatedDeath();};
