@@ -2577,8 +2577,8 @@
       "sha256": "8c6142820a0bb4286761fa7da682111893aafeb1cee5dfacb7d6c689a0bceb2b"
     },
     "core/src/test/kotlin/pdsync/AndroidReadOnlyRestoreTest.kt": {
-      "size": 18680,
-      "sha256": "7b61e269493703723abf42e38a200ddd1de805baf341bd3b181e494496369b3b"
+      "size": 18866,
+      "sha256": "7a41723391fed5c03efeb7169612987ee05ed146c3001fbcb2c47e3245d2a924"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
       "size": 19002,

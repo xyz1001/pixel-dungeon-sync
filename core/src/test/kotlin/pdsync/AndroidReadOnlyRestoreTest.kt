@@ -152,7 +152,9 @@ class AndroidReadOnlyRestoreTest {
             rig.assertReadOnlyComplete(selected.snapshot.files)
             if (sameBytes) assertEquals(prior.runs, rig.sidecar().runs)
             else assertNull(rig.sidecar().runs.getValue("game1").runUUID)
-            assertEquals(selected.id, rig.repo().baseline())
+            // Equal current-tip bytes are a verified no-op, not a new baseline adoption.
+            assertEquals(if (sameBytes) null else selected.id, rig.repo().baseline())
+            assertEquals(if (sameBytes) 0 else 1, rig.bridge.restores)
         }
     }
 
