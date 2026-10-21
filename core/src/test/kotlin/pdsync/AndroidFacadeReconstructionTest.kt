@@ -469,25 +469,16 @@ class AndroidFacadeReconstructionTest {
         assertEquals(setOf(a.id, b.id), inspection.remoteVersions.filter { it.isTip }.map { it.commitId }.toSet())
         val result = rigA.facade.restoreSelected(inspection, a.snapshot.id, true)
 
-        assertFalse(result.isConflict); assertFalse(result.isPending)
+        assertTrue(result.isConflict); assertFalse(result.isPending)
         assertEquals(1, bridgeA.restores)
         assertEquals(expectedFiles.keys, bridgeA.files.keys)
         expectedFiles.forEach { (name, bytes) -> assertContentEquals(bytes, bridgeA.files.getValue(name), name) }
-        val added = store.decoded().filter { it.id !in oldCommits }
-        assertEquals(2, added.size)
-        val preserved = added.single { it.kind == "snapshot" }
-        assertEquals(listOf(a.id), preserved.parents)
-        assertEquals(dirtyFiles, preserved.snapshot.files)
-        assertTrue(preserved.snapshot.id in store.objects)
-        val resolution = added.single { it.kind == "resolution" }
-        assertEquals(setOf(preserved.id, b.id), resolution.parents.toSet())
-        assertEquals(2, resolution.parents.size)
-        assertEquals(a.snapshot.files, resolution.snapshot.files)
+        assertTrue(store.decoded().none { it.id !in oldCommits })
         oldCommits.forEach { (id, bytes) -> assertContentEquals(bytes, store.commits.getValue(id), id) }
         oldObjects.forEach { (id, bytes) -> assertContentEquals(bytes, store.objects.getValue(id), id) }
         val restoredHistory = rigA.facade.historyPresentation(rigA.facade.inspect())
-        assertEquals(setOf(resolution.id), restoredHistory.graph.tips)
-        assertEquals(resolution.id, restoredHistory.baseline)
+        assertEquals(setOf(a.id,b.id), restoredHistory.graph.tips)
+        assertEquals(a.id, restoredHistory.baseline)
         assertFalse(rigA.facade.hasUnresolvedRestore()); assertFalse(journal(rigA.root).exists())
     }
     @Test fun failedRestoreRemainsBlockedAndRecoveryIsIdempotent() {

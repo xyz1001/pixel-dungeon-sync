@@ -95,11 +95,10 @@ class SharedSnapshotSelectionTest {
   local.root.resolve("game1/game.dat").writeText("unique-local")
   local.restoreCloudHistory(first.snapshot.id, store, true) { true }
   assertFiles(files(), local.root)
-  val plan = assertNotNull(repository(local).pending())
-  assertEquals(listOf(first.id), plan.commit.parents)
-  val result = assertIs<AppendPushResult.Diverged>(local.push(store) { true })
-  assertEquals(setOf(plan.commit.id, second.id), result.conflict.observedTips)
-  assertEquals(setOf(first.id, second.id, plan.commit.id), local.syncHistory().graph.commits.keys)
+  assertNull(repository(local).pending())
+  assertEquals(first.id,local.baseline())
+  assertEquals(setOf(first.id,second.id),local.syncHistory().graph.commits.keys)
+  assertEquals(0,store.writes)
  }
 
  @Test fun duplicateHistoryPrefersTipOverSmallerHistoricalCommitWithoutReparenting() {
@@ -208,14 +207,11 @@ class SharedSnapshotSelectionTest {
    val inspection = facade.inspect()
    val result = if (resolveDirectly) facade.resolveConflict(inspection, selected.snapshot.id)
     else facade.restoreSelected(inspection, selected.snapshot.id, false)
-   assertFalse(result.isConflict); assertFalse(result.isPending)
+   assertTrue(result.isConflict); assertFalse(result.isPending)
    assertEquals(selected.snapshot.files, bridge.content.mapValues { hash(it.value) })
    val history = facade.historyPresentation()
-   assertEquals(3, history.graph.commits.size)
-   val resolution = history.graph.commits.getValue(history.graph.tips.single())
-   assertEquals(setOf(firstId, secondId), resolution.parents.toSet())
-   assertEquals("resolution", resolution.kind)
-   assertEquals(2, store.writes)
+   assertEquals(2,history.graph.commits.size);assertEquals(setOf(firstId,secondId),history.graph.tips)
+   assertEquals(selected.id,history.baseline);assertEquals(0,store.writes)
   }
  }
 }

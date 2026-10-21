@@ -19,9 +19,10 @@ class AppendProfileSessionTest {
   var legacy = false
   var beforeObject: (() -> Unit)? = null
   var afterCommit: (() -> Unit)? = null
+  var afterReadObject: (() -> Unit)? = null
   override fun listCommits(cursor: String?) = CommitPage(commits.keys.toList())
   override fun readCommit(id: String) = commits[id]?.copyOf()
-  override fun readObject(id: String) = objects[id]?.copyOf()
+  override fun readObject(id: String): ByteArray? { val bytes=objects[id]?.copyOf(); afterReadObject?.also { afterReadObject=null }?.invoke(); return bytes }
   override fun writeCommit(id: String, bytes: ByteArray) { if (failWrite) error("offline"); commits[id] = bytes.copyOf(); afterCommit?.also { afterCommit = null }?.invoke() }
   override fun writeObject(id: String, bytes: ByteArray) { beforeObject?.also { beforeObject = null }?.invoke(); if (failWrite) error("offline"); objects[id] = bytes.copyOf() }
   override fun legacyPresent() = legacy
@@ -155,17 +156,20 @@ class AppendProfileSessionTest {
   assertTrue(local.history().any { it.manifest.id == remote.entry.manifest.id })
  }
 
- @Test fun threeBranchesOfferAllChoicesAndResolutionParentsEveryObservedTip() {
+ @Test fun threeBranchesOfferAllChoicesAndRestoreKeepsEveryCloudTip() {
   val store = Memory(); published(session(root("a")), store)
   val b = session(root("b")); assertIs<AppendPushResult.Diverged>(b.push(store) { true })
   val c = session(root("c")); val conflict = assertIs<AppendPushResult.Diverged>(c.push(store) { true }).conflict
   assertEquals(3, conflict.branches.size); val choice = conflict.branches.single { it.commit.id == b.baseline() }
-  val result = assertIs<AppendPushResult.Success>(c.resolve(conflict, choice.snapshot.manifest.id, store) { true })
-  assertEquals("resolution", result.commit.kind); assertEquals(conflict.observedTips, result.commit.parents.toSet())
-  assertEquals("b", content(c)); assertEquals(4, store.commits.size)
+  val commitsBefore=store.commits.mapValues { it.value.copyOf() };val objectsBefore=store.objects.mapValues { it.value.copyOf() }
+  val result = assertIs<AppendPushResult.Diverged>(c.resolve(conflict, choice.snapshot.manifest.id, store) { true })
+  assertEquals(conflict.observedTips,result.conflict.observedTips);assertEquals(choice.commit.id,c.baseline())
+  assertEquals("b", content(c)); assertEquals(3, store.commits.size);assertFalse(c.hasPending())
+  commitsBefore.forEach { (id,bytes)->assertContentEquals(bytes,store.commits.getValue(id)) }
+  objectsBefore.forEach { (id,bytes)->assertContentEquals(bytes,store.objects.getValue(id)) }
   assertFalse(c.history().any { it.reason == "恢复前自动备份" })
   assertTrue(c.history().any { it.manifest.files["game1/game.dat"] == hash("c".encodeToByteArray()) }) // Already published branch remains readable.
-  assertEquals(setOf(result.commit.id), graph(c, store).tips)
+  assertEquals(conflict.observedTips, graph(c, store).tips)
  }
 
  @Test fun changedLocalFilesInvalidateExplicitConflictChoiceBeforeAnyReplacement() {
@@ -185,29 +189,33 @@ class AppendProfileSessionTest {
   assertFalse(b.hasPending())
  }
 
- @Test fun lateSiblingAfterResolutionPublicationRemainsConflict() {
+ @Test fun lateSiblingDuringBranchDownloadInvalidatesSelectionWithoutWritingCloud() {
   val store = Memory(); val a = session(root("a")); published(a, store)
   val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   val thirdStore = Memory(); thirdStore.commits.putAll(store.commits); thirdStore.objects.putAll(store.objects)
   val c = session(root("late")); c.push(thirdStore) { true }
   val late = thirdStore.commits.keys - store.commits.keys
-  store.afterCommit = { late.forEach { store.commits[it] = thirdStore.commits.getValue(it) }; store.objects.putAll(thirdStore.objects) }
+  val baseline=b.baseline()
+  store.afterReadObject = { late.forEach { store.commits[it] = thirdStore.commits.getValue(it) }; store.objects.putAll(thirdStore.objects) }
   val result = assertIs<AppendPushResult.Diverged>(b.resolve(conflict, conflict.branches.first().snapshot.manifest.id, store) { true })
-  assertEquals(2, result.conflict.observedTips.size); assertTrue(result.conflict.observedTips.containsAll(late))
-  assertEquals(4, store.commits.size)
+  assertEquals(3, result.conflict.observedTips.size); assertTrue(result.conflict.observedTips.containsAll(late))
+  assertEquals(3, store.commits.size);assertEquals("b",content(b));assertEquals(baseline,b.baseline());assertFalse(b.hasPending())
  }
 
- @Test fun failedResolutionUploadRetriesExactChosenSnapshotAfterLocalEdit() {
+ @Test fun conflictRestoreWorksWithWritesDisabledAndOnlyLaterExplicitPushPublishesEdits() {
   val store = Memory(); val a = session(root("a")); published(a, store)
   val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   val choice = conflict.branches.single { it.commit.id == a.baseline() }
   store.failWrite = true
-  assertFails { b.resolve(conflict, choice.snapshot.manifest.id, store) { true } }
-  assertEquals("a", content(b)); assertTrue(b.hasPending())
-  val plan = AppendRepository(b.directory.resolve("append-v2"), Shattered, "demo").pending()!!
+  val result=assertIs<AppendPushResult.Diverged>(b.resolve(conflict, choice.snapshot.manifest.id, store) { true })
+  assertEquals(conflict.observedTips,result.conflict.observedTips)
+  assertEquals("a", content(b)); assertFalse(b.hasPending());assertEquals(choice.commit.id,b.baseline());assertEquals(2,store.commits.size)
   edit(b, "newer"); store.failWrite = false
-  val done = assertIs<AppendPushResult.Success>(b.push(store) { true })
-  assertEquals(plan.commit, done.commit); assertTrue(done.localDirty); assertEquals("newer", content(b))
+  val done = assertIs<AppendPushResult.Diverged>(b.push(store) { true })
+  val published=done.conflict.branches.single { it.commit.id==b.baseline() }.commit
+  assertEquals(listOf(choice.commit.id),published.parents);assertEquals("snapshot",published.kind)
+  assertEquals(hash("newer".encodeToByteArray()),published.snapshot.files["game1/game.dat"])
+  assertEquals("newer", content(b));assertEquals(3,store.commits.size)
  }
 
  @Test fun interruptedLocalApplyCannotBeReplayedAsPublicationBeforeExplicitArchive() {

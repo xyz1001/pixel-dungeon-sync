@@ -91,13 +91,14 @@ class AndroidSelectedRestoreEfficiency94Test {
   }
  }
 
- @Test fun equalBranchChoiceStillPublishesResolutionWithoutRedundantPreservation() {
+ @Test fun equalBranchChoiceAdoptsSelectionWithoutPublishingOrAbsorbingSibling() {
   val store=Store();publish(store);val chosen=store.latest();val sibling=store.child(chosen,emptyList())
   val bridge=Bridge();val r=rig(bridge,store);val home=r.facade.inspectHome();val writes=store.writes
   val result=r.facade.restoreSelected(home,chosen.snapshot.id,false)
-  assertEquals(writes+2,store.writes);assertEquals(0,bridge.restores)
-  assertEquals("resolution",store.latest().kind);assertEquals(setOf(chosen.id,sibling.id),store.latest().parents.toSet())
-  assertTrue(result.configurationComplete);assertFalse(result.isConflict);assertTrue(recoveryFiles(r).isEmpty())
+  assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
+  assertEquals(2,store.commits.size);assertEquals(setOf(chosen.id,sibling.id),repository(r).discover(store).tips)
+  assertEquals(chosen.id,repository(r).baseline());assertNull(repository(r).pending())
+  assertFalse(result.configurationComplete);assertTrue(result.isConflict);assertTrue(recoveryFiles(r).isEmpty())
  }
 
  @Test fun differentDirtySoleTipUsesTwoDiscoveriesNoWritesAndCreatesNoBackup() {
@@ -195,15 +196,16 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertFalse(r.facade.hasUnresolvedRestore())
  }
 
- @Test fun finalDiscoveryRejectsModifiedParentAndRetainsFrozenRestorePlan() {
+ @Test fun finalDiscoveryRejectsModifiedSelectedCommitWithoutInventingRestoreUpload() {
   val store=Store();publish(store);val chosen=store.latest();store.child(chosen,emptyList());val bridge=Bridge(files(9));val r=rig(bridge,store)
   val home=r.facade.inspectHome()
-  store.afterCommit={store.commits[chosen.id]=json.encodeToString(chosen.copy(kind="restore")).encodeToByteArray()}
+  val writes=store.writes
+  bridge.afterRestore={store.commits[chosen.id]=json.encodeToString(chosen.copy(kind="restore")).encodeToByteArray()}
   assertFailsWith<RemoteIntegrityException>{r.facade.restoreSelected(home,chosen.snapshot.id,true)}
   assertEquals(1,bridge.restores);assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
-  val frozen=assertNotNull(repository(r).pending())
-  assertEquals("resolution",frozen.commit.kind);assertEquals(chosen.snapshot.files,frozen.commit.snapshot.files)
-  assertNotEquals(frozen.commit.id,repository(r).baseline());assertFalse(r.facade.hasUnresolvedRestore())
+  assertNull(repository(r).pending());assertEquals(writes,store.writes)
+  assertEquals(chosen.id,repository(r).baseline());assertFalse(r.facade.hasUnresolvedRestore())
+
  }
 
  @Test fun loopbackDavBudgetSeparatesDifferentCurrentTipHistoryAndSameContentNoOp() {
@@ -241,11 +243,11 @@ class AndroidSelectedRestoreEfficiency94Test {
    val result=facade.restoreSelected(home,chosen.snapshot.id,true)
    val elapsedMillis=(System.nanoTime()-started)/1_000_000
    println("RESTORE94_BENCH mode=$mode elapsed_ms=$elapsedMillis http=${requests.size} puts=${requests.count {it.startsWith("PUT ")}} lists=${requests.count {it.startsWith("PROPFIND ")}} exports=${bridge.exports-exports} restores=${bridge.restores-restores}")
-   assertEquals(if(historical)27 else 20,requests.size)
-   assertEquals(2,requests.count {it.startsWith("PROPFIND ")});assertEquals(if(historical)2 else 0,requests.count {it.startsWith("PUT ")})
+   assertEquals(20,requests.size)
+   assertEquals(2,requests.count {it.startsWith("PROPFIND ")});assertEquals(0,requests.count {it.startsWith("PUT ")})
    assertEquals(exports+1,bridge.exports);assertEquals(restores+if(noop)0 else 1,bridge.restores)
    assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)});assertFalse(result.isConflict)
-   assertEquals(!noop,result.configurationComplete)
+   assertEquals(!noop&&!historical,result.configurationComplete)
   }
  }
 }

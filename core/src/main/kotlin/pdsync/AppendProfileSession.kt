@@ -35,14 +35,14 @@ internal class VerifiedSelectedRestore(
  val before:Map<String,String>,val baseline:String?,val readOnly:Boolean,val historical:Boolean=false
 ) {
  // Equal bytes are a no-op only for the current single tip. Historical/branch selections still
- // carry an explicit publication/metadata choice, even when their game bytes happen to match.
+ // carry an explicit local metadata choice, even when their game bytes happen to match.
  val unchanged:Boolean get() = !historical && selected!=null && graph.tips==setOf(selected.id) &&
   before==verified.snapshot.manifest.files &&
   (baseline==null || graph.displayGraph.descendsFrom(selected.id,baseline))
 }
 internal class SelectedRestoreStage(
  val selection:VerifiedSelectedRestore,val verified:VerifiedSnapshot,val graph:CommitMetadataGraph,
- val plan:VerifiedUploadPlan?=null,val applied:Boolean=true,val localResult:RestoreResult?=null,
+ val applied:Boolean=true,val localResult:RestoreResult?=null,
  val unchanged:Boolean=false
 )
 sealed interface AppendPushResult {
@@ -362,18 +362,6 @@ class AppendProfileSession(
   }
   VerifiedSelectedRestore(comparisonOwner,graph,selected,verified,comparison.localFiles,comparison.baselineId,readOnly,historical)
  }
- private fun publishSelectedPlan(plan:VerifiedUploadPlan,graph:CommitMetadataGraph,store:AppendStore,refreshGraph:Boolean=true):CommitMetadataGraph {
-  repository.publishVerified(store,plan,graph)
-  // Successful immutable object/commit readbacks prove our own delta. Keep the original remote
-  // parent set during the operation; one final discovery reports concurrent external branches.
-  val latest=if(refreshGraph)discoverMetadata(store)
-   else CommitMetadataGraph(graph.displayGraph.copy(commits=graph.commits+(plan.plan.commit.id to plan.plan.commit)))
-  require(latest.commits[plan.plan.commit.id]==plan.plan.commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
-  local.remember(plan.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.plan.commit.kind),repository.observedAt(plan.plan.commit.id))
-  repository.setSelectedBaseline(plan.plan.commit,latest,plan.verified)
-  markDirectorySynced(plan.plan.commit,"upload");repository.clearPending()
-  return latest
- }
  internal fun stageSelectedRestore(selection:VerifiedSelectedRestore,store:AppendStore,stopped:()->Boolean):SelectedRestoreStage = readLocked(store) {
   require(selection.owner===comparisonOwner)
   local.guard(stopped);noLegacyPending();appliedOnly()
@@ -415,10 +403,7 @@ class AppendProfileSession(
  }
  internal fun finishSelectedRestore(stage:SelectedRestoreStage,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
   require(stage.selection.owner===comparisonOwner);local.guard(stopped);appliedOnly()
-  val graph=when {
-   stage.plan!=null->publishSelectedPlan(stage.plan,stage.graph,store)
-   else->discoverMetadata(store)
-  }
+  val graph=discoverMetadata(store)
   val files=if(stage.applied)stage.verified.snapshot.manifest.files else stage.selection.before
   val baseline=repository.baseline()
   val lineage=when {
@@ -516,7 +501,7 @@ class AppendProfileSession(
   }.distinctBy { it.entry.manifest.id }
  }
 
- /** Ordinary fast-forward is allowed only for a clean baseline or a genuinely empty new target. */
+ /** Explicit restore validates the current files and adopts the selected cloud commit locally. */
  fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
   val comparison=readLocked(store) {compareLocked(store,stopped,true)}
   val selected=prepareTipRestore(comparison,snapshotId,store,stopped)
@@ -672,17 +657,19 @@ class AppendProfileSession(
   require(currentFiles() == conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_DURING_SELECTION_NOTHING_WAS_OVERWRITTEN_SYNC_AGAIN.text() }
   val branch = requireNotNull(conflict.snapshotBranch(chosenSnapshotId)) { CoreSessionMessages.THE_SELECTED_SNAPSHOT_IS_NOT_IN_AN_OBSERVED_BRANCH.text() }
   require(branch.commit.id in graph.tips && graph.commits[branch.commit.id] == branch.commit) { CoreSessionMessages.THE_SELECTION_IS_NOT_IN_AN_OBSERVED_BRANCH.text() }
-  // Re-download exact immutable bytes and preserve all branches before preparing a resolution.
-  conflict.branches.forEach { local.remember(repository.download(store, it.commit), CoreSessionMessages.CONFLICT_ORIGINAL_BRANCH.text(), repository.observedAt(it.commit.id)) }
+  // Choosing a cloud branch is a local restore. Existing cloud branches remain unchanged.
   val chosen = repository.download(store, branch.commit)
-  if (currentFiles() != chosen.manifest.files) local.checkRestore(chosen.manifest.id)
-  val plan = prepareAndApply(chosen, graph.tips.sorted(), "resolution", CoreSessionMessages.CONFLICT_RESOLUTION_EXPLICITLY_SELECTED.text(branch.commit.id.take(8))) { plan ->
-   require(currentFiles() == conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_DURING_VERIFICATION_NOTHING_WAS_OVERWRITTEN.text() }
-   if (currentFiles() != chosen.manifest.files) local.restore(snapshot(plan), stopped,conflict.observedLocalFiles)
-  }
-  // Apply precedes publication. Failed network work can only retry this exact chosen snapshot.
-  // Changes after this point remain dirty relative to the published baseline.
-  return publish(plan, store, stopped)
+  local.remember(chosen,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),repository.observedAt(branch.commit.id))
+  local.checkRestore(chosen)
+  val latest=discover(store)
+  if(latest!=graph)return AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
+  require(currentFiles() == conflict.observedLocalFiles) { CoreSessionMessages.LOCAL_PROGRESS_CHANGED_DURING_VERIFICATION_NOTHING_WAS_OVERWRITTEN.text() }
+  SafePaths.atomicWrite(applyMarker,"selected-branch-restore".encodeToByteArray())
+  if(currentFiles()!=chosen.manifest.files)local.restore(chosen,stopped,conflict.observedLocalFiles)
+  repository.setBaseline(branch.commit.id,latest)
+  markDirectorySynced(branch.commit)
+  SafePaths.checked(applyMarker).deleteExisting()
+  return AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
  }
 
  /** Read-only save comparison. Remote verification/history caches may be populated; saves and

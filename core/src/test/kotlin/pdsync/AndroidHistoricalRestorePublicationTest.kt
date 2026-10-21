@@ -11,7 +11,7 @@ import pdsync.android.app.*
 import kotlin.io.path.*
 import kotlin.test.*
 
-/** Historical Android restore must publish only after the real helper target was verified. */
+/** Historical Android downloads verify the helper without manufacturing cloud publications. */
 class AndroidHistoricalRestorePublicationTest {
     @TempDir lateinit var temp: Path
     private var sequence = 0
@@ -110,59 +110,49 @@ class AndroidHistoricalRestorePublicationTest {
         }
     }
 
-    @Test fun protectedHistoricalRestorePublishesInSameOperationAfterHelperVerification() {
-        val rig = Rig(); val (first, second) = rig.publishTwo()
+    @Test fun historicalRestoreAdoptsSelectedCommitWithoutPublicationAfterHelperVerification() {
+        val rig = Rig(); val (first, _) = rig.publishTwo()
         val originalCommits = rig.store.commits.mapValues { it.value.copyOf() }
-        rig.store.beforeWrite = {
-            assertEquals(first.snapshot.files, rig.bridge.hashes())
-            assertEquals(1, rig.bridge.restores)
-            assertTrue(rig.bridge.verifiedExportsAfterRestore > 0)
-            assertFalse(AndroidSyncFacade.hasUnresolvedRestore(rig.root))
-        }
+        val originalObjects = rig.store.objects.mapValues { it.value.copyOf() }
+        rig.store.beforeWrite = { fail("Historical download must not write to the cloud") }
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
-        assertFalse(result.isPending, "Verified historical restore must attempt its initial publication")
-        assertFalse(result.isConflict)
+        assertFalse(result.isPending); assertFalse(result.isConflict)
         assertNull(rig.pending()); assertFalse(rig.facade.hasUnresolvedRestore())
-        assertEquals(3, rig.store.commits.size)
-        val restored = rig.store.latest()
-        assertEquals("restore", restored.kind); assertEquals(listOf(second.id), restored.parents)
-        assertEquals(restored.snapshot.id, result.snapshotId)
-        assertEquals(first.snapshot.files, restored.snapshot.files)
-        assertEquals(first.snapshot.metadata, restored.snapshot.metadata)
-        assertEquals(first.snapshot.directoryMetadata, restored.snapshot.directoryMetadata)
+        assertEquals(2, rig.store.commits.size); assertEquals(2, rig.store.objects.size)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
+        assertEquals(first.snapshot.id, result.snapshotId); assertEquals(first.snapshot.files, rig.bridge.hashes())
+        assertEquals(1, rig.bridge.restores); assertTrue(rig.bridge.verifiedExportsAfterRestore > 0)
         originalCommits.forEach { (id, bytes) -> assertContentEquals(bytes, rig.store.commits.getValue(id)) }
-        assertEquals(restored.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
-        repeat(2) { assertEquals("UNCHANGED", rig.facade.autoUpload().status) }
-        assertEquals(3, rig.store.commits.size); assertEquals(1, rig.bridge.restores)
+        originalObjects.forEach { (id, bytes) -> assertContentEquals(bytes, rig.store.objects.getValue(id)) }
+        assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
     }
 
-    @Test fun helperFailureNeverPublishesBeforeExplicitRecoveryAndRetry() {
+    @Test fun helperFailureRequiresRecoveryWithoutCreatingAnyUploadPlan() {
         val rig = Rig(); val (first, second) = rig.publishTwo()
         rig.bridge.failRestore = true
         assertFails { rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false) }
         assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
-        assertEquals(second.snapshot.files, rig.bridge.hashes())
-        assertTrue(rig.facade.hasUnresolvedRestore())
-        val frozen = assertNotNull(rig.pending())
-        assertEquals("RESTORE_RECOVERY_REQUIRED", rig.facade.autoUpload().reasonCode)
+        assertEquals(second.snapshot.files, rig.bridge.hashes()); assertTrue(rig.facade.hasUnresolvedRestore())
+        assertNull(rig.pending()); assertEquals("RESTORE_RECOVERY_REQUIRED", rig.facade.autoUpload().reasonCode)
         rig.bridge.failRestore = false
         rig.facade.recoverRestore()
-        assertEquals(2, rig.store.commits.size); assertFalse(rig.facade.hasUnresolvedRestore())
-        val result = rig.facade.upload(rig.facade.inspect())
-        assertFalse(result.isPending); assertEquals(frozen.commit, rig.store.latest())
+        assertEquals(first.snapshot.files, rig.bridge.hashes()); assertEquals(2, rig.bridge.restores)
+        assertEquals(2, rig.store.commits.size); assertFalse(rig.facade.hasUnresolvedRestore()); assertNull(rig.pending())
+        assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
     }
 
-    @Test fun equalGameBytesStillPublishSelectedHistoryWithoutCallingHelperRestore() {
+    @Test fun equalGameBytesDoNotPublishRestoreOrChangeBaselineOrCallHelper() {
         val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.bridge.files = fixture(1)
         assertEquals("UPLOADED", rig.facade.autoUpload().status)
         val previous = rig.store.latest()
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertFalse(result.isPending); assertFalse(result.isConflict)
-        assertEquals(0, rig.bridge.restores); assertEquals(4, rig.store.commits.size)
-        assertEquals("restore", rig.store.latest().kind)
-        assertEquals(listOf(previous.id), rig.store.latest().parents)
-        assertEquals(first.snapshot.directoryMetadata, rig.store.latest().snapshot.directoryMetadata)
+        assertEquals(first.snapshot.id, result.snapshotId)
+        assertEquals(0, rig.bridge.restores); assertEquals(3, rig.store.commits.size)
+        assertEquals(3, rig.store.objectAttempts); assertEquals(3, rig.store.commitAttempts)
+        assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
         assertNull(rig.pending()); assertFalse(rig.facade.hasUnresolvedRestore())
     }
 
@@ -171,103 +161,101 @@ class AndroidHistoricalRestorePublicationTest {
         rig.bridge.throwAfterRestore = true
         assertFails { rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false) }
         assertEquals(first.snapshot.files, rig.bridge.hashes())
-        assertEquals(2, rig.store.commits.size); assertTrue(rig.facade.hasUnresolvedRestore())
+        assertEquals(2, rig.store.commits.size); assertTrue(rig.facade.hasUnresolvedRestore()); assertNull(rig.pending())
         rig.bridge.throwAfterRestore = false
-        val reopened = rig.reopen()
-        reopened.recoverRestore()
-        assertEquals(1, rig.bridge.restores); assertFalse(reopened.hasUnresolvedRestore())
-        reopened.upload(reopened.inspect())
-        assertEquals(3, rig.store.commits.size); assertEquals("restore", rig.store.latest().kind)
+        val reopened = rig.reopen(); reopened.recoverRestore()
+        assertEquals(1, rig.bridge.restores); assertFalse(reopened.hasUnresolvedRestore()); assertNull(rig.pending())
+        assertEquals(first.id, reopened.historyPresentation(reopened.inspect()).baseline)
+        assertEquals(2, rig.store.commits.size)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
     }
 
-    @Test fun failedInitialPublicationRetainsExactFrozenPlanForExplicitRestartRetry() {
+    @Test fun configuredCloudWriteFailuresCannotBlockHistoricalDownloadOrCreateRetryPlan() {
         for (failAtObject in listOf(true, false)) {
-            val rig = Rig(); val (first, second) = rig.publishTwo()
+            val rig = Rig(); val (first, _) = rig.publishTwo()
             rig.store.failObject = failAtObject; rig.store.failCommit = !failAtObject
-            assertFails { rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false) }
-            assertEquals(first.snapshot.files, rig.bridge.hashes())
+            val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
+            assertFalse(result.isPending); assertEquals(first.snapshot.files, rig.bridge.hashes())
             assertFalse(rig.facade.hasUnresolvedRestore()); assertEquals(1, rig.bridge.restores)
-            assertEquals(3, rig.store.objectAttempts)
-            assertEquals(if (failAtObject) 2 else 3, rig.store.commitAttempts)
-            assertEquals(2, rig.store.commits.size)
-            val frozen = assertNotNull(rig.pending())
-            assertEquals("restore", frozen.commit.kind); assertEquals(listOf(second.id), frozen.commit.parents)
-            rig.store.failObject = false; rig.store.failCommit = false
+            assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
+            assertEquals(2, rig.store.commits.size); assertNull(rig.pending())
             val reopened = rig.reopen(); val inspection = reopened.inspect()
-            assertTrue(inspection.isRetryablePending)
-            assertFalse(reopened.upload(inspection).isPending)
-            assertEquals(frozen.commit, rig.store.latest())
-            assertContentEquals(frozen.manifestBytes, rig.store.commits.getValue(frozen.commit.id))
-            assertContentEquals(frozen.zip, rig.store.objects.getValue(frozen.commit.snapshot.id))
-            assertNull(rig.pending()); assertEquals(1, rig.bridge.restores)
+            assertFalse(inspection.isRetryablePending)
+            assertEquals(first.id, reopened.historyPresentation(inspection).baseline)
         }
     }
 
-    @Test fun gameProgressAfterFinalReadbackSurvivesPublicationOfTheVerifiedRestore() {
+    @Test fun gameProgressAfterFinalReadbackSurvivesWithoutAnyCloudPublication() {
         val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.bridge.afterRestoreExport = { rig.bridge.files = fixture(9) }
-        val result=rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
+        val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertEquals(fixture(9).mapValues { hash(it.value) }, rig.bridge.hashes())
-        assertEquals(3, rig.store.commits.size);assertEquals(first.snapshot.files,rig.store.latest().snapshot.files)
-        assertFalse(result.isPending);assertFalse(rig.facade.hasUnresolvedRestore());assertNull(rig.pending())
-        // A final receipt proves that readback, not an indefinitely unchanged running game.
-        // Later progress is observed by the next read; it is never overwritten after the receipt.
-        assertEquals("DIFFERENT",rig.facade.inspect().kind)
+        assertEquals(2, rig.store.commits.size); assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
+        assertFalse(result.isPending); assertFalse(rig.facade.hasUnresolvedRestore()); assertNull(rig.pending())
+        val inspection = rig.facade.inspect()
+        assertEquals("DIFFERENT", inspection.kind)
+        assertEquals(first.id, rig.facade.historyPresentation(inspection).baseline)
     }
 
-    @Test fun acceptedWritesWithLostResponsesAreVerifiedWithoutRepeatingRestoreOrPublication() {
-        val rig = Rig(); val (first, second) = rig.publishTwo()
+    @Test fun lostWriteResponseConfigurationIsNeverExercisedByHistoricalDownload() {
+        val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.store.throwAfterObject = true; rig.store.throwAfterCommit = true
+        rig.store.beforeWrite = { fail("Restore unexpectedly attempted publication") }
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertFalse(result.isPending); assertFalse(result.isConflict)
-        assertEquals(3, rig.store.commits.size)
-        assertEquals(3, rig.store.objectAttempts); assertEquals(3, rig.store.commitAttempts)
+        assertEquals(2, rig.store.commits.size)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
         assertEquals(1, rig.bridge.restores); assertNull(rig.pending())
-        assertEquals(listOf(second.id), rig.store.latest().parents)
-        assertEquals(first.snapshot.files, rig.store.latest().snapshot.files)
+        assertEquals(first.snapshot.files, rig.bridge.hashes())
     }
 
-    @Test fun lostFrozenPlanCannotFallBackToCapturingAnOrdinarySnapshot() {
+    @Test fun failedHelperReceiptKeepsRecoveryGateWithoutCreatingAnUploadPlan() {
         val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.bridge.afterRestoreExport = {
             Files.walk(rig.root).use { paths ->
-                paths.filter { it.fileName.toString() == "active-plan.txt" }.findFirst().orElseThrow().deleteExisting()
+                assertFalse(paths.anyMatch { it.fileName.toString() == "active-plan.txt" })
             }
+            error("Synthetic final helper readback unavailable")
         }
         assertFails { rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false) }
-        assertEquals(first.snapshot.files, rig.bridge.hashes())
+        assertEquals(first.snapshot.files, rig.bridge.hashes()); assertTrue(rig.facade.hasUnresolvedRestore())
+        assertNull(rig.pending()); assertEquals(2, rig.store.commits.size)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
+        val reopened = rig.reopen(); reopened.recoverRestore()
+        assertEquals(1, rig.bridge.restores); assertFalse(reopened.hasUnresolvedRestore()); assertNull(rig.pending())
+        assertEquals(2, rig.store.commits.size)
+    }
+
+    @Test fun corruptWriteReadbackConfigurationCannotAffectReadOnlyHistoricalRestore() {
+        val rig = Rig(); val (first, _) = rig.publishTwo()
+        val originals = rig.store.objects.mapValues { it.value.copyOf() }
+        rig.store.corruptObject = true
+        val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
+        assertFalse(result.isPending); assertEquals(first.snapshot.files, rig.bridge.hashes())
+        assertFalse(rig.facade.hasUnresolvedRestore()); assertNull(rig.pending())
         assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
         assertEquals(2, rig.store.commits.size); assertEquals(1, rig.bridge.restores)
+        originals.forEach { (id, bytes) -> assertContentEquals(bytes, rig.store.objects.getValue(id)) }
     }
 
-    @Test fun corruptObjectReadbackBlocksCommitAndRetainsFrozenRestoreWithoutAutomaticRetry() {
-        val rig = Rig(); val (first, _) = rig.publishTwo()
-        rig.store.corruptObject = true
-        assertFailsWith<RemoteIntegrityException> {
-            rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
-        }
-        assertEquals(first.snapshot.files, rig.bridge.hashes())
-        assertFalse(rig.facade.hasUnresolvedRestore()); assertNotNull(rig.pending())
-        assertEquals(3, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
-        assertEquals(2, rig.store.commits.size); assertEquals(1, rig.bridge.restores)
-    }
-
-    @Test fun concurrentRemoteAdvancePreservesBothBranchesAndReturnsConflict() {
+    @Test fun concurrentRemoteAdvanceDuringHelperReceiptRemainsTheOnlyCloudTip() {
         val rig = Rig(); val (first, second) = rig.publishTwo()
         var concurrent: AppendCommit? = null
-        rig.store.afterObject = { concurrent = rig.store.remoteChild(second) }
+        rig.bridge.afterRestoreExport = { concurrent = rig.store.remoteChild(second) }
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
-        assertTrue(result.isConflict); assertFalse(result.isPending)
-        assertEquals(4, rig.store.commits.size)
-        val restored = rig.store.latest(); val sibling = assertNotNull(concurrent)
-        assertEquals("restore", restored.kind); assertEquals(listOf(second.id), restored.parents)
-        assertEquals(first.snapshot.files, restored.snapshot.files)
-        assertEquals(second.snapshot.files, sibling.snapshot.files)
+        assertFalse(result.isConflict); assertFalse(result.isPending)
+        assertEquals(3, rig.store.commits.size)
+        val advanced = assertNotNull(concurrent)
+        assertEquals(second.snapshot.files, advanced.snapshot.files)
+        assertEquals(listOf(second.id), advanced.parents)
         val inspection = rig.facade.inspect()
-        assertEquals("BRANCHED", inspection.kind)
-        assertEquals(setOf(restored.id, sibling.id), inspection.remoteVersions.map { it.commitId }.toSet())
+        assertEquals("DIFFERENT", inspection.kind)
+        assertEquals(first.id, rig.facade.historyPresentation(inspection).baseline)
+        assertTrue(inspection.remoteVersions.any { it.commitId == advanced.id })
         assertEquals(first.snapshot.files, rig.bridge.hashes())
         assertNull(rig.pending()); assertFalse(rig.facade.hasUnresolvedRestore())
         assertEquals(1, rig.bridge.restores)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
+        assertTrue(rig.store.commits.values.none { json.decodeFromString<AppendCommit>(it.decodeToString()).kind == "restore" })
     }
 }

@@ -117,7 +117,7 @@ class AndroidHomeReconstruction92Test {
   assertEquals(1,store.objectReadIds.count {it==old.snapshot.id})
   assertEquals(1,store.objectReadIds.filter {it in listOf(old.snapshot.id)}.size)
   assertEquals(exports+1,bridge.exports);assertFalse(publishedAfterReceipt)
-  assertEquals(3,store.commits.size);assertEquals(old.id,result.refreshedInspection?.comparison?.baselineId);assertTrue(result.configurationComplete)
+  assertEquals(3,store.commits.size);assertEquals(old.id,result.refreshedInspection?.comparison?.baselineId);assertFalse(result.configurationComplete)
   assertNotNull(result.refreshedInspection);assertFalse(result.isPending)
   assertEquals(old.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }

@@ -278,11 +278,10 @@ class AndroidSyncFacade internal constructor(
   val message=when {
    !staged.applied || conflict->CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text()
    staged.unchanged->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVE_BYTES_MATCH.text()
-   staged.plan!=null->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_VERIFIED_IN_THE_GAME_AND_PUBLISHED.text()
    readOnly->CoreMessages.ANDROID_SELECTED_VERSION_DOWNLOADED_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
    else->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
   }
-  return OperationResult(message,conflict,false,staged.plan?.plan?.commit?.snapshot?.id ?: snapshotId,refreshed,complete)
+  return OperationResult(message,conflict,false,snapshotId,refreshed,complete)
  }
  private fun restoreTipSelection(inspection:Inspection,snapshotId:String):OperationResult? {
   val observed=presentationChecked(inspection)

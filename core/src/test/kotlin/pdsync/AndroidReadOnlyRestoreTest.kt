@@ -113,27 +113,26 @@ class AndroidReadOnlyRestoreTest {
         assertEquals(selected.id, rig.repo().baseline()); assertEquals(1, rig.bridge.restores)
     }
 
-    @Test fun historicalDownloadKeepsCurrentBaselineThenRenewalUploadsNewLocalWork() {
+    @Test fun historicalDownloadAdoptsSelectedBaselineAndRenewalDoesNotAutoPublishOldBytes() {
         val rig = Rig(); val (first, second) = rig.publishTwo(); rig.expire()
         val result = rig.facade.restoreSelectedReadOnly(rig.facade.inspect(), first.snapshot.id, false)
         assertFalse(result.isPending); rig.assertReadOnlyComplete(first.snapshot.files)
-        assertEquals(second.id, rig.repo().baseline()); assertNull(rig.sidecar().lastSynced)
+        assertEquals(first.id, rig.repo().baseline()); assertEquals(first.id,rig.sidecar().lastSynced?.commitId)
         assertEquals(first.snapshot.directoryMetadata?.runs, rig.sidecar().runs)
         assertEquals(2, rig.store.commits.size)
         rig.store.expired = false
-        assertEquals("UPLOADED", rig.facade.autoUpload().status)
-        assertEquals(listOf(second.id), rig.store.latest().parents)
-        assertEquals("snapshot", rig.store.latest().kind)
-        assertEquals(first.snapshot.files, rig.store.latest().snapshot.files)
-        assertEquals(first.snapshot.directoryMetadata, rig.store.latest().snapshot.directoryMetadata)
+        assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
+        assertEquals(2,rig.store.commits.size);assertEquals(second.id,rig.store.latest().id)
+        assertEquals(first.id,rig.repo().baseline());assertNull(rig.repo().pending())
+
     }
 
-    @Test fun historicalDownloadDoesNotInventBaselineForNewInstallation() {
+    @Test fun historicalDownloadAdoptsVerifiedSelectedBaselineForNewInstallation() {
         val source = Rig(); val (first, _) = source.publishTwo()
         val rig = Rig(source.store); rig.bridge.files = emptyMap(); rig.expire()
         rig.facade.restoreSelectedReadOnly(rig.facade.inspect(), first.snapshot.id, false)
         rig.assertReadOnlyComplete(first.snapshot.files)
-        assertNull(rig.repo().baseline()); assertNull(rig.sidecar().lastSynced)
+        assertEquals(first.id,rig.repo().baseline()); assertEquals(first.id,rig.sidecar().lastSynced?.commitId)
         assertFalse(rig.facade.inspect().canAutoUpload)
     }
 
@@ -168,7 +167,7 @@ class AndroidReadOnlyRestoreTest {
         val sibling = rig.store.latest()
         assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
         val result = rig.facade.upload(rig.facade.inspect())
-        assertTrue(result.isConflict); assertEquals(listOf(second.id), rig.store.latest().parents)
+        assertTrue(result.isConflict); assertEquals(listOf(first.id), rig.store.latest().parents)
         assertEquals(setOf(sibling.id, rig.store.latest().id), rig.repo().discover(rig.store).tips)
     }
 
@@ -239,7 +238,7 @@ class AndroidReadOnlyRestoreTest {
         assertTrue(rig.facade.hasUnresolvedRestore()); assertEquals(0, rig.store.writes)
         assertEquals("RESTORE_RECOVERY_REQUIRED", rig.facade.autoUpload().reasonCode)
         rig.bridge.failRestore = false; rig.reopen().recoverRestore()
-        rig.assertReadOnlyComplete(first.snapshot.files); assertEquals(second.id, rig.repo().baseline())
+        rig.assertReadOnlyComplete(first.snapshot.files); assertEquals(first.id, rig.repo().baseline())
     }
 
     @Test fun uncertainHelperReplyRecoversWithoutRestoringAlreadyAppliedGameAgain() {
@@ -254,7 +253,7 @@ class AndroidReadOnlyRestoreTest {
         val rig = Rig(); val (first, second) = rig.publishTwo(); rig.expire(); rig.bridge.failRestore = true
         assertFails { rig.facade.restoreSelectedReadOnly(rig.facade.inspect(), first.snapshot.id, false) }
         rig.facade.discardInterruptedRestore()
-        rig.assertReadOnlyComplete(second.snapshot.files); assertEquals(second.id, rig.repo().baseline())
+        rig.assertReadOnlyComplete(second.snapshot.files); assertEquals(first.id, rig.repo().baseline())
         assertEquals(2, rig.store.commits.size)
     }
 

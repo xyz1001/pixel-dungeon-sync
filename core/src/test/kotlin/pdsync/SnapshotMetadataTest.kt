@@ -234,7 +234,7 @@ class SnapshotMetadataTest {
   assertContentEquals(initialBytes, remote.commits.getValue(initial.id))
  }
 
- @Test fun appendResolutionChoosingAnotherDeviceKeepsItsSnapshotOriginAndCurrentActor() {
+ @Test fun appendConflictRestoreKeepsSelectedSnapshotOriginWithoutCreatingAnotherActor() {
   val remote = Memory()
   val a = AppendProfileSession(AppConfig(saveRoot = root("initial").toString()), directory("state-a"), versions = policy, captureQuietMillis = 0)
   val initial = assertIs<AppendPushResult.Success>(a.push(remote) { true }).commit
@@ -245,15 +245,20 @@ class SnapshotMetadataTest {
   b.root.resolve("game1/game.dat").writeText("other B")
   val conflict = assertIs<AppendPushResult.Diverged>(b.push(remote) { true }).conflict
   val originalCommits = remote.commits.mapValues { it.value.copyOf() }
-  val resolved = assertIs<AppendPushResult.Success>(b.resolve(conflict, aBranch.snapshot.id, remote) { true }).commit
-  assertEquals("resolution", resolved.kind); assertEquals(conflict.observedTips, resolved.parents.toSet())
-  assertEquals(aBranch.snapshot.metadata, resolved.snapshot.metadata)
-  assertEquals(a.deviceIdentity(), resolved.snapshot.metadata!!.device)
-  assertEquals(b.deviceIdentity(), resolved.operation!!.device)
+  val originalObjects=remote.objects.mapValues {it.value.copyOf()};val writes=remote.writes
+  val result = assertIs<AppendPushResult.Diverged>(b.resolve(conflict, aBranch.snapshot.id, remote) { true })
+  assertEquals(conflict.observedTips,result.conflict.observedTips)
+  assertEquals(aBranch.id,b.baseline());assertFalse(b.hasPending());assertEquals(writes,remote.writes)
+  val restored=b.history().single {it.manifest.id==aBranch.snapshot.id}
+  assertEquals(aBranch.snapshot.metadata,restored.manifest.metadata)
+  assertEquals(a.deviceIdentity(),restored.manifest.metadata!!.device)
   assertEquals("chosen A", b.root.resolve("game1/game.dat").readText())
+  assertEquals(originalCommits.keys,remote.commits.keys);assertEquals(originalObjects.keys,remote.objects.keys)
   originalCommits.forEach { (id, bytes) -> assertContentEquals(bytes, remote.commits.getValue(id)) }
+  originalObjects.forEach { (id, bytes) -> assertContentEquals(bytes, remote.objects.getValue(id)) }
   assertTrue(initial.id in originalCommits)
-  assertNotNull(b.history().single { it.manifest.id == resolved.snapshot.id }.remoteObservedAt)
+  assertNotNull(restored.remoteObservedAt)
+
  }
 
  @Test fun metadataOnlyWriteAtReplacementBoundaryCancelsWithoutAnyBackup() {

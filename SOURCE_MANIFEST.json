@@ -17,8 +17,8 @@
       "sha256": "878a87cdcdbc135987e49aedc2149031e704ddd09ec11e445c3f9cdf5f612414"
     },
     "README.md": {
-      "size": 19267,
-      "sha256": "1b5e39dc0761d1f1f788ff07225d178dce7e2a605dbbe444e1a3c977a774f790"
+      "size": 19276,
+      "sha256": "56e266c480443faab90948cf2e4d9e1e9ba4d3ac7077ca8076a8ae21df77283b"
     },
     "RECONSTRUCTION_STATUS.md": {
       "size": 1652,
@@ -2273,8 +2273,8 @@
       "sha256": "6eaca587e0e1648d00d82d459e61ee9cd94aa141592527aa11e446f1e689dc8d"
     },
     "core/src/main/java/pdsync/i18n/CoreSessionMessages.java": {
-      "size": 50950,
-      "sha256": "ff06f5fd7bae4e6b71051980a29646567ae07d78725652c52f19c456924616ca"
+      "size": 50933,
+      "sha256": "9a4bc0fed37d25fa1ab90d1e1e5550b31b16e5ee027544d64ea049285b9b8992"
     },
     "core/src/main/java/pdsync/i18n/CoreValidationMessages.java": {
       "size": 19918,
@@ -2309,8 +2309,8 @@
       "sha256": "d99f832de6f55c857fee806282f6bc74c5867801e35d54a4b1a3d113ced85e62"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 63617,
-      "sha256": "1532bf7a5d265c72f0236f697cd1212862101d96995ab62a69127938815c5d42"
+      "size": 62350,
+      "sha256": "f6201c8c7d2de6c762a79e4f459706ef61fae876c2aa797fc6d8b01d75bc57df"
     },
     "core/src/main/kotlin/pdsync/AutomaticUploadEligibility.kt": {
       "size": 723,
@@ -2517,8 +2517,8 @@
       "sha256": "aed6c14aa563120fdf6528ed3bd59e870341422a070baba1098110a0c772f037"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidSyncFacade.kt": {
-      "size": 50411,
-      "sha256": "c9f24988a3e6394d4646be63dc1bfd82c3b837ad3ec208a3753a04e1d058f1cc"
+      "size": 50257,
+      "sha256": "2bc76751f2cf9583713529e81d95d5458ccf0a9c92d006442093ff9351112fef"
     },
     "core/src/main/kotlin/pdsync/presentation/AppPresentation.kt": {
       "size": 1012,
@@ -2561,16 +2561,16 @@
       "sha256": "29660e9c761e0ecb712f994892ce2d83c5dbb0092864d78d504bcb2054f5e46c"
     },
     "core/src/test/kotlin/pdsync/AndroidFacadeReconstructionTest.kt": {
-      "size": 39584,
-      "sha256": "08bacd6c24fb368cad204099a102923da7f00bb61436782cf00eaab511ff7c45"
+      "size": 39040,
+      "sha256": "b02c7792a91b864812d6690367d906bbf5f3fa3d0cbe9b976f0571f330048d4d"
     },
     "core/src/test/kotlin/pdsync/AndroidHistoricalRestorePublicationTest.kt": {
-      "size": 15722,
-      "sha256": "916717c9d8ec6609d6236c7bebacdf4058e2382f459569514e5bc4653db42aa8"
+      "size": 15666,
+      "sha256": "cb6f4855642f5589f0efddb9397fb42dc9938ff88387459ed839ce980cc1fd21"
     },
     "core/src/test/kotlin/pdsync/AndroidHomeReconstruction92Test.kt": {
-      "size": 19361,
-      "sha256": "ceec2eb48428edee610449cf457ecfbb1e62ace0fab28afd42cea79f0fb222e0"
+      "size": 19362,
+      "sha256": "7e2edd2845d98d9ba2fcead8bdf4e3115ac65923353550f2512e8a36bd426ed3"
     },
     "core/src/test/kotlin/pdsync/AndroidPackageNamespaceTest.kt": {
       "size": 9438,
@@ -2581,24 +2581,24 @@
       "sha256": "8c6142820a0bb4286761fa7da682111893aafeb1cee5dfacb7d6c689a0bceb2b"
     },
     "core/src/test/kotlin/pdsync/AndroidReadOnlyRestoreTest.kt": {
-      "size": 18652,
-      "sha256": "54ac71196af1366cbc749b8f0fe10f9b7a78b6f31333c1267385db45ae483581"
+      "size": 18600,
+      "sha256": "ab5aaea9e9b8b4efb5789fa70f3a7bd0e9f055d88176244c1fde65364428896f"
     },
     "core/src/test/kotlin/pdsync/AndroidRestoreReceiptRoundTrip97Test.kt": {
       "size": 7935,
       "sha256": "6b6f36e89d0e7bd1ebb789895059c628131da6afa20f75bccc46e187bcd6cd2f"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
-      "size": 18696,
-      "sha256": "3b482d1ff2e20446e6f655e6e1e8bae1ee5ee16da27956cb045103fdd1467fad"
+      "size": 18677,
+      "sha256": "29c6f3c9d9f9e55452fcf1890621cd8eefed24c2edc3ecc0a1476329122a5069"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
       "size": 15580,
       "sha256": "68e9204556fed341a65b6106e82fdba160a9253fe51ed03134711af20ea95e05"
     },
     "core/src/test/kotlin/pdsync/AppendProfileSessionTest.kt": {
-      "size": 20263,
-      "sha256": "43be02a079bccde798bba4935eb2ad53eaa06bbea2ca4869038836fbaf9f46da"
+      "size": 21218,
+      "sha256": "6fd532d790c951568e8034aabd5d10952616dc9513e79ea338e7b0f483df2131"
     },
     "core/src/test/kotlin/pdsync/AppendRepositoryTest.kt": {
       "size": 43349,
@@ -2733,8 +2733,8 @@
       "sha256": "f3be3b61db0dac0fb890ac299c24101026b5daeeac253d09978caddd9e7ccadc"
     },
     "core/src/test/kotlin/pdsync/OnboardingComparisonTest.kt": {
-      "size": 28699,
-      "sha256": "41a27cfec14cda49d49dee015cb6da8e8ed8e40f41a4eddfc748d10783ab2356"
+      "size": 27860,
+      "sha256": "d0b276e6bba85264b6f489b76d5f07fe6de20a9b79239cb5a6b8df5365835eaf"
     },
     "core/src/test/kotlin/pdsync/OnboardingConfigTest.kt": {
       "size": 2107,
@@ -2747,6 +2747,10 @@
     "core/src/test/kotlin/pdsync/PreparationDiagnosticEvidenceTest.kt": {
       "size": 8290,
       "sha256": "5ed37b0d76af445a471724034d2efc55d931ddab225da08ded67676b17c4f954"
+    },
+    "core/src/test/kotlin/pdsync/ProductionRestoreReadOnly97Test.kt": {
+      "size": 10545,
+      "sha256": "cd876981e26f937e6ac172e71cd90448a257b0936931d29899d8e383db33dcbb"
     },
     "core/src/test/kotlin/pdsync/ProductionWebDavFlowTest.kt": {
       "size": 21461,
@@ -2821,12 +2825,12 @@
       "sha256": "a284eb55ec5319baafd6c09913f3c93991bb70edeec2cf1838e1e8cc8e1fdea4"
     },
     "core/src/test/kotlin/pdsync/SharedSnapshotSelectionTest.kt": {
-      "size": 12659,
-      "sha256": "67c9dfbda8d4ed25f29bf715087d3dfafdfc6191f2139972842f355081e42495"
+      "size": 12388,
+      "sha256": "d46960d1b309e8acf3674efc00eb1a1318a52d6c0bbf4abd7c2acf44ed4fd24b"
     },
     "core/src/test/kotlin/pdsync/SnapshotMetadataTest.kt": {
-      "size": 17632,
-      "sha256": "dac5b4e0ae03b6604859e92d6c464ea07a359fac0fe078ac06785022adb8cfae"
+      "size": 17947,
+      "sha256": "3fcc08e27f0a5203e8de0951248fbdfe400dd044e32ccba55295fc2ac3254f7d"
     },
     "core/src/test/kotlin/pdsync/SyncBlockReasonTest.kt": {
       "size": 1104,
