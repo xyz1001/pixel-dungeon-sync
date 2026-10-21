@@ -58,6 +58,11 @@ public final class MainActivity {
         boolean getUploadUnnecessary() { return upload; }
         boolean getRestoreUnnecessary() { return restore; }
         boolean getMatchesCloudTip() { return matchesCloudTip; }
+        static SharedHomeContent fromHome(SyncHistory h, String selected, boolean verified, boolean pending, boolean conflict) {
+            SharedHomeContent content = from(h, selected, verified, pending, conflict);
+            return new SharedHomeContent(content.upload || content.matchesCloudTip,
+                    content.restore || content.matchesCloudTip && !"different-history".equals(selected), content.matchesCloudTip);
+        }
         static SharedHomeContent from(SyncHistory h, String selected, boolean verified, boolean pending, boolean conflict) {
             return new SharedHomeContent(verified && h != null && h.uploadUnnecessary,
                     verified && h != null && h.restoreUnnecessary,
@@ -299,14 +304,17 @@ public final class MainActivity {
         blocked(a -> { a.history.uploadUnnecessary = true; a.history.restoreUnnecessary = true; }, "both equal");
         MainActivity metadataMatch = fresh(true, true);
         metadataMatch.history.matchesCloudTip = true; metadataMatch.history.protectedLocal = false;
-        assertGates(metadataMatch, true, true, "metadata display match preserves transfer gates");
+        assertBlocked(metadataMatch, "metadata identical HOME blocks existing transfer buttons");
         check(metadataMatch.renderedStatus.startsWith(PROGRESS_SYNCED_LOCAL_AND_CLOUD_SAVES_32.text())
                 && metadataMatch.renderedKind == SharedHomeStatusKind.SYNCED,
                 "metadata content match must display synced independently of object proof");
         check(!metadataMatch.history.protectedLocal && !metadataMatch.history.uploadUnnecessary
                 && !metadataMatch.history.restoreUnnecessary && metadataMatch.operations == 0,
                 "display match cannot create protection or perform an operation");
-        metadataMatch.history.matchesCloudTip = false; metadataMatch.renderHome();
+        metadataMatch.selected = "different-history";
+        assertGates(metadataMatch, false, true, "different historical restore remains available");
+        metadataMatch.history.matchesCloudTip = false;
+        assertGates(metadataMatch, true, true, "changed local bytes re-enable HOME transfers");
         check(metadataMatch.renderedKind != SharedHomeStatusKind.SYNCED,
                 "changed content must clear the matching display");
         blocked(a -> { a.official = true; a.expired = true; }, "expired with local and cloud saves");

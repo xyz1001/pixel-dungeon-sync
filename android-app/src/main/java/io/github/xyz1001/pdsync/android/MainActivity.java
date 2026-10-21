@@ -1683,7 +1683,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private SharedHomeContent homeContent() {
-        return SharedHomeContent.from(this.history, this.selected,
+        return SharedHomeContent.fromHome(this.history, this.selected,
                 this.cloudVerified && this.connection != null && this.facade != null && this.inspection != null
                         && this.progress == OnboardingProgress.COMPLETE && this.readinessState.canContinue()
                         && !restoreNeedsAttention() && kind() != OnboardingKind.BLOCKED,

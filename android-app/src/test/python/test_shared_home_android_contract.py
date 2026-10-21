@@ -242,7 +242,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
     def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
         home = body(MAIN, 'private void renderHome()')
         evidence = body(MAIN, 'private SharedHomeContent homeContent()')
-        for required in ('SharedHomeContent.from(this.history, this.selected', 'this.cloudVerified',
+        for required in ('SharedHomeContent.fromHome(this.history, this.selected', 'this.cloudVerified',
                          'this.connection != null', 'this.facade != null', 'this.inspection != null',
                          'this.progress == OnboardingProgress.COMPLETE', '!restoreNeedsAttention()',
                          'kind() != OnboardingKind.BLOCKED', 'this.inspection.isRetryablePending()',

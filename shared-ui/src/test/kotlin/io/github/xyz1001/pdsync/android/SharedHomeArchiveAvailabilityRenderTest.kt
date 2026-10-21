@@ -47,7 +47,7 @@ class SharedHomeArchiveAvailabilityRenderTest {
 
     private fun state(history: SyncHistory?, selectedId: String? = null, verified: Boolean = true): SharedHomeState {
         val available = SharedHomeArchiveAvailability.from(history, selectedId, verified)
-        val unchanged = SharedHomeContent.from(history, selectedId, verified, false, false)
+        val unchanged = SharedHomeContent.fromHome(history, selectedId, verified, false, false)
         return SharedHomeState(SharedGameIdentity("Shattered Pixel Dungeon", "4.0.2"), "云端已连接",
             pageActive = true, canLaunch = true,
             canUpload = available.uploadSourceAvailable && !unchanged.uploadUnnecessary,
@@ -77,6 +77,7 @@ class SharedHomeArchiveAvailabilityRenderTest {
             Case("cloud-only", state(history(local = emptyMap())), listOf("restore")),
             Case("both-different", state(observed), listOf("upload", "restore")),
             Case("both-identical", state(history(local = cloudFiles)), emptyList()),
+            Case("metadata-identical", state(history(local = cloudFiles).copy(verifiedCommitIds = emptySet())), emptyList()),
             Case("empty-cloud-snapshot", state(history(emptyMap(), listOf(commit(files = emptyMap())))), emptyList()),
             Case("missing-selection", state(observed, selectedId = "missing-snapshot"), listOf("upload")),
             Case("unknown", state(null), emptyList()),

@@ -82,7 +82,7 @@ internal object DesktopSharedHomeAdapter {
   val sources = SharedHomeArchiveAvailability.from(history, current.selectedId, archiveVerified)
   val frozenUploadAvailable = archiveVerified && history != null && history.graph.pending.isEmpty() &&
    current.pendingUpload && current.pendingUploadSourceAvailable
-  val content = SharedHomeContent.from(history, current.selectedId,
+  val content = SharedHomeContent.fromHome(history, current.selectedId,
    complete && current.connected && archiveVerified,
    current.pendingUpload, current.hasConflict)
   val restoreProblem = current.restoreIssue?.takeIf {

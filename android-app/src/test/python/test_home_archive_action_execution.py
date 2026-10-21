@@ -79,10 +79,10 @@ class HomeArchiveActionExecution(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('home archive action execution passed', result.stdout)
 
-    def test_regression_detects_object_proof_reused_for_display(self):
-        result = self.execute(('content.getMatchesCloudTip()', 'content.getUploadUnnecessary()'))
+    def test_regression_detects_home_metadata_suppression_removed(self):
+        result = self.execute(('SharedHomeContent.fromHome(', 'SharedHomeContent.from('))
         self.assertNotEqual(0, result.returncode)
-        self.assertIn('metadata content match must display synced independently of object proof', result.stderr)
+        self.assertIn('metadata identical HOME blocks existing transfer buttons', result.stderr)
 
     def test_regression_detects_removed_expiry_and_refresh_guard(self):
         result = self.execute(("homeAccountAccessAvailable() && ", ""))

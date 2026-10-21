@@ -44,6 +44,25 @@ class SharedHomeContentTest {
         assertEquals(SharedHomeContent(matchesCloudTip = true), content(partlyVerified, "snapshot-tip"))
     }
 
+    @Test fun homeMetadataEqualitySuppressesOnlyTheMatchingTipWithoutChangingProof() {
+        val old = commit("old", files + ("badges.dat" to "e".repeat(64)))
+        val tip = commit("tip", parents = listOf("old"))
+        val observed = history(listOf(old, tip)).copy(verifiedCommitIds = emptySet())
+        val before = observed.copy(currentFiles = observed.currentFiles.toMap())
+        fun home(selected: String? = null, verified: Boolean = true, pending: Boolean = false,
+            conflict: Boolean = false) = SharedHomeContent.fromHome(observed, selected, verified, pending, conflict)
+        assertEquals(SharedHomeContent(true, true, true), home())
+        assertEquals(SharedHomeContent(true, true, true), home("snapshot-tip"))
+        assertEquals(SharedHomeContent(true, false, true), home("snapshot-old"))
+        assertEquals(SharedHomeContent(true, false, true), home("missing"))
+        assertEquals(SharedHomeContent(), home(verified = false))
+        assertEquals(SharedHomeContent(), home(pending = true))
+        assertEquals(SharedHomeContent(), home(conflict = true))
+        assertEquals(SharedHomeContent(matchesCloudTip = true), content(observed))
+        assertFalse(observed.currentProtected)
+        assertEquals(before, observed)
+    }
+
     @Test fun everyPathAndEveryFileHashMattersEvenWithTheSameCounts() {
         for (changed in listOf(files + ("game1/level1.dat" to "e".repeat(64)),
             files + ("badges.dat" to "f".repeat(64)),
@@ -85,9 +104,9 @@ class SharedHomeContentTest {
     }
 
     @Test fun repeatedRenderingIsPureAndRetainedCallbacksRecheckChangedCapabilities() {
-        val history = history()
+        val history = history().copy(verifiedCommitIds = emptySet())
         val original = history.copy(currentFiles = history.currentFiles.toMap())
-        repeat(20) { assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(history)) }
+        repeat(20) { assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), SharedHomeContent.fromHome(history, null, true, false, false)) }
         assertEquals(original, history)
 
         var state = SharedHomeState(null, "云端已连接", pageActive = true, canUpload = true, canRestore = true)
@@ -104,7 +123,7 @@ class SharedHomeContentTest {
         val interactions = SharedHomeInteractions({ state }, { actions })
         val retainedUpload = interactions::upload
         val retainedRestore = interactions::restore
-        val same = content(history)
+        val same = SharedHomeContent.fromHome(history, null, true, false, false)
         state = state.copy(canUpload = !same.uploadUnnecessary, canRestore = !same.restoreUnnecessary)
         retainedUpload(); retainedRestore()
         assertTrue(calls.isEmpty())

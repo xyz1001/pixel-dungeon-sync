@@ -37,7 +37,7 @@ class DesktopSharedHomeAdapterTest {
   historyOwner = config, historyVerified = true, localHistoryVerified = true,
  )
 
- @Test fun metadataEqualityShowsSyncedWithoutUpgradingObjectProofOrTransferCapabilities() {
+ @Test fun metadataEqualityDisablesHomeTransfersWithoutUpgradingObjectProof() {
   val observed = history().let { it.copy(
    graph = it.graph.copy(verification = RemoteVerification.METADATA_ONLY), verifiedCommitIds = emptySet()) }
   val before = observed.copy(currentFiles = observed.currentFiles.toMap())
@@ -48,8 +48,10 @@ class DesktopSharedHomeAdapterTest {
   assertEquals("已同步云端", local.status)
   assertFalse(local.dirty)
   assertTrue(state.history.edges.single().sameContent)
-  // Metadata changes display only; the host must still enter the existing fully checked routes.
-  assertTrue(state.canUpload); assertTrue(state.canRestore)
+  // Fresh unique-tip equality suppresses HOME actions without fabricating object proof.
+  assertFalse(state.canUpload); assertFalse(state.canRestore)
+  assertFalse(desktopHomeTransferAllowed(OperationAction.PUSH, state))
+  assertFalse(desktopHomeTransferAllowed(OperationAction.RESTORE, state))
   assertFalse(observed.currentProtected); assertFalse(observed.clean)
   assertNull(observed.baseline); assertNull(observed.baselineCommit); assertNull(observed.baselineDirection)
   assertTrue(observed.verifiedCommitIds.isEmpty())
@@ -76,6 +78,13 @@ class DesktopSharedHomeAdapterTest {
   assertNotEquals(state.status, different.status)
   assertNotEquals(SharedHomeStatusKind.SYNCED, different.statusKind)
   assertTrue(different.history!!.nodes.single { it.id == "local-current" }.dirty)
+  assertTrue(different.canUpload); assertTrue(different.canRestore)
+  val old = commit("old", content = mapOf("game1/game.dat" to "e".repeat(64)))
+  val tip = commit("tip", parents = listOf("old"))
+  val historical = history(listOf(old, tip)).copy(verifiedCommitIds = emptySet())
+  val selected = DesktopSharedHomeAdapter.state(ready(historical).copy(selectedId = "snapshot-old"))
+  assertFalse(selected.canUpload)
+  assertTrue(selected.canRestore, "A genuinely different historical restore remains actionable")
  }
 
  @Test fun expiredAuthenticatedAccountDisablesTransfersButKeepsLaunchAndHistory() {

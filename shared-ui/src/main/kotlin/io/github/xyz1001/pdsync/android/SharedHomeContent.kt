@@ -14,6 +14,25 @@ data class SharedHomeContent(
     val matchesCloudTip: Boolean = false,
 ) {
     companion object {
+        /** HOME button suppression only. Manifest equality never upgrades object proof or ancestry. */
+        @JvmStatic
+        fun fromHome(
+            history: SyncHistory?,
+            selectedId: String?,
+            verified: Boolean,
+            pendingUpload: Boolean,
+            hasConflict: Boolean,
+        ): SharedHomeContent {
+            val content = from(history, selectedId, verified, pendingUpload, hasConflict)
+            if (!content.matchesCloudTip || history == null) return content
+            val tip = history.graph.tips.singleOrNull()?.let(history.graph.commits::get)
+            val targetId = selectedId ?: history.defaultSnapshot
+            return content.copy(
+                uploadUnnecessary = true,
+                restoreUnnecessary = content.restoreUnnecessary || tip?.snapshot?.id == targetId,
+            )
+        }
+
         /** Unknown/failed observations and recovery/branch-selection actions retain host policy. */
         @JvmStatic
         fun from(
