@@ -1585,8 +1585,8 @@
       "sha256": "ba6d3561e343915e6751777ff7376bcb924527c14ca1a42a23fe670cf7cab6a8"
     },
     "android-app/src/test/python/test_controlled_session_contract.py": {
-      "size": 2551,
-      "sha256": "41f579d44a0561ca49ad9556d7dbb2b2f9d00dbf9015f693b0380c345b22713b"
+      "size": 3582,
+      "sha256": "79196a210b082d594438f77f0f3abc293ab9251d1c0ba1f71e82b6ff7583a7a4"
     },
     "android-app/src/test/python/test_detached_home_queue_execution.py": {
       "size": 14366,
@@ -1597,8 +1597,8 @@
       "sha256": "9f5a9719ddb5591ee47321d5f1c5e4960a08d4c938f8d366a7e1c1f053847f73"
     },
     "android-app/src/test/python/test_diagnostic_export_contract.py": {
-      "size": 11857,
-      "sha256": "361defa1b1d66479d932788ec78c1a558d298d163d8173eeb8182ca0e82f24e2"
+      "size": 12870,
+      "sha256": "210bf2313972767cd4216b561b5e42e4b45757d7b2a20ba7346607cbb2588c5f"
     },
     "android-app/src/test/python/test_embedded_install_contract.py": {
       "size": 10485,

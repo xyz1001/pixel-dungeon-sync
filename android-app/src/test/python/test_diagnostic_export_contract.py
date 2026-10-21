@@ -129,8 +129,21 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('DiagnosticResult.PENDING', MAIN)
         poll = body(SERVICE, 'public void poll()')
         self.assertIn('AndroidDiagnosticLogging.bind(automaticTrace())', poll)
-        self.assertEqual(poll.count('.record('), 3)  # Two terminal guards and one first PLAYING transition.
-        self.assertIn('if (!"PLAYING".equals(this.prefs.getString("state", "")))', poll)
+        self.assertNotIn('.record(', poll)  # Passive waiting emits no repeated progress/fsync records.
+        self.assertNotIn('"PLAYING"', poll)
+        self.assertIn('finish("PAUSED",', poll)
+        self.assertIn('finish("EXPIRED",', poll)
+        self.assertIn('attemptUpload();', body(poll, 'if (this.returned)'))
+        upload = body(SERVICE, 'private void attemptUpload()')
+        self.assertIn('automaticTrace().record(DiagnosticStage.WORK, DiagnosticResult.STARTED)', upload)
+        self.assertIn('automaticTrace().record(DiagnosticStage.VERIFY, AndroidDiagnosticLogging.automaticResult(status)', upload)
+        terminal = body(SERVICE, 'private synchronized void finishDiagnostics(')
+        self.assertIn('if (this.diagnosticFinished) return;', terminal)
+        self.assertIn('automaticTrace().record(DiagnosticStage.FINISHED, result, failure)', terminal)
+        self.assertIn('this.diagnosticFinished = true;', terminal)
+        self.assertLess(terminal.index('if (this.diagnosticFinished) return;'), terminal.index('.record('))
+        self.assertIn('finishDiagnostics(DiagnosticResult.CANCELED, DiagnosticFailure.CANCELED)',
+                      body(SERVICE, 'public void onDestroy()'))
         finish = body(SERVICE, 'private synchronized void finish(')
         self.assertIn('AndroidDiagnosticLogging.automaticResult(str)', finish)
         self.assertIn('case "SKIPPED_UNCERTAIN": case "PAUSED": return DiagnosticResult.SKIPPED', LOGGING)
