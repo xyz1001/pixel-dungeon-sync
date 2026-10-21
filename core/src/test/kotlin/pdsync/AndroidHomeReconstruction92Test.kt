@@ -62,10 +62,10 @@ class AndroidHomeReconstruction92Test {
   override fun legacyPresent()=false
   override fun <T> withReadScope(cacheDirectory:Path?,block:()->T):T {scopes++;if(scopeDepth++==0){outerScopes++;scopePaths+=cacheDirectory};try{return block()}finally{scopeDepth--;closedScopes++}}
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
-  fun child(parent:AppendCommit):AppendCommit {
+  fun child(parent:AppendCommit,parents:List<String> = listOf(parent.id)):AppendCommit {
    val snapshot=parent.snapshot.copy(id=UUID.randomUUID().toString())
    objects[snapshot.id]=objects.getValue(parent.snapshot.id).copyOf()
-   return parent.copy(id=UUID.randomUUID().toString(),parents=listOf(parent.id),snapshot=snapshot).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
+   return parent.copy(id=UUID.randomUUID().toString(),parents=parents,snapshot=snapshot).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
@@ -122,21 +122,21 @@ class AndroidHomeReconstruction92Test {
   assertEquals(old.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }
 
- @Test fun dirtyTipPreservesLocalBranchAndRestoresOneSelectedObject() {
+ @Test fun dirtySoleTipKeepsIndependentLocalBackupWithoutPublishing() {
   val store=Store();publish(store);val chosen=store.latest()
   val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
-  val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome();store.objectReadIds.clear()
+  val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome();store.objectReadIds.clear();val writes=store.writes
   val result=rig.facade.restoreSelected(home,chosen.snapshot.id,true)
   assertEquals(1,store.objectReadIds.count {it==chosen.snapshot.id})
   assertEquals(1,bridge.restores);assertTrue(result.configurationComplete)
-  val commits=store.commits.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}
-  assertTrue(commits.any {it.snapshot.files==before})
-  assertEquals("resolution",store.latest().kind);assertEquals(2,store.latest().parents.size)
+  assertEquals(writes,store.writes);assertEquals(chosen,store.latest())
+  val backups=Files.walk(rig.root).use {paths->paths.filter {it.parent?.fileName.toString()=="backups"&&it.fileName.toString().endsWith(".json")}.toList()}
+  assertTrue(backups.map {json.decodeFromString<Manifest>(it.readText())}.any {it.files==before})
   assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
  }
 
  @Test fun lateBranchDuringDirtyPreservationRemainsSeparateAndReportsConflictAfterRestore() {
-  val store=Store();publish(store);val chosen=store.latest()
+  val store=Store();publish(store);val chosen=store.latest();store.child(chosen,emptyList())
   val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
   val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome()
   var late:AppendCommit?=null

@@ -2305,8 +2305,8 @@
       "sha256": "d99f832de6f55c857fee806282f6bc74c5867801e35d54a4b1a3d113ced85e62"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 71161,
-      "sha256": "ca8918608f89ae08344039a48b2bf945ac6ac02a3559fe8156e92b78f2a4e9bb"
+      "size": 71274,
+      "sha256": "2be71da0b9b60fdd21bf4e6b61496f70ea481909b7c588f16d025e69ea7e510c"
     },
     "core/src/main/kotlin/pdsync/AutomaticUploadEligibility.kt": {
       "size": 723,
@@ -2565,8 +2565,8 @@
       "sha256": "916717c9d8ec6609d6236c7bebacdf4058e2382f459569514e5bc4653db42aa8"
     },
     "core/src/test/kotlin/pdsync/AndroidHomeReconstruction92Test.kt": {
-      "size": 19174,
-      "sha256": "dae5765ba10dc8f22c955bf661e8231662b186f56d18dfb1bb23fb4fba40c58a"
+      "size": 19342,
+      "sha256": "e2b922f81172ace8d43c1b027518b5f7f30f59d684834d4a2b268fd92dfb92e8"
     },
     "core/src/test/kotlin/pdsync/AndroidPackageNamespaceTest.kt": {
       "size": 9438,
@@ -2581,8 +2581,8 @@
       "sha256": "7b61e269493703723abf42e38a200ddd1de805baf341bd3b181e494496369b3b"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
-      "size": 16921,
-      "sha256": "70aa8a7009894bccac80c75f79be66f3396653395ca9adfea2c24d4382be31a2"
+      "size": 19002,
+      "sha256": "4a9917f1596289b64b29e8e0b33534f0cc64710ea3bb01a3e02ef1a99e5442c4"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
       "size": 15580,

@@ -389,7 +389,10 @@ class AppendProfileSession(
   val isTip=!selection.historical && selected!=null && selected.id in graph.tips
   val before=selection.before
   val baselineFiles=selection.baseline?.let {graph.commits.getValue(it).snapshot.files}
-  val preserveLocal=!selection.readOnly && isTip && before.isNotEmpty() && before!=chosen.snapshot.manifest.files &&
+  // An explicit restore of the sole current tip keeps the independent local backup/journal,
+  // without publishing the overwritten local bytes or an identical new cloud restore record.
+  // Actual branch choices retain their existing preservation/resolution publication semantics.
+  val preserveLocal=!selection.readOnly && isTip && graph.tips.size>1 && before.isNotEmpty() && before!=chosen.snapshot.manifest.files &&
    (selection.baseline==null || before!=baselineFiles)
   if(preserveLocal) {
    val captured=VerifiedSnapshot.read(local.capture(stopped,null),adapter)
@@ -413,8 +416,7 @@ class AppendProfileSession(
   }
   // Keep the selected parents fixed. A later cloud branch is never silently adopted as a parent;
   // completion refreshes its observation after the verified game receipt and any publication.
-  val direct=selection.readOnly || isTip && !preserveLocal && graph.tips.size==1 &&
-   (selection.baseline==null&&before.isEmpty() || before==baselineFiles&&graph.displayGraph.descendsFrom(requireNotNull(selected).id,requireNotNull(selection.baseline)))
+  val direct=selection.readOnly || isTip && graph.tips.size==1
   if(direct) {
    SafePaths.atomicWrite(applyMarker,"selected-restore".encodeToByteArray())
    val restored=local.restore(chosen,stopped,before)
