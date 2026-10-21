@@ -27,6 +27,12 @@ class Check {
         static class OperationResult { boolean isConflict(){return false;} boolean isPending(){return false;} }
         void completeOnboarding(Object i){}
     }
+    static class OperationReceipt {}
+    static class OperationReceiptContext {}
+    OperationReceiptContext captureOperationReceiptContext(){return null;}
+    boolean prepareOperationReceipt(OperationOutcome outcome,OperationReceiptContext context){return false;}
+    boolean isStaleOperationReceipt(AndroidSyncFacade.OperationResult result,OperationReceiptContext context){return false;}
+    boolean applyOperationReceipt(OperationOutcome outcome){return true;}
     static class SyncHistory { Object getBaselineCommit(){return null;} }
     static class GamePreparationService { static class PreparedPair { boolean legacyUnboundHelper; } }
     static class InstallProgressPolicy { static boolean requiresRebindAfterLegacyRecovery(boolean a,boolean b){return false;} }

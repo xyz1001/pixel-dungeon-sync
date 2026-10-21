@@ -4171,10 +4171,86 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         String refreshFailure;
         DiagnosticFailure refreshDiagnosticFailure = DiagnosticFailure.NONE;
         boolean requiresBridgeUpgrade;
+        boolean stale;
+        OperationReceipt receipt;
         AndroidSyncFacade.OperationResult result;
 
         private OperationOutcome() {
         }
+    }
+
+    private static final class OperationReceiptContext {
+        final AndroidSyncFacade facade;
+        final SecureConnectionStore.Connection account;
+        final OfficialOperationLease.Binding binding;
+        OperationReceiptContext(AndroidSyncFacade facade, SecureConnectionStore.Connection account,
+                                OfficialOperationLease.Binding binding) {
+            this.facade = facade; this.account = account; this.binding = binding;
+        }
+    }
+
+    private static final class OperationReceipt {
+        final OperationReceiptContext context;
+        final AndroidSyncFacade.Inspection inspection;
+        final SyncHistory history;
+        OperationReceipt(OperationReceiptContext context, AndroidSyncFacade.Inspection inspection, SyncHistory history) {
+            this.context = context; this.inspection = inspection; this.history = history;
+        }
+    }
+
+    /** Optional optimization context: its absence must never prevent offline local recovery. */
+    private OperationReceiptContext captureOperationReceiptContext() {
+        final AndroidSyncFacade owner = this.facade;
+        final SecureConnectionStore.Connection account = this.connection;
+        if (owner == null || account == null) return null;
+        try { return new OperationReceiptContext(owner, account, officialOperationBinding(account)); }
+        catch (Exception unavailable) { return null; }
+    }
+
+    private boolean currentOperationReceipt(OperationReceiptContext context) {
+        if (context == null || isDestroyed() || this.facade != context.facade || this.connection != context.account) return false;
+        try { return context.binding.matches(officialOperationBinding(context.account)); }
+        catch (Exception unavailable) { return false; }
+    }
+
+    private boolean isStaleOperationReceipt(AndroidSyncFacade.OperationResult result, OperationReceiptContext context) {
+        return result.getRefreshedInspection() != null && !currentOperationReceipt(context);
+    }
+
+    /** Core's verified apply receipt replaces only redundant post-restore export/completion work. */
+    private boolean prepareOperationReceipt(OperationOutcome outcome, OperationReceiptContext context) throws Exception {
+        final AndroidSyncFacade.Inspection refreshed = outcome.result.getRefreshedInspection();
+        if (refreshed == null) return false;
+        if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
+        if (outcome.result.isPending() || outcome.result.isConflict() || refreshed.getNeedsRestoreRecovery()
+                || hasAnyRestoreJournal()) return false;
+        final SyncHistory refreshedHistory = context.facade.historyPresentation(refreshed);
+        if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
+        if (outcome.result.getConfigurationComplete())
+            SyncRuntime.setOnboardingProgress(this, context.account, OnboardingProgress.COMPLETE);
+        if (!currentOperationReceipt(context)) { outcome.stale = true; return true; }
+        outcome.receipt = new OperationReceipt(context, refreshed, refreshedHistory);
+        return true;
+    }
+
+    /** UI publication is paired and rechecks ownership after the worker has finished. */
+    private boolean applyOperationReceipt(OperationOutcome outcome) {
+        if (outcome.stale) return false;
+        final OperationReceipt receipt = outcome.receipt;
+        if (receipt == null) return true;
+        if (!currentOperationReceipt(receipt.context)) return false;
+        this.inspection = receipt.inspection;
+        this.history = receipt.history;
+        this.cloudVerified = true;
+        this.homeObservationOwner = currentHomeContext(0);
+        boolean found = false;
+        for (AppendCommit commit : this.history.getCloud())
+            if (commit.getSnapshot().getId().equals(this.selected)) found = true;
+        if (!found) {
+            this.selected = this.history.getDefaultSnapshot();
+            this.explicitHomeSelection = null;
+        }
+        return true;
     }
 
     private void operation(DiagnosticAction action, String str, final Task<AndroidSyncFacade.OperationResult> task, final String str2) {
@@ -4200,6 +4276,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* synthetic */ OperationOutcome m54xc977a20(Task task) throws Exception {
         SyncHistory syncHistory;
         OperationOutcome operationOutcome = new OperationOutcome();
+        final OperationReceiptContext receiptContext = captureOperationReceiptContext();
         operationOutcome.result = (AndroidSyncFacade.OperationResult) task.run();
         DiagnosticLog.record(DiagnosticStage.VERIFY, operationOutcome.result.isConflict() ? DiagnosticResult.CONFLICT
                 : operationOutcome.result.isPending() ? DiagnosticResult.PENDING : DiagnosticResult.SUCCEEDED);
@@ -4230,12 +4307,17 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return operationOutcome;
         }
         try {
+            if (prepareOperationReceipt(operationOutcome, receiptContext)) return operationOutcome;
             readComparison(true, false);
             if (this.cloudVerified && kind() == OnboardingKind.IDENTICAL && (syncHistory = this.history) != null && syncHistory.getBaselineCommit() != null && !operationOutcome.result.isPending() && !operationOutcome.result.isConflict()) {
                 sync().completeOnboarding(this.inspection);
                 SyncRuntime.setOnboardingProgress(this, this.connection, OnboardingProgress.COMPLETE);
             }
         } catch (Exception refreshError) {
+            if (isStaleOperationReceipt(operationOutcome.result, receiptContext)) {
+                operationOutcome.stale = true;
+                return operationOutcome;
+            }
             // The operation already completed. A separate cloud refresh cannot undo local recovery.
             DiagnosticLog.failure(DiagnosticStage.REFRESH, refreshError);
             this.cloudVerified = false;
@@ -4249,6 +4331,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: lambda$operation$86$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m55x8211a061(String str, OperationOutcome operationOutcome) throws Exception {
+        if (!applyOperationReceipt(operationOutcome)) return;
         if (operationOutcome.requiresBridgeUpgrade) {
             this.facade = null;
             this.inspection = null;
