@@ -120,23 +120,20 @@ class RootUiContract(unittest.TestCase):
                           'InstallNext m32xc4841ad1()', 'Object m33x39fe4112(', 'Object m36x9a6cb3d5('):
             self.assertIn('if (SyncRuntime.rootMode(this)) throw', body(MAIN, signature))
 
-    def test_auto_service_uses_actual_capabilities_and_quiet_root_observation(self):
+    def test_auto_service_uses_actual_capabilities_and_passive_return(self):
         self.assertIn('SyncRuntime.currentSelectionToken(context)', SERVICE)
         self.assertIn('SyncRuntime.currentSelectionToken(this)', SERVICE)
-        self.assertIn('this.bridge = SyncRuntime.backend(this)', SERVICE)
+        self.assertNotIn('observeLifecycle(', SERVICE)
         initialization = body(SERVICE, 'void m1x57256bb9()')
-        self.assertLess(initialization.index('SyncRuntime.automaticAllowed'), initialization.index('SyncRuntime.backend(this)'))
+        self.assertLess(initialization.index('SyncRuntime.automaticAllowed'), initialization.index('SyncRuntime.facade(this, this.connection)'))
         launch = body(MAIN, 'void m49x6e86027e(')
         self.assertIn('!automaticObservationSupported()', launch)
         self.assertNotIn('if (this.rootGame != null ||', launch)
         capture = body(MAIN, 'Intent m48xf90bdc3d()')
         self.assertIn('if (this.rootGame != null && !this.cloudVerified) readComparison()', capture)
         self.assertLess(capture.index('readComparison()'), capture.index('beginControlledSession()'))
-        policy = body(SERVICE, 'static boolean reliableForAutomaticObservation(')
-        self.assertIn('observation.reliable', policy)
-        self.assertIn('observation.foreground || observation.ready', policy)
-        self.assertNotIn('processPresent', policy)
-        self.assertIn('this.facade.observeControlledSession(controlledObservation, observationObserveLifecycle.reliable, observationObserveLifecycle.foreground)', SERVICE)
+        self.assertNotIn('observeControlledSession(', SERVICE)
+        self.assertIn('if (this.returned)', body(SERVICE, 'public void poll()'))
         settings = body(MAIN, 'private void renderSettings()')
         self.assertIn('selectedGame && automaticObservationSupported()', settings)
         self.assertIn('capabilities.canToggleAutomatic', settings)

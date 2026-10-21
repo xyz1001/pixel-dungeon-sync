@@ -15,19 +15,15 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertIn('class BridgeClient implements GameAccessBackend', CLIENT)
         self.assertIn('embedded() ? Mode.EMBEDDED_BRIDGE : Mode.LEGACY_HELPER_BRIDGE',
                       body(CLIENT, 'public Mode mode()'))
-        self.assertIn('new Capabilities(true, true, true, true)', CLIENT)
+        self.assertIn('new Capabilities(true, true, false, true)', CLIENT)
         self.assertIn('return CAPABILITIES;', body(CLIENT, 'public Capabilities capabilities()'))
         self.assertNotIn('ROOT_DIRECT', CLIENT)
 
-    def test_lifecycle_evidence_still_comes_from_authenticated_exchange(self):
+    def test_lifecycle_observation_is_unsupported_without_any_exchange(self):
         observer = body(CLIENT, 'public Observation observeLifecycle()')
-        self.assertIn('exchange("inspect", null)', observer)
-        for field in ('gameForeground', 'gameProcessPresent', 'ready', 'observationReliable'):
-            self.assertIn('reply.getBoolean("' + field + '", false)', observer)
-        self.assertIn('catch (Exception unused)', observer)
         self.assertIn('return Observation.unknown();', observer)
-        self.assertNotIn('capabilities()', observer)
-        self.assertNotIn('mode()', observer)
+        self.assertNotIn('exchange(', observer)
+        self.assertNotIn('call(', observer)
 
     def test_factory_keeps_prepared_selection_and_identity_without_readiness_claims(self):
         factory = body(FACTORY, 'public static GameAccessBackend forPreparedGame(')
@@ -42,9 +38,9 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertIn('backend(context)', facade)
         self.assertIn('GameAccessBackends.forPreparedGame(context, prepared, gameIdentity(context, prepared))', body(RUNTIME, 'GameAccessBackend backend('))
         self.assertNotIn('new BridgeClient(', facade)
-        self.assertIn('private GameAccessBackend bridge;', SERVICE)
-        self.assertIn('GameAccessBackend.Observation observationObserveLifecycle', SERVICE)
-        self.assertIn('this.bridge = SyncRuntime.backend(this)', SERVICE)
+        self.assertNotIn('observeLifecycle(', SERVICE)
+        self.assertNotIn('lifecycleObservation', SERVICE)
+        self.assertIn('this.facade = SyncRuntime.facade(this, this.connection)', SERVICE)
         self.assertNotIn('new BridgeClient(', SERVICE)
 
     def test_metadata_does_not_replace_existing_readiness_or_automatic_gates(self):
@@ -57,7 +53,7 @@ class GameAccessBackendContract(unittest.TestCase):
         self.assertNotIn('rootMode(context) ||', automatic)
         support = body(RUNTIME, 'static boolean backendSupportsAutomatic(')
         self.assertIn('exportSupported', support)
-        self.assertIn('lifecycleObservation', support)
+        self.assertNotIn('lifecycleObservation', support)
         self.assertIn('LEGACY_HELPER_BRIDGE', support)
         for operation in ('inspectReady(', 'observeLifecycle(', 'probeRootAuthorization(', 'exportTo('):
             self.assertNotIn(operation, automatic)
