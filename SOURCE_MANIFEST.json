@@ -165,8 +165,8 @@
       "sha256": "7befd0892b6a9c28c80652962adb800cb3cccd0631c426e0a7b2b20fd4831a44"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeClient.java": {
-      "size": 33781,
-      "sha256": "797bfc7f7253aba4ed75db35f92aadad4314a3c0f4e6acaa760abc1111f2864e"
+      "size": 36037,
+      "sha256": "e8929e8500f4fd5262b35c82677a47e08c502017d874152d0e2e7f82252049d0"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/BridgeDiagnostics.java": {
       "size": 28655,
@@ -1580,6 +1580,10 @@
       "size": 3739,
       "sha256": "ae26e58ccfc60778749934f76b0549a083e41e3f0bcb841fe012533499720a80"
     },
+    "android-app/src/test/python/test_bridge_capability_diagnostics94_execution.py": {
+      "size": 7887,
+      "sha256": "7d7fe921153405dca9b386bf62d9bd5af59d2b6b8da82ca06c0b5af92e7f1d09"
+    },
     "android-app/src/test/python/test_controlled_session_contract.py": {
       "size": 2551,
       "sha256": "41f579d44a0561ca49ad9556d7dbb2b2f9d00dbf9015f693b0380c345b22713b"
@@ -2332,17 +2336,21 @@
       "size": 2346,
       "sha256": "0910d3ab243377073b4e5170cf015b7f73112a17e6b4c179fe186a5a54c358a5"
     },
+    "core/src/main/kotlin/pdsync/DiagnosticCapabilities.kt": {
+      "size": 1703,
+      "sha256": "b82002bdc6f8b5fd0dc7c7ae1c8dc5f27db52370f422ed7ce36dc9fe4ebb9f1d"
+    },
     "core/src/main/kotlin/pdsync/DiagnosticDetails.kt": {
-      "size": 17663,
-      "sha256": "8810c28aca7260470e2c2cbfcbf645a0ed3d11da02513d24f9209408b6bd8bc8"
+      "size": 19210,
+      "sha256": "393d8def37a813b1520f6f8f0412ea3e6093d80e50f637b76999ffcbf05902f3"
     },
     "core/src/main/kotlin/pdsync/DiagnosticEnvironment.kt": {
       "size": 4559,
       "sha256": "90f53e1474d284deb452339ca0eb019ff9607975e58e779866edcc3665414548"
     },
     "core/src/main/kotlin/pdsync/DiagnosticLog.kt": {
-      "size": 31367,
-      "sha256": "45fa1190a359bb082e5b0edc708f582f5f46cdcc6df2f5a2bffcc371f25a5f49"
+      "size": 31755,
+      "sha256": "de89113e081e2133668d1d8b736fb4c40692ff683f6e4322d83c8eb816159478"
     },
     "core/src/main/kotlin/pdsync/DiagnosticTiming.kt": {
       "size": 4006,
@@ -2639,6 +2647,10 @@
     "core/src/test/kotlin/pdsync/DetachedHomeReadTest.kt": {
       "size": 3688,
       "sha256": "e4bd7351fe0373479aedcbab0c0b988925e16041f7c89df18430e71a86a02269"
+    },
+    "core/src/test/kotlin/pdsync/DiagnosticCapabilityEvidence94Test.kt": {
+      "size": 4964,
+      "sha256": "f1ec6223261de68049c3c3ad69d5a2407cf14d5e1a0b30584fb9daed5d6b5832"
     },
     "core/src/test/kotlin/pdsync/DiagnosticDetailsTest.kt": {
       "size": 14031,

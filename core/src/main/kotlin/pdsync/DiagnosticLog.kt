@@ -44,6 +44,7 @@ import javax.net.ssl.SSLException
 
 class DiagnosticTrace internal constructor(val id: String, val action: DiagnosticAction, val automatic: Boolean) {
  internal val timings = DiagnosticPhaseCollector()
+ internal val capabilities = DiagnosticCapabilityCollector()
  internal val startedNanos = System.nanoTime()
  fun record(stage: DiagnosticStage, result: DiagnosticResult): Boolean = record(stage, result, DiagnosticFailure.NONE)
  fun record(stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure): Boolean =
@@ -154,12 +155,17 @@ object DiagnosticLog {
    prepare(config); prune(config)
    val now = config.clock.instant(); val zone = safeZone(config.clock.zone)
    val phaseTotals = if (stage == DiagnosticStage.FINISHED) trace.timings.snapshot() else emptyMap()
+   var finishedDetails = details
+   if (stage == DiagnosticStage.FINISHED) {
+    val capabilityEvidence = trace.capabilities.snapshot()
+    if (!capabilityEvidence.isEmpty()) finishedDetails = (finishedDetails ?: DiagnosticDetails.builder().build()).withCapabilityEvidence(capabilityEvidence)
+    if (phaseTotals.isNotEmpty()) finishedDetails = (finishedDetails ?: DiagnosticDetails.builder().build()).withPhaseTimings(phaseTotals)
+   }
    val record = Record(timestampUtc = now.toString(), zone = zone.id,
     offsetMinutes = zone.rules.getOffset(now).totalSeconds / 60, appVersion = config.version, platform = config.platform,
     operationId = trace.id, action = trace.action, automatic = trace.automatic, stage = stage, result = result, failure = failure,
     elapsedMs = ((System.nanoTime() - trace.startedNanos) / 1_000_000).coerceIn(0, 7 * 24 * 60 * 60 * 1000L),
-    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 }, details = if(phaseTotals.isNotEmpty())
-     (details ?: DiagnosticDetails.builder().build()).withPhaseTimings(phaseTotals) else details)
+    httpMethod = method, httpStatus = status?.takeIf { it in 100..599 }, details = finishedDetails)
    var line = (codec.encodeToString(record) + "\n").toByteArray(Charsets.UTF_8)
    require(line.size <= MAX_LINE_BYTES)
    val file = SafePaths.checked(config.directory.resolve("events-${utcDate(now)}.jsonl"))

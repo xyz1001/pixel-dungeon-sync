@@ -62,7 +62,13 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("installationPhase") INSTALLATION_PHASE,
   @SerialName("installationCache") INSTALLATION_CACHE,
   @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS,
-  @SerialName("phaseTimings") PHASE_TIMINGS
+  @SerialName("phaseTimings") PHASE_TIMINGS,
+  @SerialName("helperAccessProtocolVersion") HELPER_ACCESS_PROTOCOL_VERSION,
+  @SerialName("helperSinglePassReadVersion") HELPER_SINGLE_PASS_READ_VERSION,
+  @SerialName("helperReadSnapshotVersion") HELPER_READ_SNAPSHOT_VERSION,
+  @SerialName("helperRestoreResultVersion") HELPER_RESTORE_RESULT_VERSION,
+  @SerialName("helperReadSnapshotCapability") HELPER_READ_SNAPSHOT_CAPABILITY,
+  @SerialName("helperRestoreResultCapability") HELPER_RESTORE_RESULT_CAPABILITY
  }
  enum class Mode { ROOT_DIRECT, EMBEDDED_BRIDGE, LEGACY_HELPER_BRIDGE, DESKTOP, UNKNOWN }
  enum class NetworkTarget { DAV, OFFICIAL_AUTH, ENTITLEMENT, ASSET, UNKNOWN }
@@ -72,6 +78,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   REMOTE_HISTORY, SYNC_COMPARE, NETWORK, INSTALLATION, PREPARATION, UNKNOWN
  }
 
+ internal fun withCapabilityEvidence(evidence:DiagnosticDetails):DiagnosticDetails = DiagnosticDetails(values+evidence.values)
  internal fun withPhaseTimings(timings:Map<DiagnosticPhase,DiagnosticPhaseMeasurement>):DiagnosticDetails {
   val encoded=DiagnosticTimingEvidence.encode(timings) ?: return this
   return DiagnosticDetails(values+(Field.PHASE_TIMINGS to encoded))
@@ -91,6 +98,14 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   /** No arbitrary string setter is exposed. Every token method selects its own allowlist. */
   fun preparationEvidence(evidence: Map<String, String>?): Builder = apply {
    PreparationDiagnosticEvidence.encode(evidence)?.let { values[Field.PREPARATION] = it } ?: values.remove(Field.PREPARATION)
+  }
+  fun helperCapability(capability:DiagnosticCapability,state:DiagnosticCapabilityState):Builder = token(
+   if(capability==DiagnosticCapability.READ_SNAPSHOT)Field.HELPER_READ_SNAPSHOT_CAPABILITY else Field.HELPER_RESTORE_RESULT_CAPABILITY,state.name)
+  fun helperCapabilityVersions(accessProtocol:Int,singlePassRead:Int,readSnapshot:Int,restoreResult:Int):Builder = apply {
+   number(Field.HELPER_ACCESS_PROTOCOL_VERSION,accessProtocol.toLong())
+   number(Field.HELPER_SINGLE_PASS_READ_VERSION,singlePassRead.toLong())
+   number(Field.HELPER_READ_SNAPSHOT_VERSION,readSnapshot.toLong())
+   number(Field.HELPER_RESTORE_RESULT_VERSION,restoreResult.toLong())
   }
   fun installationPhase(value: String?): Builder = token(Field.INSTALLATION_PHASE, value)
   fun installationCache(value: String?): Builder = token(Field.INSTALLATION_CACHE, value)
@@ -226,6 +241,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   private val compareStates = OnboardingKind.entries.map { it.name }.toSet() + "UNKNOWN"
   private val blockReasons = SyncBlockReason.entries.map { it.name }.toSet() + "UNKNOWN"
   private fun tokens(field: Field): Set<String> = when (field) {
+   Field.HELPER_READ_SNAPSHOT_CAPABILITY, Field.HELPER_RESTORE_RESULT_CAPABILITY -> DiagnosticCapabilityState.entries.map { it.name }.toSet()
    Field.INSTALLATION_PHASE -> setOf("PREPARE_VALIDATION", "UNINSTALL_REQUEST", "INSTALL_SESSION", "SESSION_WRITE", "INSTALL_COMMIT", "INSTALL_RESULT", "CONFIRMATION_RETAIN", "CONFIRMATION_LAUNCH", "CONFIRMATION_DEPARTURE", "CONFIRMATION_RETURN", "UNKNOWN")
    Field.INSTALLATION_CACHE -> setOf("CACHE_HIT", "SESSION_MISSING", "FILE_CHANGED", "REVALIDATED", "NOT_APPLICABLE", "UNKNOWN")
    Field.MODE -> Mode.entries.map { it.name }.toSet()
@@ -252,7 +268,8 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.CONTENT_BYTES -> 0L..MAX_CONTENT_BYTES
    Field.REQUEST_DURATION_MS, Field.INSTALLATION_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
    Field.GAME_VERSION_CODE -> 0L..Long.MAX_VALUE
-   Field.SAVE_VERSION -> 0L..Int.MAX_VALUE.toLong()
+   Field.SAVE_VERSION, Field.HELPER_ACCESS_PROTOCOL_VERSION, Field.HELPER_SINGLE_PASS_READ_VERSION,
+   Field.HELPER_READ_SNAPSHOT_VERSION, Field.HELPER_RESTORE_RESULT_VERSION -> 0L..Int.MAX_VALUE.toLong()
    else -> null
   }
   private fun valid(field: Field, value: String): Boolean {

@@ -20,6 +20,9 @@ import java.nio.file.Path;
 import java.util.Map;
 import pdsync.DirectoryMetadataKt;
 import pdsync.DiagnosticPhase;
+import pdsync.DiagnosticCapabilities;
+import pdsync.DiagnosticCapability;
+import pdsync.DiagnosticCapabilityState;
 import pdsync.DiagnosticTiming;
 import pdsync.ReasonedSyncFailure;
 import pdsync.SyncBlockReason;
@@ -438,7 +441,7 @@ public final class BridgeClient implements GameAccessBackend {
     @Override
     public AndroidSaveObservation readSnapshot() {
         try {
-            if (!supportsCapability("readSnapshotVersion")) return null;
+            if (!supportsCapability(DiagnosticCapability.READ_SNAPSHOT)) return null;
             AndroidGameTarget target = targetGame(); Bundle reply = call("readSnapshot", null);
             try {
                 ParcelFileDescriptor descriptor = AndroidCompat.descriptor(reply, "snapshot");
@@ -468,7 +471,7 @@ public final class BridgeClient implements GameAccessBackend {
         File archive = null;
         try {
             if (homeIdentity != null) homeIdentity.requireNoReadScope();
-            if (!supportsCapability("restoreResultVersion")) return null;
+            if (!supportsCapability(DiagnosticCapability.RESTORE_RESULT)) return null;
             AndroidGameTarget target = targetGame();
             Map<String,String> desired = new java.util.TreeMap<>(snapshot.getManifest().getFiles());
             if (desired.size() > MAX_FILES) throw new IOException("Restore inventory exceeds the file limit");
@@ -506,21 +509,52 @@ public final class BridgeClient implements GameAccessBackend {
     }
 
     /** The installed runtime, rather than the bundled DEX or a version label, grants this capability. */
-    private boolean supportsCapability(String capability) throws Exception {
-        if (!embedded()) return false;
-        Bundle reply;
-        try { reply = call("authenticate", null); }
-        catch (Failure unsupported) {
-            if (unsupported.getCause() instanceof IllegalArgumentException
-                    || "UNKNOWN_METHOD".equals(unsupported.code) || "UNSUPPORTED_METHOD".equals(unsupported.code))
-                return false;
-            throw unsupported;
+    private boolean supportsCapability(DiagnosticCapability capability) throws Exception {
+        if (!embedded()) {
+            DiagnosticCapabilities.record(capability, DiagnosticCapabilityState.NOT_EMBEDDED);
+            return false;
         }
         try {
-            return reply.getInt("accessProtocolVersion", 0) == 1 && reply.getBoolean("metadataOnly", false)
-                    && (reply.getBoolean("accessAuthenticated", false) || reply.getBoolean("authenticated", false))
-                    && !reply.containsKey("archive") && !reply.containsKey("snapshot") && reply.getInt(capability, 0) == 1;
-        } finally { closeReply(reply); }
+            Bundle reply;
+            try { reply = call("authenticate", null); }
+            catch (Failure unsupported) {
+                if (unsupported.getCause() instanceof IllegalArgumentException
+                        || "UNKNOWN_METHOD".equals(unsupported.code) || "UNSUPPORTED_METHOD".equals(unsupported.code)) {
+                    DiagnosticCapabilities.record(capability, DiagnosticCapabilityState.AUTHENTICATE_UNSUPPORTED);
+                    return false;
+                }
+                throw unsupported;
+            }
+            try {
+                DiagnosticCapabilities.reply(capabilityVersion(reply, "accessProtocolVersion"),
+                        capabilityVersion(reply, "singlePassReadVersion"), capabilityVersion(reply, "readSnapshotVersion"),
+                        capabilityVersion(reply, "restoreResultVersion"));
+                String key = capability == DiagnosticCapability.READ_SNAPSHOT ? "readSnapshotVersion" : "restoreResultVersion";
+                DiagnosticCapabilityState state;
+                if (reply.getInt("accessProtocolVersion", 0) != 1)
+                    state = DiagnosticCapabilityState.PROTOCOL_UNSUPPORTED;
+                else if (!reply.getBoolean("metadataOnly", false) || reply.containsKey("archive") || reply.containsKey("snapshot"))
+                    state = DiagnosticCapabilityState.INVALID_REPLY;
+                else if (!reply.getBoolean("accessAuthenticated", false) && !reply.getBoolean("authenticated", false))
+                    state = DiagnosticCapabilityState.AUTHENTICATION_UNVERIFIED;
+                else if (!reply.containsKey(key)) state = DiagnosticCapabilityState.VERSION_MISSING;
+                else if (capabilityVersion(reply, key) < 0) state = DiagnosticCapabilityState.INVALID_REPLY;
+                else if (reply.getInt(key, 0) != 1) state = DiagnosticCapabilityState.VERSION_UNSUPPORTED;
+                else state = DiagnosticCapabilityState.SUPPORTED;
+                DiagnosticCapabilities.record(capability, state);
+                return state == DiagnosticCapabilityState.SUPPORTED;
+            } finally { closeReply(reply); }
+        } catch (Exception failure) {
+            DiagnosticCapabilities.record(capability, pdsync.DiagnosticLog.classify(failure) == pdsync.DiagnosticFailure.CANCELED
+                    ? DiagnosticCapabilityState.CANCELED : DiagnosticCapabilityState.FAILED);
+            throw failure;
+        }
+    }
+
+    /** Missing/malformed values stay absent; do not turn a default integer into reported evidence. */
+    private static int capabilityVersion(Bundle reply, String key) {
+        Object value = reply.get(key);
+        return value instanceof Integer && ((Integer) value) >= 0 ? (Integer) value : -1;
     }
 
     @Override
