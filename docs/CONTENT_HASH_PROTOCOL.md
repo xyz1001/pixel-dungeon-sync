@@ -103,8 +103,9 @@ deepest alias are not required to publish valid new content.
 
 Every resolved physical parent source must have complete verified ancestry before
 the child is admitted to the verified graph; a convenient valid alias cannot hide
-an incomplete or cyclic equivalent source. A hash reference does not identify a particular old publication or rewrite its
-parents.
+an incomplete or cyclic equivalent source. History rendering retains all actual
+legacy parent evidence while grouping equivalent content. A hash reference does
+not identify a particular old publication or rewrite its parents.
 
 Hash parents with no matching discovered content are fetched by their v3 name
 after available candidate metadata has been considered. Schema-2 UUID parent

@@ -92,15 +92,18 @@ class SharedHistoryRecordOrderRenderTest {
                             layout.cards.getValue("local-current").center.y)
                         assertCloudTopOrder(layout, listOf("resolution", "branch"))
                         assertEquals(setOf(
+                            HistoryEdge("resolution", "branch"),
                             HistoryEdge("branch", "resolution"),
                             HistoryEdge("local-current", "resolution", sameContent = true),
                         ), layout.arrows.map { it.edge }.toSet())
                         assertEquals(listOf("original"), state.graph.commits.getValue("branch").parents,
-                            "A hidden parent is never redirected into a new reverse edge")
+                            "The hidden original's recorded parent relationship is preserved in the DAG")
                         assertEquals(3, state.graph.commits.size)
                         assertArrowOutsideTargets(layout)
                         val restore = layout.arrows.single { it.edge.fromId == "local-current" }
                         assertTrue(restore.tip.x < restore.start.x, "restored local content points toward its matching cloud card")
+                        assertEquals(listOf("original", "branch"), state.graph.commits.getValue("resolution").parents,
+                            "Both projected cloud directions come from actual stored parent relationships")
                         assertEquals(state.graph.commits.getValue("original").snapshot,
                             state.graph.commits.getValue("resolution").snapshot,
                             "this really is a resolution record retaining the older snapshot")
@@ -154,6 +157,10 @@ class SharedHistoryRecordOrderRenderTest {
                 }
                 val cross = layout.arrows.single { it.edge == expected }
                 assertTrue(cross.tip.x < cross.start.x, "local baseline always points toward its matching cloud card")
+                assertEquals(setOf(HistoryEdge("resolution", "branch"), HistoryEdge("branch", "resolution")),
+                    layout.arrows.filter { it.edge.fromId in setOf("resolution", "branch") &&
+                        it.edge.toId in setOf("resolution", "branch") }.map { it.edge }.toSet(),
+                    "All recorded cross-group parent relationships survive content grouping")
                 val change = layout.arrows.single { it.edge.dashed }
                 assertEquals(HistoryEdge("local-baseline", "local-current", dashed = true), change.edge)
                 assertTrue(change.tip.y < change.start.y, "the unsynced change still points from baseline to current")

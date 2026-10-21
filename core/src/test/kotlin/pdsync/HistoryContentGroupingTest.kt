@@ -122,7 +122,7 @@ class HistoryContentGroupingTest {
   assertEquals(listOf(tip.id, base.id), view.nodes.filter { it.column == 0 }.map { it.id })
   assertEquals(HistoryPresentation.time("2026-10-02T00:00:00Z"), view.nodes.single { it.id == base.id }.time)
   assertEquals(base.snapshot.id, HistoryPresentation.representativeSnapshotId(history, duplicate.snapshot.id))
-  assertEquals(listOf(HistoryEdge("local-current", base.id, sameContent = true)), view.edges)
+  assertEquals(setOf(HistoryEdge(base.id, tip.id), HistoryEdge("local-current", base.id, sameContent = true)), view.edges.toSet())
   val unmatched = history.copy(currentFiles = different("local"))
   assertEquals(duplicate.snapshot.id, HistoryPresentation.representativeSnapshotId(unmatched, base.snapshot.id))
   val dirty = HistoryPresentation.from(unmatched, 0)
@@ -131,15 +131,15 @@ class HistoryContentGroupingTest {
   assertEquals(base.id, unmatched.baseline)
  }
 
- @Test fun repeatedContentDoesNotInventQuotientCycleOrReconnectAncestry() {
+ @Test fun legacyRepeatedContentRetainsBothRecordedCrossGroupRelationships() {
   val a = commit("a")
   val b = commit("b", "2026-10-02T00:00:00Z", listOf(a.id), different("b"))
   val c = commit("c", "2026-10-03T00:00:00Z", listOf(b.id))
   val history = state(listOf(a, b, c))
   val view = HistoryPresentation.from(history, 0)
   assertEquals(listOf(c.id, b.id), view.nodes.map { it.id })
-  assertEquals(listOf(HistoryEdge(b.id, c.id)), view.edges)
-  assertTrue(view.edges.none { it.fromId == c.id && it.toId == b.id || it.fromId == it.toId })
+  assertEquals(setOf(HistoryEdge(b.id, c.id), HistoryEdge(c.id, b.id)), view.edges.toSet())
+  assertTrue(view.edges.none { it.fromId == it.toId })
   assertEquals(listOf(a.id), history.graph.commits.getValue(b.id).parents)
   assertEquals(listOf(b.id), history.graph.commits.getValue(c.id).parents)
  }
@@ -181,6 +181,146 @@ class HistoryContentGroupingTest {
   assertNull(history.baseline)
   assertEquals(setOf(original.id, duplicate.id), history.graph.commits.keys)
  }
+
+ @Test fun hiddenDuplicateParentProjectsItsRealBranchEdgesWithoutConnectingUnrelatedCards() {
+  val base = commit("base")
+  val hidden = commit("hidden", "2026-10-02T00:00:00Z", listOf(base.id))
+  val left = commit("left", "2026-10-03T00:00:00Z", listOf(hidden.id), different("left"))
+  val right = commit("right", "2026-10-04T00:00:00Z", listOf(hidden.id), different("right"))
+  val unrelated = commit("unrelated", content = different("unrelated"))
+  val history = state(listOf(base, hidden, left, right, unrelated), base.id, files, "restore")
+  val before = history.copy(graph = history.graph.copy(commits = history.graph.commits.toMap()))
+  val view = HistoryPresentation.from(history, 0)
+  assertEquals(setOf(HistoryEdge(base.id, left.id), HistoryEdge(base.id, right.id)),
+   view.edges.filter { !it.sameContent }.toSet())
+  assertTrue(view.edges.none { it.fromId == unrelated.id || it.toId == unrelated.id })
+  assertEquals(before, history)
+  repeat(10) { seed ->
+   assertEquals(view, HistoryPresentation.from(history.copy(graph = history.graph.copy(
+    commits = history.graph.commits.values.shuffled(kotlin.random.Random(seed)).associateBy { it.id })), 0))
+  }
+ }
+
+ @Test fun sameContentAncestorChainsRetainTransitionsAcrossEveryCollapsedGroup() {
+  val a = commit("a")
+  val aa = commit("aa", parents = listOf(a.id))
+  val b = commit("b", parents = listOf(aa.id), content = different("b"))
+  val bb = commit("bb", parents = listOf(b.id), content = different("b"))
+  val c = commit("c", parents = listOf(bb.id), content = different("c"))
+  val history = state(listOf(a, aa, b, bb, c), a.id, files)
+  val view = HistoryPresentation.from(history, 0)
+  assertEquals(setOf(HistoryEdge(a.id, bb.id), HistoryEdge(bb.id, c.id)),
+   view.edges.filter { !it.sameContent }.toSet())
+  assertEquals(listOf(aa.id), history.graph.commits.getValue(b.id).parents)
+ }
+
+ @Test fun legacyRepeatedContentKeepsRecordedDirectionsDespiteClockSkew() {
+  val a = commit("a", "2030-01-01T00:00:00Z")
+  val b = commit("b", "2029-01-01T00:00:00Z", listOf(a.id), different("b"))
+  val c = commit("c", "2020-01-01T00:00:00Z", listOf(b.id))
+  val view = HistoryPresentation.from(state(listOf(a, b, c)), 0)
+  assertEquals(listOf(c.id, b.id), view.nodes.map { it.id })
+  assertEquals(HistoryPresentation.time("2030-01-01T00:00:00Z"), view.nodes.first().time)
+  assertEquals(setOf(HistoryEdge(b.id, c.id), HistoryEdge(c.id, b.id)), view.edges.toSet())
+ }
+
+ @Test fun groupedProjectionIsGlobalBeforePagingAndNeverBridgesOffPageCards() {
+  val start = java.time.Instant.parse("2026-10-01T00:00:00Z")
+  val commits = (0..40).flatMap { index ->
+   val content = different("group-$index")
+   val old = commit("old-%02d".format(index), start.plusSeconds(index.toLong()).toString(),
+    if (index == 0) emptyList() else listOf("old-%02d".format(index - 1)), content)
+   // A separate newer member is the display handle; the old chain still proves every edge.
+   val recent = commit("recent-%02d".format(index), start.plusSeconds(100L + index).toString(),
+    listOf(old.id), content)
+   listOf(old, recent)
+  }
+  val history = state(commits)
+  val pages = (0..2).map { HistoryPresentation.from(history, it) }
+  for (page in pages) {
+   val visible = page.nodes.map { it.id }.toSet()
+   val expected = (1..40).map { index -> HistoryEdge("recent-%02d".format(index - 1), "recent-%02d".format(index)) }
+    .filter { it.fromId in visible && it.toId in visible }.toSet()
+   assertEquals(expected, page.edges.toSet())
+   assertTrue(page.edges.all { it.fromId in visible && it.toId in visible })
+  }
+  assertEquals(38, pages.sumOf { it.edges.size })
+ }
+
+ @Test fun legacyMultiGroupRepetitionRetainsAllRecordedTransitionsDeterministically() {
+  val contents = listOf(files, different("b"), different("c"), files, different("b"))
+  val commits = contents.mapIndexed { index, content -> commit("node-$index",
+   parents = if (index == 0) emptyList() else listOf("node-${index - 1}"), content = content) }
+  val history = state(commits)
+  val expected = HistoryPresentation.from(history, 0)
+  assertEquals(setOf(HistoryEdge("node-3", "node-4"), HistoryEdge("node-2", "node-3"), HistoryEdge("node-4", "node-2")), expected.edges.toSet())
+  repeat(10) { seed ->
+   assertEquals(expected, HistoryPresentation.from(state(commits.shuffled(kotlin.random.Random(seed))), 0))
+  }
+ }
+
+
+ @Test fun offPageCardsDoNotSuppressVisibleRecordedRelationships() {
+  val a = commit("a", "2026-10-01T00:00:00Z")
+  val b = commit("b", "2026-10-20T00:00:00Z", listOf(a.id), different("b"))
+  val c = commit("c", "2026-10-02T00:00:00Z", listOf(b.id), different("c"))
+  val d = commit("d", "2026-10-21T00:00:00Z", listOf(c.id))
+  val fillers = (0..19).map { commit("filler-$it", "2026-10-10T00:00:00Z", content = different("filler-$it")) }
+  val history = state(listOf(a, b, c, d) + fillers)
+  val first = HistoryPresentation.from(history, 0)
+  assertTrue(first.nodes.any { it.id == d.id })
+  assertTrue(first.nodes.any { it.id == b.id })
+  assertTrue(first.nodes.none { it.id == c.id })
+  assertEquals(listOf(HistoryEdge(d.id, b.id)), first.edges)
+ }
+
+
+ @Test fun contentHashParentResolvesLegacyCardWithoutChangingItsUuidMetadata() {
+  val legacy = commit("00000000-0000-4000-8000-000000000001")
+  val childFiles = different("hash-child")
+  val childId = contentSha256(childFiles)
+  val child = commit(childId, parents = listOf(contentSha256(files)), content = childFiles).let {
+   it.copy(schema = 3, snapshot = it.snapshot.copy(id = childId))
+  }
+  val history = state(listOf(legacy, child))
+  val before = history.copy(graph = history.graph.copy(commits = history.graph.commits.toMap()))
+  val view = HistoryPresentation.from(history, 0)
+  assertEquals(listOf(childId, legacy.id), view.nodes.map { it.id })
+  assertEquals(listOf(HistoryEdge(legacy.id, childId)), view.edges)
+  assertEquals(listOf(legacy.id), history.graph.parentIds(child))
+  assertEquals(listOf(contentSha256(files)), child.parents)
+  assertEquals(before, history)
+ }
+
+ @Test fun hashRecordsConnectOnlyTheirRecordedParentHashesAndKeepBranchDirections() {
+  fun hashed(content: Map<String, String>, parents: List<String> = emptyList()): AppendCommit {
+   val id = contentSha256(content)
+   return commit(id, parents = parents, content = content).let { it.copy(schema = 3, snapshot = it.snapshot.copy(id = id)) }
+  }
+  val root = hashed(files)
+  val left = hashed(different("hash-left"), listOf(root.id))
+  val right = hashed(different("hash-right"), listOf(root.id))
+  val unrelated = hashed(different("hash-unrelated"))
+  val history = state(listOf(root, left, right, unrelated))
+  val view = HistoryPresentation.from(history, 0)
+  assertEquals(setOf(HistoryEdge(root.id, left.id), HistoryEdge(root.id, right.id)), view.edges.toSet())
+  assertTrue(view.edges.none { it.fromId == unrelated.id || it.toId == unrelated.id })
+  assertEquals(setOf(left.id, right.id, unrelated.id), history.graph.tips)
+  repeat(10) { seed ->
+   assertEquals(view, HistoryPresentation.from(state(history.graph.commits.values.shuffled(kotlin.random.Random(seed))), 0))
+  }
+ }
+
+ @Test fun unresolvedParentHashDoesNotInventAnArrowToAnotherContentCard() {
+  val unrelated = commit("unrelated")
+  val childFiles = different("child")
+  val childId = contentSha256(childFiles)
+  val child = commit(childId, parents = listOf(contentSha256(different("missing"))), content = childFiles).let {
+   it.copy(schema = 3, snapshot = it.snapshot.copy(id = childId))
+  }
+  assertTrue(HistoryPresentation.from(state(listOf(unrelated, child)), 0).edges.isEmpty())
+ }
+
 
  @Test fun defaultCardNameUsesContentHashWhileSelectionRetainsTheRealLegacyTarget() {
   val original = commit("00000000-0000-4000-8000-000000000001")

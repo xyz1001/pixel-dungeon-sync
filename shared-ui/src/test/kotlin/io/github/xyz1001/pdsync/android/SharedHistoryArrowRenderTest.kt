@@ -17,11 +17,19 @@ import java.nio.file.Files
 import java.nio.file.Path
 import javax.imageio.ImageIO
 import org.jetbrains.skia.EncodedImageFormat
+import pdsync.AppendCommit
+import pdsync.CommitGraph
+import pdsync.CommitOperationMetadata
+import pdsync.DeviceIdentity
+import pdsync.Manifest
+import pdsync.SaveVersions
+import pdsync.SyncHistory
 import pdsync.presentation.HistoryEdge
 import pdsync.presentation.HistoryNode
 import pdsync.presentation.HistoryPresentation
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -90,6 +98,61 @@ class SharedHistoryArrowRenderTest {
                 }
                 assertTrue(outside.isNotEmpty(), "sampled beyond actual tip: $name/$width")
                 assertTrue(outside.all { isNear(it, 0xffffff) }, "shaft must not pierce arrow tip: $name/$width; $outside")
+            } finally { scene.close() }
+        }
+    }
+
+    @Test fun actualGroupedPresentationPreservesAncestryAndLocalMatchBeforeAndAfterRestore() {
+        fun commit(id: String, parent: String?, content: Char, hour: Int) = AppendCommit(
+            id = id, parents = listOfNotNull(parent), objectBytes = 1,
+            operation = CommitOperationMetadata(device = DeviceIdentity("desktop", "Desktop"),
+                preparedAt = "2026-10-20T${hour.toString().padStart(2, '0')}:00:00Z"),
+            snapshot = Manifest(game = "shattered", profile = "test", version = "922", id = "snapshot-$id",
+                parent = null, sha256 = content.toString().repeat(64),
+                files = mapOf("game1/game.dat" to content.toString().repeat(64)),
+                saveVersions = SaveVersions(mapOf("game1" to 922))))
+        val first = commit("first", null, 'a', 10)
+        val second = commit("second", "first", 'a', 11)
+        val restored = commit("restored", "second", 'b', 12)
+        for (after in listOf(false, true)) for (width in listOf(320, 1165)) {
+            val current = if (after) restored else second
+            val commits = listOf(first, second, restored)
+            val state = SyncHistory(CommitGraph(commits.associateBy { it.id }, emptyMap()), current.id,
+                current.snapshot.files, "Current save", null, emptyMap(), if (after) "restore" else "upload")
+            val view = HistoryPresentation.from(state, 0)
+            val expected = setOf(HistoryEdge("second", "restored"),
+                HistoryEdge("local-current", current.id, sameContent = after))
+            assertEquals(2, view.cloudCount)
+            assertEquals(expected, view.edges.toSet())
+            var layout: SharedHistoryCanvasLayout? = null
+            val observer = object : SharedHistoryLayoutObserver {
+                override fun canvas(positionInRoot: Offset, layoutValue: SharedHistoryCanvasLayout) { layout = layoutValue }
+            }
+            val scene = ImageComposeScene(width = width, height = 900, density = Density(1f)) {
+                SharedConnectionTheme {
+                    CompositionLocalProvider(LocalSharedHistoryLayoutObserver provides observer) {
+                        Column(Modifier.fillMaxSize().background(Color.White)) {
+                            SharedHistorySection(view, current.snapshot.id, false, {}, {}, {})
+                        }
+                    }
+                }
+            }
+            try {
+                repeat(3) { scene.render(it * 16_000_000L).close() }
+                scene.render(48_000_000L).use { image ->
+                    image.encodeToData(EncodedImageFormat.PNG)!!.use { data ->
+                        val file = Path.of("build/reports/shared-history", "arrow-restore-${if (after) "after" else "before"}-$width.png")
+                        Files.createDirectories(file.parent); Files.write(file, data.bytes)
+                    }
+                }
+                val measured = assertNotNull(layout)
+                assertEquals(expected, measured.arrows.map { it.edge }.toSet())
+                val match = measured.arrows.single { it.edge.fromId == "local-current" }
+                assertTrue(match.tip.x < match.start.x, "local match always points toward cloud")
+                val ancestry = measured.arrows.single { it.edge.fromId != "local-current" }
+                assertTrue(ancestry.tip.y < ancestry.start.y, "actual parent group points toward newer child group")
+                assertEquals(8f, (match.tip - match.shaftEnd).getDistance(), 0.001f)
+                assertEquals(commits.size, state.graph.commits.size, "rendering never changes original DAG")
             } finally { scene.close() }
         }
     }

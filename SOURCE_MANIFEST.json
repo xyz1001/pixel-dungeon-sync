@@ -2529,8 +2529,8 @@
       "sha256": "249d8fe16e51bca882ed64bfbafe1a54e6221d031788d2a3ed2cb6eec45d860c"
     },
     "core/src/main/kotlin/pdsync/presentation/HistoryPresentation.kt": {
-      "size": 13357,
-      "sha256": "ebbeb92e3d53ed2b55febf6cafe7f18eaafc5697c3f4f58ba6fd002cb2931a61"
+      "size": 14447,
+      "sha256": "719582a8bd43b18bc4cb1fc470b94fa8319b57a0883a95a1c16a8feebec87fd7"
     },
     "core/src/test/java/pdsync/DiagnosticDetailsJavaTest.java": {
       "size": 2634,
@@ -2709,8 +2709,8 @@
       "sha256": "425b7cbd12d8cd179936b3a9c2ccab524e60e542e9e1d405c1250f00066bd3eb"
     },
     "core/src/test/kotlin/pdsync/HistoryContentGroupingTest.kt": {
-      "size": 13082,
-      "sha256": "29dc756b25143be8533b20961c3efc1d215352a1f0c338977e7defa22ca71530"
+      "size": 20645,
+      "sha256": "24473decc336f99dacfe44ddcfbacc308b9d3d99167ba3bc8ffaf3253355440f"
     },
     "core/src/test/kotlin/pdsync/HistoryPresentationTest.kt": {
       "size": 30221,
@@ -3337,8 +3337,8 @@
       "sha256": "534e4d8d35777c2ba87600ac38e7e229c16cb20595722642835b8ae2160dff32"
     },
     "docs/CONTENT_HASH_PROTOCOL.md": {
-      "size": 15407,
-      "sha256": "8d6e31df5667e88529a35aba0fef6788bc95a2d3f25ae96cb525ab855cd36b93"
+      "size": 15502,
+      "sha256": "ac1136e6434d2de650273046302692329fae769a7b76f7878543bda3b2def37a"
     },
     "docs/DEFAULT_PATH_RULES.md": {
       "size": 5308,
@@ -7165,8 +7165,8 @@
       "sha256": "7423fb2970164fe50a46bb64f0f7539d1f4a7a05612002b5bdf8919f631f009e"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryArrowRenderTest.kt": {
-      "size": 5660,
-      "sha256": "8517535d43d22d8351a2ea424dd24042af13433b834d101739481757605204aa"
+      "size": 9565,
+      "sha256": "162761e64192c4f1b4faf62d82993e1aa7d77b167c4449a011362331a4120686"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryGeometryTest.kt": {
       "size": 6146,
@@ -7177,8 +7177,8 @@
       "sha256": "9bda3547a0e211a2bbef1aa9d5f88a2b7a3102f1b18f729c87de16351e6946ce"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryRecordOrderRenderTest.kt": {
-      "size": 21091,
-      "sha256": "131a84eb02fa1bb8ea31d22700cf02c0602161dadffdd7d11a4223cbc36fc319"
+      "size": 21793,
+      "sha256": "71497b18a0c2b3c4a3a1499f5d7f3d61e7e614e8b6f01a9512fcf4bd40371366"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryRenderTest.kt": {
       "size": 18235,

@@ -110,6 +110,26 @@ data class HistoryPresentation(
    }
   }
 
+  /**
+   * Project every recorded parent→child relationship onto content cards. Resolve schema-3
+   * parent hashes through the graph, while legacy UUID references keep their original meaning.
+   * A representative is a display handle for all members, not a new ancestry claim about that
+   * specific original commit. Equal bytes alone never create an edge; missing parents stay absent.
+   * Hide within-card edges and deduplicate identical arrows only. Legacy returns to old content
+   * may produce opposing arrows after grouping: retain both recorded relationships rather than
+   * dropping evidence to manufacture a DAG. Paging only filters the projected endpoints.
+   */
+  private fun cloudEdges(state: SyncHistory, groups: List<CloudGroup>): List<HistoryEdge> {
+   val groupIds = groups.flatMap { group -> group.members.map { it.id to group.representative.id } }.toMap()
+   return state.graph.commits.values.sortedBy { it.id }.flatMap { child ->
+    val to = groupIds.getValue(child.id)
+    state.graph.parentIds(child).sorted().mapNotNull { parent ->
+     val from = groupIds[parent]
+     if (from == null || from == to) null else HistoryEdge(from, to)
+    }
+   }.distinct()
+  }
+
   /** Map a saved selection for display only. Callers must retain its original operation target. */
   @JvmStatic fun representativeSnapshotId(state: SyncHistory, snapshotId: String?): String? {
    if (snapshotId == null) return null
@@ -128,8 +148,8 @@ data class HistoryPresentation(
    * progress uses its own save-file time. Unknown times sort last.
    *
    * The history supplied by the facade is the sole source of nodes and true graph edges.
-   * True edges with hidden or off-page endpoints are omitted, never redirected to representatives.
-   * Content equality is not ancestry: quotienting an A(X) -> B(Y) -> C(X) DAG would create a cycle.
+   * Cloud arrows retain all recorded cross-group member relationships, including legacy returns.
+   * Off-page endpoints are omitted. Content equality alone never creates a cloud ancestry edge.
    */
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
    data class TimedNode(val node: HistoryNode, val instant: Instant?)
@@ -213,9 +233,7 @@ data class HistoryPresentation(
    val nodes = pageRows.flatten().map { it.copy(row = it.row - firstRow) }
    val visible = nodes.map { it.id }.toSet()
    val edges = mutableListOf<HistoryEdge>()
-   allCloud.filter { it.id in visible }.forEach { commit ->
-    state.graph.parentIds(commit).filter { it in visible }.forEach { parent -> edges += HistoryEdge(parent, commit.id) }
-   }
+   edges += cloudEdges(state, groups).filter { it.fromId in visible && it.toId in visible }
    if (state.localNodeCount > 0 && baseline != null && (state.clean || state.localNodeCount == 2)) {
     val local = if (state.localNodeCount == 2) "local-baseline" else "local-current"
     if (local in visible && baseline.id in visible) when (state.baselineDirection) {
