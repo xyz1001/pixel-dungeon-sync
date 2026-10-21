@@ -1646,7 +1646,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private String homeStatus(SharedHomeContent content) {
         final boolean serviceExpired = homeAccountExpired();
         String homeStatus = serviceExpired ? pdsync.i18n.CoreSessionMessages.SERVICE_EXPIRED.text() : this.cloudVerified
-                ? content.getUploadUnnecessary() ? PROGRESS_SYNCED_LOCAL_AND_CLOUD_SAVES_32.text() : CLOUD_CONNECTED_33.text()
+                ? homeDisplayMatchesCloudTip(content) ? PROGRESS_SYNCED_LOCAL_AND_CLOUD_SAVES_32.text() : CLOUD_CONNECTED_33.text()
                 : this.connection == null ? WAITING_FOR_CONNECTION_34.text() : SAVES_NEED_CHECKING_35.text();
         if (!automaticObservationSupported() || SyncRuntime.isAutoUploadPaused(this) || this.progress != OnboardingProgress.COMPLETE)
             homeStatus += AUTO_UPLOAD_PAUSED_36.text();
@@ -1669,8 +1669,17 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (kind() == OnboardingKind.BRANCHED) return SharedHomeStatusKind.CONFLICT;
         if (restoreNeedsAttention() || this.feedbackError || (this.inspection != null && this.inspection.isRetryablePending()))
             return SharedHomeStatusKind.WARNING;
-        if (this.cloudVerified && content.getUploadUnnecessary()) return SharedHomeStatusKind.SYNCED;
+        if (homeDisplayMatchesCloudTip(content)) return SharedHomeStatusKind.SYNCED;
         return SharedHomeStatusKind.NEUTRAL;
+    }
+
+    /** A display match must belong to the current successful observation, never a previous account. */
+    private boolean homeDisplayMatchesCloudTip(SharedHomeContent content) {
+        return content.getMatchesCloudTip() && this.cloudVerified && !this.feedbackError
+                && this.homeObservationOwner != null
+                && this.homeObservationOwner.accepts(currentHomeContext(0), true, false)
+                && this.connection == SyncRuntime.currentConnection()
+                && !this.archiveReads.loading() && !isHomeArchiveLoading();
     }
 
     private SharedHomeContent homeContent() {

@@ -47,7 +47,7 @@ class DesktopHomeMetadataTest {
   assertEquals(0,store.objectReads)
   assertEquals(RemoteVerification.METADATA_ONLY,preview.graph.verification)
   assertFalse(preview.currentProtected)
-  assertEquals(SharedHomeContent(), SharedHomeContent.from(preview,null,true,false,false))
+  assertEquals(SharedHomeContent(matchesCloudTip=true), SharedHomeContent.from(preview,null,true,false,false))
   assertTrue(manager.history().isEmpty())
   val result=assertIs<HomePushResult.Unchanged>(manager.pushFromHome(preview,store) { true })
   assertTrue(store.objectReads>0,"zero PUT still requires full object verification")
@@ -56,7 +56,7 @@ class DesktopHomeMetadataTest {
   assertFalse(manager.hasPending())
   assertEquals(RemoteVerification.OBJECTS_VERIFIED,result.history.graph.verification)
   assertTrue(result.history.currentProtected)
-  assertEquals(SharedHomeContent(true,true),SharedHomeContent.from(result.history,null,true,false,false))
+  assertEquals(SharedHomeContent(true,true,matchesCloudTip=true),SharedHomeContent.from(result.history,null,true,false,false))
   assertEquals(preview.currentFiles,result.history.currentFiles)
  }
 

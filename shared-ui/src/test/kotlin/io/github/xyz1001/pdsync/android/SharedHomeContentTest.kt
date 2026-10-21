@@ -25,23 +25,23 @@ class SharedHomeContentTest {
 
     @Test fun completeFileMapsMatchIndependentlyOfOrderingBaselineAndLabels() {
         val history = history(current = files.entries.reversed().associate { it.toPair() })
-        assertEquals(SharedHomeContent(true, true), content(history))
-        assertEquals(SharedHomeContent(true, true), content(history.copy(baseline = "absent-baseline",
+        assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(history))
+        assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(history.copy(baseline = "absent-baseline",
             currentName = "改名", aliases = mapOf("snapshot-tip" to "另一名称"), summary = null)))
-        assertEquals(SharedHomeContent(true, true), content(history.copy(baseline = "tip")))
+        assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(history.copy(baseline = "tip")))
     }
 
     @Test fun metadataMatchesNeverSuppressTransferWithoutVerifiedObjectIds() {
         val metadata = history().copy(verifiedCommitIds = emptySet())
-        assertEquals(SharedHomeContent(), content(metadata))
+        assertEquals(SharedHomeContent(matchesCloudTip = true), content(metadata))
         assertFalse(metadata.currentProtected)
-        assertEquals(SharedHomeContent(), content(metadata.copy(verifiedCommitIds = setOf("another-account-tip"))))
-        assertEquals(SharedHomeContent(true, true), content(metadata.copy(verifiedCommitIds = setOf("tip"))))
+        assertEquals(SharedHomeContent(matchesCloudTip = true), content(metadata.copy(verifiedCommitIds = setOf("another-account-tip"))))
+        assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(metadata.copy(verifiedCommitIds = setOf("tip"))))
         val old = commit("old")
         val tip = commit("tip", parents = listOf("old"))
         val partlyVerified = history(listOf(old, tip)).copy(verifiedCommitIds = setOf("old"))
-        assertEquals(SharedHomeContent(false, true), content(partlyVerified, "snapshot-old"))
-        assertEquals(SharedHomeContent(), content(partlyVerified, "snapshot-tip"))
+        assertEquals(SharedHomeContent(false, true, matchesCloudTip = true), content(partlyVerified, "snapshot-old"))
+        assertEquals(SharedHomeContent(matchesCloudTip = true), content(partlyVerified, "snapshot-tip"))
     }
 
     @Test fun everyPathAndEveryFileHashMattersEvenWithTheSameCounts() {
@@ -62,8 +62,8 @@ class SharedHomeContentTest {
         assertEquals(SharedHomeContent(), content(history))
         assertEquals(SharedHomeContent(), content(history, "missing-target"))
         val atTip = history.copy(currentFiles = newer.snapshot.files)
-        assertEquals(SharedHomeContent(true, false), content(atTip, "snapshot-old"))
-        assertEquals(SharedHomeContent(true, false), content(atTip, "missing-target"))
+        assertEquals(SharedHomeContent(true, false, matchesCloudTip = true), content(atTip, "snapshot-old"))
+        assertEquals(SharedHomeContent(true, false, matchesCloudTip = true), content(atTip, "missing-target"))
     }
 
     @Test fun unknownFailedEmptyOrUnsettledHistoryDoesNotSuppressHostRecovery() {
@@ -87,7 +87,7 @@ class SharedHomeContentTest {
     @Test fun repeatedRenderingIsPureAndRetainedCallbacksRecheckChangedCapabilities() {
         val history = history()
         val original = history.copy(currentFiles = history.currentFiles.toMap())
-        repeat(20) { assertEquals(SharedHomeContent(true, true), content(history)) }
+        repeat(20) { assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), content(history)) }
         assertEquals(original, history)
 
         var state = SharedHomeState(null, "云端已连接", pageActive = true, canUpload = true, canRestore = true)

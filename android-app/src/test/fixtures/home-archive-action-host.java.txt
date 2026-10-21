@@ -31,7 +31,7 @@ public final class MainActivity {
     static final class SyncHistory {
         // Already-computed outputs of the separately tested shared policies, not archive inference.
         final boolean uploadSource, restoreSource;
-        boolean uploadUnnecessary, restoreUnnecessary, protectedLocal = true;
+        boolean uploadUnnecessary, restoreUnnecessary, matchesCloudTip, protectedLocal = true;
         SyncHistory(boolean upload, boolean restore) { uploadSource = upload; restoreSource = restore; }
         boolean getCurrentProtected() { return protectedLocal; }
         java.util.List<AppendCommit> getCloud() { return java.util.List.of(); }
@@ -51,13 +51,17 @@ public final class MainActivity {
         }
     }
     static final class SharedHomeContent {
-        final boolean upload, restore;
-        SharedHomeContent(boolean up, boolean down) { upload = up; restore = down; }
+        final boolean upload, restore, matchesCloudTip;
+        SharedHomeContent(boolean up, boolean down, boolean matches) {
+            upload = up; restore = down; matchesCloudTip = matches;
+        }
         boolean getUploadUnnecessary() { return upload; }
         boolean getRestoreUnnecessary() { return restore; }
+        boolean getMatchesCloudTip() { return matchesCloudTip; }
         static SharedHomeContent from(SyncHistory h, String selected, boolean verified, boolean pending, boolean conflict) {
             return new SharedHomeContent(verified && h != null && h.uploadUnnecessary,
-                    verified && h != null && h.restoreUnnecessary);
+                    verified && h != null && h.restoreUnnecessary,
+                    verified && h != null && !pending && !conflict && h.matchesCloudTip);
         }
     }
     static final class Readiness { boolean ready = true; boolean canContinue() { return ready; } }
@@ -258,13 +262,53 @@ public final class MainActivity {
         }
     }
 
+    static void metadataDisplayBoundaries() {
+        @SuppressWarnings("unchecked") Consumer<MainActivity>[] changes = new Consumer[] {
+            (Consumer<MainActivity>) a -> a.cloudVerified = false,
+            (Consumer<MainActivity>) a -> a.feedbackError = true,
+            (Consumer<MainActivity>) a -> a.connection = new Object(),
+            (Consumer<MainActivity>) a -> SyncRuntime.account = new Object(),
+            (Consumer<MainActivity>) a -> a.facade = new AndroidSyncFacade(),
+            (Consumer<MainActivity>) a -> a.inspection = new AndroidSyncFacade.Inspection(),
+            (Consumer<MainActivity>) a -> a.selectionToken = "root:other.game",
+            (Consumer<MainActivity>) a -> a.namespace = "other-profile",
+            (Consumer<MainActivity>) a -> a.homeObservationOwner = null,
+            (Consumer<MainActivity>) a -> a.archiveReads.begin(),
+            (Consumer<MainActivity>) a -> a.inspection.pending = true,
+            (Consumer<MainActivity>) a -> a.observedKind = OnboardingKind.BRANCHED,
+            (Consumer<MainActivity>) a -> a.observedKind = OnboardingKind.BLOCKED,
+            (Consumer<MainActivity>) a -> a.recovery = true,
+            (Consumer<MainActivity>) a -> a.expired = true
+        };
+        for (int condition = 0; condition < changes.length; condition++) {
+            MainActivity a = fresh(true, true); a.history.matchesCloudTip = true;
+            changes[condition].accept(a); a.renderHome();
+            check(!a.renderedStatus.startsWith(PROGRESS_SYNCED_LOCAL_AND_CLOUD_SAVES_32.text())
+                    && a.renderedKind != SharedHomeStatusKind.SYNCED,
+                    "unavailable or changed observation cannot claim synced: " + condition);
+        }
+    }
+
     public static void main(String[] args) {
         manualRefreshCallbacks();
+        metadataDisplayBoundaries();
         assertBlocked(fresh(false, false), "both empty");
         assertGates(fresh(true, false), true, false, "local only");
         assertGates(fresh(false, true), false, true, "cloud only");
         assertGates(fresh(true, true), true, true, "both different");
         blocked(a -> { a.history.uploadUnnecessary = true; a.history.restoreUnnecessary = true; }, "both equal");
+        MainActivity metadataMatch = fresh(true, true);
+        metadataMatch.history.matchesCloudTip = true; metadataMatch.history.protectedLocal = false;
+        assertGates(metadataMatch, true, true, "metadata display match preserves transfer gates");
+        check(metadataMatch.renderedStatus.startsWith(PROGRESS_SYNCED_LOCAL_AND_CLOUD_SAVES_32.text())
+                && metadataMatch.renderedKind == SharedHomeStatusKind.SYNCED,
+                "metadata content match must display synced independently of object proof");
+        check(!metadataMatch.history.protectedLocal && !metadataMatch.history.uploadUnnecessary
+                && !metadataMatch.history.restoreUnnecessary && metadataMatch.operations == 0,
+                "display match cannot create protection or perform an operation");
+        metadataMatch.history.matchesCloudTip = false; metadataMatch.renderHome();
+        check(metadataMatch.renderedKind != SharedHomeStatusKind.SYNCED,
+                "changed content must clear the matching display");
         blocked(a -> { a.official = true; a.expired = true; }, "expired with local and cloud saves");
         blocked(a -> { a.official = true; a.accountFresh = false; }, "failed refresh with old active and both saves");
         MainActivity renewed = fresh(true, true); renewed.official = true; renewed.expired = true;

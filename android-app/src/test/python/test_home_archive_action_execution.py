@@ -21,6 +21,7 @@ METHODS = (
     'private void renderHome()',
     'private String homeStatus(',
     'private SharedHomeContent homeContent()',
+    'private boolean homeDisplayMatchesCloudTip(',
     'private SharedHomeStatusKind homeStatusKind(',
     'private SharedHomeArchiveAvailability homeArchiveAvailability()',
     'private boolean canHomeUpload()',
@@ -29,6 +30,7 @@ METHODS = (
     'private boolean isForegroundHome()',
     'private HomeActionContext currentHomeContext(',
     'private boolean isCurrentHomeAction(',
+    'private boolean isCurrentHomeNavigation(',
     'private boolean isHomeArchiveLoading()',
     'public void requestUpload()',
     'public void upload()',
@@ -76,6 +78,11 @@ class HomeArchiveActionExecution(unittest.TestCase):
         result = self.execute()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('home archive action execution passed', result.stdout)
+
+    def test_regression_detects_object_proof_reused_for_display(self):
+        result = self.execute(('content.getMatchesCloudTip()', 'content.getUploadUnnecessary()'))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('metadata content match must display synced independently of object proof', result.stderr)
 
     def test_regression_detects_removed_expiry_and_refresh_guard(self):
         result = self.execute(("homeAccountAccessAvailable() && ", ""))

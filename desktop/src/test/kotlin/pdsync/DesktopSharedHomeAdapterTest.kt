@@ -37,6 +37,47 @@ class DesktopSharedHomeAdapterTest {
   historyOwner = config, historyVerified = true, localHistoryVerified = true,
  )
 
+ @Test fun metadataEqualityShowsSyncedWithoutUpgradingObjectProofOrTransferCapabilities() {
+  val observed = history().let { it.copy(
+   graph = it.graph.copy(verification = RemoteVerification.METADATA_ONLY), verifiedCommitIds = emptySet()) }
+  val before = observed.copy(currentFiles = observed.currentFiles.toMap())
+  val state = DesktopSharedHomeAdapter.state(ready(observed))
+  assertEquals("进度已同步 · 本机与云端档案完全一致", state.status)
+  assertEquals(SharedHomeStatusKind.SYNCED, state.statusKind)
+  val local = state.history!!.nodes.single { it.id == "local-current" }
+  assertEquals("已同步云端", local.status)
+  assertFalse(local.dirty)
+  assertTrue(state.history.edges.single().sameContent)
+  // Metadata changes display only; the host must still enter the existing fully checked routes.
+  assertTrue(state.canUpload); assertTrue(state.canRestore)
+  assertFalse(observed.currentProtected); assertFalse(observed.clean)
+  assertNull(observed.baseline); assertNull(observed.baselineCommit); assertNull(observed.baselineDirection)
+  assertTrue(observed.verifiedCommitIds.isEmpty())
+  assertEquals(RemoteVerification.METADATA_ONLY, observed.graph.verification)
+  assertEquals(before, observed)
+  val base = ready(observed)
+  for (blocked in listOf(base.copy(historyVerified = false), base.copy(localHistoryVerified = false),
+   base.copy(historyOwner = config.copy(username = "previous-account")), base.copy(historyOwner = null),
+   base.copy(locationIssue = "failed local read"), base.copy(remoteTips = emptySet()),
+   base.copy(pendingUpload = true), base.copy(hasConflict = true), base.copy(serviceExpired = true),
+   base.copy(history = observed.copy(graph = observed.graph.copy(pending = mapOf("missing" to "unverified")))))) {
+   val invalid = DesktopSharedHomeAdapter.state(blocked)
+   assertNotEquals(state.status, invalid.status)
+   assertNotEquals(SharedHomeStatusKind.SYNCED, invalid.statusKind)
+  }
+  val branches = history(listOf(commit("left"), commit("right"))).let { it.copy(
+   graph = it.graph.copy(verification = RemoteVerification.METADATA_ONLY), verifiedCommitIds = emptySet()) }
+  val branched = DesktopSharedHomeAdapter.state(ready(branches).copy(
+   remoteTips = setOf("snapshot-left", "snapshot-right"), selectedId = "snapshot-left"))
+  assertEquals(SharedHomeStatusKind.CONFLICT, branched.statusKind)
+  assertNotEquals(state.status, branched.status)
+  val changed = observed.copy(currentFiles = mapOf("game1/game.dat" to "e".repeat(64)))
+  val different = DesktopSharedHomeAdapter.state(ready(changed))
+  assertNotEquals(state.status, different.status)
+  assertNotEquals(SharedHomeStatusKind.SYNCED, different.statusKind)
+  assertTrue(different.history!!.nodes.single { it.id == "local-current" }.dirty)
+ }
+
  @Test fun expiredAuthenticatedAccountDisablesTransfersButKeepsLaunchAndHistory() {
   val base = ready()
   val state = DesktopSharedHomeAdapter.state(base.copy(serviceExpired = true))

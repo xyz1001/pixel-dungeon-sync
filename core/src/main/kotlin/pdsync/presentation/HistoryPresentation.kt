@@ -114,7 +114,7 @@ data class HistoryPresentation(
     all += TimedNode(HistoryNode(
      "local-current", null, state.currentName.ifBlank { CoreMessages.CURRENT_LOCAL.text() }, time(recordedAt?.toString()),
      CoreMessages.SLOTS_AND_PLAYS.text(slots(state.summary?.slots?.size), plays(state.summary?.plays)),
-     if (state.currentProtected) CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(), 1, 0, dirty = !state.currentProtected
+     if (matchingCurrent != null) CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(), 1, 0, dirty = matchingCurrent == null
     ), recordedAt)
    }
    if (state.localNodeCount == 2 && baseline != null) {

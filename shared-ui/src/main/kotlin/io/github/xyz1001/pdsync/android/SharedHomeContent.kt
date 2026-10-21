@@ -3,13 +3,15 @@ package io.github.xyz1001.pdsync.android
 import pdsync.SyncHistory
 
 /**
- * UI-only no-op detection from the host's current verified observation. Every entry is a complete
+ * UI-only content comparison from the host's current verified observation. Every entry is a complete
  * save-relative path and SHA-256 of that file's bytes; names, counts, times and the baseline are not
  * content evidence. This neither reads files nor authorizes a write or advances a sync baseline.
  */
 data class SharedHomeContent(
     val uploadUnnecessary: Boolean = false,
     val restoreUnnecessary: Boolean = false,
+    /** Display-only manifest equality; never object verification or permission to skip a transfer. */
+    val matchesCloudTip: Boolean = false,
 ) {
     companion object {
         /** Unknown/failed observations and recovery/branch-selection actions retain host policy. */
@@ -31,6 +33,7 @@ data class SharedHomeContent(
             return SharedHomeContent(
                 uploadUnnecessary = tip != null && tip.id in history.verifiedCommitIds && tip.snapshot.files == history.currentFiles,
                 restoreUnnecessary = target != null && target.id in history.verifiedCommitIds && target.snapshot.files == history.currentFiles,
+                matchesCloudTip = tip != null && tip.snapshot.files == history.currentFiles,
             )
         }
     }

@@ -36,7 +36,7 @@ class SharedHomeArchiveAvailabilityTest {
         assertEquals(SharedHomeArchiveAvailability(true, true), availability(history()))
         val matching = history(local = cloudFiles)
         assertEquals(SharedHomeArchiveAvailability(true, true), availability(matching))
-        assertEquals(SharedHomeContent(true, true), SharedHomeContent.from(matching, null, true, false, false),
+        assertEquals(SharedHomeContent(true, true, matchesCloudTip = true), SharedHomeContent.from(matching, null, true, false, false),
             "Source existence and the existing no-op protection remain separate policies")
     }
 

@@ -223,6 +223,21 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertLess(automatic.index('state.inFlight = true'), automatic.index('work(DiagnosticAction.INSPECT'))
         self.assertIn('this.automaticHistoryState.inFlight = false', body(MAIN, 'private void finishDetachedHomeRead('))
 
+    def test_home_status_uses_display_equality_without_granting_transfer_or_object_proof(self):
+        for signature in ('private String homeStatus(', 'private SharedHomeStatusKind homeStatusKind('):
+            status = body(MAIN, signature)
+            self.assertIn('homeDisplayMatchesCloudTip(content)', status)
+            self.assertNotIn('content.getUploadUnnecessary()', status)
+        current = body(MAIN, 'private boolean homeDisplayMatchesCloudTip(')
+        for guard in ('content.getMatchesCloudTip()', 'this.cloudVerified', '!this.feedbackError',
+                      'this.homeObservationOwner.accepts(currentHomeContext(0), true, false)',
+                      'this.connection == SyncRuntime.currentConnection()',
+                      '!this.archiveReads.loading()', '!isHomeArchiveLoading()'):
+            self.assertIn(guard, current)
+        for signature in ('private boolean canHomeUpload()', 'private boolean canHomeRestore()',
+                          'private boolean mayRestoreWithoutReplacementConfirmation('):
+            self.assertNotIn('getMatchesCloudTip()', body(MAIN, signature))
+
     def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
         home = body(MAIN, 'private void renderHome()')
         evidence = body(MAIN, 'private SharedHomeContent homeContent()')

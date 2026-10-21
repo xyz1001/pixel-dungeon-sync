@@ -111,7 +111,7 @@ internal object DesktopSharedHomeAdapter {
     !complete -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_CHOOSE_UPLOAD_OR_RESTORE_FIRST.text()
     current.pendingUpload -> DesktopMessages.THE_LAST_UPLOAD_IS_INCOMPLETE_RETRY_THE_UPLOAD_FIRST.text()
     current.hasConflict || hasRemoteBranches -> DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text()
-    content.uploadUnnecessary -> DesktopMessages.PROGRESS_SYNCED_LOCAL_AND_CLOUD_PROFILES_ARE_IDENTICAL.text()
+    content.matchesCloudTip -> DesktopMessages.PROGRESS_SYNCED_LOCAL_AND_CLOUD_PROFILES_ARE_IDENTICAL.text()
     automaticStatus.isNotBlank() -> desktopHomeFeedback(automaticStatus, DesktopMessages.PLEASE_CHECK_SYNC_STATUS.text())
     else -> DesktopMessages.CONNECTED_TO_CLOUD.text()
    },
@@ -120,7 +120,7 @@ internal object DesktopSharedHomeAdapter {
     current.connectingAtStartup || current.launchingGame || current.busy -> SharedHomeStatusKind.RUNNING
     !current.connected || !complete || current.pendingUpload -> SharedHomeStatusKind.WARNING
     current.hasConflict || hasRemoteBranches -> SharedHomeStatusKind.CONFLICT
-    content.uploadUnnecessary -> SharedHomeStatusKind.SYNCED
+    content.matchesCloudTip -> SharedHomeStatusKind.SYNCED
     current.config?.autoUploadPaused == true -> SharedHomeStatusKind.WARNING
     else -> SharedHomeStatusKind.NEUTRAL
    },
