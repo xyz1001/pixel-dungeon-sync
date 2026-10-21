@@ -43,6 +43,23 @@ object Shattered : GameAdapter {
 }
 fun deduplicate(paths: List<Path>, adapter: GameAdapter) = paths.distinctBy { adapter.canonical(it) }
 data class Snapshot(val manifest: Manifest, val zip: ByteArray)
+/** A single operation owns these verified bytes; no whole-history decoded cache is retained. */
+class VerifiedSnapshot private constructor(
+ val snapshot: Snapshot,
+ internal val entries: Map<String, ByteArray>,
+ private val source:VerifiedSnapshot?=null
+) {
+ val byteCount: Long = entries.values.sumOf { it.size.toLong() }
+ internal val saveVersions: SaveVersions by lazy { source?.saveVersions ?: ShatteredVersions.detect(entries) }
+ internal fun withManifest(manifest:Manifest):VerifiedSnapshot {
+  require(manifest.files==snapshot.manifest.files && manifest.sha256==snapshot.manifest.sha256)
+  return VerifiedSnapshot(snapshot.copy(manifest=manifest),entries,this)
+ }
+ companion object {
+  internal fun read(snapshot: Snapshot, adapter: GameAdapter): VerifiedSnapshot =
+   VerifiedSnapshot(snapshot, Snapshots.verify(snapshot, adapter))
+ }
+}
 /** One bounded filesystem read. Its fingerprint describes the same bytes used for the snapshot. */
 internal class LocalSaveRead(
  val entries: Map<String, ByteArray>,
@@ -168,12 +185,23 @@ object Snapshots {
  fun restore(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {}, onBackupReady: (Snapshot, Path) -> Unit = { _, _ -> },
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
   captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
-  beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) : Path {
+  beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) : Path =
+  restoreImpl(snapshot,root,backupRoot,adapter,version,guard,beforeWrite,afterFileWrite,onBackupReady,validateCompatibility,captureBackup,beforeReplacement,afterRestore,null)
+
+ internal fun restoreVerified(verified: VerifiedSnapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
+  onBackupReady: (Snapshot, Path) -> Unit, validateCompatibility: (Snapshot, String) -> Unit,
+  captureBackup: (Path) -> Snapshot, beforeReplacement: () -> Unit, afterRestore: () -> Unit): Path =
+  restoreImpl(verified.snapshot,root,backupRoot,adapter,version,guard,{},{},onBackupReady,validateCompatibility,captureBackup,beforeReplacement,afterRestore,verified)
+
+ private fun restoreImpl(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,
+  beforeWrite: () -> Unit, afterFileWrite: (String) -> Unit, onBackupReady: (Snapshot, Path) -> Unit,
+  validateCompatibility: (Snapshot, String) -> Unit, captureBackup: (Path) -> Snapshot,
+  beforeReplacement: () -> Unit, afterRestore: () -> Unit, verified: VerifiedSnapshot?): Path {
   guard() // Existing callers may verify package/authorization here; running state does not gate I/O.
   if (Thread.currentThread().isInterrupted) throw InterruptedException()
   SafePaths.directory(root); SafePaths.checked(backupRoot)
   validateCompatibility(snapshot, version)
-  val files = verify(snapshot,adapter)
+  val files = verified?.entries ?: verify(snapshot,adapter)
   Files.walk(root).use { entries -> require(entries.noneMatch { Files.isSymbolicLink(it) }) { CoreValidationMessages.RESTORE_TARGET_CONTAINS_SYMLINKS.text() } }
   require(!Files.isSymbolicLink(root) && !Files.isSymbolicLink(backupRoot))
   backupRoot.createDirectories()

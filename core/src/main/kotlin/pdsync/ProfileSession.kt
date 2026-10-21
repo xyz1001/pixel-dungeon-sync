@@ -137,10 +137,18 @@ data class RestoreResult(val restored: Manifest, val backup: HistoryEntry, val b
 /** Version handling belongs to the selected game, not the WebDAV protocol. */
 interface ProfileVersions {
  fun annotate(snapshot: Snapshot): Snapshot
+ fun annotate(verified: VerifiedSnapshot): Snapshot = annotate(verified.snapshot)
  fun target(path: String): TargetGame?
  fun checkRestore(snapshot: Snapshot, targetPath: String)
+ fun checkRestore(verified: VerifiedSnapshot, targetPath: String) = checkRestore(verified.snapshot, targetPath)
 }
 object ShatteredProfileVersions : ProfileVersions {
+ override fun annotate(verified:VerifiedSnapshot):Snapshot {
+  val snapshot=verified.snapshot
+  require(recordedGamePackage(snapshot.manifest)==GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_HAS_NO_VERIFIABLE_GAME_PACKAGE_IDENTITY.text() }
+  val detected=try {verified.saveVersions} catch(e:Exception) {SaveVersions(emptyMap(),emptyList(),CoreSessionMessages.UNRECOGNIZED.text(e.message))}
+  return snapshot.copy(manifest=snapshot.manifest.copy(version=detected.summary(),saveVersions=detected,gamePackage=GameCloudIdentity.SHATTERED_PACKAGE))
+ }
  override fun annotate(snapshot: Snapshot): Snapshot {
   val files = Snapshots.verify(snapshot, Shattered)
   require(recordedGamePackage(snapshot.manifest) == GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_HAS_NO_VERIFIABLE_GAME_PACKAGE_IDENTITY.text() }
@@ -153,6 +161,10 @@ object ShatteredProfileVersions : ProfileVersions {
  override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(java.nio.file.Paths.get(path))
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   val actual = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))
+  checkRestore(snapshot,targetPath,actual)
+ }
+ override fun checkRestore(verified:VerifiedSnapshot,targetPath:String)=checkRestore(verified.snapshot,targetPath,verified.saveVersions)
+ private fun checkRestore(snapshot:Snapshot,targetPath:String,actual:SaveVersions) {
   snapshot.manifest.saveVersions?.let { require(it == actual) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_SAVE_CONTENTS.text() } }
   require(recordedGamePackage(snapshot.manifest) == GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_BELONGS_TO_A_DIFFERENT_GAME_PACKAGE_AND_CANNOT.text() }
   val target = target(targetPath) ?: error(CoreSessionMessages.SELECT_THE_TARGET_GAME_JAR_FIRST_THE_INSTALLED_GAME_VERSION.text())
@@ -227,16 +239,25 @@ class ProfileSession(
  private fun head(): String? = if (SafePaths.checked(headPath).exists())
   SafePaths.boundedRead(headPath, 128).decodeToString().trim().also { require(it.matches(Regex("[0-9a-fA-F-]{36}"))) } else null
  private fun setHead(id: String) = SafePaths.atomicWrite(headPath, id.encodeToByteArray())
- internal fun remember(snapshot: Snapshot, reason: String, remoteObservedAt: String? = null): HistoryEntry {
+ internal fun remember(snapshot: Snapshot, reason: String, remoteObservedAt: String? = null): HistoryEntry =
+  remember(snapshot,reason,remoteObservedAt,null)
+ internal fun remember(verified: VerifiedSnapshot, reason: String, remoteObservedAt: String? = null): HistoryEntry =
+  remember(verified.snapshot,reason,remoteObservedAt,verified)
+ private fun remember(snapshot: Snapshot, reason: String, remoteObservedAt: String?, verified: VerifiedSnapshot?): HistoryEntry {
   remoteObservedAt?.let(::requireUtcTimestamp)
-  checkedManifest(snapshot.manifest); Snapshots.verify(snapshot, adapter)
+  checkedManifest(snapshot.manifest)
+  if (verified == null) Snapshots.verify(snapshot, adapter)
   snapshot.manifest.saveVersions?.let { evidence ->
-   require(versions.annotate(snapshot).manifest.saveVersions == evidence) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_ACTUAL_CONTENTS.text() }
+   require((if(verified==null)versions.annotate(snapshot) else versions.annotate(verified)).manifest.saveVersions == evidence) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_ACTUAL_CONTENTS.text() }
   }
   val id = snapshot.manifest.id
   val entryPath = historyRoot.resolve("$id.entry.json")
   if (SafePaths.checked(entryPath).exists()) {
-   val old = loadSnapshot(id)
+   val old = if(verified==null)loadSnapshot(id) else {
+    val entry=json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath,MAX_MANIFEST_BYTES).decodeToString())
+    checkedManifest(entry.manifest)
+    Snapshot(entry.manifest,SafePaths.boundedRead(historyRoot.resolve("$id.zip"),MAX_SNAPSHOT_BYTES))
+   }
    require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text() }
    val existing = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
    existing.remoteObservedAt?.let(::requireUtcTimestamp)
@@ -258,11 +279,12 @@ class ProfileSession(
    entry
   }.sortedByDescending { it.savedAt } }
  }
- fun loadSnapshot(id: String): Snapshot {
+ fun loadSnapshot(id: String): Snapshot = loadVerifiedSnapshot(id).snapshot
+ internal fun loadVerifiedSnapshot(id:String):VerifiedSnapshot {
   require(id.matches(Regex("[0-9a-fA-F-]{36}")))
   val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(historyRoot.resolve("$id.entry.json"), MAX_MANIFEST_BYTES).decodeToString())
   checkedManifest(entry.manifest); require(entry.manifest.id == id)
-  return Snapshot(entry.manifest, SafePaths.boundedRead(historyRoot.resolve("$id.zip"), MAX_SNAPSHOT_BYTES)).also { Snapshots.verify(it, adapter) }
+  return VerifiedSnapshot.read(Snapshot(entry.manifest, SafePaths.boundedRead(historyRoot.resolve("$id.zip"), MAX_SNAPSHOT_BYTES)),adapter)
  }
  fun currentVersions(): SaveVersions? = locked {
   versions.annotate(Snapshots.capture(root, adapter, config.profile, "自动识别", null)).manifest.saveVersions
@@ -271,6 +293,7 @@ class ProfileSession(
  // Immutable history reads do not take the mutation lock. Restore repeats this check under the lock.
  fun checkRestore(id: String) = versions.checkRestore(loadSnapshot(id), config.targetGame)
  internal fun checkRestore(snapshot: Snapshot) = versions.checkRestore(snapshot,config.targetGame)
+ internal fun checkRestore(verified: VerifiedSnapshot) = versions.checkRestore(verified,config.targetGame)
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = locked { remember(capture(stopped), CoreSessionMessages.LOCAL_SNAPSHOT.text()) }
  internal fun legacyPending(): Snapshot? = queue.load(queueKey)
  internal fun archiveLegacyPending() {
@@ -329,22 +352,32 @@ class ProfileSession(
   queue.replace(queueKey, chosen)
   pushPending(chosen, store)
  }
- internal fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>? = null): RestoreResult {
+ internal fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>? = null): RestoreResult =
+  restore(snapshot,stopped,expectedFiles,null)
+ internal fun restore(verified: VerifiedSnapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>? = null): RestoreResult =
+  restore(verified.snapshot,stopped,expectedFiles,verified)
+ private fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>?, verified: VerifiedSnapshot?): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
   var entry: HistoryEntry? = null
   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
   var backupFingerprint: SaveFingerprint? = null
-  val backupPath = Snapshots.restore(snapshot, root, backupRoot, adapter, "自动识别", stopped,
-   onBackupReady = { backup, _ -> entry = remember(backup, CoreSessionMessages.AUTOMATIC_BACKUP_BEFORE_RESTORE.text()) },
-   validateCompatibility = { candidate, _ -> versions.checkRestore(candidate, config.targetGame) },
-   captureBackup = { current ->
+  val onBackupReady: (Snapshot,Path)->Unit = { backup, _ -> entry = remember(backup, CoreSessionMessages.AUTOMATIC_BACKUP_BEFORE_RESTORE.text()) }
+  val compatibility: (Snapshot,String)->Unit = { candidate, _ ->
+   if(verified==null)versions.checkRestore(candidate,config.targetGame) else versions.checkRestore(verified,config.targetGame)
+  }
+  val captureBackup: (Path)->Snapshot = { current ->
     require(current == root)
     val captured = stability.captureStable(config.profile, "自动识别", null, captureContextProvider = metadata::captureContext)
     require(expectedFiles==null || captured.snapshot.manifest.files==expectedFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_RESTORING_SELECT_AGAIN.text() }
     backupFingerprint = captured.fingerprint
     versions.annotate(captured.snapshot).let { it.copy(manifest=it.manifest.copy(directoryMetadata=directoryMetadata.observe(it.manifest.files,initialImport=!historyRoot.exists()))) }
-   }, beforeReplacement = { stability.requireUnchanged(requireNotNull(backupFingerprint)) },
-   afterRestore = { directoryMetadata.adopt(snapshot.manifest.directoryMetadata,snapshot.manifest.files) })
+   }
+  val beforeReplacement: ()->Unit = { stability.requireUnchanged(requireNotNull(backupFingerprint)) }
+  val afterRestore: ()->Unit = { directoryMetadata.adopt(snapshot.manifest.directoryMetadata,snapshot.manifest.files) }
+  val backupPath = if(verified==null)
+   Snapshots.restore(snapshot,root,backupRoot,adapter,"自动识别",stopped,onBackupReady=onBackupReady,
+    validateCompatibility=compatibility,captureBackup=captureBackup,beforeReplacement=beforeReplacement,afterRestore=afterRestore)
+  else Snapshots.restoreVerified(verified,root,backupRoot,adapter,"自动识别",stopped,onBackupReady,compatibility,captureBackup,beforeReplacement,afterRestore)
   return RestoreResult(snapshot.manifest, requireNotNull(entry), backupPath)
  }
  fun restoreHistory(id: String, stopped: () -> Boolean): RestoreResult = locked {
