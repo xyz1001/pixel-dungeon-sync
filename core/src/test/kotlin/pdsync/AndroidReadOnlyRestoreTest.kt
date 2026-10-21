@@ -86,7 +86,7 @@ class AndroidReadOnlyRestoreTest {
         }
     }
 
-    @Test fun expiredTipRestoreRequiresUniqueOverwriteApprovalAndKeepsRestorableLocalBackup() {
+    @Test fun expiredTipRestoreRequiresUniqueOverwriteApprovalWithoutCreatingLocalBackup() {
         val source = Rig(); assertEquals("UPLOADED", source.facade.autoUpload().status)
         val selected = source.store.latest()
         val rig = Rig(source.store); rig.bridge.files = fixture(9); rig.expire()
@@ -99,11 +99,9 @@ class AndroidReadOnlyRestoreTest {
         assertEquals(selected.id, rig.repo().baseline())
         assertEquals(selected.snapshot.directoryMetadata?.runs, rig.sidecar().runs)
         assertEquals(selected.id, rig.sidecar().lastSynced?.commitId)
-        val backup = rig.facade.listVersions().single { it.reason == "恢复前自动备份" }
-        rig.facade.restoreSelectedReadOnly(rig.facade.inspect(), backup.snapshotId, false)
-        rig.assertReadOnlyComplete(fixture(9).mapValues { hash(it.value) })
-        assertEquals(selected.id, rig.repo().baseline()); assertNull(rig.sidecar().lastSynced)
-        assertEquals(1, rig.store.commits.size); assertEquals(2, rig.bridge.restores)
+        assertFalse(rig.facade.listVersions().any { it.reason == "恢复前自动备份" })
+        assertEquals(1, rig.store.commits.size); assertEquals(1, rig.bridge.restores)
+
     }
 
     @Test fun expiredEmptyTargetDownloadsTipWithoutCreatingCloudWritesOrPending() {
@@ -260,7 +258,7 @@ class AndroidReadOnlyRestoreTest {
         assertEquals(2, rig.store.commits.size)
     }
 
-    @Test fun localApplyRollbackRetainsRealJournalAndBackupUntilExplicitReview() {
+    @Test fun localApplyFailureRetainsPartialMirrorAndRecoveryGateWithoutBackup() {
         val rig = Rig(); val (first, second) = rig.publishTwo(); rig.expire()
         val inspection = rig.facade.inspect()
         val sidecar = rig.find("mirror").resolve(DIRECTORY_METADATA_FILE)
@@ -268,14 +266,14 @@ class AndroidReadOnlyRestoreTest {
         sidecar.deleteExisting(); sidecar.createDirectory() // Force metadata adoption to fail after file replacement.
         assertFails { rig.facade.restoreSelectedReadOnly(inspection, first.snapshot.id, false) }
         assertEquals(second.snapshot.files, rig.bridge.hashes())
-        assertEquals(second.snapshot.files, Snapshots.capture(rig.find("mirror"), AndroidGameAdapter(identity), connection.profile, "test", null).manifest.files)
+        assertEquals(first.snapshot.files, Snapshots.capture(rig.find("mirror"), AndroidGameAdapter(identity), connection.profile, "test", null).manifest.files)
         assertTrue(rig.facade.hasUnresolvedRestore())
         assertTrue(rig.find("append-v2").resolve("apply-required.txt").exists())
         assertNull(rig.repo().pending()); assertEquals(0, rig.store.writes)
-        assertTrue(Files.list(rig.find("backups")).use { paths -> paths.anyMatch { it.fileName.toString().endsWith(".zip") } })
+        assertFalse(Files.walk(rig.root).use { paths -> paths.anyMatch { it.parent?.fileName.toString()=="backups" && it.fileName.toString().endsWith(".zip") } })
         sidecar.deleteExisting(); sidecar.writeBytes(originalSidecar)
         val reopened = rig.reopen()
-        assertFails { reopened.recoverRestore() } // A rolled-back core transaction is not ready to apply.
+        assertFails { reopened.recoverRestore() } // A failed metadata adoption does not produce a ready helper transaction.
         reopened.discardInterruptedRestore()
         rig.assertReadOnlyComplete(second.snapshot.files)
         reopened.restoreSelectedReadOnly(reopened.inspect(), first.snapshot.id, false)

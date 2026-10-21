@@ -100,7 +100,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertTrue(result.configurationComplete);assertFalse(result.isConflict);assertTrue(recoveryFiles(r).isEmpty())
  }
 
- @Test fun differentDirtySoleTipUsesTwoDiscoveriesNoWritesAndKeepsOriginalIndependentBackup() {
+ @Test fun differentDirtySoleTipUsesTwoDiscoveriesNoWritesAndCreatesNoBackup() {
   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge(files(9));val r=rig(bridge,store)
   val before=bridge.content.mapValues {hash(it.value)};val home=r.facade.inspectHome();val lists=store.listings;val writes=store.writes
   val result=r.facade.restoreSelected(home,chosen.snapshot.id,true)
@@ -108,9 +108,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)});assertTrue(result.configurationComplete)
   assertEquals(chosen,store.latest());assertEquals(chosen.id,repository(r).baseline())
   val backups=Files.walk(r.root).use {paths->paths.filter {it.parent?.fileName.toString()=="backups"&&it.fileName.toString().endsWith(".json")}.toList()}
-  val backup=backups.map {json.decodeFromString<Manifest>(it.readText()) to it}.single {it.first.files==before}
-  val archive=backup.second.resolveSibling("${backup.first.id}.zip")
-  assertEquals(before,Snapshots.verify(Snapshot(backup.first,archive.readBytes()),AndroidGameAdapter(identity)).mapValues {hash(it.value)})
+  assertTrue(backups.isEmpty());assertNotEquals(before,bridge.content.mapValues {hash(it.value)})
   assertTrue(recoveryFiles(r).isEmpty())
  }
 
@@ -122,7 +120,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals(writes,store.writes);assertEquals(0,bridge.restores);assertNull(repository(r).pending());assertTrue(recoveryFiles(r).isEmpty())
  }
 
- @Test fun dirtySoleTipStillRequiresOverwriteApprovalAndRetainsBackupAcrossHelperFailure() {
+ @Test fun dirtySoleTipStillRequiresOverwriteApprovalAndKeepsRecoveryGateWithoutBackup() {
   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge(files(9));val r=rig(bridge,store)
   val before=bridge.content.mapValues {hash(it.value)};val writes=store.writes
   assertFailsWith<IllegalArgumentException>{r.facade.restoreSelected(r.facade.inspectHome(),chosen.snapshot.id,false)}
@@ -132,7 +130,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals(1,bridge.restores);assertEquals(before,bridge.content.mapValues {hash(it.value)});assertEquals(writes,store.writes)
   assertTrue(r.facade.hasUnresolvedRestore());assertNull(repository(r).pending())
   val backups=Files.walk(r.root).use {paths->paths.filter {it.parent?.fileName.toString()=="backups"&&it.fileName.toString().endsWith(".json")}.toList()}
-  assertTrue(backups.map {json.decodeFromString<Manifest>(it.readText())}.any {it.files==before})
+  assertTrue(backups.isEmpty())
   bridge.failRestore=false;r.facade.recoverRestore()
   assertEquals(2,bridge.restores);assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
   assertEquals(writes,store.writes);assertFalse(r.facade.hasUnresolvedRestore());assertTrue(recoveryFiles(r).isEmpty())

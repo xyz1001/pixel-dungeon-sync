@@ -2281,8 +2281,8 @@
       "sha256": "6b4fed4f48945472b387d05b7d4a0f8bd01f5110132ac4097c7bb5a173b6b53c"
     },
     "core/src/main/java/pdsync/i18n/DesktopMessages.java": {
-      "size": 51147,
-      "sha256": "329efc7aeadddc5fd7b58e151a4c29a0f5d50c01d3102002985d7484862ce458"
+      "size": 51103,
+      "sha256": "ce4025958520f105925c9602736a2a79736dccce84c2fcb0db80fc19853e844b"
     },
     "core/src/main/java/pdsync/i18n/PrepareMessages.java": {
       "size": 3283,
@@ -2581,16 +2581,16 @@
       "sha256": "8c6142820a0bb4286761fa7da682111893aafeb1cee5dfacb7d6c689a0bceb2b"
     },
     "core/src/test/kotlin/pdsync/AndroidReadOnlyRestoreTest.kt": {
-      "size": 18866,
-      "sha256": "7a41723391fed5c03efeb7169612987ee05ed146c3001fbcb2c47e3245d2a924"
+      "size": 18652,
+      "sha256": "54ac71196af1366cbc749b8f0fe10f9b7a78b6f31333c1267385db45ae483581"
     },
     "core/src/test/kotlin/pdsync/AndroidRestoreReceiptRoundTrip97Test.kt": {
       "size": 7935,
       "sha256": "6b6f36e89d0e7bd1ebb789895059c628131da6afa20f75bccc46e187bcd6cd2f"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
-      "size": 19002,
-      "sha256": "4a9917f1596289b64b29e8e0b33534f0cc64710ea3bb01a3e02ef1a99e5442c4"
+      "size": 18696,
+      "sha256": "3b482d1ff2e20446e6f655e6e1e8bae1ee5ee16da27956cb045103fdd1467fad"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
       "size": 15580,
@@ -2637,8 +2637,8 @@
       "sha256": "e4f9fe05be597afb9fa54d61ac81384b3b16cbe6dff752842bd197f461a82d13"
     },
     "core/src/test/kotlin/pdsync/CoreTest.kt": {
-      "size": 15759,
-      "sha256": "88a68a174b0f5f425d5afe544cfee22c457a96747849bf6965bacf1eb8e9e82c"
+      "size": 15882,
+      "sha256": "afad70c418a52c1c6b142b9829875a59916c2aada20f9cf243f82305a8a63acb"
     },
     "core/src/test/kotlin/pdsync/DefaultProfileLocationTest.kt": {
       "size": 5605,
@@ -2749,8 +2749,8 @@
       "sha256": "5ed37b0d76af445a471724034d2efc55d931ddab225da08ded67676b17c4f954"
     },
     "core/src/test/kotlin/pdsync/ProductionWebDavFlowTest.kt": {
-      "size": 21442,
-      "sha256": "0a9803033cfa80a30343980f2e30c5a950fd961e5212163a4f1ea103e05aa857"
+      "size": 21461,
+      "sha256": "722c510b89fc6597c04a44d401addf0922123b80b8e6532a03e5bbe22ff81eac"
     },
     "core/src/test/kotlin/pdsync/ProfileScopeIsolationTest.kt": {
       "size": 4802,

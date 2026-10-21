@@ -29,7 +29,7 @@ class CoreTest {
   val error=assertFails {Snapshots.restore(selected,target,backups,Shattered,"v1",{true},afterFileWrite={throw java.io.IOException("injected write failure")})}
   assertEquals("injected write failure",error.message);assertFalse(backups.exists())
   assertFalse(target.resolve("game1/game.dat").exists() && target.resolve("game1/game.dat").readText()=="original")
-  assertNotEquals(selected.manifest.files,Snapshots.fileHashes(target,Shattered))
+  assertTrue(Files.walk(target).use { paths -> paths.filter { Files.isRegularFile(it) && it.fileName.toString() != "settings.xml" }.count() } < selected.manifest.files.size)
  }
  @Test fun deletionDoesNotResurrect() { val r=root(); r.resolve("game1/depth1.dat").deleteExisting(); r.resolve("game1/game.dat").deleteExisting(); r.resolve("game1").deleteExisting(); val s=Snapshots.capture(r,Shattered,"test","v1",null); val target=root(); Snapshots.restore(s,target,Files.createTempDirectory("backup"),Shattered,"v1",{true}); assertFalse(target.resolve("game1").exists()) }
  @Test fun aliases() { val r=root(); assertEquals(1,deduplicate(listOf(r,r.resolve(".")),Shattered).size) }
@@ -120,7 +120,7 @@ class CoreTest {
   val source=root(); source.resolve("game1/game.dat").writeText("changed"); source.resolve("rankings.dat").writeText("changed-record")
   val backup=Files.createTempDirectory("backup")
   assertFails { Snapshots.restore(Snapshots.capture(source,Shattered,"test","v1",null),target,backup,Shattered,"v1",{true},afterFileWrite={error("mid-write failure")}) }
-  assertNotEquals(original.manifest.files,Snapshots.fileHashes(target,Shattered))
+  assertFalse(target.resolve("game1/game.dat").exists() && target.resolve("game1/game.dat").readText()=="alive")
   assertTrue(Files.list(backup).use { it.count() } == 0L)
  }
  @Test fun symlinkRestoreTargetRejected() {

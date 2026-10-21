@@ -136,12 +136,12 @@ class ProductionWebDavFlowTest {
   val ahead=assertIs<AppendPushResult.Success>(restarted.push(dav.store()){true})
   assertTrue(ahead.remoteAhead);assertEquals(retry.id,ahead.commit.id);assertEquals(aheadBefore,dav.fingerprint())
  }
- @Test fun metadataApplyFailureRollsBackAndRequiresExplicitRecoveryBeforeRetry()=Dav().use{dav->
+ @Test fun metadataApplyFailureKeepsAppliedBytesAndRequiresExplicitRecoveryBeforeRetry()=Dav().use{dav->
   val ca=configured("restore-A",dav);val cb=configured("restore-B",dav);seed(Path.of(ca.saveRoot),1)
   val a=open(ca);val b=open(cb);published(a,dav);val chosen=b.readRemote(dav.store()).single().entry.manifest.id
   val meta=b.root.resolve(DIRECTORY_METADATA_FILE).createDirectory();meta.resolve("blocked").writeText("fixture")
-  assertFails{b.restoreRemote(chosen,dav.store()){true}};assertTrue(b.observedFiles().isEmpty());assertTrue(b.hasPending());assertFalse(b.retryablePending())
-  assertFails{b.push(dav.store()){true}};assertTrue(b.history().any{it.reason.contains("备份")})
+  assertFails{b.restoreRemote(chosen,dav.store()){true}};assertEquals(a.observedFiles(),b.observedFiles());assertTrue(b.hasPending());assertFalse(b.retryablePending())
+  assertFails{b.push(dav.store()){true}};assertTrue(b.history().none{it.reason.contains("备份")})
   meta.resolve("blocked").deleteExisting();meta.deleteExisting();b.archivePending();restore(b,dav)
   val files=b.observedFiles();restore(b,dav);assertEquals(files,b.observedFiles());assertFalse(b.hasPending())
   b.restoreRemote(chosen,dav.store()){false};assertEquals(files,b.observedFiles())
