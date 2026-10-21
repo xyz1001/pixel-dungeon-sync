@@ -206,6 +206,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private <T> void setupWork(DiagnosticAction action, String message, Task<T> task, SetupDone<T> done) {
         if (this.busy || this.setupSession.running || isDestroyed()) return;
+        cancelDetachedHomeRead();
         final SetupSession session = this.setupSession;
         final long generation = session.flow.generation();
         final String target = session.flow.target();
@@ -317,6 +318,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: io, reason: collision with root package name */
     private final ExecutorService f9io = Executors.newSingleThreadExecutor();
+    private final ExecutorService homeReader = Executors.newSingleThreadExecutor();
+    private volatile DetachedHomeRead detachedHomeRead;
     private final ThreadLocal<OfficialOperationLease> officialOperationLease = new ThreadLocal<>();
     private SyncPage page = SyncPage.DISCOVERY;
     private boolean initialLoad = true;
@@ -486,6 +489,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             AndroidDiagnosticLogging.confirmationEvent("CONFIRMATION_DEPARTURE", DiagnosticResult.PENDING);
         }
         this.resumed = false;
+        cancelDetachedHomeRead();
         ++this.sharedHomeRenderToken;
         if (this.homeNaming != null) this.homeNaming.close();
         ++this.sharedSettingsRenderToken;
@@ -499,6 +503,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        cancelDetachedHomeRead();
         this.archiveReads.close();
         ++this.sharedHomeRenderToken;
         if (this.homeNaming != null) this.homeNaming.close();
@@ -521,6 +526,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.setupSession.executor.shutdown();
         }
         this.f9io.shutdown();
+        this.homeReader.shutdownNow();
         super.onDestroy();
     }
 
@@ -580,6 +586,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy || isDestroyed()) {
             return;
         }
+        cancelDetachedHomeRead();
         invalidatePathPreview();
         if (!preserveAutomaticHistory) this.automaticHistoryState.outcome = null;
         this.diagnosticReport = "";
@@ -1304,6 +1311,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         if (this.page != syncPage) {
+            cancelDetachedHomeRead();
             this.archiveReads.invalidate();
             ++this.sharedHomeRenderToken;
             if (this.homeNaming != null) this.homeNaming.close();
@@ -1595,10 +1603,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.selected, this.explicitHomeSelection, content, homeNotice, this.feedbackError, "",
                 new SharedHomeActions() {
                     @Override public void settings() {
-                        if (isCurrentHomeAction(owner)) navigate(SyncPage.SETTINGS);
+                        if (isCurrentHomeNavigation(owner)) navigate(SyncPage.SETTINGS);
                     }
                     @Override public void appreciate() {
-                        if (isCurrentHomeAction(owner) && homeAccountExpired() && !installer.hasActiveRequest())
+                        if (isCurrentHomeNavigation(owner) && homeAccountExpired() && !installer.hasActiveRequest())
                             showManagedAccount(MainActivity.this.connection);
                     }
                     @Override public void refreshHistory() {
@@ -1733,6 +1741,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return new HomeActionContext(renderToken, this.connection, this.facade, this.inspection, this.history,
                     SyncRuntime.currentSelectionToken(this) + "\n" + SyncRuntime.currentNamespace(this));
         } catch (Exception unavailable) { return null; }
+    }
+
+    private boolean isCurrentHomeNavigation(HomeActionContext owner) {
+        return owner != null && owner.accepts(currentHomeContext(this.sharedHomeRenderToken), isForegroundHome(), this.busy);
     }
 
     private boolean isCurrentHomeAction(HomeActionContext owner) {
@@ -3099,6 +3111,198 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         readHomeArchives(account, selection, namespace);
     }
 
+    private static final class DetachedHomeRead {
+        final SecureConnectionStore.Connection account;
+        final OfficialOperationLease.Binding binding;
+        final long ticket;
+        final AutoSyncHistoryRefresh.Ticket automatic;
+        final HomeReadCancellation cancellation = new HomeReadCancellation();
+        DetachedHomeRead(SecureConnectionStore.Connection account, OfficialOperationLease.Binding binding,
+                         long ticket, AutoSyncHistoryRefresh.Ticket automatic) {
+            this.account = account; this.binding = binding; this.ticket = ticket; this.automatic = automatic;
+        }
+    }
+
+    private static final class DetachedHomeOutcome {
+        AndroidSyncFacade facade;
+        AndroidSyncFacade.Inspection inspection;
+        SyncHistory history;
+        Exception error;
+        boolean notReady;
+        long observationGeneration = -1;
+    }
+
+    private void cancelDetachedHomeRead() {
+        DetachedHomeRead old = this.detachedHomeRead;
+        this.detachedHomeRead = null;
+        if (old == null) return;
+        this.archiveReads.finish(old.ticket);
+        old.cancellation.cancel();
+        if (old.automatic != null) {
+            this.automaticHistoryState.inFlight = false;
+            this.automaticHistoryState.refresh.deferBeforeRead(old.automatic);
+        }
+    }
+
+    private void requireDetachedHomeRead(DetachedHomeRead read) throws Exception {
+        read.cancellation.checkActive();
+        if (this.detachedHomeRead != read || !this.archiveReads.accepts(read.ticket)
+                || !isForegroundHome() || this.busy || this.installer.hasActiveRequest()
+                || !read.binding.matches(officialOperationBinding(read.account))
+                || read.automatic != null && !currentAutomaticHistory(read.automatic, read.account))
+            throw new StaleArchiveReadException();
+    }
+
+    private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,
+                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic) {
+        if (!isForegroundHome() || this.busy || this.installer.hasActiveRequest() || account == null) return false;
+        final OfficialOperationLease.Binding binding;
+        try { binding = officialOperationBinding(account); }
+        catch (Exception changed) { return false; }
+        cancelDetachedHomeRead();
+        final DetachedHomeRead read = new DetachedHomeRead(account, binding, this.archiveReads.begin(), automatic);
+        this.detachedHomeRead = read;
+        if (automatic != null) this.automaticHistoryState.inFlight = true;
+        this.cloudVerified = false; this.inspection = null; this.history = null; this.homeObservationOwner = null;
+        this.details = ""; this.feedbackError = false; this.notice = CHECKING_SAVES_144.text();
+        render();
+        final DiagnosticTrace trace = DiagnosticLog.begin(DiagnosticAction.INSPECT, false);
+        final DiagnosticTiming.Scope queueWait = DiagnosticTiming.start(trace, DiagnosticPhase.QUEUE_WAIT);
+        read.cancellation.attach(this.homeReader.submit(() -> {
+            queueWait.close();
+            DetachedHomeOutcome outcome = new DetachedHomeOutcome();
+            boolean cancelled = false;
+            try (AndroidDiagnosticLogging.Scope diagnostic = AndroidDiagnosticLogging.bind(trace);
+                 OfficialOperationLease lease = new OfficialOperationLease()) {
+                trace.record(DiagnosticStage.VERIFY, DiagnosticResult.STARTED);
+                requireDetachedHomeRead(read);
+                synchronized (SyncRuntime.OPERATION_LOCK) {
+                    requireDetachedHomeRead(read);
+                    if (checkReadiness) {
+                        readInstallationReadiness();
+                        if (this.rootGame != null) checkRootAccess();
+                    }
+                    requireDetachedHomeRead(read);
+                    if (!readyForSaves()) outcome.notReady = true;
+                    else outcome.facade = SyncRuntime.localFacade(this, account);
+                }
+                if (!outcome.notReady) {
+                    final AndroidSyncFacade owner = outcome.facade;
+                    // This read owns its lease through capture/network/accept. No work() lease is revived.
+                    lease.authorize(binding, owner, SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text(),
+                            () -> SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, owner),
+                            () -> SyncRuntime.checkOfficialSyncAccess(account, owner),
+                            () -> requireDetachedHomeRead(read), () -> SyncRuntime.clearOfficialSyncAccess(owner));
+                    try (AutoCloseable identity = owner.beginHomeReadIdentityScope()) {
+                        final AndroidSyncFacade.HomeReadContext context;
+                        synchronized (SyncRuntime.OPERATION_LOCK) {
+                            requireDetachedHomeRead(read);
+                            if (prepareNamespace && isOfficialAccount(account) && !this.preparedOfficialNamespace.contains(binding)) {
+                                AndroidSyncFacade.ConnectionStatus prepared = owner.connect();
+                                if (!prepared.isSuccess()) throw new IOException(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
+                                requireDetachedHomeRead(read);
+                                this.preparedOfficialNamespace.succeeded(binding);
+                            }
+                            context = owner.captureHomeReadContext();
+                            requireDetachedHomeRead(read);
+                        }
+                        if (context == null) {
+                            // Unsupported helpers/recovery retain the serialized legacy boundary.
+                            synchronized (SyncRuntime.OPERATION_LOCK) {
+                                requireDetachedHomeRead(read);
+                                outcome.inspection = owner.inspectHome();
+                                outcome.history = "BLOCKED".equals(outcome.inspection.getKind()) ? null : owner.historyPresentation(outcome.inspection);
+                                outcome.observationGeneration = owner.observationGeneration();
+                            }
+                        } else {
+                            read.cancellation.attach(context);
+                            try (AndroidSyncFacade.HomeReadContext ignored = context) {
+                                requireDetachedHomeRead(read);
+                                AndroidSyncFacade.HomeReadResult remote = owner.readHomeRemote(context);
+                                synchronized (SyncRuntime.OPERATION_LOCK) {
+                                    requireDetachedHomeRead(read);
+                                    outcome.inspection = owner.acceptHomeObservation(remote);
+                                    if (outcome.inspection == null) throw new StaleArchiveReadException();
+                                    outcome.history = "BLOCKED".equals(outcome.inspection.getKind()) ? null : owner.historyPresentation(outcome.inspection);
+                                    outcome.observationGeneration = owner.observationGeneration();
+                                }
+                            }
+                        }
+                    }
+                    requireDetachedHomeRead(read);
+                }
+            } catch (java.util.concurrent.CancellationException | StaleArchiveReadException stale) {
+                cancelled = true;
+            } catch (Exception error) {
+                try {
+                    requireDetachedHomeRead(read);
+                    outcome.inspection = null; outcome.history = null;
+                    outcome.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error);
+                }
+                catch (Exception stale) { cancelled = true; }
+            }
+            final DetachedHomeOutcome completed = outcome;
+            final boolean discarded = cancelled;
+            final DiagnosticTiming.Scope uiCompletion = DiagnosticTiming.start(trace, DiagnosticPhase.UI_COMPLETION);
+            runOnUiThread(() -> {
+                try { finishDetachedHomeRead(read, completed, discarded); }
+                finally {
+                    uiCompletion.close();
+                    if (discarded) trace.record(DiagnosticStage.FINISHED, DiagnosticResult.SKIPPED);
+                    else if (completed.error != null) AndroidDiagnosticLogging.failure(trace, DiagnosticStage.FINISHED, completed.error);
+                    else trace.record(DiagnosticStage.FINISHED, DiagnosticResult.SUCCEEDED);
+                }
+            });
+        }));
+        return true;
+    }
+
+    private void finishDetachedHomeRead(DetachedHomeRead read, DetachedHomeOutcome outcome, boolean discarded) {
+        try { requireDetachedHomeRead(read); }
+        catch (Exception stale) { discarded = true; }
+        if (outcome.inspection != null && outcome.facade.observationGeneration() != outcome.observationGeneration) discarded = true;
+        if (this.detachedHomeRead != read) return;
+        this.detachedHomeRead = null;
+        this.archiveReads.finish(read.ticket);
+        if (read.automatic != null) {
+            this.automaticHistoryState.inFlight = false;
+            if (discarded || outcome.notReady || !AutoSyncService.claimHistoryRefresh(this, read.automatic)) {
+                this.automaticHistoryState.refresh.deferBeforeRead(read.automatic);
+                if (isForegroundHome()) render();
+                return;
+            }
+        }
+        if (discarded) { if (isForegroundHome()) render(); return; }
+        if (read.automatic != null) {
+            AutomaticHistoryOutcome automatic = new AutomaticHistoryOutcome(read.automatic, read.account);
+            automatic.facade = outcome.facade; automatic.inspection = outcome.inspection;
+            automatic.history = outcome.history; automatic.error = outcome.error;
+            automatic.observationGeneration = outcome.observationGeneration;
+            this.automaticHistoryState.outcome = automatic;
+            drainAutomaticHistoryRefresh();
+            return;
+        }
+        if (outcome.error != null) {
+            invalidatePreparedOfficialNamespace(); reportError(outcome.error);
+        } else if (outcome.notReady) {
+            this.notice = this.readinessState.statusDescription(); maybeActivateSetupComponent();
+        } else {
+            this.facade = outcome.facade; this.inspection = outcome.inspection; this.history = outcome.history;
+            this.cloudVerified = outcome.history != null;
+            this.homeObservationOwner = this.cloudVerified ? currentHomeContext(0) : null;
+            if (!this.cloudVerified) invalidatePreparedOfficialNamespace();
+            boolean found = false;
+            if (this.history != null) for (AppendCommit commit : this.history.getCloud())
+                if (commit.getSnapshot().getId().equals(this.selected)) found = true;
+            if (!found) { this.selected = this.history == null ? null : this.history.getDefaultSnapshot(); this.explicitHomeSelection = null; }
+            this.notice = comparisonCopy();
+            this.details = this.inspection == null ? "" : safeText(this.inspection.getMessage());
+        }
+        render();
+        drainRenewalArchiveRead();
+        drainAutomaticHistoryRefresh();
+    }
+
     private boolean isCurrentHomeRead(SecureConnectionStore.Connection account, String selection, String namespace) {
         if (!isForegroundHome() || this.connection != account || SyncRuntime.currentConnection() != account) return false;
         try { return selection.equals(SyncRuntime.currentSelectionToken(this)) && namespace.equals(SyncRuntime.currentNamespace(this)); }
@@ -3108,22 +3312,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /** Shared by renewal and explicit Refresh; never provisions or writes the remote namespace. */
     private void readHomeArchives(final SecureConnectionStore.Connection account, final String selection, final String namespace) {
         if (!isCurrentHomeRead(account, selection, namespace) || this.busy || this.installer.hasActiveRequest()) return;
-        this.cloudVerified = false; this.inspection = null; this.history = null; this.homeObservationOwner = null;
-        this.facade = null;
-        final java.util.concurrent.atomic.AtomicReference<Exception> readFailure = new java.util.concurrent.atomic.AtomicReference<>();
-        work(DiagnosticAction.INSPECT, CHECKING_SAVES_144.text(), () -> {
-            if (!isCurrentHomeRead(account, selection, namespace)) throw new StaleArchiveReadException();
-            if (!readyForSaves()) return false;
-            try { readComparison(false); return true; }
-            catch (Exception failure) { readFailure.set(failure); return false; }
-        }, value -> {
-            if (!isCurrentHomeRead(account, selection, namespace)) return;
-            if (readFailure.get() instanceof StaleArchiveReadException) return;
-            if (readFailure.get() != null) throw readFailure.get();
-            if (!value) { this.notice = this.readinessState.statusDescription(); return; }
-            this.notice = comparisonCopy();
-            this.details = this.inspection == null ? "" : safeText(this.inspection.getMessage());
-        });
+        startDetachedHomeRead(account, false, false, null);
     }
 
     @Override public void onBusyChanged(boolean busy) {
@@ -3200,6 +3389,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private void showManagedAccount(SecureConnectionStore.Connection source) {
         if (this.busy || !isOfficialAccount(source) || isDestroyed()) return;
+        cancelDetachedHomeRead();
         closeSharedConnection();
         try {
             this.renewalArchiveRead.open(source, SyncRuntime.currentSelectionToken(this), SyncRuntime.currentNamespace(this),
@@ -3291,13 +3481,16 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private static final class AutomaticHistoryOutcome {
         final AutoSyncHistoryRefresh.Ticket ticket;
         final SecureConnectionStore.Connection connection;
+        final long credentialsGeneration;
         AndroidSyncFacade facade;
         AndroidSyncFacade.Inspection inspection;
         SyncHistory history;
         Exception error;
         boolean applied;
+        long observationGeneration = -1;
         AutomaticHistoryOutcome(AutoSyncHistoryRefresh.Ticket ticket, SecureConnectionStore.Connection connection) {
             this.ticket = ticket; this.connection = connection;
+            this.credentialsGeneration = SyncRuntime.connectionGeneration();
         }
     }
 
@@ -3328,6 +3521,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 || this.facade == null || !currentAutomaticHistory(state.ticket, state.connection)) return;
         AutomaticHistoryOutcome current = new AutomaticHistoryOutcome(state.ticket, state.connection);
         current.facade = this.facade; current.inspection = this.inspection; current.history = this.history;
+        current.observationGeneration = this.facade.observationGeneration();
         current.applied = true;
         state.outcome = current;
     }
@@ -3339,7 +3533,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 || this.readinessState.restorePending) return;
         AutomaticHistoryOutcome completed = this.automaticHistoryState.outcome;
         if (completed != null) {
-            if (currentAutomaticHistory(completed.ticket, completed.connection)) {
+            if (completed.credentialsGeneration == SyncRuntime.connectionGeneration()
+                    && (completed.inspection == null || completed.facade.observationGeneration() == completed.observationGeneration)
+                    && currentAutomaticHistory(completed.ticket, completed.connection)) {
                 if (!completed.applied) {
                     completed.applied = true;
                     if (completed.error != null) {
@@ -3393,38 +3589,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (ticket == null) return;
         final AutomaticHistoryState state = this.automaticHistoryState;
         state.ticket = ticket; state.connection = captured; state.inFlight = true;
-        work(DiagnosticAction.INSPECT, CHECKING_SAVES_144.text(), () -> {
-            // work() holds the global operation lock. A task paused before any read is deferred.
-            // Rotation shares this holder, so the replacement Activity receives the same result.
-            try {
-                if (!this.resumed || !currentAutomaticHistory(ticket, captured)) {
-                    state.refresh.deferBeforeRead(ticket);
-                    return DiagnosticResult.SKIPPED;
-                }
-                if (!AutoSyncService.claimHistoryRefresh(this, ticket)) return DiagnosticResult.SKIPPED;
-                AutomaticHistoryOutcome result = new AutomaticHistoryOutcome(ticket, captured);
-                try {
-                    result.facade = SyncRuntime.facade(this, captured);
-                    final AndroidSyncFacade.Inspection observed;
-                    final SyncHistory observedHistory;
-                    try (AutoCloseable identity = result.facade.beginHomeReadIdentityScope()) {
-                        observed = result.facade.inspectHome();
-                        DiagnosticLog.record(DiagnosticStage.VERIFY,
-                                AndroidDiagnosticLogging.inspectionResult(observed.getKind(), false),
-                                observed.getNeedsRestoreRecovery() ? DiagnosticFailure.RECOVERY_REQUIRED : DiagnosticFailure.NONE,
-                                diagnosticInspectionDetails(observed));
-                        observedHistory = "BLOCKED".equals(observed.getKind()) ? null : result.facade.historyPresentation(observed);
-                    }
-                    result.inspection = observed;
-                    result.history = observedHistory;
-                } catch (Exception error) {
-                    DiagnosticLog.failure(DiagnosticStage.REFRESH, error);
-                    result.error = SyncInspectionDiagnostics.at(SyncInspectionDiagnostics.Stage.INSPECT, error);
-                }
-                state.outcome = result;
-                return result;
-            } finally { state.inFlight = false; }
-        }, ignored -> { /* Only drainAutomaticHistoryRefresh applies the scoped foreground result. */ }, true);
+        if (!startDetachedHomeRead(captured, false, false, ticket)) {
+            state.inFlight = false;
+            state.refresh.deferBeforeRead(ticket);
+        }
     }
 
     /** Idempotent app-folder preparation after configuration; it never creates a save or baseline. */
@@ -3587,6 +3755,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         if (this.busy || isDestroyed()) {
+            return;
+        }
+        if (syncPage == SyncPage.HOME && isForegroundHome() && this.progress == OnboardingProgress.COMPLETE) {
+            startDetachedHomeRead(this.connection, true, z, null);
             return;
         }
         if (z) {

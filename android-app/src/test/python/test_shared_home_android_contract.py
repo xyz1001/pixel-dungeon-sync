@@ -29,7 +29,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
                       body(MAIN, 'private String homeStatus('))
         self.assertIn('TrustedEntitlementCache.withoutExpiryNotice(visibleNotice())', home)
         self.assertIn('serviceExpired ? SharedHomeStatusKind.EXPIRED', home)
-        self.assertIn('isCurrentHomeAction(owner) && homeAccountExpired() && !installer.hasActiveRequest()', home)
+        self.assertIn('isCurrentHomeNavigation(owner) && homeAccountExpired() && !installer.hasActiveRequest()', home)
         self.assertIn('showManagedAccount(MainActivity.this.connection)', home)
         state = body(MAIN, 'private boolean homeAccountExpired()')
         for expected in ('isOfficialAccount(this.connection)', '.read(', 'this.connection.username', 'elapsedRealtime()', 'bootCount(', 'TrustedEntitlementCache.currentExpired('):
@@ -122,7 +122,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         for signature in ('public void settings()', 'public void upload()', 'public void restore()',
                           'public void launch()', 'public void selectSnapshot(', 'public void rename(',
                           'public void changeHistoryPage('):
-            self.assertIn('isCurrentHomeAction(owner)', body(home, signature))
+            self.assertIn('isCurrentHomeNavigation(owner)' if signature in ('public void settings()', 'public void appreciate()') else 'isCurrentHomeAction(owner)', body(home, signature))
         for signature in ('protected void onPause()', 'protected void onDestroy()', 'private void navigate('):
             self.assertIn('++this.sharedHomeRenderToken', body(MAIN, signature))
 
@@ -221,7 +221,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('this.archiveReads.invalidate()', body(MAIN, 'private void navigate('))
         automatic = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
         self.assertLess(automatic.index('state.inFlight = true'), automatic.index('work(DiagnosticAction.INSPECT'))
-        self.assertIn('finally { state.inFlight = false; }', automatic)
+        self.assertIn('this.automaticHistoryState.inFlight = false', body(MAIN, 'private void finishDetachedHomeRead('))
 
     def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
         home = body(MAIN, 'private void renderHome()')

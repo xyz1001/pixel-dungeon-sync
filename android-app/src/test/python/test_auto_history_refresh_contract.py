@@ -33,13 +33,15 @@ class AutoHistoryRefreshContract(unittest.TestCase):
         for gate in ('!this.resumed', 'this.busy', 'isDestroyed()', 'this.page != SyncPage.HOME',
                      'this.readinessState.restorePending', 'this.installer.hasActiveRequest()'):
             self.assertIn(gate, refresh)
-        self.assertEqual(refresh.count('.inspectHome()'), 1)
-        self.assertEqual(refresh.count('.historyPresentation(observed)'), 1)
-        self.assertLess(refresh.index('!this.resumed || !currentAutomaticHistory(ticket, captured)'),
-                        refresh.index('result.facade = SyncRuntime.facade'))
-        self.assertIn('state.outcome = result', refresh)
-        self.assertLess(refresh.index('claimHistoryRefresh(this, ticket)'), refresh.index('result.facade = SyncRuntime.facade'))
-        self.assertIn('finally { state.inFlight = false; }', refresh)
+        self.assertIn('startDetachedHomeRead(captured, false, false, ticket)', refresh)
+        reader=body(MAIN, 'private boolean startDetachedHomeRead(')
+        self.assertIn('owner.readHomeRemote(context)', reader)
+        self.assertIn('owner.acceptHomeObservation(remote)', reader)
+        finish=body(MAIN, 'private void finishDetachedHomeRead(')
+        self.assertLess(finish.index('requireDetachedHomeRead(read)'), finish.index('claimHistoryRefresh(this, read.automatic)'))
+        self.assertIn('discarded || outcome.notReady || !AutoSyncService.claimHistoryRefresh', finish)
+        self.assertIn('this.automaticHistoryState.inFlight = false', finish)
+        self.assertIn('deferBeforeRead(read.automatic)', finish)
         self.assertIn('deferBeforeRead(ticket)', refresh)
         for mutation in ('.autoUpload(', '.upload(', '.restoreSelected(', '.mergeConflict(',
                          '.completeOnboarding(', '.arm(', '.schedule(', '.postDelayed('):

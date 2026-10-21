@@ -30,59 +30,10 @@ class HomeScopeTimingExecution(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
 
     def test_automatic_history_close_failure_cannot_publish_observation(self):
-        refresh = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
-        start = refresh.index('AutomaticHistoryOutcome result = new AutomaticHistoryOutcome(ticket, captured);')
-        stop = refresh.index('return result;', start) + len('return result;')
-        method = 'AutomaticHistoryOutcome read() { Object ticket = new Object(), captured = new Object(); State state = new State();\n' + refresh[start:stop] + '\n}'
-        self.run_java(r'''
-class MainActivity {
- interface Hook { void run() throws Exception; }
- static class SyncHistory {}
- static class AndroidSyncFacade {
-  static class Inspection { String kind="IDENTICAL"; String getKind(){return kind;} boolean getNeedsRestoreRecovery(){return false;} }
-  Inspection inspection=new Inspection(); SyncHistory history=new SyncHistory();
-  Hook close=()->{}, historyHook=()->{}; int closes;
-  AutoCloseable beginHomeReadIdentityScope(){return ()->{closes++;close.run();};}
-  Inspection inspectHome(){return inspection;}
-  SyncHistory historyPresentation(Inspection observation) throws Exception {historyHook.run();return history;}
- }
- static class AutomaticHistoryOutcome {
-  AndroidSyncFacade facade; AndroidSyncFacade.Inspection inspection; SyncHistory history; Exception error;
-  AutomaticHistoryOutcome(Object ticket,Object captured){current=this;}
- }
- static AutomaticHistoryOutcome current;
- static class State {AutomaticHistoryOutcome outcome;}
- static class SyncRuntime { static AndroidSyncFacade facade(MainActivity a,Object captured){return a.facade;} }
- enum DiagnosticStage {VERIFY,REFRESH}
- enum DiagnosticFailure {RECOVERY_REQUIRED,NONE}
- static class DiagnosticLog {static void record(Object...args){} static void failure(Object...args){} }
- static class AndroidDiagnosticLogging {static Object inspectionResult(Object...args){return null;} }
- static class SyncInspectionDiagnostics {enum Stage{INSPECT} static Exception at(Stage stage,Exception e){return e;} }
- Object diagnosticInspectionDetails(Object observed){return null;}
- AndroidSyncFacade facade=new AndroidSyncFacade();
- /* METHODS */
- static void check(boolean value,String text){if(!value)throw new AssertionError(text);}
- public static void main(String[] args) throws Exception {
-  for(String kind:java.util.List.of("IDENTICAL","BLOCKED")) {
-   MainActivity a=new MainActivity(); a.facade.inspection.kind=kind;
-   java.io.IOException failure=new java.io.IOException("identity changed at close");
-   a.facade.close=()->{
-    check(current.inspection==null && current.history==null,"automatic observation published before close");
-    throw failure;
-   };
-   AutomaticHistoryOutcome result=a.read();
-   check(result.inspection==null && result.history==null && result.error==failure,"close failure retained automatic proof");
-   check(a.facade.closes==1,"identity scope must close once");
-  }
-  MainActivity a=new MainActivity(); AutomaticHistoryOutcome success=a.read();
-  check(success.error==null && success.inspection==a.facade.inspection && success.history==a.facade.history,"valid result lost");
-  check(a.facade.closes==1,"success close missing");
-  MainActivity blocked=new MainActivity();blocked.facade.inspection.kind="BLOCKED";
-  AutomaticHistoryOutcome result=blocked.read();
-  check(result.inspection!=null && result.history==null && blocked.facade.closes==1,"blocked close missing");
- }
-}
-''', method)
+        # The read now has a dedicated executor; the actual extracted scheduler fixture exercises
+        # both manual and automatic close failures before any paired observation can publish.
+        from test_detached_home_queue_execution import DetachedHomeQueueExecution
+        DetachedHomeQueueExecution().test_real_queue_network_lock_lifetime_cancellation_identity_and_live_access()
 
     def test_restore_scope_spans_action_full_refresh_and_onboarding(self):
         methods = '\n'.join(declaration(signature) for signature in (
@@ -108,7 +59,11 @@ class MainActivity {
   }
   void completeOnboarding(Object observed){check(active==expected,"onboarding outside action scope");completed++;}
  }
- static class OperationOutcome{String refreshFailure;DiagnosticFailure refreshDiagnosticFailure=DiagnosticFailure.NONE;boolean requiresBridgeUpgrade;AndroidSyncFacade.OperationResult result;}
+ static class OperationOutcome{String refreshFailure;DiagnosticFailure refreshDiagnosticFailure=DiagnosticFailure.NONE;boolean requiresBridgeUpgrade,stale;AndroidSyncFacade.OperationResult result;}
+ static class OperationReceiptContext{}
+ OperationReceiptContext captureOperationReceiptContext(){return null;}
+ boolean prepareOperationReceipt(OperationOutcome outcome,OperationReceiptContext context){return false;}
+ boolean isStaleOperationReceipt(AndroidSyncFacade.OperationResult result,OperationReceiptContext context){return false;}
  static class SyncHistory{Object getBaselineCommit(){return new Object();}}
  static class GamePreparationService{static class PreparedPair{boolean legacyUnboundHelper;}}
  static class InstallProgressPolicy{static boolean requiresRebindAfterLegacyRecovery(boolean a,boolean b){return false;}}

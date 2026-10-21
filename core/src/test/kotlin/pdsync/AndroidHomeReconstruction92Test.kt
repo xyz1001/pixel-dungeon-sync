@@ -29,6 +29,7 @@ class AndroidHomeReconstruction92Test {
  private inner class Bridge(initial:Map<String,ByteArray> = files()):AndroidGameBridge {
   var content=initial.toMutableMap();var exports=0;var restores=0;var targets=0;var identityScopes=0;var closedScopes=0
   var lastExport:Path?=null;var onTarget:((Int)->Unit)?=null;var afterExport:((Path)->Unit)?=null
+  var directRestore=false;var wrongReceiptBytes=false
   val target=AndroidGameTarget(identity,"synthetic-896",896,"b".repeat(64),"c".repeat(64))
   override fun targetGame():AndroidGameTarget {targets++;onTarget?.invoke(targets);return target}
   override fun exportTo(emptyDestination:Path) {
@@ -41,14 +42,22 @@ class AndroidHomeReconstruction92Test {
    content=Files.walk(preparedDirectory).use {paths->paths.filter(Files::isRegularFile).toList().associate {preparedDirectory.relativize(it).toString().replace('\\','/') to it.readBytes()}}.toMutableMap()
   }
   override fun beginHomeReadIdentityScope():AutoCloseable {identityScopes++;return AutoCloseable {closedScopes++}}
+  override fun restoreVerified(snapshot:Snapshot,expectedCurrentFiles:Map<String,String>):AndroidRestoreReceipt? {
+   if(!directRestore)return null
+   restores++;require(content.mapValues {hash(it.value)}==expectedCurrentFiles)
+   content=Snapshots.verify(snapshot,AndroidGameAdapter(identity)).toMutableMap()
+   return AndroidRestoreReceipt(target,snapshot.manifest.files,content.values.sumOf {it.size.toLong()}+if(wrongReceiptBytes)1 else 0)
+  }
  }
  private class Store:AppendStore {
   val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>()
   val objectReads=AtomicInteger();val commitReads=AtomicInteger();var writes=0;var scopes=0;var closedScopes=0;var scopeDepth=0;var outerScopes=0;val scopePaths=mutableListOf<Path?>()
+  val objectReadIds=mutableListOf<String>()
+  var afterCommit:((AppendCommit)->Unit)?=null
   override fun listCommits(cursor:String?)=CommitPage(commits.keys.toList())
   override fun readCommit(id:String):ByteArray? {commitReads.incrementAndGet();return commits[id]?.copyOf()}
-  override fun readObject(id:String):ByteArray? {objectReads.incrementAndGet();return objects[id]?.copyOf()}
-  override fun writeCommit(id:String,bytes:ByteArray) {writes++;commits[id]=bytes.copyOf()}
+  override fun readObject(id:String):ByteArray? {objectReads.incrementAndGet();objectReadIds+=id;return objects[id]?.copyOf()}
+  override fun writeCommit(id:String,bytes:ByteArray) {writes++;commits[id]=bytes.copyOf();afterCommit?.invoke(json.decodeFromString(bytes.decodeToString()))}
   override fun writeObject(id:String,bytes:ByteArray) {writes++;objects[id]=bytes.copyOf()}
   override fun legacyPresent()=false
   override fun <T> withReadScope(cacheDirectory:Path?,block:()->T):T {scopes++;if(scopeDepth++==0){outerScopes++;scopePaths+=cacheDirectory};try{return block()}finally{scopeDepth--;closedScopes++}}
@@ -65,6 +74,77 @@ class AndroidHomeReconstruction92Test {
  private fun mirror(root:Path)=Files.walk(root.resolve("connections")).use {paths->paths.filter {it.fileName.toString()=="mirror" && Files.isDirectory(it)}.findFirst().orElseThrow()}
  private fun treeFingerprint(root:Path)=Files.walk(root).use {paths->paths.toList().associate {path->val a=Files.readAttributes(path,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS);root.relativize(path).toString() to "${a.fileKey()}:${a.lastModifiedTime()}:${a.size()}:${if(a.isRegularFile)hash(path.readBytes()) else "directory"}"}}
  private fun assertExportsClean(root:Path) {assertFalse(Files.walk(root).use {paths->paths.anyMatch {it.fileName.toString().startsWith("export-")}})}
+
+ @Test fun selectedTipRestoreReadsOnlyChosenObjectAndUsesFinalReceiptWithoutAnotherExport() {
+  val store=Store();publish(store);val first=store.latest();val second=store.child(first);val chosen=store.child(second)
+  val bridge=Bridge(emptyMap()).also {it.directRestore=true};val rig=rig(bridge,store)
+  val home=rig.facade.inspectHome();store.objectReadIds.clear();val exports=bridge.exports;val writes=store.writes
+  val result=rig.facade.restoreSelected(home,chosen.snapshot.id,false)
+  assertEquals(listOf(chosen.snapshot.id),store.objectReadIds)
+  assertEquals(exports+1,bridge.exports);assertEquals(1,bridge.restores);assertEquals(writes,store.writes)
+  assertTrue(result.configurationComplete);val refreshed=assertNotNull(result.refreshedInspection)
+  assertFalse(refreshed.isObjectVerified);assertEquals(chosen.id,refreshed.comparison?.baselineId)
+  assertTrue(rig.facade.historyPresentation(refreshed).currentProtected)
+  assertEquals(exports+1,bridge.exports)
+  assertFalse(rig.facade.hasUnresolvedRestore())
+ }
+
+ @Test fun selectedTipRestoreRejectsBadReceiptAndRetainsRecovery() {
+  val store=Store();publish(store);val bridge=Bridge(emptyMap()).also {it.directRestore=true;it.wrongReceiptBytes=true};val rig=rig(bridge,store)
+  val home=rig.facade.inspectHome()
+  assertFailsWith<IllegalArgumentException> {rig.facade.restoreSelected(home,store.latest().snapshot.id,false)}
+  assertTrue(rig.facade.hasUnresolvedRestore())
+ }
+
+ @Test fun selectedTipRestoreDoesNotUseMetadataAsObjectProof() {
+  val store=Store();publish(store);val chosen=store.latest()
+  val bridge=Bridge(emptyMap()).also {it.directRestore=true};val rig=rig(bridge,store);val home=rig.facade.inspectHome()
+  store.objects[chosen.snapshot.id]=byteArrayOf(1,2,3)
+  assertFailsWith<IllegalArgumentException> {rig.facade.restoreSelected(home,chosen.snapshot.id,false)}
+  assertEquals(0,bridge.restores);assertFalse(rig.facade.hasUnresolvedRestore())
+ }
+
+ @Test fun historicalRestoreReusesOnlySelectedArchiveAndPublishesAfterGameReceipt() {
+  val store=Store();val remote=Bridge();val published=publish(store,remote);val old=store.latest()
+  remote.content=files(2);assertEquals("UPLOADED",published.facade.autoUpload().status)
+  remote.content=files(3);assertEquals("UPLOADED",published.facade.autoUpload().status)
+  val bridge=Bridge(emptyMap()).also {it.directRestore=true};val rig=rig(bridge,store)
+  rig.facade.restoreSelected(rig.facade.inspectHome(),store.latest().snapshot.id,false)
+  val home=rig.facade.inspectHome();store.objectReadIds.clear();val exports=bridge.exports;val restores=bridge.restores
+  var publishedAfterReceipt=false
+  store.afterCommit={publishedAfterReceipt=bridge.restores==restores+1}
+  val result=rig.facade.restoreSelected(home,old.snapshot.id,false)
+  assertEquals(1,store.objectReadIds.count {it==old.snapshot.id})
+  assertEquals(1,store.objectReadIds.filter {it in listOf(old.snapshot.id)}.size)
+  assertEquals(exports+1,bridge.exports);assertTrue(publishedAfterReceipt)
+  assertEquals("restore",store.latest().kind);assertTrue(result.configurationComplete)
+  assertNotNull(result.refreshedInspection);assertFalse(result.isPending)
+  assertEquals(old.snapshot.files,bridge.content.mapValues {hash(it.value)})
+ }
+
+ @Test fun dirtyTipPreservesLocalBranchAndRestoresOneSelectedObject() {
+  val store=Store();publish(store);val chosen=store.latest()
+  val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
+  val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome();store.objectReadIds.clear()
+  val result=rig.facade.restoreSelected(home,chosen.snapshot.id,true)
+  assertEquals(1,store.objectReadIds.count {it==chosen.snapshot.id})
+  assertEquals(1,bridge.restores);assertTrue(result.configurationComplete)
+  val commits=store.commits.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}
+  assertTrue(commits.any {it.snapshot.files==before})
+  assertEquals("resolution",store.latest().kind);assertEquals(2,store.latest().parents.size)
+  assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
+ }
+
+ @Test fun lateBranchDuringDirtyPreservationDoesNotReplaceGameFiles() {
+  val store=Store();publish(store);val chosen=store.latest()
+  val bridge=Bridge(files(9)).also {it.directRestore=true};val rig=rig(bridge,store)
+  val before=bridge.content.mapValues {hash(it.value)};val home=rig.facade.inspectHome()
+  store.afterCommit={store.afterCommit=null;store.child(chosen)}
+  val result=rig.facade.restoreSelected(home,chosen.snapshot.id,true)
+  assertTrue(result.isConflict);assertFalse(result.configurationComplete)
+  assertEquals(0,bridge.restores);assertEquals(before,bridge.content.mapValues {hash(it.value)})
+  assertFalse(rig.facade.hasUnresolvedRestore())
+ }
 
  @Test fun homeReadsMetadataWithoutObjectAuthorityOrTransferAndReusesOneExport() {
   val store=Store();publish(store);val bridge=Bridge();val rig=rig(bridge,store);val reads=store.objectReads.get();val writes=store.writes
@@ -131,8 +211,11 @@ class AndroidHomeReconstruction92Test {
 
  @Test fun mutationBetweenVerifiedCaptureAndMirrorUseIsRejectedWithoutMirrorReplacement() {
   val store=Store();val bridge=Bridge();val rig=rig(bridge,store);rig.facade.inspectHome();val root=mirror(rig.root);val before=treeFingerprint(root)
-  bridge.content=files(2);val at=bridge.targets+3 // before export, after export, then immediately before consuming export proof
-  bridge.onTarget={count->if(count==at)requireNotNull(bridge.lastExport).resolve("game1/game.dat").writeBytes(files(3).getValue("game1/game.dat"))}
+  bridge.content=files(2)
+  bridge.afterExport={exported->
+   var targetChecks=0
+   bridge.onTarget={if(++targetChecks==2)exported.resolve("game1/game.dat").writeBytes(files(3).getValue("game1/game.dat"))}
+  }
   val failure=assertFailsWith<IllegalArgumentException> {rig.facade.inspectHome()}
   assertEquals(SyncBlockReason.SAVE_NOT_STABLE,(failure as ReasonedSyncFailure).syncBlockReason)
   assertEquals(before,treeFingerprint(root));assertExportsClean(rig.root);assertEquals(0,store.writes)
@@ -158,9 +241,11 @@ class AndroidHomeReconstruction92Test {
   val home=DiagnosticLog.bind(trace).use {rig.facade.inspectHome()}
   assertEquals(3,home.localFileCount);assertEquals(1,bridge.exports)
   val phases=trace.timings.snapshot()
-  for(phase in listOf(DiagnosticPhase.SAVE_EXPORT,DiagnosticPhase.LOCAL_EXPORT_VERIFY,DiagnosticPhase.MIRROR_COPY,DiagnosticPhase.LOCAL_SUMMARY,DiagnosticPhase.COMPARISON))assertEquals(1,phases[phase]?.count,"$phase count")
-  assertTrue(requireNotNull(phases[DiagnosticPhase.SAVE_EXPORT]).durationMs>=1_900)
-  assertEquals(1,phases[DiagnosticPhase.OPERATION_LOCK_WAIT]?.count)
+  for(phase in listOf(DiagnosticPhase.LOCAL_EXPORT_VERIFY,DiagnosticPhase.MIRROR_COPY,DiagnosticPhase.LOCAL_SUMMARY,DiagnosticPhase.COMPARISON))assertEquals(1,phases[phase]?.count,"$phase count")
+  val exports=requireNotNull(phases[DiagnosticPhase.SAVE_EXPORT])
+  assertEquals(2,exports.count);assertEquals(1,exports.skipped) // unsupported inventory probe, then one real export
+  assertTrue(exports.durationMs>=1_900)
+  assertEquals(2,phases[DiagnosticPhase.OPERATION_LOCK_WAIT]?.count) // short inventory attempt plus serialized fallback
  }
 
  @Test fun facadeDelegatesIdentityScopeAndRestoreDiskReadScopeWithFailureCleanup() {

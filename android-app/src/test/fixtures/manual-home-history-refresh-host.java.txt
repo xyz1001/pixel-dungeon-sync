@@ -151,6 +151,24 @@ class MainActivity {
         }
     }
     void runPending() throws Exception { runWorker(); finishWorker(); }
+    // Scheduling port only; the real detached scheduler is exercised by test_detached_home_queue_execution.
+    boolean startDetachedHomeRead(final SecureConnectionStore.Connection account, boolean prepare, boolean readiness, Object automatic) {
+        final String selection=SyncRuntime.selection, namespace=SyncRuntime.namespace;
+        this.cloudVerified=false;this.inspection=null;this.history=null;this.homeObservationOwner=null;this.facade=null;
+        final java.util.concurrent.atomic.AtomicReference<Exception> readFailure=new java.util.concurrent.atomic.AtomicReference<>();
+        work(DiagnosticAction.INSPECT,CHECKING_SAVES_144.text(),()->{
+            if(!isCurrentHomeRead(account,selection,namespace))throw new StaleArchiveReadException();
+            if(!readyForSaves())return false;
+            try{readComparison(prepare);return true;}catch(Exception failure){readFailure.set(failure);return false;}
+        },value->{
+            if(!isCurrentHomeRead(account,selection,namespace))return;
+            if(readFailure.get() instanceof StaleArchiveReadException)return;
+            if(readFailure.get()!=null)throw readFailure.get();
+            if(!value){this.notice=this.readinessState.statusDescription();return;}
+            this.notice=comparisonCopy();this.details=this.inspection==null?"":safeText(this.inspection.getMessage());
+        });
+        return true;
+    }
     /* PRODUCTION_METHODS */
 
     static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

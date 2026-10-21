@@ -74,7 +74,7 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertIn('no previous observation must remain refreshable', result.stderr)
 
     def test_regression_detects_namespace_preparation(self):
-        result = self.execute(('readComparison(false);', 'readComparison(true);'))
+        result = self.execute(('startDetachedHomeRead(account, false, false, null);', 'startDetachedHomeRead(account, true, false, null);'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('manual read provisioned the remote namespace', result.stderr)
 
@@ -83,32 +83,30 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn('manual refresh must consume same-scope pending renewal', result.stderr)
 
-    def test_regression_detects_early_unscoped_failure_delivery(self):
-        result = self.execute(('catch (Exception failure) { readFailure.set(failure); return false; }',
-                               'catch (Exception failure) { throw failure; }'))
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn('stale in-flight read accepted or reported old scope', result.stderr)
-
-    def test_regression_detects_unscoped_completion_feedback(self):
-        result = self.execute(('if (!isCurrentHomeRead(account, selection, namespace)) return;', ''))
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn('stale completion overwrote new scope feedback', result.stderr)
+    def test_stale_failure_and_completion_use_scoped_reader_acceptance(self):
+        # Full cross-thread execution, including old-scope errors, lives in the detached queue fixture.
+        finish = body(MAIN, 'private void finishDetachedHomeRead(')
+        self.assertLess(finish.index('requireDetachedHomeRead(read)'), finish.index('reportError(outcome.error)'))
+        self.assertIn('if (discarded)', finish)
 
     def test_manual_and_renewal_share_only_read_only_inspection_work(self):
         manual = body(MAIN, 'private void refreshHomeHistory()')
         self.assertIn('if (!canRefreshHomeHistory()) return;', manual)
         self.assertIn('readHomeArchives(account, selection, namespace)', manual)
         helper = body(MAIN, 'private void readHomeArchives(')
-        self.assertEqual(1, helper.count('readComparison(false)'))
-        self.assertIn('work(DiagnosticAction.INSPECT, CHECKING_SAVES_144.text()', helper)
+        self.assertEqual(1, helper.count('startDetachedHomeRead(account, false, false, null)'))
+        self.assertNotIn('work(', helper)
         for forbidden in ('checkRootAccess(', 'requestRootAuthorization(', 'readInstallationReadiness(',
                           'refreshComparison(', 'prepareOfficialHomeNamespace(', '.connect(', '.upload(',
                           '.autoUpload(', '.restore', '.mergeConflict(', 'replaceMirror(', 'completeOnboarding(',
                           'setOnboardingProgress(', '.arm(', '.schedule(', '.postDelayed('):
             self.assertNotIn(forbidden, manual + helper)
-        # The executable port publishes busy synchronously, just like the production work scheduler.
+        # Mutation scheduling remains independent; the separate reader never sets write-busy.
         work = body(MAIN, 'private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)')
         self.assertLess(work.index('this.busy = true'), work.index('this.f9io.execute'))
+        reader = body(MAIN, 'private boolean startDetachedHomeRead(')
+        self.assertIn('this.homeReader.submit', reader)
+        self.assertNotIn('this.busy = true', reader)
         failure = body(MAIN, 'void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(')
         self.assertIn('this.busy = false', failure)
         self.assertIn('if (!(exc instanceof StaleArchiveReadException)) reportError(exc)', failure)

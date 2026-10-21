@@ -38,5 +38,8 @@ class ReconstructedHomeProofTest {
  @Test fun metadataCannotAuthorizeDirectUpload(){val(store,s)=seeded();val p=s.compareHomeMetadata(store){true};assertFails{s.onboardingUpload(p,store){true}};assertEquals(0,store.puts)}
  @Test fun localChangeRejectsOldPreview(){val(store,s)=seeded();val p=s.compareHomeMetadata(store){true};s.root.resolve("game1/game.dat").writeText("changed");assertFails{s.verifyComparison(p,store){true}};assertEquals(0,store.puts)}
  @Test fun observationsBelongToOneSession(){val(store,s)=seeded();val p=s.compareHomeMetadata(store){true};val other=session();assertFails{other.verifyComparison(p,store){true}};assertFails{other.syncHistory(s.syncHistory(p))}}
- @Test fun failedPreviewNeverClaimsVerification(){val(_,s)=seeded();val bad=object:AppendStore by Store(){override fun listCommits(cursor:String?):CommitPage=error("offline")};val p=s.compareHomeMetadata(bad){true};assertEquals(OnboardingKind.BLOCKED,p.kind);assertEquals(RemoteVerification.METADATA_ONLY,p.verification);assertFalse(AutomaticUploadEligibility.allows(p))}
+ @Test fun failedPreviewNeverClaimsVerification(){val(_,s)=seeded();val bad=object:AppendStore by Store(){
+  override fun listCommits(cursor:String?):CommitPage=error("offline")
+  override fun listCommits(cursor:String?,cancellation:MetadataReadCancellation):CommitPage=error("offline")
+ };val p=s.compareHomeMetadata(bad){true};assertEquals(OnboardingKind.BLOCKED,p.kind);assertEquals(RemoteVerification.METADATA_ONLY,p.verification);assertFalse(AutomaticUploadEligibility.allows(p))}
 }

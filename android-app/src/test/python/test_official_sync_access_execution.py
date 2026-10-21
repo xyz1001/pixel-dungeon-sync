@@ -24,7 +24,10 @@ class OfficialSyncAccessExecution(unittest.TestCase):
         auto = body(AUTO, 'private void attemptUpload()')
         self.assertLess(auto.index('SyncRuntime.requireOfficialSyncAccess'), auto.index('this.facade.autoUpload()'))
         history = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
-        self.assertLess(history.index('SyncRuntime.facade(this, captured)'), history.index('result.facade.inspectHome()'))
+        self.assertIn('startDetachedHomeRead(captured, false, false, ticket)', history)
+        reader=body(MAIN, 'private boolean startDetachedHomeRead(')
+        self.assertLess(reader.index('lease.authorize('), reader.index('owner.readHomeRemote(context)'))
+        self.assertIn('SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, owner)', reader)
         # Every cloud action obtains sync(), including inspect/history, conflict and recovery.
         self.assertIn('AndroidSyncFacade owner = sync()', body(MAIN, 'private AndroidSyncFacade.OperationResult restoreForCurrentAccount('))
 

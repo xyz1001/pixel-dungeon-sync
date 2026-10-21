@@ -60,7 +60,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
         self.assertIn('Renewal archive read host execution passed', result.stdout)
 
     def test_regression_detects_namespace_preparation(self):
-        result = self.execute(('readComparison(false);', 'readComparison(true);'))
+        result = self.execute(('startDetachedHomeRead(account, false, false, null);', 'startDetachedHomeRead(account, true, false, null);'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('HOME performs one read-only recovery', result.stderr)
 
@@ -69,15 +69,11 @@ class RenewalArchiveReadExecution(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn('account overlay cannot read', result.stderr)
 
-    def test_regression_detects_missing_readiness_gate(self):
-        result = self.execute(('if (!readyForSaves()) return false;', ''))
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn('readiness failure', result.stderr)
-
-    def test_regression_detects_reused_facade(self):
-        result = self.execute(('this.facade = null;', ''))
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn('renewal must create a fresh facade', result.stderr)
+    def test_reader_retains_readiness_and_fresh_facade_boundary(self):
+        reader=body(MAIN, 'private boolean startDetachedHomeRead(')
+        self.assertIn('if (!readyForSaves()) outcome.notReady = true;', reader)
+        self.assertIn('outcome.facade = SyncRuntime.localFacade(this, account);', reader)
+        self.assertNotIn('outcome.facade = this.facade', reader)
 
     def test_regression_detects_retained_success_during_refresh(self):
         result = self.execute(('this.renewalArchiveRead.started();', '{}'))
@@ -103,8 +99,9 @@ class RenewalArchiveReadExecution(unittest.TestCase):
                           '.restore', '.mergeConflict(', 'replaceMirror(', 'completeOnboarding(',
                           'setOnboardingProgress(', '.arm(', '.schedule(', '.postDelayed('):
             self.assertNotIn(forbidden, drain + read_home)
-        self.assertEqual(1, read_home.count('readComparison(false)'))
-        self.assertLess(read_home.index('if (!readyForSaves())'), read_home.index('readComparison(false)'))
+        self.assertEqual(1, read_home.count('startDetachedHomeRead(account, false, false, null)'))
+        reader=body(MAIN, 'private boolean startDetachedHomeRead(')
+        self.assertLess(reader.index('if (!readyForSaves())'), reader.index('owner.readHomeRemote(context)'))
         self.assertIn('readComparison(true)', body(MAIN, 'private void readComparison()'))
         read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertIn('if (prepareNamespace) prepareOfficialHomeNamespace(activeFacade)', read)
