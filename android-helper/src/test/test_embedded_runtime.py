@@ -166,23 +166,12 @@ public final class EmbeddedRuntimeTests {
         denied(()->new GameGuard(c).binding(),"bridge in main game process rejected"); provider.processName=GAME+":pdsync_bridge";
         provider.grantUriPermissions=true;
         denied(()->new GameGuard(c).binding(),"URI grants rejected"); provider.grantUriPermissions=false;
-        ActivityManager.RunningAppProcessInfo self=process(GAME+":pdsync_bridge",4242,100,GAME);
-        c.manager.running=new ArrayList<>(); c.manager.running.add(self);
-        check(!guard.observe().gameProcessPresent,"own active bridge process excluded from game visibility");
-        ActivityManager.RunningAppProcessInfo other=process("custom.game.process",4250,100,GAME);
-        c.manager.running.add(other);
-        check(guard.observe().gameForeground && guard.observe().gameProcessPresent,"all owned game processes count regardless of name");
-        denied(guard::requireQuiescent,"foreground game blocks save access");
-        other.importance=400;
-        check(!guard.observe().gameForeground && guard.observe().gameProcessPresent,"cached game process requires downstream quiet scan");
-        other.pkgList=new String[]{GAME,"evil.pkg"}; denied(guard::observe,"ambiguous process package list"); other.pkgList=new String[]{GAME};
-        other.processName=GAME+":pdsync_bridge"; denied(guard::observe,"second bridge PID is ambiguous"); other.processName=GAME;
-        c.manager.running.remove(self); denied(guard::observe,"own PID visibility required"); c.manager.running.add(self);
-        self.processName=GAME; denied(guard::observe,"own PID must have dedicated process identity"); self.processName=GAME+":pdsync_bridge";
+        c.manager.running=null;
+        check(guard.installedGame()==game,"binding verification ignores unavailable process visibility");
         ActivityManager.ProcessErrorStateInfo error=new ActivityManager.ProcessErrorStateInfo(); error.uid=42;
-        c.manager.errors=Arrays.asList(error); denied(guard::observe,"crashing game or bridge process blocks transfer"); c.manager.errors=null;
-        c.manager.running=null; denied(guard::observe,"missing process visibility");
-        System.out.println("PASS: embedded runtime API "+sdk+", "+assertions+" authentication/process assertions; JVM stubs only.");
+        c.manager.errors=Arrays.asList(error);
+        check(guard.installedGame()==game,"process error state is not an access gate");
+        System.out.println("PASS: embedded runtime API "+sdk+", "+assertions+" authentication/binding assertions; JVM stubs only.");
     }
 }
 '''

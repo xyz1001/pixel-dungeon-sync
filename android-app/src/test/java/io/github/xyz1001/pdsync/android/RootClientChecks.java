@@ -141,7 +141,7 @@ public final class RootClientChecks {
         rejects(wrongBinding::inspectReady,"ROOT_REPLY_MISMATCH");
         RootGameBridge unknown=new RootGameBridge(game,identity,g->{},(r,o)->new RootProtocol.Response(
                 RootProtocol.Status.OK,game.binding().fingerprint(),"EMPTY_DIRECTORY",0,0,emptyFingerprint,"UNKNOWN",false,null).withRequest(r,RootProtocol.Outcome.READ_ONLY),()->true,dir.toFile());
-        rejects(unknown::inspectReady,"ROOT_UNRELIABLE");check(!unknown.observeLifecycle().reliable,"unknown lifecycle truthful");
+        unknown.inspectReady();check(!unknown.observeLifecycle().reliable,"unknown lifecycle truthful and no readiness gate");
         byte[] emptyArchive=new byte[22];emptyArchive[0]=0x50;emptyArchive[1]=0x4b;emptyArchive[2]=5;emptyArchive[3]=6;
         AtomicInteger exportChecks=new AtomicInteger();
         RootGameBridge emptyExporter=new RootGameBridge(game,identity,g->exportChecks.incrementAndGet(),(r,o)->{
@@ -250,7 +250,7 @@ public final class RootClientChecks {
             check(line.contains("\"rootCommand\":\"OBSERVE\""), "actual observation command exported");
             check(!line.contains("\"fileCount\""), "observation does not invent empty inventory");
         }
-        check(transitions == 2, "only changed observation states are logged, not every poll");
+        check(transitions == 0, "disabled lifecycle polling produces no observation IPC logs");
         check(!diagnosticEvents().contains(game.gamePackage), "package and binding identifiers omitted");
     }
 
