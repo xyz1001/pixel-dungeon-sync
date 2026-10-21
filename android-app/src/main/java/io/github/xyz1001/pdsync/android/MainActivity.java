@@ -4285,8 +4285,16 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void operation(DiagnosticAction action, String str, final Task<AndroidSyncFacade.OperationResult> task, final String str2) {
+        if (this.busy || isDestroyed()) return;
         this.confirmedAction = null;
         this.confirmationMerge = null;
+        if (this.page == SyncPage.CONFIRM) {
+            // Leave the modal before queuing I/O. work() sets busy and renders the existing
+            // destination loading state in the same UI turn; navigate() would start a read
+            // between consent and the write. Retained confirmation callbacks expire now.
+            ++this.settingsConfirmationToken;
+            this.page = this.confirmationReturn == null ? SyncPage.HOME : this.confirmationReturn;
+        }
         work(action, str, new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda36
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {

@@ -43,6 +43,10 @@ class HomeScopeTimingExecution(unittest.TestCase):
         self.run_java(r"""
 class MainActivity {
  enum DiagnosticAction{RESTORE,RESOLVE,PUSH}
+ enum SyncPage{HOME,CONFIRM}
+ boolean busy,destroyed; int settingsConfirmationToken;
+ SyncPage page=SyncPage.HOME,confirmationReturn=SyncPage.HOME;
+ boolean isDestroyed(){return destroyed;}
  enum DiagnosticStage{VERIFY,REFRESH}
  enum DiagnosticResult{CONFLICT,PENDING,SUCCEEDED,REJECTED}
  enum DiagnosticFailure{NONE,FAILED}
