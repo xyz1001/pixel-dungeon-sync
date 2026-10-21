@@ -600,7 +600,7 @@ class AppendProfileSession(
   revalidateComparison(comparison,store,stopped)
   mergeCurrentLocked(AppendConflict(comparison.observedTips,emptyList(),comparison.localFiles),store,stopped,enforceObservedTips=true)
  }
- /** Preflight before publishing a unique local branch; then retain both sources in the merge DAG. */
+ /** Preflight the merged outcome without publishing an extra local insurance branch. */
  fun mergeCurrent(store:AppendStore,stopped:()->Boolean):AppendPushResult = local.locked {
   val graph=discover(store);require(graph.tips.isNotEmpty()) { CoreSessionMessages.NO_CLOUD_BRANCHES_ARE_AVAILABLE_TO_MERGE.text() }
   val observed=AppendConflict(graph.tips,emptyList(),currentFiles())
@@ -609,21 +609,15 @@ class AppendProfileSession(
  private fun mergeCurrentLocked(observed:AppendConflict,store:AppendStore,stopped:()->Boolean,enforceObservedTips:Boolean=false):AppendPushResult {
   val preview=buildMerge(observed,store,stopped)
   local.checkRestore(preview.snapshot)
-  val captured=local.capture(stopped,null)
-  require(captured.manifest.files==observed.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_AFTER_THE_PREFLIGHT_CHECK_COMPARE_AGAIN.text() }
-  val localPlan=repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
-  val expectedTips=(observed.observedTips-localPlan.commit.parents.toSet())+localPlan.commit.id
-  val uploaded=publish(localPlan,store,stopped)
-  if(enforceObservedTips) {
-   // Publishing our preserved local branch does not authorize merging a newly arrived device.
-   // Keep the real branches and require a fresh preview before any local apply/resolution.
-   val graph=discover(store)
-   if(graph.tips!=expectedTips)return AppendPushResult.Diverged(preserveConflict(graph,store,stopped))
+  val latest=discover(store)
+  if(latest.tips!=observed.observedTips)return AppendPushResult.Diverged(preserveConflict(latest,store,stopped))
+  require(currentFiles()==observed.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_AFTER_THE_PREFLIGHT_CHECK_COMPARE_AGAIN.text() }
+  // Publish only the requested merged outcome, never an insurance copy of overwritten local data.
+  val plan=prepareAndApply(preview.snapshot,latest.tips.sorted(),if(latest.tips.size>1)"resolution" else "snapshot",CoreSessionMessages.PER_RUN_MERGE_SLOTS.text(preview.slots)) { plan ->
+   require(currentFiles()==observed.observedLocalFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_MERGING_NOTHING_WAS_OVERWRITTEN.text() }
+   local.restore(snapshot(plan),stopped,observed.observedLocalFiles)
   }
-  return when(uploaded) {
-   is AppendPushResult.Success -> uploaded
-   is AppendPushResult.Diverged -> mergeLocked(uploaded.conflict,store,stopped)
-  }
+  return publish(plan,store,stopped)
  }
  private fun buildMerge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): RunMergeResult {
   local.guard(stopped);noLegacyPending();appliedOnly()

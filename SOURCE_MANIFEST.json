@@ -2305,8 +2305,8 @@
       "sha256": "d99f832de6f55c857fee806282f6bc74c5867801e35d54a4b1a3d113ced85e62"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 63710,
-      "sha256": "4f6ac48a001e8b4c42f248aafe1e5d64ce322c20bb0adeb3920fa9cb97f6fba2"
+      "size": 63565,
+      "sha256": "5ed306c39d2d33b79fb123d75af02532edefd87991794a966d288bebfdb9ffd7"
     },
     "core/src/main/kotlin/pdsync/AutomaticUploadEligibility.kt": {
       "size": 723,
