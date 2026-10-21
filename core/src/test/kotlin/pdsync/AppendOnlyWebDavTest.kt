@@ -14,6 +14,8 @@ import kotlin.test.*
 class AppendOnlyWebDavTest {
  private val id = "11111111-1111-4111-8111-111111111111"
  private val id2 = "22222222-2222-4222-8222-222222222222"
+ private val hash = "ab".repeat(32)
+ private fun hashName(id: String = hash) = "pdsync-v3-commit-$id.json"
  private val folder = "/dav/shattered/hero/"
  private fun name(id: String = this.id) = "pdsync-v2-commit-$id.json"
  private fun store(server: MockWebServer, client: OkHttpClient = OkHttpClient()) = AppendOnlyWebDav(server.url("/dav/").toString(), "shattered", "hero", "player", "test-secret", client)
@@ -32,12 +34,16 @@ class AppendOnlyWebDavTest {
   assertEquals(Credentials.basic("player",password,Charsets.UTF_8),authorization)
  }
 
- @Test fun flatReadsAndWritesWorkWithoutEtagsOrConditionalSupportAndNeverWriteHead() = MockWebServer().use { server ->
-  // This deliberately ignores conditionals and returns no ETag, like a minimal append store.
+ @Test fun hashWritesAreCreateOnlyAndNeverWriteHead() = MockWebServer().use { server ->
+  // A minimal create-only DAV store requires no ETag or shared head.
   val objects = mutableMapOf<String, ByteArray>()
   server.dispatcher = object: Dispatcher() {
    override fun dispatch(request: RecordedRequest): MockResponse = when (request.method) {
-    "PUT" -> { objects[request.path!!] = request.body.readByteArray(); MockResponse().setResponseCode(201) }
+    "PUT" -> {
+     if (request.getHeader("If-None-Match") != "*") MockResponse().setResponseCode(400)
+     else if (objects.containsKey(request.path)) MockResponse().setResponseCode(412)
+     else { objects[request.path!!] = request.body.readByteArray(); MockResponse().setResponseCode(201) }
+    }
     "GET" -> objects[request.path]?.let { MockResponse().setBody(okio.Buffer().write(it)) } ?: MockResponse().setResponseCode(404)
     else -> MockResponse().setResponseCode(405)
    }
@@ -45,16 +51,66 @@ class AppendOnlyWebDavTest {
   server.start(); val dav = store(server)
   val commit = "{\"synthetic\":true}".encodeToByteArray(); val archive = byteArrayOf(0, 1, 127, -1)
   assertNull(dav.readCommit(id)); assertNull(dav.readObject(id)); assertFalse(dav.legacyPresent())
-  dav.writeObject(id, archive); dav.writeCommit(id, commit)
-  assertContentEquals(archive, dav.readObject(id)); assertContentEquals(commit, dav.readCommit(id))
-  assertEquals(setOf(folder + "pdsync-v2-object-$id.zip", folder + name()), objects.keys)
+  dav.writeObject(hash, archive); dav.writeCommit(hash, commit)
+  assertContentEquals(archive, dav.readObject(hash)); assertContentEquals(commit, dav.readCommit(hash))
+  assertEquals(setOf(folder + "pdsync-v3-object-$hash.zip", folder + hashName()), objects.keys)
   repeat(server.requestCount) {
    val request = server.takeRequest(1, TimeUnit.SECONDS)!!
    assertEquals(Credentials.basic("player", "test-secret"), request.getHeader("Authorization"))
-   assertNull(request.getHeader("If-Match")); assertNull(request.getHeader("If-None-Match"))
+   assertNull(request.getHeader("If-Match")); assertEquals(if (request.method == "PUT") "*" else null, request.getHeader("If-None-Match"))
    if (request.path!!.endsWith("head.json")) assertEquals("GET", request.method)
    assertTrue(request.method in setOf("GET", "PUT"))
   }
+ }
+
+ @Test fun legacyRecordsRemainReadableButCannotBeWritten() = MockWebServer().use { server ->
+  server.enqueue(MockResponse().setBody("legacy commit")); server.enqueue(MockResponse().setBody("legacy zip")); server.start()
+  val dav = store(server)
+  assertEquals("legacy commit", dav.readCommit(id)!!.decodeToString())
+  assertEquals("legacy zip", dav.readObject(id)!!.decodeToString())
+  assertEquals(folder + name(), server.takeRequest().path)
+  assertEquals(folder + "pdsync-v2-object-$id.zip", server.takeRequest().path)
+  assertFailsWith<IllegalArgumentException> { dav.writeCommit(id, byteArrayOf(1)) }
+  assertFailsWith<IllegalArgumentException> { dav.writeObject(id, byteArrayOf(1)) }
+  assertEquals(2, server.requestCount)
+ }
+
+ @Test fun hashConflictsAndRetryableStatusesReturnOnceWithoutOverwritingOrRetrying() = MockWebServer().use { server ->
+  server.start(); val dav = store(server)
+  for (status in listOf(409, 412, 503)) for (commit in listOf(false, true)) {
+   server.enqueue(MockResponse().setResponseCode(status).setHeader("Retry-After", "0"))
+   val error = assertFailsWith<WebDavException> {
+    if (commit) dav.writeCommit(hash, byteArrayOf(1)) else dav.writeObject(hash, byteArrayOf(2))
+   }
+   assertEquals(status, error.statusCode)
+   val request = server.takeRequest()
+   assertEquals("PUT", request.method); assertEquals("*", request.getHeader("If-None-Match"))
+   assertEquals(folder + if (commit) hashName() else "pdsync-v3-object-$hash.zip", request.path)
+  }
+  assertEquals(6, server.requestCount)
+ }
+
+ @Test fun mixedVersionPaginationKeepsHashAndLegacyPathsAndCredentialsIsolated() = MockWebServer().use { server ->
+  server.enqueue(listing(entry(folder + name())).setHeader("Link", "<?page=2>; rel=next"))
+  server.enqueue(listing(entry(folder + hashName()), entry(folder + "pdsync-v3-object-$hash.zip")))
+  server.enqueue(MockResponse().setBody("hash")); server.enqueue(MockResponse().setBody("legacy")); server.start()
+  val dav = store(server); val first = dav.listCommits(); val second = dav.listCommits(first.next)
+  assertEquals(listOf(id), first.ids); assertEquals(listOf(hash), second.ids); assertNull(second.next)
+  dav.readCommit(hash); dav.readCommit(id)
+  val requests = List(4) { server.takeRequest() }
+  assertEquals(listOf(folder, folder + "?page=2", folder + hashName(), folder + name()), requests.map { it.path })
+  requests.forEach { assertEquals(Credentials.basic("player", "test-secret"), it.getHeader("Authorization")) }
+  assertFalse(first.next!!.contains("test-secret"))
+ }
+
+ @Test fun malformedHashAndWrongVersionNamesFailClosed() = MockWebServer().use { server ->
+  server.start(); val dav = store(server)
+  for (filename in listOf(hashName(hash.uppercase()), hashName(hash.drop(1)), hashName(id),
+   "pdsync-v2-commit-$hash.json", hashName() + "/", hashName().replace(".json", ".zip"))) {
+   server.enqueue(listing(entry(folder + filename)))
+   assertFailsWith<IllegalArgumentException> { dav.listCommits() }
+  }
+  assertEquals(6, server.requestCount)
  }
 
  @Test fun legacyDetectionDoesNotParseOrWriteOldHead() = MockWebServer().use { server ->
@@ -187,7 +243,7 @@ class AppendOnlyWebDavTest {
 
  @Test fun redirectsNeverFollowEvenWithRedirectEnabledClientAndErrorsDoNotExposeLocation() = MockWebServer().use { server ->
   server.start(); val dav = store(server, OkHttpClient.Builder().followRedirects(true).followSslRedirects(true).build())
-  for (action in listOf<() -> Any?>({ dav.readCommit(id) }, { dav.listCommits() }, { dav.writeCommit(id, byteArrayOf(1)) })) {
+  for (action in listOf<() -> Any?>({ dav.readCommit(id) }, { dav.listCommits() }, { dav.writeCommit(hash, byteArrayOf(1)) })) {
    server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", "https://other.example/?secret=private"))
    val error = assertFailsWith<WebDavException> { action() }
    assertEquals(307, error.statusCode); assertFalse(error.toString().contains("private"))
@@ -205,7 +261,7 @@ class AppendOnlyWebDavTest {
   assertFailsWith<IllegalArgumentException> { dav.listCommits() }
   server.enqueue(MockResponse().setBody("x").setHeader("Content-Length", MAX_SNAPSHOT_BYTES + 1))
   assertFailsWith<IllegalArgumentException> { dav.readObject(id) }
-  assertFailsWith<IllegalArgumentException> { dav.writeCommit(id, ByteArray(MAX_MANIFEST_BYTES + 1)) }
+  assertFailsWith<IllegalArgumentException> { dav.writeCommit(hash, ByteArray(MAX_MANIFEST_BYTES + 1)) }
   assertEquals(4, server.requestCount)
  }
 

@@ -127,7 +127,7 @@ class OnboardingComparisonTest {
  @Test fun equalDescendantDoesNotSilentlyAdvanceBaseline() {
   val store = Memory(); val remote = session(); val first = publish(remote, store)
   val local = session(); local.adoptOnboardingRemote(compare(local, store), store) { true }
-  remote.renameCurrent("Same game bytes, new metadata") { true }
+  edit(remote,"new progress");edit(local,"new progress")
   val second = publish(remote, store)
   val result = compare(local, store)
   assertEquals(OnboardingKind.IDENTICAL, result.kind); assertEquals(OnboardingLineage.ANCESTOR_OF_TIP, result.baselineLineage)
@@ -165,10 +165,11 @@ class OnboardingComparisonTest {
   val old = compare(local, store); edit(remote, "new"); publish(remote, store)
   assertFails { local.adoptOnboardingRemote(old, store) { true } }
   assertFails { local.onboardingRestore(old, first.snapshot.id, store) { true } }
+  edit(local,"genuinely new local progress")
   val current = compare(local, store)
   local.onboardingUpload(current, store) { true }
   assertFails { local.onboardingUpload(current, store) { true } }
-  assertEquals("alive", content(local))
+  assertEquals("genuinely new local progress", content(local))
  }
 
  @Test fun unknownAndIncompleteRemoteAreBlockedNeverEmpty() {
@@ -237,7 +238,12 @@ class OnboardingComparisonTest {
  @Test fun equalBytesWithUnrelatedBranchesRequireExplicitChoiceNotAdoption() {
   val store = Memory(); val first = publish(session(), store); val local = session()
   local.adoptOnboardingRemote(compare(local, store), store) { true }
-  session().push(store) { true }
+  // Historical UUID clients could create independent equal-content roots. Read compatibility
+  // must retain those branches, although new hash-based publication now deduplicates them.
+  val legacySnapshot=first.snapshot.copy(id=UUID.randomUUID().toString())
+  val legacy=first.copy(schema=2,id=UUID.randomUUID().toString(),parents=emptyList(),snapshot=legacySnapshot)
+  store.writeObject(legacySnapshot.id,store.objects.getValue(first.snapshot.id))
+  store.writeCommit(legacy.id,json.encodeToString(legacy).encodeToByteArray())
   val comparison = compare(local, store)
   assertEquals(OnboardingKind.BRANCHED, comparison.kind); assertEquals(OnboardingLineage.BRANCHED, comparison.baselineLineage)
   assertFalse(comparison.canAdoptRemote); assertFails { local.adoptOnboardingRemote(comparison, store) { true } }

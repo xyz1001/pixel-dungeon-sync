@@ -24,7 +24,7 @@ class UnchangedBaselineLineageTest {
   fun child(parent: AppendCommit, manifest: Manifest = parent.snapshot, kind: String = "snapshot", parents: List<String> = listOf(parent.id)): AppendCommit {
    val snapshot = manifest.copy(id = UUID.randomUUID().toString())
    objects[snapshot.id] = objects.getValue(parent.snapshot.id).copyOf()
-   val commit = parent.copy(id = UUID.randomUUID().toString(), parents = parents, snapshot = snapshot, kind = kind)
+   val commit = parent.copy(schema = 2, id = UUID.randomUUID().toString(), parents = parents, snapshot = snapshot, kind = kind)
    commits[commit.id] = json.encodeToString(commit).encodeToByteArray()
    return commit
   }
@@ -32,8 +32,19 @@ class UnchangedBaselineLineageTest {
  private fun session(name: String = "local") = AppendProfileSession(AppConfig(saveRoot = temp.resolve(name).createDirectories().also {
   it.resolve("game1").createDirectories(); it.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":1}")
  }.toString()), temp.resolve("$name-state"), captureQuietMillis = 0)
+ // No-op ancestry is a read-compatibility feature for old UUID records. New schema3
+ // writers cannot create these duplicate-content chains.
+ private fun seedLegacy(local:AppendProfileSession,store:Memory):AppendCommit {
+  val captured=local.loadSnapshot(local.createSnapshot {true}.manifest.id)
+  val snapshot=captured.manifest.copy(id=UUID.randomUUID().toString())
+  val first=AppendCommit(schema=2,id=UUID.randomUUID().toString(),parents=emptyList(),snapshot=snapshot,objectBytes=captured.zip.size)
+  store.writeObject(snapshot.id,captured.zip)
+  store.writeCommit(first.id,json.encodeToString(first).encodeToByteArray())
+  local.adoptOnboardingRemote(compare(local,store),store){true}
+  return first
+ }
  private fun setup(): Triple<AppendProfileSession, Memory, AppendCommit> {
-  val local = session(); val store = Memory(); val first = assertIs<AppendPushResult.Success>(local.push(store) { true }).commit
+  val local = session(); val store = Memory(); val first = seedLegacy(local,store)
   return Triple(local, store, first)
  }
  private fun edit(local: AppendProfileSession) = local.root.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":2}")
@@ -56,7 +67,19 @@ class UnchangedBaselineLineageTest {
   val fresh = compare(local, store)
   assertEquals(OnboardingLineage.SAME_TIP, fresh.baselineLineage)
   val uploaded = assertIs<AppendPushResult.Success>(local.onboardingUpload(fresh, store) { true }).commit
-  assertEquals(listOf(third.id), uploaded.parents)
+  assertEquals(listOf(contentSha256(third.snapshot.files)), uploaded.parents)
+ }
+ @Test fun mixedHashParentIsResolvedButChangedContentNeverQualifiesAsNoop() {
+  val (local,store,legacy)=setup()
+  edit(local)
+  val changed=assertIs<AppendPushResult.Success>(local.push(store){true}).commit
+  assertEquals(listOf(contentSha256(legacy.snapshot.files)),changed.parents)
+  val mixed=AppendRepository(local.directory.resolve("append-v2"),Shattered,local.config.profile).discover(store)
+  assertEquals(listOf(legacy.id),mixed.parentIds(changed))
+  assertTrue(mixed.descendsFrom(changed.id,legacy.id))
+  assertNull(unchangedDescendantTip(mixed,legacy.id,false))
+  val missing=changed.copy(parents=listOf("f".repeat(64)))
+  assertNull(unchangedDescendantTip(graph(legacy,missing),legacy.id,false))
  }
  @Test fun equalLocalBytesCanAdvanceWithoutSidecarAdoption() {
   val (local, store, first) = setup(); val second = store.child(first)
@@ -103,7 +126,7 @@ class UnchangedBaselineLineageTest {
  }
  @Test fun changedLocalBytesAndMetadataInvalidateOldAdvance() {
   for (metadataOnly in listOf(false, true)) {
-   val local = session("case-$metadataOnly"); val store = Memory(); val base = assertIs<AppendPushResult.Success>(local.push(store) { true }).commit
+   val local = session("case-$metadataOnly"); val store = Memory(); val base = seedLegacy(local,store)
    store.child(base); val comparison = compare(local, store)
    if(metadataOnly) { val path = local.root.resolve("game1/game.dat"); Files.setLastModifiedTime(path, FileTime.fromMillis(Files.getLastModifiedTime(path).toMillis() + 2000)) } else edit(local)
    assertFails { local.advanceUnchangedBaseline(comparison, store) { true } }; assertEquals(base.id, local.baseline()); assertEquals(2, store.writes)

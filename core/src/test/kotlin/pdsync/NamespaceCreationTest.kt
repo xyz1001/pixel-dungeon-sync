@@ -269,9 +269,9 @@ class NamespaceCreationTest {
 
  @Test fun originRootAppendTrafficStaysBelowGameProfileWithoutApiOrUploadRoutes() = MockWebServer().use { server ->
   val folder = "/shattered/hero/"
-  val id = "11111111-1111-4111-8111-111111111111"
-  val objectPath = folder + "pdsync-v2-object-$id.zip"
-  val commitPath = folder + "pdsync-v2-commit-$id.json"
+  val id = "ab".repeat(32)
+  val objectPath = folder + "pdsync-v3-object-$id.zip"
+  val commitPath = folder + "pdsync-v3-commit-$id.json"
   server.enqueue(status(201)); server.enqueue(status(201))
   server.enqueue(body(xml(entry(folder), entry(commitPath, false))))
   server.enqueue(MockResponse().setBody("object")); server.enqueue(MockResponse().setBody("commit"))

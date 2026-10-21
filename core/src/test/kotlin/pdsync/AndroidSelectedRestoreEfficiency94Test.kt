@@ -55,9 +55,9 @@ class AndroidSelectedRestoreEfficiency94Test {
   override fun legacyPresent()=false
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
   fun child(parent:AppendCommit,parents:List<String> = listOf(parent.id)):AppendCommit {
-   val snapshot=parent.snapshot.copy(id=UUID.randomUUID().toString())
-   objects[snapshot.id]=objects.getValue(parent.snapshot.id).copyOf()
-   return parent.copy(id=UUID.randomUUID().toString(),parents=parents,snapshot=snapshot).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
+   val (child,zip)=changedHashFixture(parent,objects.getValue(parent.snapshot.id),parents,commits.size)
+   objects[child.snapshot.id]=zip
+   return child.also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
@@ -78,16 +78,17 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertNull(repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
  }
 
- @Test fun sameTipAndAncestorBaselinesRemainExactlyUnchanged() {
+ @Test fun sameTipIsUnchangedWhileDifferentDescendantRestoresVerifiedContent() {
   for(advance in listOf(false,true)) {
    val store=Store();val bridge=Bridge();val r=publish(store,bridge);val base=store.latest()
    val chosen=if(advance)store.child(base) else base
    val home=r.facade.inspectHome();val sidecar=DirectoryMetadataStore(mirror(r)).read();val writes=store.writes;val exports=bridge.exports
    val result=r.facade.restoreSelected(home,chosen.snapshot.id,false)
-   assertEquals(exports+1,bridge.exports);assertEquals(0,bridge.restores);assertEquals(writes,store.writes)
-   assertEquals(base.id,repository(r).baseline());assertEquals(base.id,result.refreshedInspection?.comparison?.baselineId)
-   assertEquals(sidecar,DirectoryMetadataStore(mirror(r)).read());assertTrue(recoveryFiles(r).isEmpty())
-   assertEquals(!advance,result.configurationComplete)
+   assertEquals(exports+1,bridge.exports);assertEquals(if(advance)1 else 0,bridge.restores);assertEquals(writes,store.writes)
+   assertEquals(chosen.id,repository(r).baseline());assertEquals(chosen.id,result.refreshedInspection?.comparison?.baselineId)
+   assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)})
+   if(!advance)assertEquals(sidecar,DirectoryMetadataStore(mirror(r)).read())
+   assertTrue(recoveryFiles(r).isEmpty());assertTrue(result.configurationComplete)
   }
  }
 
@@ -216,8 +217,8 @@ class AndroidSelectedRestoreEfficiency94Test {
    repeat(5) {seed.child(seed.latest())};val tip=seed.latest();val chosen=if(historical)first else tip
    val folder="/dav/${AndroidGameAdapter(identity).id}/${connection.profile}/"
    val remote=ConcurrentHashMap<String,ByteArray>()
-   seed.commits.forEach {(id,bytes)->remote[folder+"pdsync-v2-commit-$id.json"]=bytes}
-   seed.objects.forEach {(id,bytes)->remote[folder+"pdsync-v2-object-$id.zip"]=bytes}
+   seed.commits.forEach {(id,bytes)->remote[folder+"pdsync-v${if(validContentHashId(id))3 else 2}-commit-$id.json"]=bytes}
+   seed.objects.forEach {(id,bytes)->remote[folder+"pdsync-v${if(validContentHashId(id))3 else 2}-object-$id.zip"]=bytes}
    val requests=CopyOnWriteArrayList<String>()
    server.dispatcher=object:Dispatcher() {
     override fun dispatch(request:RecordedRequest):MockResponse {
@@ -235,7 +236,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    }
    server.start()
    val endpoint=server.url("/dav/").toString()
-   val bridge=Bridge(if(historical)emptyMap() else files(if(noop)2 else 9));val root=temp.resolve("dav-${sequence++}")
+   val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
    val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
     AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0)
    if(historical)facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)

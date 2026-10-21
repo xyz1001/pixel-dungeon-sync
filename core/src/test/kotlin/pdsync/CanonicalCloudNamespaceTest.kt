@@ -48,8 +48,8 @@ class CanonicalCloudNamespaceTest {
  private fun commit(snapshot: Snapshot, parents: List<String> = emptyList(), id: String = UUID.randomUUID().toString()) =
   AppendCommit(id = id, parents = parents, snapshot = snapshot.manifest, objectBytes = snapshot.zip.size)
  private fun encoded(commit: AppendCommit) = json.encodeToString(commit).encodeToByteArray()
- private fun commitPath(namespace: String, id: String, profile: String = this.profile) = "/dav/$namespace/$profile/pdsync-v2-commit-$id.json"
- private fun objectPath(namespace: String, id: String, profile: String = this.profile) = "/dav/$namespace/$profile/pdsync-v2-object-$id.zip"
+ private fun commitPath(namespace: String, id: String, profile: String = this.profile) = "/dav/$namespace/$profile/pdsync-${if (validContentHashId(id)) "v3" else "v2"}-commit-$id.json"
+ private fun objectPath(namespace: String, id: String, profile: String = this.profile) = "/dav/$namespace/$profile/pdsync-${if (validContentHashId(id)) "v3" else "v2"}-object-$id.zip"
  private fun writeFiles(root: Path, marker: String) = files(marker).forEach { (name, bytes) ->
   root.resolve(name).also { it.parent.createDirectories(); it.writeBytes(bytes) }
  }
@@ -97,6 +97,8 @@ class CanonicalCloudNamespaceTest {
       "PUT" -> when {
        path == failNextPutAt -> { failNextPutAt = null; MockResponse().setResponseCode(500) }
        path.substringBeforeLast('/') + "/" !in collections -> MockResponse().setResponseCode(409)
+       request.getHeader("If-None-Match") != "*" -> MockResponse().setResponseCode(400)
+       bytes.containsKey(path) -> MockResponse().setResponseCode(412)
        else -> { bytes[path] = request.body.clone().readByteArray(); MockResponse().setResponseCode(201) }
       }
       else -> MockResponse().setResponseCode(405)
@@ -313,7 +315,7 @@ class CanonicalCloudNamespaceTest {
    kind = OnboardingKind.BRANCHED, localFiles = leftSave.manifest.files, baselineId = null,
    baselineLineage = OnboardingLineage.NONE, remoteEntries = emptyList(), observedTips = graph.tips, owner = this)))
   assertTrue(dav.mutations().isEmpty())
-  val resolution = repo.prepare(leftSave, graph.tips.toList(), "resolution")
+  val resolution = repo.prepare(snapshot("resolved-new-content"), graph.tips.toList(), "resolution")
   assertEquals(resolution.commit, repo.publish(store, resolution))
   val resolved = repository().discover(dav.store()); resolved.requireSettled()
   assertEquals(setOf(resolution.commit.id), resolved.tips)
@@ -388,7 +390,8 @@ class CanonicalCloudNamespaceTest {
  @Test fun malformedCurrentHistoryBlocksPublicationAndRetainsTheFrozenPlan(): Unit = Dav().use { dav ->
   val parentSave = snapshot("parent"); val parent = commit(parentSave); dav.seed(parent, parentSave.zip)
   dav.bytes[commitPath(canonical, UUID.randomUUID().toString())] = "{not-json".encodeToByteArray()
-  val repo = repository(); val plan = repo.prepare(snapshot("child"), listOf(parent.id))
+  val repo = repository(); repo.discover(dav.store())
+  val plan = repo.prepare(snapshot("child"), listOf(parent.id))
   assertFailsWith<UnsettledRemoteException> { repo.publish(dav.store(), plan) }
   assertContentEquals(plan.manifestBytes, assertNotNull(repo.pending()).manifestBytes)
   assertContentEquals(plan.zip, assertNotNull(repo.pending()).zip)

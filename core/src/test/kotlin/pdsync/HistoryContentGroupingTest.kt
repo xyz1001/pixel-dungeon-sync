@@ -181,4 +181,32 @@ class HistoryContentGroupingTest {
   assertNull(history.baseline)
   assertEquals(setOf(original.id, duplicate.id), history.graph.commits.keys)
  }
+
+ @Test fun defaultCardNameUsesContentHashWhileSelectionRetainsTheRealLegacyTarget() {
+  val original = commit("00000000-0000-4000-8000-000000000001")
+  val duplicate = commit("00000000-0000-4000-8000-000000000002", "2026-10-02T00:00:00Z", listOf(original.id))
+  val history = state(listOf(original, duplicate))
+  val card = HistoryPresentation.from(history, 0).nodes.single()
+  assertEquals(pdsync.i18n.CoreMessages.SAVE_1_S.text(contentSha256(files).take(6)), card.name)
+  assertEquals(duplicate.id, card.id)
+  assertEquals(duplicate.snapshot.id, card.snapshotId)
+  assertEquals(duplicate.snapshot.id, HistoryPresentation.representativeSnapshotId(history, original.snapshot.id))
+  assertEquals("My save", HistoryPresentation.from(history.copy(
+   aliases = mapOf(duplicate.snapshot.id to "My save")), 0).nodes.single().name)
+  val named = duplicate.copy(snapshot = duplicate.snapshot.copy(directoryMetadata = DirectorySnapshotMetadata(
+   displayName = "Named in save", contentSha256 = contentSha256(files))))
+  assertEquals("Named in save", HistoryPresentation.from(state(listOf(original, named)), 0).nodes.single().name)
+  assertEquals("My save", HistoryPresentation.from(state(listOf(original, named)).copy(
+   aliases = mapOf(named.snapshot.id to "My save")), 0).nodes.single().name)
+ }
+
+ @Test fun defaultHashRecordCardNameMatchesItsContentIdentity() {
+  val id = contentSha256(files)
+  val record = commit(id).let { it.copy(schema = 3, snapshot = it.snapshot.copy(id = id)) }
+  val card = HistoryPresentation.from(state(listOf(record)), 0).nodes.single()
+  assertEquals(pdsync.i18n.CoreMessages.SAVE_1_S.text(id.take(6)), card.name)
+  assertEquals(id, card.id)
+  assertEquals(id, card.snapshotId)
+ }
+
 }

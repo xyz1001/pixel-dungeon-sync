@@ -63,9 +63,9 @@ class AndroidHomeReconstruction92Test {
   override fun <T> withReadScope(cacheDirectory:Path?,block:()->T):T {scopes++;if(scopeDepth++==0){outerScopes++;scopePaths+=cacheDirectory};try{return block()}finally{scopeDepth--;closedScopes++}}
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
   fun child(parent:AppendCommit,parents:List<String> = listOf(parent.id)):AppendCommit {
-   val snapshot=parent.snapshot.copy(id=UUID.randomUUID().toString())
-   objects[snapshot.id]=objects.getValue(parent.snapshot.id).copyOf()
-   return parent.copy(id=UUID.randomUUID().toString(),parents=parents,snapshot=snapshot).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
+   val (child,zip)=changedHashFixture(parent,objects.getValue(parent.snapshot.id),parents,commits.size)
+   objects[child.snapshot.id]=zip
+   return child.also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
@@ -264,4 +264,19 @@ class AndroidHomeReconstruction92Test {
   assertFailsWith<IllegalStateException> {rig.facade.withRestoreReadScope(Callable<Int> {error("synthetic")})}
   assertEquals(store.scopes,store.closedScopes)
  }
+}
+
+/** New history fixtures use real changed bytes; schema3 cannot encode a duplicate-content child. */
+internal fun changedHashFixture(parent:AppendCommit, archive:ByteArray, parents:List<String>, salt:Int):Pair<AppendCommit,ByteArray> {
+ val adapter=object:GameAdapter by Shattered {
+  override val id=parent.snapshot.game
+  override fun acceptsManifest(manifest:Manifest)=manifest.game==id
+ }
+ val files=Snapshots.verify(Snapshot(parent.snapshot,archive),adapter).toMutableMap()
+ val path=files.keys.first {it.endsWith("/depth1.dat")}
+ files[path]=files.getValue(path)+salt.toString().encodeToByteArray()
+ val fresh=Snapshots.fromFiles(files,adapter,parent.snapshot.profile,parent.snapshot.version)
+ val id=contentSha256(fresh.manifest.files)
+ val manifest=parent.snapshot.copy(id=id,files=fresh.manifest.files,sha256=fresh.manifest.sha256,directoryMetadata=null)
+ return parent.copy(schema=3,id=id,parents=parents,snapshot=manifest,objectBytes=fresh.zip.size) to fresh.zip
 }

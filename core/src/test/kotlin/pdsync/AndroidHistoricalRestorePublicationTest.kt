@@ -2,7 +2,6 @@ package pdsync
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.UUID
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import org.junit.jupiter.api.Test
@@ -53,7 +52,7 @@ class AndroidHistoricalRestorePublicationTest {
         }
         fun hashes() = files.mapValues { hash(it.value) }
     }
-    private class Store : AppendStore {
+    private inner class Store : AppendStore {
         val commits = linkedMapOf<String, ByteArray>()
         val objects = linkedMapOf<String, ByteArray>()
         var objectAttempts = 0
@@ -84,9 +83,18 @@ class AndroidHistoricalRestorePublicationTest {
         override fun legacyPresent() = false
         fun latest() = json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
         fun remoteChild(parent: AppendCommit): AppendCommit {
-            val snapshot = parent.snapshot.copy(id = UUID.randomUUID().toString())
-            objects[snapshot.id] = objects.getValue(parent.snapshot.id).copyOf()
-            val commit = parent.copy(id = UUID.randomUUID().toString(), parents = listOf(parent.id), snapshot = snapshot)
+            // Advance with genuinely changed bytes: a schema3 client cannot create a
+            // second record merely by assigning another UUID to the same progress.
+            val root = temp.resolve("remote-child-${sequence++}").createDirectory()
+            fixture(3).forEach { (name, bytes) -> root.resolve(name).also {
+                it.parent.createDirectories(); it.writeBytes(bytes)
+            } }
+            val captured = Snapshots.capture(root, AndroidGameAdapter(identity), connection.profile, parent.snapshot.version, null)
+            val id = contentSha256(captured.manifest.files)
+            val snapshot = captured.manifest.copy(id = id)
+            objects[id] = captured.zip.copyOf()
+            val commit = parent.copy(schema = 3, id = id, parents = listOf(contentSha256(parent.snapshot.files)),
+                snapshot = snapshot, objectBytes = captured.zip.size)
             commits[commit.id] = json.encodeToString(commit).encodeToByteArray()
             return commit
         }
@@ -127,6 +135,8 @@ class AndroidHistoricalRestorePublicationTest {
         assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
     }
 
+
+
     @Test fun helperFailureRequiresRecoveryWithoutCreatingAnyUploadPlan() {
         val rig = Rig(); val (first, second) = rig.publishTwo()
         rig.bridge.failRestore = true
@@ -150,8 +160,8 @@ class AndroidHistoricalRestorePublicationTest {
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertFalse(result.isPending); assertFalse(result.isConflict)
         assertEquals(first.snapshot.id, result.snapshotId)
-        assertEquals(0, rig.bridge.restores); assertEquals(3, rig.store.commits.size)
-        assertEquals(3, rig.store.objectAttempts); assertEquals(3, rig.store.commitAttempts)
+        assertEquals(0, rig.bridge.restores); assertEquals(2, rig.store.commits.size)
+        assertEquals(2, rig.store.objectAttempts); assertEquals(2, rig.store.commitAttempts)
         assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
         assertNull(rig.pending()); assertFalse(rig.facade.hasUnresolvedRestore())
     }
@@ -246,7 +256,8 @@ class AndroidHistoricalRestorePublicationTest {
         assertFalse(result.isConflict); assertFalse(result.isPending)
         assertEquals(3, rig.store.commits.size)
         val advanced = assertNotNull(concurrent)
-        assertEquals(second.snapshot.files, advanced.snapshot.files)
+        assertNotEquals(second.snapshot.files, advanced.snapshot.files)
+        assertEquals(fixture(3).mapValues { hash(it.value) }, advanced.snapshot.files)
         assertEquals(listOf(second.id), advanced.parents)
         val inspection = rig.facade.inspect()
         assertEquals("DIFFERENT", inspection.kind)

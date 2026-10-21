@@ -130,7 +130,7 @@ class OfficialSyncAccessTest {
         val f=Fixture();val lease=f.begin();f.now=100_000_000
         val client=OkHttpClient.Builder().addInterceptor { error("Transport must not run") }.build()
         val dav=AppendOnlyWebDav("https://example.com/","shattered","hero","alice","secret",client,lease)
-        val id="11111111-1111-4111-8111-111111111111"
+        val id="ab".repeat(32)
         val actions=listOf<()->Any?>({dav.legacyPresent()},{dav.listCommits(null)},{dav.readCommit(id)},
             {dav.readObject(id)},{dav.writeCommit(id,byteArrayOf())},{dav.writeObject(id,byteArrayOf())},{dav.ensureNamespace()})
         actions.forEach{action-> assertTrue(assertFailsWith<OfficialSyncAccess.AccessException>{action()}.isExpired)}

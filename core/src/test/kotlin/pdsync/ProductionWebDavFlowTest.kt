@@ -1,5 +1,7 @@
 package pdsync
 
+import kotlinx.serialization.decodeFromString
+
 import okhttp3.Credentials
 import okhttp3.mockwebserver.*
 import okio.Buffer
@@ -17,7 +19,7 @@ import java.util.jar.Manifest as JarManifest
 import kotlin.io.path.*
 import kotlin.test.*
 
-/** Real HTTP + production DAV/session/version/config paths. No CAS, ETag, external service or game launch. */
+/** Real HTTP + production DAV/session/version/config paths. Create-only PUT, no ETag, external service or game launch. */
 class ProductionWebDavFlowTest {
  @TempDir lateinit var temp:Path
  private class Dav:AutoCloseable {
@@ -33,7 +35,9 @@ class ProductionWebDavFlowTest {
    server.dispatcher=object:Dispatcher(){
     override fun dispatch(r:RecordedRequest):MockResponse {
      methods.add(requireNotNull(r.method))
-     if(r.getHeader("If-Match")!=null || r.getHeader("If-None-Match")!=null || r.method !in setOf("GET","PUT","PROPFIND","MKCOL"))invalidProtocol.set(true)
+     if(r.getHeader("If-Match")!=null ||
+      r.getHeader("If-None-Match") != (if(r.method=="PUT") "*" else null) ||
+      r.method !in setOf("GET","PUT","PROPFIND","MKCOL"))invalidProtocol.set(true)
      if(r.getHeader("Authorization")!=Credentials.basic("fixture",""))return MockResponse().setResponseCode(401)
      val path=r.path!!.substringBefore('?')
      return when(r.method){
@@ -48,7 +52,7 @@ class ProductionWebDavFlowTest {
       "PUT"->{
        if(path.endsWith("head.json"))invalidProtocol.set(true)
        val bytes=r.body.readByteArray();val prior=contents.putIfAbsent(path,bytes)
-       if(prior!=null && !prior.contentEquals(bytes))invalidProtocol.set(true)
+       if(prior!=null)return MockResponse().setResponseCode(412)
        val fail=path.contains("-commit-")&&failCommitAfterAccept.compareAndSet(true,false)
        if(fail)failCommitReads.set(true)
        MockResponse().setResponseCode(if(fail)503 else 201)
@@ -61,7 +65,7 @@ class ProductionWebDavFlowTest {
   val endpoint get()=server.url("/dav/").toString()
   fun store()=AppendOnlyWebDav(endpoint,"shattered","e2e","fixture","")
   fun fingerprint()=contents.mapValues{hash(it.value)}
-  override fun close(){server.close();assertFalse(invalidProtocol.get(),"CAS/ETag/head rewrite or immutable overwrite attempted")}
+  override fun close(){server.close();assertFalse(invalidProtocol.get(),"Missing create-only PUT, ETag/head rewrite or unsupported method attempted")}
  }
  private val target:Path by lazy {
   System.getenv("PDSYNC_TEST_GAME_JAR")?.let{Path.of(it)} ?: temp.resolve("format-fixture.jar").also { file ->
@@ -99,8 +103,19 @@ class ProductionWebDavFlowTest {
   assertEquals(baseline,s.baseline());assertTrue(s.hasPending());assertTrue(s.retryablePending())
   assertEquals(prepared.commit.snapshot.files,s.observedFiles())
   assertFalse(s.directory.resolve("backups").exists(),"Merge must not create old-data backups")
+  val before=dav.fingerprint();val requestStart=dav.methods.size
+  val existing=dav.contents.values.mapNotNull { bytes ->
+   runCatching { json.decodeFromString<AppendCommit>(bytes.decodeToString()) }.getOrNull()
+  }.singleOrNull {it.snapshot.files==prepared.commit.snapshot.files}
   val published=published(s,dav)
-  assertEquals(prepared.commit,published);assertFalse(s.hasPending())
+  if(existing==null) assertEquals(prepared.commit,published)
+  else {
+   assertEquals(existing,published,"Same-content publication must retain the exact first writer record")
+   assertEquals(prepared.commit.id,published.id)
+   assertEquals(before,dav.fingerprint(),"Reusing prepared content must preserve every remote byte")
+   assertTrue(dav.methods.drop(requestStart).all {it in setOf("GET","HEAD","PROPFIND")})
+  }
+  assertFalse(s.hasPending())
   return published
  }
  private fun restore(s:AppendProfileSession,dav:Dav)=s.restoreRemote(s.readRemote(dav.store()).single().entry.manifest.id,dav.store()){true}
@@ -123,7 +138,8 @@ class ProductionWebDavFlowTest {
   val merge=mergeAndPublish(b,dav)
   assertEquals(2,merge.snapshot.saveVersions!!.runs.size);assertContentEquals(gzip("A1"),b.root.resolve("game1/depth1.dat").readBytes());assertContentEquals(gzip("B1"),b.root.resolve("game2/depth1.dat").readBytes())
   val files=b.observedFiles();b.renameCurrent("隔离进度"){true};assertEquals(files,b.observedFiles());val renamed=published(b,dav)
-  assertEquals(files,renamed.snapshot.files);assertEquals("隔离进度",renamed.snapshot.directoryMetadata!!.displayName)
+  assertEquals(files,renamed.snapshot.files);assertEquals(merge,renamed,"Rename cannot rewrite immutable cloud metadata")
+  assertEquals("隔离进度",b.syncHistory().currentName)
   val restarted=open(cb);assertEquals(renamed.id,restarted.baseline());assertEquals("隔离进度",restarted.syncHistory().currentName)
   restore(a,dav);advance(a,1,"left-fork");published(a,dav);advance(restarted,1,"right-fork")
   val fork=mergeAndPublish(restarted,dav)

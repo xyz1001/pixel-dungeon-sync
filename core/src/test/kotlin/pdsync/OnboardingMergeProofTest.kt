@@ -124,6 +124,11 @@ class OnboardingMergeProofTest {
   val beforeWrites = fixture.store.writes
   val beforeBaseline = fixture.local.baseline()
   val preview = fixture.local.previewOnboardingMerge(observed, fixture.store) { true }
+  assertEquals(contentSha256(preview.snapshot.manifest.files),preview.snapshot.manifest.id)
+  assertNull(preview.snapshot.manifest.parent)
+  val repeated=fixture.local.previewOnboardingMerge(observed,fixture.store){true}
+  assertEquals(preview.snapshot.manifest.files,repeated.snapshot.manifest.files)
+  assertEquals(preview.snapshot.manifest.id,repeated.snapshot.manifest.id)
   assertEquals(2, preview.slots)
   assertEquals(0, preview.addedSlots)
   assertEquals(beforeFiles, files(fixture.local.root))
@@ -134,6 +139,7 @@ class OnboardingMergeProofTest {
   val result = assertIs<AppendPushResult.Prepared>(fixture.local.mergeCurrent(observed, fixture.store) { true })
   assertEquals("snapshot", result.commit.kind)
   assertEquals(preview.snapshot.manifest.files, fixture.local.observedFiles())
+  assertTrue(fixture.local.history().all {it.manifest.id==contentSha256(it.manifest.files)})
   assertEquals("remote-1", fixture.local.root.resolve("game1/depth1.dat").readText())
   assertEquals("local-2", fixture.local.root.resolve("game2/depth1.dat").readText())
   assertEquals(beforeBaseline, fixture.local.baseline())

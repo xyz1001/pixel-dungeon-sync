@@ -225,7 +225,8 @@ class ProfileSession(
   if (Thread.currentThread().isInterrupted) throw InterruptedException()
  }
  private fun checkedManifest(manifest: Manifest) {
-  require(manifest.id.matches(Regex("[0-9a-fA-F-]{36}")))
+  require(validRecordId(manifest.id))
+  if (validContentHashId(manifest.id)) require(manifest.id == contentSha256(manifest.files))
   require(adapter.acceptsManifest(manifest) && manifest.profile == config.profile) { CoreSessionMessages.THE_SNAPSHOT_GAME_OR_PROFILE_DOES_NOT_MATCH.text() }
   manifest.metadata?.validated(manifest.files.keys)
   manifest.directoryMetadata?.validated(manifest.files)
@@ -258,11 +259,22 @@ class ProfileSession(
     checkedManifest(entry.manifest)
     Snapshot(entry.manifest,SafePaths.boundedRead(historyRoot.resolve("$id.zip"),MAX_SNAPSHOT_BYTES))
    }
-   require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text() }
+   if (validContentHashId(id)) {
+    // A content address may have several valid ZIP encodings or capture metadata. Keep the
+    // first local archive, but never turn an unverified existing file into a trusted winner.
+    Snapshots.verify(old, adapter)
+    require(old.manifest.id == id && old.manifest.files == snapshot.manifest.files) {
+     CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text()
+    }
+   } else require(old.manifest == snapshot.manifest && old.zip.contentEquals(snapshot.zip)) { CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text() }
    val existing = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(entryPath, MAX_MANIFEST_BYTES).decodeToString())
    existing.remoteObservedAt?.let(::requireUtcTimestamp)
    if (existing.remoteObservedAt != null || remoteObservedAt == null) return existing
    return existing.copy(remoteObservedAt = remoteObservedAt).also { SafePaths.atomicWrite(entryPath, json.encodeToString(it).encodeToByteArray()) }
+  }
+  // An interrupted or foreign content-addressed archive without its manifest is not safe to replace.
+  if (validContentHashId(id)) require(!SafePaths.checked(historyRoot.resolve("$id.zip")).exists()) {
+   CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text()
   }
   val entry = HistoryEntry(snapshot.manifest, Instant.now().toString(), reason, remoteObservedAt)
   SafePaths.atomicWrite(historyRoot.resolve("$id.zip"), snapshot.zip)
@@ -281,7 +293,7 @@ class ProfileSession(
  }
  fun loadSnapshot(id: String): Snapshot = loadVerifiedSnapshot(id).snapshot
  internal fun loadVerifiedSnapshot(id:String):VerifiedSnapshot {
-  require(id.matches(Regex("[0-9a-fA-F-]{36}")))
+  require(validRecordId(id))
   val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(historyRoot.resolve("$id.entry.json"), MAX_MANIFEST_BYTES).decodeToString())
   checkedManifest(entry.manifest); require(entry.manifest.id == id)
   return VerifiedSnapshot.read(Snapshot(entry.manifest, SafePaths.boundedRead(historyRoot.resolve("$id.zip"), MAX_SNAPSHOT_BYTES)),adapter)

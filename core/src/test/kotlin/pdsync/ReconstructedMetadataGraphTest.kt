@@ -130,7 +130,7 @@ class ReconstructedMetadataGraphTest {
   assertEquals(plan.commit, repo.publish(remote, plan))
   assertEquals(1, scopes)
   assertFalse(fresh)
-  assertEquals(listOf("read object", "write object", "read object", "read commit", "write commit", "read commit"), operations)
+  assertEquals(listOf("read commit", "read object", "write object", "read object", "read commit", "write commit", "read commit", "read object"), operations)
   assertNotNull(repo.observedAt(plan.commit.id))
   assertNull(repo.baseline())
  }

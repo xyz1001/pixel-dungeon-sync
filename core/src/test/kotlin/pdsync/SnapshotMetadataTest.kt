@@ -128,7 +128,7 @@ class SnapshotMetadataTest {
   val origin = metadata(); val source = snapshot(origin)
   val actor = metadata(time = publishTime, label = "另一台电脑")
   for (kind in listOf("restore", "resolution")) {
-   val parents = if (kind == "resolution") List(2) { UUID.randomUUID().toString() } else emptyList()
+   val parents = if (kind == "resolution") List(2) { hash("parent-$it".encodeToByteArray()) } else emptyList()
    val plan = AppendRepository(directory("repo"), Shattered, "demo").prepare(source, parents, kind, actor.operation())
    assertEquals(source.manifest.metadata, plan.commit.snapshot.metadata)
    assertEquals(origin.currentDevice(), plan.commit.snapshot.metadata!!.device)

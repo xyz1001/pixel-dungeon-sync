@@ -178,9 +178,10 @@ class SharedSnapshotSelectionTest {
   val original = json.decodeFromString<AppendCommit>(store.commits.values.single().decodeToString())
   // Keep the complete original Manifest and object bytes, including metadata and source identity.
   store.commits.clear()
-  val first = original.copy(id = firstId)
-  store.seed(first.copy(id = secondId), store.objects.getValue(first.snapshot.id))
-  store.seed(first, store.objects.getValue(first.snapshot.id)); store.writes = 0
+  val zip = store.objects.getValue(original.snapshot.id)
+  val first = original.copy(schema=2,id=firstId,snapshot=original.snapshot.copy(id="33333333-3333-4333-8333-333333333333"))
+  store.seed(first.copy(id = secondId), zip)
+  store.seed(first, zip); store.writes = 0
   return store to first
  }
 

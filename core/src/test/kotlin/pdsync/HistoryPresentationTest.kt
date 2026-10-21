@@ -149,7 +149,7 @@ class HistoryPresentationTest {
   val view=HistoryPresentation.from(history.copy(aliases=mapOf("snapshot-abcdefghi" to "旅程")),0)
   assertEquals(setOf("旅程"),view.nodes.filter {it.snapshotId=="snapshot-abcdefghi"}.map {it.name}.toSet())
   val fallback=HistoryPresentation.from(history.copy(aliases=mapOf("snapshot-abcdefghi" to " ")),0)
-  assertEquals("存档 abcdef",fallback.nodes.single {it.column==0}.name)
+  assertEquals("存档 ${contentSha256(history.graph.commits.getValue("abcdefghi").snapshot.files).take(6)}",fallback.nodes.single {it.column==0}.name)
   assertEquals("同步基线",fallback.nodes.single {it.id=="local-baseline"}.name)
   assertNull(history.graph.commits.getValue("abcdefghi").snapshot.directoryMetadata)
  }

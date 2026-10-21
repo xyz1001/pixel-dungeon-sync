@@ -4,6 +4,7 @@ import pdsync.i18n.CoreMessages
 import pdsync.i18n.UiLocale
 import java.time.format.FormatStyle
 import pdsync.AppendCommit
+import pdsync.CommitGraph
 import pdsync.SyncHistory
 import pdsync.contentSha256
 import pdsync.Shattered
@@ -48,11 +49,11 @@ data class HistoryPresentation(
    else if (commit.kind == "snapshot") instant(commit.snapshot.metadata?.capturedAt) else null
 
   /** Time is primary. Within a tied group, descendants precede parents and IDs settle branches. */
-  private fun orderedRecords(commits: Collection<AppendCommit>): List<AppendCommit> =
-   commits.groupBy(::recordTime).entries.sortedWith(compareByDescending { it.key }).flatMap { (_, group) ->
+  private fun orderedRecords(graph: CommitGraph): List<AppendCommit> =
+   graph.commits.values.groupBy(::recordTime).entries.sortedWith(compareByDescending { it.key }).flatMap { (_, group) ->
     val byId = group.associateBy { it.id }
     val remainingChildren = group.associate { it.id to 0 }.toMutableMap()
-    group.forEach { child -> child.parents.filter { it in byId }.forEach { parent ->
+    group.forEach { child -> graph.parentIds(child).filter { it in byId }.forEach { parent ->
      remainingChildren[parent] = remainingChildren.getValue(parent) + 1
     } }
     val ready = PriorityQueue<String>()
@@ -61,7 +62,7 @@ data class HistoryPresentation(
     while (ready.isNotEmpty()) {
      val child = byId.getValue(ready.remove())
      ordered += child
-     child.parents.filter { it in byId }.forEach { parent ->
+     graph.parentIds(child).filter { it in byId }.forEach { parent ->
       val remaining = remainingChildren.getValue(parent) - 1
       remainingChildren[parent] = remaining
       if (remaining == 0) ready.add(parent)
@@ -93,7 +94,7 @@ data class HistoryPresentation(
 
   /** Global content groups precede paging; every retained handle is an actual original commit. */
   private fun cloudGroups(state: SyncHistory): List<CloudGroup> {
-   val ordered = orderedRecords(state.graph.commits.values)
+   val ordered = orderedRecords(state.graph)
    val groups = linkedMapOf<Any, MutableList<AppendCommit>>()
    ordered.forEach { commit ->
     // Invalid inventories are visible individually, never collapsed through a null key.
@@ -151,7 +152,7 @@ data class HistoryPresentation(
      commit.id, snapshot.id,
      state.aliases[snapshot.id]?.takeIf(String::isNotBlank)
       ?: snapshot.directoryMetadata?.displayName?.takeIf(String::isNotBlank)
-      ?: CoreMessages.SAVE_1_S.text(commit.id.take(6)),
+      ?: CoreMessages.SAVE_1_S.text((group.content?.sha256 ?: commit.id).take(6)),
      time(recordedAt?.toString()),
      CoreMessages.SOURCE_AND_SLOTS.text(snapshot.metadata?.device?.label ?: CoreMessages.UNKNOWN_SOURCE.text(), slots(snapshot.saveVersions?.runs?.size)),
      if (group.cloudHead) CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
@@ -213,7 +214,7 @@ data class HistoryPresentation(
    val visible = nodes.map { it.id }.toSet()
    val edges = mutableListOf<HistoryEdge>()
    allCloud.filter { it.id in visible }.forEach { commit ->
-    commit.parents.filter { it in visible }.forEach { parent -> edges += HistoryEdge(parent, commit.id) }
+    state.graph.parentIds(commit).filter { it in visible }.forEach { parent -> edges += HistoryEdge(parent, commit.id) }
    }
    if (state.localNodeCount > 0 && baseline != null && (state.clean || state.localNodeCount == 2)) {
     val local = if (state.localNodeCount == 2) "local-baseline" else "local-current"

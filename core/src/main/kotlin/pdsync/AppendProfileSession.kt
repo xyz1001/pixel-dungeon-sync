@@ -48,7 +48,7 @@ internal class SelectedRestoreStage(
 sealed interface AppendPushResult {
  /** Verified local merge waiting for a separate upload action; no cloud write has occurred. */
  data class Prepared(val commit: AppendCommit): AppendPushResult
- data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
+ data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false, val reused: Boolean = false): AppendPushResult
  data class Diverged(val conflict: AppendConflict): AppendPushResult
 }
 sealed interface AutomaticPushResult {
@@ -88,7 +88,7 @@ class AppendProfileSession(
  private fun aliases(): Map<String,String> {
   if(!SafePaths.checked(aliasesPath).exists())return emptyMap()
   val text=SafePaths.boundedRead(aliasesPath,MAX_MANIFEST_BYTES).decodeToString();requireUniqueJsonKeys(text)
-  return json.decodeFromString<Map<String,String>>(text).also { values -> require(values.size<=MAX_COMMITS);values.forEach { (id,name)->require(validCommitId(id)&&name==sanitizeSnapshotName(name)) } }
+  return json.decodeFromString<Map<String,String>>(text).also { values -> require(values.size<=MAX_COMMITS);values.forEach { (id,name)->require(validRecordId(id)&&name==sanitizeSnapshotName(name)) } }
  }
  fun renameHistory(snapshotId:String,name:String) = local.locked {
   require(repository.cachedGraph().commits.values.any { it.snapshot.id==snapshotId }) { CoreSessionMessages.HISTORY_ENTRY_NOT_FOUND.text() }
@@ -234,16 +234,16 @@ class AppendProfileSession(
  fun deviceIdentity() = local.deviceIdentity()
  fun directoryStatus(): SidecarRead = local.locked { local.directoryMetadata.read() }
  fun inspectDirectory(stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
-  requireNotNull(local.capture(stopped,null).manifest.directoryMetadata)
+  requireNotNull(captureContent(stopped).manifest.directoryMetadata)
  }
  fun renameCurrent(name: String, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
   local.guard(stopped)
-  val captured=local.capture(stopped,null)
+  val captured=captureContent(stopped)
   local.directoryMetadata.rename(name,captured.manifest.files)
  }
  fun confirmRunIdentity(slot: String, expectedFiles: Map<String,String>, sameRun: Boolean, stopped: () -> Boolean): DirectorySnapshotMetadata = local.locked {
   local.guard(stopped)
-  val captured=local.capture(stopped,null)
+  val captured=captureContent(stopped)
   require(captured.manifest.files==expectedFiles) { CoreSessionMessages.CONTENT_CHANGED_DURING_CONFIRMATION_CHECK_AGAIN.text() }
   local.directoryMetadata.confirmRun(slot,expectedFiles,sameRun)
  }
@@ -275,7 +275,7 @@ class AppendProfileSession(
  }
  fun validateRoot() = local.validateRoot()
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = local.locked {
-  local.remember(local.capture(stopped, null), CoreSessionMessages.LOCAL_SNAPSHOT.text())
+  local.remember(captureContent(stopped), CoreSessionMessages.LOCAL_SNAPSHOT.text())
  }
  fun hasPending(): Boolean = local.locked { repository.pending() != null || local.legacyPending() != null || needsApply() }
  fun baseline(): String? = local.locked { repository.baseline() }
@@ -295,6 +295,12 @@ class AppendProfileSession(
   it.requireSettled();it.commits.values.snapshotRepresentatives(it.tips)
   repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
  }
+ /** Normalize only newly created local work. Downloaded legacy manifests retain their real IDs.
+  * Identity metadata changes in memory; archive bytes are neither reread nor repacked. */
+ private fun contentSnapshot(snapshot:Snapshot):Snapshot = snapshot.copy(manifest=snapshot.manifest.copy(
+  id=contentSha256(snapshot.manifest.files),parent=null))
+ private fun captureContent(stopped:()->Boolean,persistDirectoryMetadata:Boolean=true):Snapshot =
+  contentSnapshot(local.capture(stopped,null,persistDirectoryMetadata=persistDirectoryMetadata))
  private fun currentFiles():Map<String,String> = Snapshots.fileHashes(root,adapter)
  /** Common clean/empty single-tip restore needs only the selected object, not every ancestor ZIP. */
  internal fun prepareTipRestore(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,stopped:()->Boolean):VerifiedTipRestore? = readLocked(store) {
@@ -441,17 +447,41 @@ class AppendProfileSession(
   require(currentFiles() == current) { CoreSessionMessages.SAVES_CHANGED_WHILE_READING_CONFLICTS_EXIT_THE_GAME_AND_TRY.text() }
   return AppendConflict(graph.tips, branches, current, repository.baseline())
  }
- private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean): AppendPushResult {
+ private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean, expected:CommitGraph?=null): AppendPushResult {
   preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
-  repository.publish(store, plan)
+  val publication=repository.publishResult(store,plan,expected)
+  val commit=publication.commit
+  if(publication.reused) {
+   // Publication verified the winning object. Its real record (including legacy ID) is returned;
+   // reusing content never moves ancestry, adds a parent, or recaptures the current directory.
+   val graph=repository.cachedGraph()
+   finishReusedPending(commit,graph,plan)
+   return AppendPushResult.Success(commit,currentFiles()!=commit.snapshot.files,graph.tips.singleOrNull()!=commit.id,reused=true)
+  }
   val graph = discover(store)
-  require(plan.commit.id in graph.commits) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
-  local.remember(snapshot(plan), CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind), repository.observedAt(plan.commit.id))
-  repository.setBaseline(plan.commit.id, graph)
-  markDirectorySynced(plan.commit,"upload")
+  require(graph.commits[commit.id]==commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
+  val actual=if(hash(plan.zip)==commit.snapshot.sha256)Snapshot(commit.snapshot,plan.zip) else repository.download(store,commit)
+  local.remember(actual, CoreSessionMessages.APPEND_ONLY_SYNC.text(commit.kind), repository.observedAt(commit.id))
+  repository.setBaseline(commit.id, graph)
+  markDirectorySynced(commit,"upload")
   repository.clearPending()
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
-   else AppendPushResult.Success(plan.commit, runCatching { currentFiles() != plan.commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != plan.commit.id)
+   else AppendPushResult.Success(commit, runCatching { currentFiles() != commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != commit.id)
+ }
+ private fun associateUpload(commit:AppendCommit,graph:CommitGraph) {
+  val receipt=DirectorySyncBaseline(hash(directory.toString().encodeToByteArray()),commit.id,contentSha256(commit.snapshot.files))
+  val sidecar=local.directoryMetadata.read()
+  val receiptMatches=sidecar !is SidecarRead.Valid || sidecar.value.lastSynced==receipt
+  val transfer=SafePaths.checked(directory.resolve("baseline-transfer.txt"))
+  if(repository.baseline()==commit.id && receiptMatches && transfer.exists() &&
+   SafePaths.boundedRead(transfer,128).decodeToString()==commit.id+" upload")return
+  repository.setBaseline(commit.id,graph)
+  // Only the synchronization receipt changes. Preserve the user's bytes, display name and run metadata.
+  markDirectorySynced(commit,"upload")
+ }
+ private fun finishReusedPending(commit:AppendCommit,graph:CommitGraph,pending:UploadPlan) {
+  associateUpload(commit,graph)
+  repository.clearPending()
  }
  fun push(store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
@@ -459,7 +489,7 @@ class AppendProfileSession(
   // first attempt is durable, and restarting can retry these exact bytes without startup recapture.
   val plan = repository.pending() ?: run {
    val baseline = repository.baseline()
-   val captured = local.capture(stopped, null)
+   val captured = captureContent(stopped)
    val previous = baseline?.let { repository.cachedGraph().commits[it] }
    // Identical content AND portable metadata is already protected by this verified baseline.
    // Still observe the graph so a remote advance/conflict is reported without creating a sibling.
@@ -618,7 +648,7 @@ class AppendProfileSession(
   val nearest=common.filter { candidate -> common.none { it!=candidate&&graph.descendsFrom(it,candidate) } }
   if(nearest.size!=1)throw RunMergeException(CoreSessionMessages.NO_UNIQUE_VERIFIABLE_COMMON_ANCESTOR_EXISTS.text())
   val base=repository.download(store,graph.commits.getValue(nearest.single()))
-  val current=local.capture(stopped,null,persistDirectoryMetadata=false)
+  val current=captureContent(stopped,persistDirectoryMetadata=false)
   require(current.manifest.files==conflict.observedLocalFiles) { CoreSessionMessages.CONTENT_CHANGED_DURING_CAPTURE_NOTHING_WAS_MERGED.text() }
   val branches=graph.tips.sorted().map { id ->
    val commit=graph.commits.getValue(id)
@@ -628,7 +658,7 @@ class AppendProfileSession(
   }.toMutableList()
   if(branches.none { it===current })branches.add(0,current) else { branches.remove(current);branches.add(0,current) }
   val operation=local.operationMetadata()
-  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException(CoreSessionMessages.NO_VERIFIED_GAME_SELECTED.text()),SnapshotCaptureContext(operation.device,operation.preparedAt),adapter)
+  return RunMergePlanner.plan(base,branches,local.targetInfo() ?: throw RunMergeException(CoreSessionMessages.NO_VERIFIED_GAME_SELECTED.text()),SnapshotCaptureContext(operation.device,operation.preparedAt),adapter).let {it.copy(snapshot=contentSnapshot(it.snapshot))}
  }
  fun merge(conflict: AppendConflict, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   mergeLocked(conflict,store,stopped)
@@ -834,7 +864,7 @@ class AppendProfileSession(
   revalidateComparison(comparison, store, stopped, allowPending = true)
   val plan = repository.pending() ?: run {
    require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }
-   val captured = local.capture(stopped, null)
+   val captured = captureContent(stopped)
    require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())

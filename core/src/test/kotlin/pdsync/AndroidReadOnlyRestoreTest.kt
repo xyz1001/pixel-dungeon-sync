@@ -56,11 +56,9 @@ class AndroidReadOnlyRestoreTest {
         override fun legacyPresent() = false
         fun latest() = json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
         fun cloneCommit(source: AppendCommit, parents: List<String> = listOf(source.id)): AppendCommit {
-            val snapshot = source.snapshot.copy(id = UUID.randomUUID().toString())
-            objects[snapshot.id] = objects.getValue(source.snapshot.id).copyOf()
-            return source.copy(id = UUID.randomUUID().toString(), parents = parents, snapshot = snapshot).also {
-                commits[it.id] = json.encodeToString(it).encodeToByteArray()
-            }
+            val (child, zip) = changedHashFixture(source, objects.getValue(source.snapshot.id), parents, commits.size)
+            objects[child.snapshot.id] = zip
+            return child.also { commits[it.id] = json.encodeToString(it).encodeToByteArray() }
         }
     }
     private inner class Rig(val store: Store = Store()) {
@@ -167,8 +165,10 @@ class AndroidReadOnlyRestoreTest {
         val sibling = rig.store.latest()
         assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
         val result = rig.facade.upload(rig.facade.inspect())
-        assertTrue(result.isConflict); assertEquals(listOf(first.id), rig.store.latest().parents)
-        assertEquals(setOf(sibling.id, rig.store.latest().id), rig.repo().discover(rig.store).tips)
+        assertFalse(result.isPending); assertFalse(result.isConflict)
+        assertEquals(sibling.id,rig.store.latest().id); assertEquals(3,rig.store.commits.size)
+        assertEquals(setOf(sibling.id),rig.repo().discover(rig.store).tips)
+        assertEquals(first.id,rig.repo().baseline()); assertEquals(2,rig.store.writes)
     }
 
     @Test fun choosingCloudBranchDownloadsButNeverPublishesResolutionOrDiscardsOtherTips() {
@@ -176,7 +176,7 @@ class AndroidReadOnlyRestoreTest {
         val sibling = rig.store.cloneCommit(first, emptyList()); rig.expire()
         val result = rig.facade.restoreSelectedReadOnly(rig.facade.inspect(), sibling.snapshot.id, false)
         assertTrue(result.isConflict); assertFalse(result.isPending)
-        rig.assertReadOnlyComplete(first.snapshot.files)
+        rig.assertReadOnlyComplete(sibling.snapshot.files)
         assertEquals(sibling.id, rig.repo().baseline())
         assertEquals(setOf(second.id, sibling.id), rig.repo().discover(rig.store).tips)
         assertEquals("BRANCHED", rig.facade.inspect().kind); assertEquals(3, rig.store.commits.size)

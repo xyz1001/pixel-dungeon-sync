@@ -121,11 +121,11 @@ class AppendRepositoryTest {
   assertFailsWith<UnsettledRemoteException> { graph.requireSettled() }
  }
 
- @Test fun preparingFreezesIndependentCanonicalIdentitiesBytesAndSortedParents() {
-  val source = snapshot(); val sourceBytes = source.zip.copyOf(); val parents = listOf(id(), id()).sortedDescending()
+ @Test fun preparingFreezesContentIdentityBytesAndSortedHashParents() {
+  val source = snapshot(); val sourceBytes = source.zip.copyOf(); val parents = listOf(hash("parent-a".encodeToByteArray()), hash("parent-b".encodeToByteArray())).sortedDescending()
   val repo = repository(); val plan = repo.prepare(source, parents, "resolution")
-  assertTrue(validCommitId(plan.commit.id)); assertTrue(validCommitId(plan.commit.snapshot.id))
-  assertEquals(3, setOf(source.manifest.id, plan.commit.id, plan.commit.snapshot.id).size)
+  assertTrue(validContentHashId(plan.commit.id)); assertEquals(plan.commit.id,plan.commit.snapshot.id)
+  assertEquals(contentSha256(source.manifest.files),plan.commit.id)
   assertEquals(parents.sorted(), plan.commit.parents); assertEquals("resolution", plan.commit.kind)
   assertNull(plan.commit.snapshot.parent); assertEquals(source.manifest.files, plan.commit.snapshot.files)
   assertContentEquals(sourceBytes, plan.zip)
@@ -134,12 +134,12 @@ class AppendRepositoryTest {
   assertContentEquals(encoded(plan.commit), plan.manifestBytes)
  }
 
- @Test fun separateDevicesPreparingIdenticalBytesGenerateIndependentPublicationIdentities() {
+ @Test fun separateDevicesPreparingIdenticalBytesUseTheSameContentIdentity() {
   val source = snapshot("identical")
   val first = repository().prepare(source, emptyList())
   val second = repository().prepare(source, emptyList())
   val identifiers = setOf(source.manifest.id, first.commit.id, first.commit.snapshot.id, second.commit.id, second.commit.snapshot.id)
-  assertEquals(5, identifiers.size); assertTrue(identifiers.all(::validCommitId))
+  assertEquals(2, identifiers.size); assertEquals(first.commit.id,second.commit.id); assertTrue(validContentHashId(first.commit.id)); assertTrue(validCommitId(source.manifest.id))
   assertContentEquals(first.zip, second.zip); assertEquals(first.commit.snapshot.sha256, second.commit.snapshot.sha256)
  }
 
@@ -147,6 +147,7 @@ class AppendRepositoryTest {
   Fault.entries.forEach { failure ->
    val path = directory("state-${failure.name}"); val repo = repository(path); val remote = Memory()
    val parent = remote.addSnapshot("parent"); val original = snapshot("frozen")
+   repo.discover(remote)
    val plan = repo.prepare(original, listOf(parent.id)); remote.fault = failure
    assertFails("Expected injected $failure") { repo.publish(remote, plan) }
    assertPlanEquals(plan, repo.pending()); assertNull(repo.baseline())
@@ -158,8 +159,8 @@ class AppendRepositoryTest {
    assertEquals(plan.commit, restarted.publish(remote, retry), failure.name)
    assertContentEquals(plan.zip, remote.objects[plan.commit.snapshot.id])
    assertContentEquals(plan.manifestBytes, remote.commits[plan.commit.id])
-   remote.writes().filter { it.id == plan.commit.snapshot.id }.forEach { assertContentEquals(plan.zip, it.bytes) }
-   remote.writes().filter { it.id == plan.commit.id }.forEach { assertContentEquals(plan.manifestBytes, it.bytes) }
+   remote.writes().filter { it.operation == "writeObject" && it.id == plan.commit.snapshot.id }.forEach { assertContentEquals(plan.zip, it.bytes) }
+   remote.writes().filter { it.operation == "writeCommit" && it.id == plan.commit.id }.forEach { assertContentEquals(plan.manifestBytes, it.bytes) }
    val objectAttempts = remote.writes().count { it.operation == "writeObject" }
    val commitAttempts = remote.writes().count { it.operation == "writeCommit" }
    assertEquals(if (failure == Fault.OBJECT_WRITE_BEFORE) 2 else 1, objectAttempts, failure.name)
@@ -319,6 +320,7 @@ class AppendRepositoryTest {
  @Test fun remoteReadFailuresPropagateAndCannotBeMistakenForMissingOrEmptyHistory() {
   listOf("commit", "object").forEach { read ->
    val remote = Memory(); val root = remote.addSnapshot(); val repo = repository()
+   repo.discover(remote)
    val plan = repo.prepare(snapshot("local"), listOf(root.id))
    if (read == "commit") remote.commitOverride = { throw IOException("Manifest connection failed") }
    else remote.objectOverride = { throw IOException("Object connection failed") }
@@ -617,9 +619,10 @@ class AppendRepositoryTest {
  @Test fun resolutionNamesEveryChosenBranchWithoutRewritingParentsOrInventingMergeBytes() {
   val remote = Memory(); val root = remote.addSnapshot("root"); val left = remote.addSnapshot("left", listOf(root.id))
   val right = remote.addSnapshot("right", listOf(root.id)); val repo = repository(); val chosen = snapshot("explicit-choice")
+  repo.discover(remote)
   val plan = repo.prepare(chosen, listOf(right.id, left.id), "resolution")
   val published = repo.publish(remote, plan); val graph = repo.discover(remote); graph.requireSettled()
-  assertEquals(setOf(published.id), graph.tips); assertEquals(setOf(left.id, right.id), published.parents.toSet())
+  assertEquals(setOf(published.id), graph.tips); assertEquals(setOf(contentSha256(left.snapshot.files), contentSha256(right.snapshot.files)), published.parents.toSet())
   assertTrue(graph.descendsFrom(published.id, root.id)); assertTrue(graph.descendsFrom(published.id, left.id)); assertTrue(graph.descendsFrom(published.id, right.id))
   assertEquals(chosen.manifest.files, published.snapshot.files); assertContentEquals(chosen.zip, remote.objects[published.snapshot.id])
   assertContentEquals(encoded(left), remote.commits[left.id]); assertContentEquals(encoded(right), remote.commits[right.id])
@@ -628,9 +631,10 @@ class AppendRepositoryTest {
  @Test fun branchAppearingAfterPlanIsFrozenIsNotSilentlyAddedToResolutionParents() {
   val remote = Memory(); val root = remote.addSnapshot("root"); val left = remote.addSnapshot("left", listOf(root.id))
   val right = remote.addSnapshot("right", listOf(root.id)); val repo = repository()
+  repo.discover(remote)
   val plan = repo.prepare(snapshot("choice"), listOf(left.id, right.id), "resolution")
   val late = remote.addSnapshot("late", listOf(root.id)); val published = repo.publish(remote, plan)
-  assertEquals(setOf(left.id, right.id), published.parents.toSet())
+  assertEquals(setOf(contentSha256(left.snapshot.files), contentSha256(right.snapshot.files)), published.parents.toSet())
   val graph = repo.discover(remote); graph.requireSettled(); assertEquals(setOf(late.id, published.id), graph.tips)
   assertFalse(graph.descendsFrom(published.id, late.id)); assertPlanEquals(plan, repo.pending())
  }
@@ -647,7 +651,7 @@ class AppendRepositoryTest {
  }
 
  @Test fun nonexistentParentBlocksPublicationBeforeObjectUpload() {
-  val repo = repository(); val remote = Memory(); val plan = repo.prepare(snapshot(), listOf(id()))
+  val repo = repository(); val remote = Memory(); val plan = repo.prepare(snapshot(), listOf(hash("missing-parent".encodeToByteArray())))
   assertFailsWith<IllegalArgumentException> { repo.publish(remote, plan) }
   assertTrue(remote.writes().isEmpty()); assertPlanEquals(plan, repo.pending())
  }

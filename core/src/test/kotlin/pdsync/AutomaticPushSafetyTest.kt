@@ -1,5 +1,7 @@
 package pdsync
 
+import kotlinx.serialization.encodeToString
+import java.util.UUID
 import java.io.IOException
 import java.nio.file.Path
 import kotlin.io.path.*
@@ -191,6 +193,35 @@ class AutomaticPushSafetyTest {
   val comparison = skippedWithoutWrites(local, store)
   assertTrue(comparison.retryablePending); assertFalse(AutomaticUploadEligibility.allows(comparison))
   assertEquals(frozen.commit, repository(local).pending()?.commit)
+ }
+
+ @Test fun hashPendingWithEquivalentLegacyParentsCanAutomaticallyRetryWithoutNewRoot() {
+  val local=session();val store=Memory()
+  val captured=local.loadSnapshot(local.createSnapshot {true}.manifest.id)
+  val snapshot=captured.manifest.copy(id=UUID.randomUUID().toString())
+  val legacy=AppendCommit(schema=2,id=UUID.randomUUID().toString(),parents=emptyList(),snapshot=snapshot,objectBytes=captured.zip.size)
+  store.writeObject(snapshot.id,captured.zip)
+  store.writeCommit(legacy.id,json.encodeToString(legacy).encodeToByteArray())
+  val childSnapshot=snapshot.copy(id=UUID.randomUUID().toString())
+  val child=legacy.copy(id=UUID.randomUUID().toString(),parents=listOf(legacy.id),snapshot=childSnapshot)
+  store.writeObject(childSnapshot.id,captured.zip)
+  store.writeCommit(child.id,json.encodeToString(child).encodeToByteArray())
+  local.adoptOnboardingRemote(local.compareOnboarding(store){true},store){true}
+  edit(local,"new content after legacy baseline");store.failWrites=true
+  assertFailsWith<IOException> {local.push(store){true}}
+  val pending=assertNotNull(repository(local).pending())
+  assertEquals(3,pending.commit.schema)
+  assertEquals(listOf(contentSha256(legacy.snapshot.files)),pending.commit.parents)
+  store.failWrites=false
+  val comparison=local.compareOnboarding(store){true}
+  assertEquals(setOf(child.id),comparison.observedTips)
+  assertEquals(setOf(legacy.id,child.id),requireNotNull(comparison.graph).resolveParentIds(contentSha256(snapshot.files)))
+  assertTrue(AutomaticUploadEligibility.allows(comparison))
+  val result=assertIs<AutomaticPushResult.Published>(local.automaticPush(store){true})
+  assertEquals(pending.commit,assertIs<AppendPushResult.Success>(result.result).commit)
+  assertEquals(pending.commit.id,local.baseline());assertFalse(local.hasPending())
+  assertEquals(3,store.commits.size)
+  assertContentEquals(pending.zip,store.objects.getValue(pending.commit.snapshot.id))
  }
 
  @Test fun pendingAlreadyPublishedAsTheSoleTipCanFinishWithoutAnyNewWrite() {

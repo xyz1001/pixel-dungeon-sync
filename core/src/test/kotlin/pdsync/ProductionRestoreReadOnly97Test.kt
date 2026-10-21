@@ -42,7 +42,7 @@ class ProductionRestoreReadOnly97Test {
   }
   override fun readSnapshot()=AndroidSaveObservation(targetGame(),content.mapValues {(_,bytes)->AndroidSaveFile(hash(bytes),bytes.size.toLong(),1700000000000)},content.filterKeys {it.endsWith("/game.dat")})
  }
- private class Store:AppendStore {
+ private inner class Store:AppendStore {
   val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>()
   var listings=0;var writes=0;var objectReads=0;var afterReadObject:(()->Unit)?=null;var afterCommit:(()->Unit)?=null
   override fun listCommits(cursor:String?):CommitPage {listings++;return CommitPage(commits.keys.toList())}
@@ -55,9 +55,12 @@ class ProductionRestoreReadOnly97Test {
   override fun legacyPresent()=false
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
   fun child(parent:AppendCommit,parents:List<String> = listOf(parent.id)):AppendCommit {
-   val snapshot=parent.snapshot.copy(id=UUID.randomUUID().toString())
-   objects[snapshot.id]=objects.getValue(parent.snapshot.id).copyOf()
-   return parent.copy(id=UUID.randomUUID().toString(),parents=parents,snapshot=snapshot).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
+   // A concurrent branch needs distinct save bytes; random IDs cannot create content identity.
+   val captured=Snapshots.fromFiles(files(3),AndroidGameAdapter(identity),parent.snapshot.profile,parent.snapshot.version)
+   val id=contentSha256(captured.manifest.files)
+   val snapshot=captured.manifest.copy(id=id,gamePackage=parent.snapshot.gamePackage,gameSource=parent.snapshot.gameSource)
+   objects[id]=captured.zip.copyOf()
+   return parent.copy(schema=3,id=id,parents=parents,snapshot=snapshot,objectBytes=captured.zip.size).also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
@@ -79,7 +82,11 @@ class ProductionRestoreReadOnly97Test {
      return when(request.method) {
       "GET"->if(failObjects&&path.endsWith(".zip"))MockResponse().setResponseCode(503) else remote[path]?.let {MockResponse().setBody(okio.Buffer().write(it))} ?: MockResponse().setResponseCode(404)
       "HEAD"->MockResponse().setResponseCode(if(remote.containsKey(path))200 else 404)
-      "PUT"->{remote[path]=request.body.readByteArray();MockResponse().setResponseCode(201)}
+      "PUT"->when {
+       request.getHeader("If-None-Match")!="*"->MockResponse().setResponseCode(400)
+       remote.putIfAbsent(path,request.body.readByteArray())!=null->MockResponse().setResponseCode(412)
+       else->MockResponse().setResponseCode(201)
+      }
       "MKCOL"->MockResponse().setResponseCode(201)
       "PROPFIND"->{
        fun entry(path:String,collection:Boolean=false)="""<d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype>${if(collection)"<d:collection/>" else ""}</d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
@@ -91,15 +98,15 @@ class ProductionRestoreReadOnly97Test {
    };server.start()
   }
   fun seed(store:Store) {
-   store.commits.forEach {(id,bytes)->remote[folder+"pdsync-v2-commit-$id.json"]=bytes.copyOf()}
-   store.objects.forEach {(id,bytes)->remote[folder+"pdsync-v2-object-$id.zip"]=bytes.copyOf()}
+   store.commits.forEach {(id,bytes)->remote[folder+"pdsync-${if(validContentHashId(id))"v3" else "v2"}-commit-$id.json"]=bytes.copyOf()}
+   store.objects.forEach {(id,bytes)->remote[folder+"pdsync-${if(validContentHashId(id))"v3" else "v2"}-object-$id.zip"]=bytes.copyOf()}
   }
   fun rig(bridge:Bridge):Rig {
    val endpoint=server.url("/dav/").toString();val root=temp.resolve("http-${sequence++}")
    return Rig(root,AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
     AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0))
   }
-  fun commits()=remote.filterKeys {it.contains("pdsync-v2-commit-")}.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}
+  fun commits()=remote.filterKeys {it.contains("pdsync-v2-commit-") || it.contains("pdsync-v3-commit-")}.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}
   fun onlyTip():AppendCommit {val all=commits();val parents=all.flatMap {it.parents}.toSet();return all.single {it.id !in parents}}
   fun <T> readOnly(label:String,action:()->T):T {
    val before=remote.mapValues {it.value.copyOf()};requests.clear()

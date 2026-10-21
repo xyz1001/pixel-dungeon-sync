@@ -72,11 +72,10 @@ class AndroidFacadeReconstructionTest {
         override fun legacyPresent() = false
         fun decoded() = commits.values.map { json.decodeFromString<AppendCommit>(it.decodeToString()) }
         fun latest() = decoded().last()
-        fun noopChild(parent: AppendCommit, kind: String = "snapshot"): AppendCommit {
-            val snapshot = parent.snapshot.copy(id = UUID.randomUUID().toString())
-            objects[snapshot.id] = objects.getValue(parent.snapshot.id).copyOf()
-            val child = parent.copy(id = UUID.randomUUID().toString(), parents = listOf(parent.id), snapshot = snapshot, kind = kind)
-            commits[child.id] = json.encodeToString(child).encodeToByteArray()
+        fun changedChild(parent: AppendCommit, kind: String = "snapshot"): AppendCommit {
+            val (changed,zip)=changedHashFixture(parent,objects.getValue(parent.snapshot.id),listOf(parent.id),commits.size)
+            val child=changed.copy(kind=kind)
+            objects[child.snapshot.id]=zip; commits[child.id]=json.encodeToString(child).encodeToByteArray()
             return child
         }
     }
@@ -317,20 +316,22 @@ class AndroidFacadeReconstructionTest {
     }
     @Test fun remoteAdvanceInvalidatesOldInspectionBeforeNewWrite() {
         val store = MemoryAppendStore(); val aBridge = FakeBridge(); val a = publish(aBridge, store).facade
-        val old = a.inspect(); store.noopChild(store.latest()); val writes = store.writes
+        val old = a.inspect(); store.changedChild(store.latest()); val writes = store.writes
         assertFails { a.upload(old) }; assertEquals(writes, store.writes); assertEquals(0, aBridge.restores)
     }
-    @Test fun unchangedRemoteDescendantsAdvanceThenUploadRealLocalProgress() {
+    @Test fun reusedContentThenRealLocalProgressParentsOriginalHash() {
         val store = MemoryAppendStore(); val bridge = FakeBridge(); val rig = publish(bridge, store)
-        val first = store.latest(); val child = store.noopChild(first); val tip = store.noopChild(child, "restore")
+        val first = store.latest()
+        repeat(2) { assertEquals("UNCHANGED",rig.facade.autoUpload().status) }
+        assertEquals(1,store.commits.size)
         bridge.files = fixture(2)
         assertEquals("UPLOADED", rig.facade.autoUpload().status)
-        assertEquals(listOf(tip.id), store.latest().parents); assertEquals(4, store.commits.size)
+        assertEquals(listOf(first.id), store.latest().parents); assertEquals(2, store.commits.size)
         assertEquals(0, bridge.restores); assertEquals(bridge.files.mapValues { hash(it.value) }, store.latest().snapshot.files)
     }
-    @Test fun equalNoopAdvanceDoesNotPublishOrTouchMirror() {
+    @Test fun equalContentReuseDoesNotPublishOrTouchMirror() {
         val store = MemoryAppendStore(); val bridge = FakeBridge(); val rig = publish(bridge, store)
-        val before = fingerprint(mirror(rig.root)); val writes = store.writes; val child = store.noopChild(store.latest())
+        val before = fingerprint(mirror(rig.root)); val writes = store.writes; val child = store.latest()
         assertEquals("UNCHANGED", rig.facade.autoUpload().status)
         assertEquals(writes, store.writes); assertEquals(before, fingerprint(mirror(rig.root)))
         assertEquals(child.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
@@ -348,7 +349,7 @@ class AndroidFacadeReconstructionTest {
         val fixture = mergeRig(); val facade = fixture.local.facade
         val inspection = facade.inspect(); assertEquals("DIFFERENT", inspection.kind)
         assertTrue(facade.previewMerge(inspection).isAllowed)
-        fixture.store.noopChild(fixture.store.latest())
+        fixture.store.changedChild(fixture.store.latest())
         assertMergeRejectedWithoutSideEffects(fixture, inspection)
     }
     @Test fun mergeRejectsActualGameProgressAfterPreviewBeforeWritesRestoreOrJournal() {

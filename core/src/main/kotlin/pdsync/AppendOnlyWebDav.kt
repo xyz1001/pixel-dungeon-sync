@@ -31,7 +31,8 @@ class NamespaceProvisioningException(
 
 /**
  * Append-only names in a WebDAV collection. Namespace creation is an explicit separate operation.
- * No shared head is written, and no ETag, conditional PUT, LOCK or MOVE is required. AppendSync owns collision checks and readback.
+ * No shared head is written. Hash records require create-only conditional PUT; UUID records are read-only.
+ * AppendSync owns collision validation and readback; no LOCK or MOVE is used.
  *
  * RFC 4918 has no standard listing pagination. Normally a Depth:1 207 is the complete listing;
  * an explicit RFC 8288 Link rel="next" is supported only for this exact collection and origin.
@@ -55,6 +56,17 @@ class AppendOnlyWebDav(
   val accepted = if (chain.request().method == "MKCOL") setOf(201, 405) else setOf(207, 404)
   if (response.code !in accepted) {
    val error = namespaceHttpError(response.code)
+   response.close()
+   throw error
+  }
+  response
+ }.build()
+ // Reject failed mutations before OkHttp's retry/follow-up interceptor can replay them.
+ // A collision is returned to AppendSync for bounded fresh readback and content verification.
+ private val writeClient = this.client.newBuilder().addNetworkInterceptor { chain ->
+  val response = chain.proceed(chain.request())
+  if (response.code !in setOf(200, 201, 204)) {
+   val error = WebDavException(response.code)
    response.close()
    throw error
   }
@@ -223,8 +235,14 @@ class AppendOnlyWebDav(
  override fun legacyPresent(): Boolean = get(fileUrl("head.json"), MAX_MANIFEST_BYTES) != null
  override fun legacyPresent(cancellation:MetadataReadCancellation):Boolean =
   get(fileUrl("head.json"),MAX_MANIFEST_BYTES,cancellation)!=null
- override fun writeCommit(id: String, bytes: ByteArray) = put(fileUrl(commitName(id)), bytes, MAX_MANIFEST_BYTES, "application/json")
- override fun writeObject(id: String, bytes: ByteArray) = put(fileUrl(objectName(id)), bytes, MAX_SNAPSHOT_BYTES, "application/zip")
+ override fun writeCommit(id: String, bytes: ByteArray) {
+  validateWritableId(id)
+  put(fileUrl(commitName(id)), bytes, MAX_MANIFEST_BYTES, "application/json")
+ }
+ override fun writeObject(id: String, bytes: ByteArray) {
+  validateWritableId(id)
+  put(fileUrl(objectName(id)), bytes, MAX_SNAPSHOT_BYTES, "application/zip")
+ }
 
  override fun listCommits(cursor: String?): CommitPage = listCommitsImpl(cursor,null)
  override fun listCommits(cursor:String?,cancellation:MetadataReadCancellation):CommitPage = listCommitsImpl(cursor,cancellation)
@@ -269,7 +287,7 @@ class AppendOnlyWebDav(
   readScopes.get()?.remove(url.toString())
   try {
    require(bytes.size <= limit) { CoreValidationMessages.UPLOAD_EXCEEDS_SIZE_LIMIT.text() }
-   execute(request(url).put(bytes.toRequestBody(mediaType.toMediaType())).build()) { response ->
+   execute(request(url).header("If-None-Match", "*").put(bytes.toRequestBody(mediaType.toMediaType())).build(), writeClient) { response ->
     if (response.code !in setOf(200, 201, 204)) throw WebDavException(response.code)
     readBounded(response, MAX_MANIFEST_BYTES)
    }
@@ -301,7 +319,11 @@ class AppendOnlyWebDav(
   e.statusCode?.let { DiagnosticLog.http(diagnosticMethod(request.method), it, context()) }
   throw e
  }
- catch (e: WebDavException) { throw e }
+ catch (e: WebDavException) {
+  // Failed PUT statuses are intercepted before the response reaches this method.
+  if (requestClient === writeClient) DiagnosticLog.http(diagnosticMethod(request.method), e.statusCode, context())
+  throw e
+ }
  catch (error: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw error }
  catch (error: IOException) {
   DiagnosticLog.networkFailure(error, context())
@@ -339,9 +361,10 @@ class AppendOnlyWebDav(
  }
 
  private fun fileUrl(name: String) = collection.newBuilder().addPathSegment(name).build()
- private fun commitName(id: String): String { validateId(id); return "pdsync-v2-commit-$id.json" }
- private fun objectName(id: String): String { validateId(id); return "pdsync-v2-object-$id.zip" }
- private fun validateId(id: String) = require(validCommitId(id)) { CoreValidationMessages.INVALID_APPEND_ONLY_IDENTIFIER.text() }
+ private fun commitName(id: String): String { validateId(id); return "${if (validContentHashId(id)) HASH_COMMIT_PREFIX else LEGACY_COMMIT_PREFIX}$id.json" }
+ private fun objectName(id: String): String { validateId(id); return "pdsync-${if (validContentHashId(id)) "v3" else "v2"}-object-$id.zip" }
+ private fun validateId(id: String) = require(validRecordId(id)) { CoreValidationMessages.INVALID_APPEND_ONLY_IDENTIFIER.text() }
+ private fun validateWritableId(id: String) = require(validContentHashId(id)) { CoreValidationMessages.INVALID_APPEND_ONLY_IDENTIFIER.text() }
 
  /** Validate before HttpUrl can normalize traversal, backslashes or URL credentials away. */
  private fun checkedUri(value: String, allowQuery: Boolean): URI {
@@ -417,13 +440,14 @@ class AppendOnlyWebDav(
    }
    if (own) continue
    val name = url.pathSegments.last()
-   if (name.startsWith(COMMIT_PREFIX)) {
+   val prefix = COMMIT_PREFIXES.firstOrNull { name.startsWith(it) }
+   if (prefix != null) {
     require(!path.endsWith('/') && name.endsWith(".json") && relative == name) { CoreValidationMessages.MALFORMED_APPEND_ONLY_COMMIT_FILENAME.text() }
-    val id = name.removePrefix(COMMIT_PREFIX).removeSuffix(".json")
-    validateId(id)
+    val id = name.removePrefix(prefix).removeSuffix(".json")
+    require(if (prefix == HASH_COMMIT_PREFIX) validContentHashId(id) else validCommitId(id)) { CoreValidationMessages.INVALID_APPEND_ONLY_IDENTIFIER.text() }
     require(entry.getElementsByTagNameNS(DAV, "collection").length == 0) { CoreValidationMessages.COMMIT_IS_A_COLLECTION.text() }
     require(ids.add(id)) { CoreValidationMessages.DUPLICATE_COMMIT_IDENTIFIER.text() }
-   } else if (relative!!.startsWith(COMMIT_PREFIX)) {
+   } else if (COMMIT_PREFIXES.any { relative!!.startsWith(it) }) {
     throw IllegalArgumentException(CoreValidationMessages.MALFORMED_APPEND_ONLY_COMMIT_FILENAME.text())
    }
   }
@@ -482,7 +506,9 @@ class AppendOnlyWebDav(
 
  companion object {
   private const val DAV = "DAV:"
-  private const val COMMIT_PREFIX = "pdsync-v2-commit-"
+  private const val LEGACY_COMMIT_PREFIX = "pdsync-v2-commit-"
+  private const val HASH_COMMIT_PREFIX = "pdsync-v3-commit-"
+  private val COMMIT_PREFIXES = listOf(LEGACY_COMMIT_PREFIX, HASH_COMMIT_PREFIX)
   private const val MAX_LISTING_BYTES = 2 * 1024 * 1024
   private const val MAX_LISTING_RESPONSES = 10_000
   private const val MAX_HREF_LENGTH = 8192

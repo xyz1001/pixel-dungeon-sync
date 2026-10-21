@@ -40,7 +40,7 @@ class HomeRestoreDiagnosticEvidence private constructor(values: Map<String, Stri
    val values = linkedMapOf<String, String>()
    val current = summarize(values, "current", currentFiles)
    val target = summarize(values, "target", targetFiles)
-   if (selectedCommitId != null && validCommitId(selectedCommitId))
+   if (selectedCommitId != null && validRecordId(selectedCommitId))
     values["selected.commit_sha256"] = hash(selectedCommitId.toByteArray(Charsets.UTF_8))
    values["selected.tip"] = selectedTip.toString()
    if (current != null && target != null) values["filemaps_equal"] = (current == target).toString()

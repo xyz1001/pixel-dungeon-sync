@@ -27,7 +27,7 @@ import kotlin.test.*
 
 class WebDavNetworkDiagnosticsTest {
  @TempDir lateinit var temp: Path
- private val id = "11111111-1111-4111-8111-111111111111"
+ private val id = "ab".repeat(32)
  private val secret = "https://private.invalid/path?password=sentinel-secret Authorization: private-token"
  private fun store(base: String, client: OkHttpClient) = AppendOnlyWebDav(base, "shattered", "hero", "synthetic", "test-only", client)
 
@@ -75,7 +75,7 @@ class WebDavNetworkDiagnosticsTest {
   assertEquals(IOException::class.java, error.javaClass)
   assertEquals(1, server.requestCount)
   val request = server.takeRequest(); assertEquals("PUT", request.method)
-  assertEquals("/shattered/hero/pdsync-v2-object-$id.zip", request.path)
+  assertEquals("/shattered/hero/pdsync-v3-object-$id.zip", request.path)
   assertContentEquals(bytes, request.body.readByteArray())
  }
 
@@ -116,8 +116,8 @@ class WebDavNetworkDiagnosticsTest {
   source.zip.fill(0); root.resolve("game1/game.dat").writeText("later-local-change")
   val restarted = AppendRepository(state, Shattered, "hero")
   assertEquals(frozen.commit, restarted.publish(dav, restarted.pending()!!))
-  assertContentEquals(frozen.zip, remote["/shattered/hero/pdsync-v2-object-${frozen.commit.snapshot.id}.zip"])
-  assertContentEquals(frozen.manifestBytes, remote["/shattered/hero/pdsync-v2-commit-${frozen.commit.id}.json"])
+  assertContentEquals(frozen.zip, remote["/shattered/hero/pdsync-v3-object-${frozen.commit.snapshot.id}.zip"])
+  assertContentEquals(frozen.manifestBytes, remote["/shattered/hero/pdsync-v3-commit-${frozen.commit.id}.json"])
   assertEquals(2, puts.size) // Accepted object was read back, not uploaded a second time.
   assertEquals(frozen.commit, restarted.publish(dav, restarted.pending()!!)); assertEquals(2, puts.size)
  }

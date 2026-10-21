@@ -16,7 +16,7 @@ import org.junit.jupiter.api.io.TempDir
 
 class WebDavPersistentDiagnosticsTest {
  @TempDir lateinit var temp: Path
- private val id = "11111111-1111-4111-8111-111111111111"
+ private val id = "ab".repeat(32)
  private val username = "private-test-account"
  private val password = "private-test-password"
  private fun dav(base:String,client:OkHttpClient=OkHttpClient()) =

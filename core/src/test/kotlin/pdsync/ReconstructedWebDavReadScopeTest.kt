@@ -22,7 +22,7 @@ import kotlin.test.*
 /** Newly reconstructed loopback transport checks; no device or external server is used. */
 class ReconstructedWebDavReadScopeTest {
  @TempDir lateinit var cacheRoot: Path
- private val id = "11111111-1111-4111-8111-111111111111"
+ private val id = "ab".repeat(32)
  private fun store(server: MockWebServer, user: String = "fixture",
   check: WebDavRequestCheck = WebDavRequestCheck {}): AppendOnlyWebDav =
   AppendOnlyWebDav(server.url("/dav/").toString(), "shattered", "hero", user, "fixture-value",

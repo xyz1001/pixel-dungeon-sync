@@ -88,7 +88,7 @@ fun sanitizeSnapshotName(raw: String): String = if(raw.isBlank()) "" else
  sanitizeDeviceLabel(raw).codePoints().limit(40).toArray().let { String(it,0,it.size) }
 
 @Serializable data class DirectorySyncBaseline(val scope: String, val commitId: String, val contentSha256: String) {
- fun validated() = also { require(digestPattern.matches(scope)); require(validCommitId(commitId)); require(digestPattern.matches(contentSha256)) }
+ fun validated() = also { require(digestPattern.matches(scope)); require(validRecordId(commitId)); require(digestPattern.matches(contentSha256)); require(!validContentHashId(commitId) || commitId == contentSha256) }
 }
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class DirectorySidecar(
