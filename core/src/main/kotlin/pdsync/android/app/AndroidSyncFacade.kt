@@ -7,6 +7,9 @@ import java.nio.file.*
 import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -35,6 +38,7 @@ class AndroidSyncFacade internal constructor(
  private val journals=SafePaths.checked(base.resolve("restore-journals").resolve(AndroidGameIdentity.LOCAL_STATE_GENERATION)).also { Files.createDirectories(it) }
  private val journalPath=journals.resolve("${identity.originalSourceIdentity}.json")
  private val owner=Any()
+ private val mutationEpoch=sharedMutationEpochs.computeIfAbsent(base) { AtomicLong() }
  private val config=validatedStateConnection.copy(saveRoot=mirror.toString(),targetGame="android-package:${identity.packageName}")
  private var pinnedTarget:AndroidGameTarget?=null
  private val versions=AndroidProfileVersions(identity,adapter,::verifiedTarget)
@@ -52,7 +56,7 @@ class AndroidSyncFacade internal constructor(
  class Version(val snapshotId:String,val commitId:String?,val displayName:String,val versionSummary:String,val fileCount:Int,val capturedAt:String?,val deviceLabel:String?,val isTip:Boolean,val reason:String) {
   override fun toString()=CoreMessages.ANDROID_1_S_2_S_FILES_3_S.text(displayName, fileCount, versionSummary)
  }
- class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null) {
+ class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null,internal val homeObservation:HomeReadContext?=null) {
   val remoteVersions=immutable(remoteVersions)
   /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
   fun diagnosticBlockReason():String? = blockReason?.name
@@ -70,7 +74,7 @@ class AndroidSyncFacade internal constructor(
  class ControlledObservation internal constructor(internal val proof:AndroidControlledSessions.ObservationProof?)
  @Serializable private data class RestoreJournal(val schema:Int=2,val profileScope:String,val gameSourceIdentity:String,val gamePackage:String,val installedApkSha256:String,val sourceApkSha256:String,val expectedBefore:Map<String,String>,val expectedAfter:Map<String,String>,val action:String,val ready:Boolean=false)
 
- fun hasUnresolvedRestore()=locked { anyUnresolvedRestore() }
+ fun hasUnresolvedRestore()=locked(mutation=false) { anyUnresolvedRestore() }
  fun testConnection()=connectionCheck(false)
  fun connect()=connectionCheck(true)
  private fun connectionCheck(create:Boolean)=locked {
@@ -102,7 +106,73 @@ class AndroidSyncFacade internal constructor(
  fun observeControlledSession(observation:ControlledObservation,reliable:Boolean,foreground:Boolean) {controlledSessions.observe(base,workspace,observation.proof,reliable,foreground)}
  fun cancelControlledSession(token:String) {controlledSessions.cancel(base,token)}
  fun inspect()=locked { inspectLocked() }
- fun inspectHome()=locked { inspectLocked(metadataOnly=true) }
+ /** One immutable backend observation. It never grants write authority or owns the mirror. */
+ class HomeReadContext internal constructor(internal val owner:Any,internal val target:AndroidGameTarget,
+  internal val epoch:Long,internal val observation:AndroidSaveObservation,internal val sessionContext:pdsync.HomeReadContext,
+  internal val mirrorBefore:Map<String,String>,internal val sidecarBefore:SidecarRead,
+  internal val continuity:HomeContinuity?) : AutoCloseable {
+  internal val cancellation=MetadataReadCancellation()
+  internal val accepted=AtomicBoolean(false)
+  internal val materialized=AtomicBoolean(false)
+  internal var materializedReceipt:AndroidRestoreReceipt?=null
+  override fun close()=cancellation.cancel()
+ }
+ internal class HomeContinuity(val target:AndroidGameTarget,val epoch:Long,val before:Map<String,String>,val sidecar:SidecarRead,
+  val after:Map<String,String>,val runs:Map<String,RunIdentity>) {
+  val consumed=AtomicBoolean(false)
+  fun matches(target:AndroidGameTarget,epoch:Long,before:Map<String,String>,sidecar:SidecarRead,after:Map<String,String>)=
+   !consumed.get() && this.target==target && this.epoch==epoch && this.before==before && this.sidecar==sidecar && this.after==after
+ }
+ class HomeReadResult internal constructor(internal val context:HomeReadContext,internal val remote:pdsync.HomeReadResult)
+ /** Short serialized capture; unsupported backends explicitly retain the old serialized path. */
+ fun captureHomeReadContext():HomeReadContext?=locked(mutation=false) {
+  if(anyUnresolvedRestore())return@locked null
+  val proof=controlledSessions.beginExport(base,workspace)
+  try {
+   val target=verifiedTarget()
+   val observationTiming=DiagnosticTiming.start(DiagnosticPhase.SAVE_EXPORT)
+   val observation=try {bridge.readSnapshot().also {if(it==null)observationTiming.skipped() else observationTiming.succeeded()}}
+    catch(error:Throwable){observationTiming.failed(error);throw error}
+   if(observation==null) {controlledSessions.releaseExport(proof);return@locked null}
+   require(observation.target==target && verifiedTarget()==target) { CoreMessages.ANDROID_SELECTED_GAME_IDENTITY_OR_CLOUD_BINDING_CHANGED_REOPEN_THAT_GAME_AND_COMPARE_AGAIN.text() }
+   versions.detectVerifiedEntries(observation.summaryEntries)
+   val summary=DiagnosticTiming.measure(DiagnosticPhase.LOCAL_SUMMARY) {
+    SaveSummary.fromObservation(observation.inventory.keys,observation.summaryEntries) { observation.inventory.getValue(it).modifiedMillis }
+   }
+   val before=immutableMap(currentFiles());val sidecar=DirectoryMetadataStore(mirror).read()
+   val continued=controlledSessions.consume(proof,base,workspace,target,before,(sidecar as? SidecarRead.Valid)?.value?.runs.orEmpty(),observation.files,observation.summaryEntries)
+   val epoch=mutationEpoch.get()
+   val continuity=if(continued.isNotEmpty())HomeContinuity(target,epoch,before,sidecar,observation.files,immutableMap(continued)).also {sharedHomeContinuity[workspace]=it}
+    else sharedHomeContinuity[workspace]?.takeIf {it.matches(target,epoch,before,sidecar,observation.files)}
+   if(continuity==null)sharedHomeContinuity.remove(workspace)
+   HomeReadContext(owner,target,epoch,observation,session.beginHomeRead(observation.files,summary),before,sidecar,continuity)
+  } finally {controlledSessions.abandonExport(proof)}
+ }
+ /** Pure network/CPU phase: no facade lock, mirror, baseline or discovery-cache write. */
+ fun readHomeRemote(context:HomeReadContext):HomeReadResult {
+  require(context.owner===owner)
+  context.cancellation.checkActive()
+  return HomeReadResult(context,session.readHome(context.sessionContext,store,context.cancellation))
+ }
+ /** Short serialized acceptance. Stale/cancelled observations never merge remote evidence. */
+ fun acceptHomeObservation(result:HomeReadResult):Inspection?=locked(mutation=false) {
+  val context=result.context;require(context.owner===owner)
+  context.cancellation.checkActive()
+  if(context.accepted.get() || context.epoch!=mutationEpoch.get() || anyUnresolvedRestore())return@locked null
+  require(verifiedTarget()==context.target) { CoreMessages.ANDROID_SELECTED_GAME_IDENTITY_OR_CLOUD_BINDING_CHANGED_REOPEN_THAT_GAME_AND_COMPARE_AGAIN.text() }
+  if(currentFiles()!=context.mirrorBefore || DirectoryMetadataStore(mirror).read()!=context.sidecarBefore)return@locked null
+  val (comparison,history)=session.acceptHome(result.remote) ?: return@locked null
+  context.accepted.set(true)
+  val remote=comparison.remoteCommits.map {version(it,true,CoreMessages.CLOUD_HISTORY.text())}
+  Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: CoreMessages.CLOUD_HISTORY.text(),comparison.localFiles.size,
+   remote,comparison.retryablePending,comparison.canAdoptRemote,false,history=if(comparison.kind==OnboardingKind.BLOCKED)null else history,homeObservation=context)
+ }
+ fun inspectHome():Inspection {
+  val context=captureHomeReadContext() ?: return locked {inspectLocked(metadataOnly=true)}
+  context.use { return requireNotNull(acceptHomeObservation(readHomeRemote(it))) { CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text() } }
+ }
+ /** Memory-only publication stamp; any completed serialized operation invalidates older reads. */
+ fun observationGeneration():Long=mutationEpoch.get()
  fun beginHomeReadIdentityScope():AutoCloseable=bridge.beginHomeReadIdentityScope()
  private fun inspectLocked(metadataOnly:Boolean=false):Inspection {
   if(anyUnresolvedRestore()) return Inspection(owner,null,"BLOCKED",CoreMessages.ANDROID_A_GAME_RESTORE_NEEDS_VERIFICATION_OR_RECOVERY_UPLOAD_IS_BLOCKED_UNTIL_IT_IS_RESOLVED.text(),currentFiles().size,emptyList(),false,false,true,SyncBlockReason.RESTORE_RECOVERY_REQUIRED)
@@ -243,7 +313,10 @@ class AndroidSyncFacade internal constructor(
  fun previewLocal()=locked {requireNoRecovery();freshExport {exported->val count=capture(exported).manifest.files.size;LocalPreview(count,runCatching {SaveSummary.read(exported)}.getOrNull(),if(count==0)CoreMessages.ANDROID_THE_SELECTED_GAME_S_SAVE_DIRECTORY_IS_EMPTY.text() else CoreMessages.ANDROID_VERIFIED_1_S_SAVE_FILES_FOR_2_S.text(count, identity.displayName))}}
  /** Standalone refresh explicitly creates a new observation. Use overload for an existing UI. */
  fun historyPresentation():SyncHistory=locked {val inspection=inspectLocked(metadataOnly=true);requireNotNull(inspection.history){inspection.message}}
- fun historyPresentation(inspection:Inspection):SyncHistory=locked {presentationChecked(inspection);requireNotNull(inspection.history){inspection.message}}
+ fun historyPresentation(inspection:Inspection):SyncHistory=locked(mutation=false) {
+  if(inspection.homeObservation!=null)validateHomePresentation(inspection) else presentationChecked(inspection)
+  requireNotNull(inspection.history){inspection.message}
+ }
  fun verifyHomeInspection(inspection:Inspection):Inspection=locked {
   val c=checked(inspection);checkActualUnchanged(c.localFiles)
   val verified=inspectionFromComparison(c)
@@ -262,9 +335,42 @@ class AndroidSyncFacade internal constructor(
   if(pinnedTarget==null)pinnedTarget=target
   target
  }
+ private fun validateHomePresentation(inspection:Inspection) {
+  requireNoRecovery();require(inspection.owner===owner) { CoreMessages.ANDROID_THIS_COMPARISON_BELONGS_TO_ANOTHER_CONNECTION_COMPARE_AGAIN.text() }
+  val context=requireNotNull(inspection.homeObservation)
+  require(context.accepted.get() && context.epoch==mutationEpoch.get() && verifiedTarget()==context.target &&
+   currentFiles()==context.mirrorBefore && DirectoryMetadataStore(mirror).read()==context.sidecarBefore) {
+   CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text()
+  }
+ }
+ /** Inventory is display evidence. The first real action must acquire complete fresh bytes. */
+ private fun materializeHome(inspection:Inspection) {
+  val context=inspection.homeObservation ?: return
+  validateHomePresentation(inspection)
+  require(context.materialized.compareAndSet(false,true)) { CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text() }
+  freshVerifiedExport { exported ->
+   require(exported.snapshot.manifest.files==context.observation.files) {
+    CoreMessages.ANDROID_ACTUAL_GAME_PROGRESS_CHANGED_SINCE_COMPARISON_COMPARE_AGAIN_NO_GAME_FILES_WERE_REPLACED.text()
+   }
+   require(verifiedTarget()==context.target && currentFiles()==context.mirrorBefore && DirectoryMetadataStore(mirror).read()==context.sidecarBefore) {
+    CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text()
+   }
+   replaceMirror(exported,null)
+   val old=(context.sidecarBefore as? SidecarRead.Valid)?.value
+   val continuity=context.continuity
+   if(old!=null && continuity!=null && continuity.matches(context.target,context.epoch,context.mirrorBefore,context.sidecarBefore,context.observation.files)
+    && continuity.consumed.compareAndSet(false,true)) {
+    sharedHomeContinuity.remove(workspace,continuity)
+    val metadata=DirectoryMetadataStore(mirror);val observed=metadata.observe(context.observation.files,initialImport=false,persist=false)
+    metadata.write(old.copy(currentContentSha256=observed.contentSha256,runs=observed.runs+continuity.runs))
+   }
+   context.materializedReceipt=AndroidRestoreReceipt(context.target,exported.snapshot.manifest.files,exported.entries.values.sumOf {it.size.toLong()})
+  }
+ }
  private fun presentationChecked(inspection:Inspection):OnboardingComparison {
   requireNoRecovery();require(inspection.owner===owner){CoreMessages.ANDROID_THIS_COMPARISON_BELONGS_TO_ANOTHER_CONNECTION_COMPARE_AGAIN.text()}
   val c=requireNotNull(inspection.comparison){CoreMessages.ANDROID_COMPLETE_A_SAFE_COMPARISON_FIRST.text()}
+  materializeHome(inspection)
   verifiedTarget()
   require(currentFiles()==c.localFiles){CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text()};return c
  }
@@ -395,19 +501,21 @@ class AndroidSyncFacade internal constructor(
  }
  fun <T> withRestoreReadScope(action:Callable<T>):T=store.withReadScope(scratch.resolve("read-cache")) {action.call()}
  private fun <T> restoreReadLocked(action:()->T):T=locked {store.withReadScope(scratch.resolve("read-cache"),action)}
- private fun <T> locked(action:()->T):T {
+ private fun <T> locked(mutation:Boolean=true,action:()->T):T {
   DiagnosticTiming.start(DiagnosticPhase.OPERATION_LOCK_WAIT).use {timing->
    return synchronized(this) {
     FileChannel.open(SafePaths.checked(base.resolve("android-facade.lock")),StandardOpenOption.CREATE,StandardOpenOption.WRITE).use {channel->
      val lock=try {channel.tryLock()}catch(_:OverlappingFileLockException){null}
      checkNotNull(lock){CoreMessages.ANDROID_ANOTHER_ANDROID_SYNC_OPERATION_IS_RUNNING_WAIT_FOR_IT_TO_FINISH.text()}
-     lock.use {timing.close();action()}
+     lock.use {timing.close();try {action()} finally {if(mutation)mutationEpoch.incrementAndGet()}}
     }
    }
   }
  }
  companion object {
   private val sharedControlledSessions=AndroidControlledSessions()
+  private val sharedMutationEpochs=ConcurrentHashMap<Path,AtomicLong>()
+  private val sharedHomeContinuity=ConcurrentHashMap<Path,HomeContinuity>()
   @JvmStatic fun cancelControlledSession(root:Path,token:String){sharedControlledSessions.cancel(SafePaths.checked(root),token)}
   @JvmStatic fun hasUnresolvedRestore(root:Path):Boolean {val base=SafePaths.checked(root);val dir=SafePaths.checked(base.resolve("restore-journals").resolve(AndroidGameIdentity.LOCAL_STATE_GENERATION));if(!Files.exists(dir,LinkOption.NOFOLLOW_LINKS))return false;require(Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)){CoreMessages.ANDROID_RESTORE_RECOVERY_STORAGE_IS_DAMAGED.text()};return Files.list(dir).use {it.anyMatch {p->p.fileName.toString().endsWith(".json")}}}
   private fun <T> immutable(values:List<T>):List<T> = Collections.unmodifiableList(ArrayList(values))

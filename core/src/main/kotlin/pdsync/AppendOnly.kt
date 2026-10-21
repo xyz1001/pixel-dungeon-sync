@@ -25,6 +25,9 @@ interface AppendStore {
  fun <T> withReadScope(cacheDirectory: Path? = null, block: () -> T): T = block()
  fun <T> withFreshReads(block: () -> T): T = block()
  fun listCommits(cursor: String? = null): CommitPage
+ fun listCommits(cursor:String?,cancellation:MetadataReadCancellation):CommitPage {
+  cancellation.checkActive();return listCommits(cursor)
+ }
  fun readCommit(id: String): ByteArray?
  fun readCommit(id: String, cancellation: MetadataReadCancellation): ByteArray? {
   cancellation.checkActive()
@@ -34,6 +37,9 @@ interface AppendStore {
  fun writeCommit(id: String, bytes: ByteArray)
  fun writeObject(id: String, bytes: ByteArray)
  fun legacyPresent(): Boolean
+ fun legacyPresent(cancellation:MetadataReadCancellation):Boolean {
+  cancellation.checkActive();return legacyPresent()
+ }
 }
 
 fun validCommitId(id: String) = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}").matches(id)
@@ -84,6 +90,14 @@ data class CommitMetadataGraph internal constructor(val displayGraph: CommitGrap
  val pending: Map<String, String> get() = displayGraph.pending
  val tips: Set<String> get() = displayGraph.tips
  fun requireSettled() = displayGraph.requireSettled()
+}
+internal class MetadataReadSeed(val known:Map<String,String>,val observed:Set<String>,val baseline:String?)
+internal class DetachedMetadataRead(val graph:CommitMetadataGraph,val known:Map<String,ByteArray>,val observed:Set<String>)
+private class MetadataEvidence(seed:MetadataReadSeed) {
+ val expected=seed.known
+ val known=linkedMapOf<String,ByteArray>()
+ val observed=LinkedHashSet(seed.observed)
+ val baseline=seed.baseline
 }
 
 /** Caller serializes all access using the profile's OS FileChannel lock. */
@@ -188,6 +202,17 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   SafePaths.atomicWrite(baselineMarker, "established".encodeToByteArray())
   SafePaths.atomicWrite(baselinePath, id.encodeToByteArray())
  }
+ /** Selected-object evidence never upgrades the rest of a metadata graph. */
+ internal fun setSelectedBaseline(commit: AppendCommit, graph: CommitMetadataGraph, verified: VerifiedSnapshot) {
+  graph.requireSettled()
+  require(graph.commits[commit.id] == commit && verified.snapshot.manifest == commit.snapshot)
+  require(verified.snapshot.zip.size == commit.objectBytes && observedAt(commit.id) != null)
+  require(decode(requireNotNull(known(commit.id)),commit.id) == commit)
+  SafePaths.atomicWrite(baselineMarker,"established".encodeToByteArray())
+  SafePaths.atomicWrite(baselinePath,commit.id.encodeToByteArray())
+ }
+ internal fun verifiedCommitIds(graph: CommitGraph): Set<String> =
+  graph.commits.filter { (id,commit) -> observedAt(id)!=null && known(id)?.let { decode(it,id)==commit }==true }.keys
 
  /** Missing later listings never erase remembered IDs. Parents are fetched even when omitted. */
  fun discover(store: AppendStore): CommitGraph = discoverGraph(store, verifyObjects = true)
@@ -196,18 +221,49 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(parallelism in 1..4)
   return CommitMetadataGraph(discoverGraph(store, verifyObjects = false, metadataParallelism = parallelism))
  }
+ internal fun metadataReadSeed():MetadataReadSeed {
+  var total=0L
+  val known=idsIn(knownRoot).associateWith {
+   val bytes=requireNotNull(known(it))
+   total+=bytes.size;require(total<=MAX_REMOTE_SCAN_BYTES)
+   hash(bytes)
+  }
+  return MetadataReadSeed(known,idsIn(observedRoot),baseline())
+ }
+ /** No filesystem reads or writes occur after the seed has been captured under the profile lock. */
+ internal fun readMetadata(store:AppendStore,seed:MetadataReadSeed,cancellation:MetadataReadCancellation):DetachedMetadataRead {
+  val evidence=MetadataEvidence(seed)
+  val graph=CommitMetadataGraph(discoverGraph(store,false,4,evidence,cancellation))
+  return DetachedMetadataRead(graph,evidence.known.toMap(),evidence.observed.toSet())
+ }
+ internal fun mergeMetadata(read:DetachedMetadataRead) {
+  // Validate the complete delta before the first write. This never records object verification.
+  read.known.forEach { (id,bytes) ->
+   val old=known(id)
+   if(old!=null && !old.contentEquals(bytes))throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
+   decode(bytes,id)
+  }
+  read.observed.forEach(::observe)
+  read.known.forEach { (id,bytes)->remember(id,bytes) }
+ }
 
- private fun discoverGraph(store: AppendStore, verifyObjects: Boolean, metadataParallelism: Int = 1): CommitGraph {
-  if (store.legacyPresent()) throw LegacyProtocolException()
-  val ids = (idsIn(knownRoot) + idsIn(observedRoot)).toMutableSet(); baseline()?.let { ids.add(it) }; require(ids.size <= MAX_COMMITS)
+ private fun discoverGraph(store: AppendStore, verifyObjects: Boolean, metadataParallelism: Int = 1,
+  evidence:MetadataEvidence?=null,externalCancellation:MetadataReadCancellation?=null): CommitGraph {
+  val cancellation = externalCancellation ?: if (verifyObjects) null else MetadataReadCancellation()
+  fun observed(id:String) { if(evidence==null)observe(id) else evidence.observed.add(id) }
+  fun knownBytes(id:String):ByteArray? = if(evidence==null)known(id) else evidence.known[id]
+  fun rememberBytes(id:String,bytes:ByteArray) { if(evidence==null)remember(id,bytes) else evidence.known[id]=bytes }
+  if (if(cancellation==null)store.legacyPresent() else store.legacyPresent(cancellation)) throw LegacyProtocolException()
+  val ids = (if(evidence==null)idsIn(knownRoot)+idsIn(observedRoot) else evidence.expected.keys+evidence.observed).toMutableSet()
+  (if(evidence==null)baseline() else evidence.baseline)?.let { ids.add(it) }; require(ids.size <= MAX_COMMITS)
   val cursors = mutableSetOf<String>(); var cursor: String? = null; var pages = 0; var listed = 0L
   do {
    require(++pages <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_LISTING_PAGES_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   val page = store.listCommits(cursor)
+   val page = if(cancellation==null)store.listCommits(cursor) else store.listCommits(cursor,cancellation)
    listed += page.ids.size; require(listed <= MAX_COMMITS) { CoreValidationMessages.LISTING_ENTRY_WORK_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
    require(page.ids.all(::validCommitId)) { CoreValidationMessages.INVALID_COMMIT_FILENAME.text() }
    ids.addAll(page.ids); require(ids.size <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_COMMITS_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   page.ids.forEach(::observe)
+   page.ids.forEach(::observed)
    cursor = page.next
    if (cursor != null) require(cursors.add(cursor)) { CoreValidationMessages.REPEATED_LISTING_CONTINUATION_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
   } while (cursor != null)
@@ -218,16 +274,16 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   }
   val trace = DiagnosticLog.currentTrace()
   val futures = mutableListOf<Future<Pair<String, ByteArray?>>>()
-  val cancellation = if (verifyObjects) null else MetadataReadCancellation()
   try {
    while (queue.isNotEmpty()) {
     if (Thread.currentThread().isInterrupted) throw InterruptedException()
+    cancellation?.checkActive()
     val batch = mutableListOf<String>()
     while (queue.isNotEmpty() && batch.size < if (verifyObjects) 1 else metadataParallelism) {
      val id = queue.removeFirst()
      if (seen.add(id)) {
       require(seen.size <= MAX_COMMITS) { CoreValidationMessages.HISTORY_TOO_LARGE_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-      observe(id)
+      observed(id)
       batch += id
      }
     }
@@ -252,10 +308,11 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
      val bytes = if (executor != null) fetched[id] else if (cancellation != null) store.readCommit(id, cancellation) else store.readCommit(id)
      if (bytes == null) { pending[id] = "missing manifest"; continue }
      scanBytes += bytes.size; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-     val old = known(id)
-     if (old != null && !old.contentEquals(bytes)) throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
+     val old = knownBytes(id)
+     if (old != null && !old.contentEquals(bytes) || evidence?.expected?.get(id)?.let {it!=hash(bytes)}==true)
+      throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
      val commit = try { decode(bytes, id) } catch (_: Exception) { pending[id] = "invalid manifest"; continue }
-     remember(id, bytes)
+     rememberBytes(id, bytes)
      commit.parents.forEach { queue.add(it) }
      if (verifyObjects) {
       scanBytes += commit.objectBytes; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
@@ -270,8 +327,11 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
      candidates[id] = commit
     }
    }
-  } finally {
+  } catch(failure:Throwable) {
    cancellation?.cancel()
+   throw failure
+  } finally {
+   if(externalCancellation==null)cancellation?.cancel()
    futures.forEach { it.cancel(true) }
    executor?.shutdownNow()
    try { executor?.awaitTermination(100, TimeUnit.MILLISECONDS) }

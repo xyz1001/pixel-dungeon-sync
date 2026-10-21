@@ -5,6 +5,7 @@ import java.util.Collections
 /** Content classification only. A blocked observation must never be interpreted as empty. */
 enum class OnboardingKind { BOTH_EMPTY, LOCAL_ONLY, REMOTE_ONLY, IDENTICAL, DIFFERENT, BRANCHED, BLOCKED }
 enum class OnboardingLineage { NONE, SAME_TIP, ANCESTOR_OF_TIP, BRANCHED, BLOCKED }
+internal enum class LocalObservationSource { FILESYSTEM, RESTORE_RECEIPT, BRIDGE_INVENTORY }
 
 /**
  * An immutable observation, not permission to use stale bytes. Actions validate this session-bound
@@ -26,7 +27,8 @@ class OnboardingComparison internal constructor(
  fingerprint: SaveFingerprint? = null,
  graph: CommitGraph? = null,
  pendingCommit: AppendCommit? = null,
- val verification: RemoteVerification = graph?.verification ?: RemoteVerification.OBJECTS_VERIFIED
+ val verification: RemoteVerification = graph?.verification ?: RemoteVerification.OBJECTS_VERIFIED,
+ internal val localSource: LocalObservationSource = LocalObservationSource.FILESYSTEM
 ) {
  val localFiles: Map<String, String> = immutableMap(localFiles)
  /** Actual file mtime from this guarded observation; not a capture/upload/server receipt time. */

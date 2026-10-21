@@ -221,13 +221,17 @@ class AppendOnlyWebDav(
   get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES, cancellation)
  override fun readObject(id: String): ByteArray? = getObject(fileUrl(objectName(id)))
  override fun legacyPresent(): Boolean = get(fileUrl("head.json"), MAX_MANIFEST_BYTES) != null
+ override fun legacyPresent(cancellation:MetadataReadCancellation):Boolean =
+  get(fileUrl("head.json"),MAX_MANIFEST_BYTES,cancellation)!=null
  override fun writeCommit(id: String, bytes: ByteArray) = put(fileUrl(commitName(id)), bytes, MAX_MANIFEST_BYTES, "application/json")
  override fun writeObject(id: String, bytes: ByteArray) = put(fileUrl(objectName(id)), bytes, MAX_SNAPSHOT_BYTES, "application/zip")
 
- override fun listCommits(cursor: String?): CommitPage {
+ override fun listCommits(cursor: String?): CommitPage = listCommitsImpl(cursor,null)
+ override fun listCommits(cursor:String?,cancellation:MetadataReadCancellation):CommitPage = listCommitsImpl(cursor,cancellation)
+ private fun listCommitsImpl(cursor:String?,cancellation:MetadataReadCancellation?):CommitPage {
   val url = if (cursor == null) collection else listingUrl(cursor)
   val request = request(url).header("Depth", "1").method("PROPFIND", PROPFIND.toRequestBody("application/xml; charset=utf-8".toMediaType())).build()
-  return execute(request) { response ->
+  return execute(request,cancellation=cancellation) { response ->
    if (response.code != 207) throw WebDavException(response.code)
    // Content-Range means this is not a complete response to our Depth:1 request.
    require(response.header("Content-Range") == null) { CoreValidationMessages.PARTIAL_WEBDAV_LISTING_IS_UNSUPPORTED.text() }

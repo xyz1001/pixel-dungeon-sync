@@ -16,6 +16,15 @@ data class AppendConflict(
  val publishedLocalCommit: String? = null
 )
 data class AppendRemoteEntry(val commit: AppendCommit, val entry: HistoryEntry)
+internal data class HomeReadState(
+ val baseline:String?,val pending:AppendCommit?,val legacyId:String?,val needsApply:Boolean,
+ val aliases:Map<String,String>,val sidecar:SidecarRead,val transfer:String?
+)
+internal class HomeReadContext(
+ val owner:Any,val files:Map<String,String>,val summary:SaveSummary?,
+ val state:HomeReadState,val seed:MetadataReadSeed
+)
+internal class HomeReadResult(val context:HomeReadContext,val metadata:DetachedMetadataRead)
 sealed interface AppendPushResult {
  data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
  data class Diverged(val conflict: AppendConflict): AppendPushResult
@@ -82,12 +91,75 @@ class AppendProfileSession(
   historyView(requireNotNull(comparison.graph),summary)
  }
  fun readHomeHistory(store:AppendStore):SyncHistory = readLocked(store) { historyView(discoverMetadata(store).displayGraph) }
+ private fun homeReadState():HomeReadState {
+  val transfer=directory.resolve("baseline-transfer.txt")
+  return HomeReadState(repository.baseline(),repository.pending()?.commit,local.legacyPending()?.manifest?.id,
+   needsApply(),aliases(),local.directoryMetadata.read(),
+   if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString() else null)
+ }
+ /** Capture only local control state; the supplied files came from the backend's complete read. */
+ internal fun beginHomeRead(files:Map<String,String>,summary:SaveSummary?):HomeReadContext = local.locked {
+  require(files.size<=MAX_SNAPSHOT_FILES)
+  files.forEach { (name,digest)->require(safePath(name)&&adapter.includes(name)&&!isDirectoryMetadata(name)&&Regex("[0-9a-f]{64}").matches(digest)) }
+  HomeReadContext(comparisonOwner,java.util.Collections.unmodifiableMap(LinkedHashMap(files)),summary,homeReadState(),repository.metadataReadSeed())
+ }
+ /** Pure network/CPU phase: no mirror, baseline, alias, or discovery cache is modified. */
+ internal fun readHome(context:HomeReadContext,store:AppendStore,cancellation:MetadataReadCancellation):HomeReadResult {
+  require(context.owner===comparisonOwner)
+  val metadata=repository.readMetadata(store,context.seed,cancellation)
+  metadata.graph.requireSettled();metadata.graph.commits.values.snapshotRepresentatives(metadata.graph.tips)
+  context.state.baseline?.let { require(it in metadata.graph.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
+  return HomeReadResult(context,metadata)
+ }
+ /** Null means stale; no evidence is merged until the captured control state still matches. */
+ internal fun acceptHome(result:HomeReadResult):Pair<OnboardingComparison,SyncHistory>? = local.locked {
+  val context=result.context
+  require(context.owner===comparisonOwner)
+  if(homeReadState()!=context.state)return@locked null
+  val state=context.state;val graph=result.metadata.graph.displayGraph
+  repository.mergeMetadata(result.metadata)
+  val lineage=when {
+   state.baseline==null->OnboardingLineage.NONE
+   graph.tips.size>1->OnboardingLineage.BRANCHED
+   graph.tips.singleOrNull()==state.baseline->OnboardingLineage.SAME_TIP
+   graph.tips.singleOrNull()?.let {graph.descendsFrom(it,state.baseline)}==true->OnboardingLineage.ANCESTOR_OF_TIP
+   else->OnboardingLineage.BLOCKED
+  }
+  val reason=when {
+   state.needsApply->SyncBlockReason.RESTORE_RECOVERY_REQUIRED
+   state.legacyId!=null->SyncBlockReason.LEGACY_PENDING_UPLOAD
+   state.pending!=null->SyncBlockReason.PENDING_UPLOAD
+   else->null
+  }
+  val kind=when {
+   reason!=null->OnboardingKind.BLOCKED
+   graph.tips.size>1->OnboardingKind.BRANCHED
+   context.files.isEmpty()&&graph.tips.isEmpty()->OnboardingKind.BOTH_EMPTY
+   graph.tips.isEmpty()->OnboardingKind.LOCAL_ONLY
+   context.files.isEmpty()->OnboardingKind.REMOTE_ONLY
+   context.files==graph.commits.getValue(graph.tips.single()).snapshot.files->OnboardingKind.IDENTICAL
+   else->OnboardingKind.DIFFERENT
+  }
+  val blocker=when(reason) {
+   SyncBlockReason.RESTORE_RECOVERY_REQUIRED->CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_EXPLICITLY_ARCHIVE_IT.text()
+   SyncBlockReason.LEGACY_PENDING_UPLOAD->CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_FIRST.text()
+   SyncBlockReason.PENDING_UPLOAD->CoreSessionMessages.A_FROZEN_UPLOAD_IS_PENDING_RETRYING_USES_ITS_ORIGINAL_SNAPSHOT.text()
+   else->null
+  }
+  val comparison=OnboardingComparison(kind,context.files,state.baseline,lineage,emptyList(),graph.tips,
+   blocker=blocker,blockReason=reason,retryablePending=state.pending!=null,pendingCommitId=state.pending?.id,
+   owner=comparisonOwner,graph=graph,pendingCommit=state.pending,localSource=LocalObservationSource.BRIDGE_INVENTORY)
+  val direction=state.transfer?.split(' ')?.takeIf {it.size==2&&it[0]==state.baseline&&it[1] in setOf("upload","restore")}?.get(1)
+  val history=SyncHistory(graph,state.baseline,context.files,(state.sidecar as? SidecarRead.Valid)?.value?.displayName.orEmpty(),
+   context.summary,state.aliases,direction,repository.verifiedCommitIds(graph),comparisonOwner)
+  comparison to history
+ }
  private fun historyView(graph:CommitGraph,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory {
   val files=currentFiles();val baseline=repository.baseline()
   require(summary==null || summary.first==files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val transfer=directory.resolve("baseline-transfer.txt")
   val direction=if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString().split(' ').takeIf { it.size==2&&it[0]==baseline&&it[1] in setOf("upload","restore") }?.get(1) else null
-  val verifiedIds=if(graph.verification==RemoteVerification.OBJECTS_VERIFIED)graph.commits.keys.toSet() else repository.cachedGraph().commits.filter { (id,value)-> graph.commits[id]==value }.keys.toSet()
+  val verifiedIds=if(graph.verification==RemoteVerification.OBJECTS_VERIFIED)graph.commits.keys.toSet() else repository.verifiedCommitIds(graph)
   return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner)
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
@@ -532,7 +604,7 @@ class AppendProfileSession(
   val before=requireNotNull(comparison.graph)
   val fresh=compareLocked(store,stopped,false);val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified()
   require(graph.commits==before.commits && graph.pending==before.pending && fresh.observedTips==comparison.observedTips) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
-  require(fresh.localFiles==comparison.localFiles && fresh.fingerprint==comparison.fingerprint) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  require(fresh.localFiles==comparison.localFiles && (comparison.localSource!=LocalObservationSource.FILESYSTEM || fresh.fingerprint==comparison.fingerprint)) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   require(fresh.baselineId==comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   require(fresh.pendingCommit==comparison.pendingCommit) { CoreSessionMessages.THE_PENDING_UPLOAD_CHANGED_COMPARE_AGAIN.text() }
   fresh

@@ -53,6 +53,10 @@ internal class AndroidControlledSessions(private val now: () -> Long = System::n
   if(window.scope!=scope || !withinWindow(window,time) || window.export!=null){windows.remove(root);return null}
   return ExportProof(root,window,window.foregroundSeen,time).also {window.export=it}
  }
+ /** Unsupported read capability performed no I/O; let the serialized export reserve afresh. */
+ @Synchronized fun releaseExport(proof:ExportProof?) {
+  if(proof!=null && windows[proof.root]===proof.window && proof.window.export===proof)proof.window.export=null
+ }
  @Synchronized fun abandonExport(proof:ExportProof?) {
   if(proof!=null && windows[proof.root]===proof.window && proof.window.export===proof)windows.remove(proof.root)
  }
