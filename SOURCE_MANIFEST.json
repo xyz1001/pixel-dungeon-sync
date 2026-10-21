@@ -3057,8 +3057,8 @@
       "sha256": "2f967dff5f1bbc9de7fe17b35233c4b53c5aa43d2599e20fd8e56af7fd783d6a"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedComparisonFlowTest.kt": {
-      "size": 17579,
-      "sha256": "5b687043b1e40725ea295804bb60dc38745b2be371dfb818c9e12264d185ee3b"
+      "size": 17913,
+      "sha256": "192a011acfeae88551b725fcd8eea71a0ff643809001a6b9b5781be023df0d2a"
     },
     "desktop/src/test/kotlin/pdsync/DesktopSharedConnectionFlowTest.kt": {
       "size": 13643,

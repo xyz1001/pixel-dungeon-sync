@@ -242,7 +242,12 @@ class DesktopSharedComparisonFlowTest {
   assertNull(adapter.confirmation(current, initial.token, SharedComparisonConfirmationStage.CONFLICT))
   val confirmed = assertNotNull(adapter.confirmation(current, reviewed.proof.token, SharedComparisonConfirmationStage.MERGE_REVIEW))
   val applied = manager.mergeCurrent(confirmed.observed, store) { true }
-  assertTrue(desktopOnboardingOperationSucceeded(applied))
+  assertIs<AppendPushResult.Prepared>(applied)
+  assertFalse(desktopOnboardingOperationSucceeded(applied))
+  assertEquals(commitsBefore, store.commits.size, "local merge cannot publish")
+  val pending = manager.compareOnboarding(store) { true }
+  assertFalse(desktopCanFinishAfterOperation(false, true, pending))
+  assertTrue(desktopOnboardingOperationSucceeded(manager.push(store) { true }))
   val fresh = manager.compareOnboarding(store) { true }
   assertTrue(desktopCanFinishAfterOperation(true, true, fresh))
   manager.confirmOnboardingReady(fresh, store) { true }
