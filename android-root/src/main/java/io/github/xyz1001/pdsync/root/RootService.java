@@ -36,7 +36,7 @@ public final class RootService {
             if(request.command==RootProtocol.Command.PROBE) {
                 // Setup proves root and package identity only. Save directories and lifecycle
                 // belong to the later read operation, including when files does not exist yet.
-                stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
+                stage=RootProtocol.DiagnosticStage.PM_BINDING;runtime.verifyInstalledMetadata(request.binding);
                 return readReply(request,"",0,0,"","UNKNOWN",false,null);
             }
             stage=RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE;
@@ -44,17 +44,18 @@ public final class RootService {
                 guard.requireClear();
                 if(request.command==RootProtocol.Command.OBSERVE) {
                     stage=RootProtocol.DiagnosticStage.ROOT_OPEN;tree.probe();
-                    stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
+                    stage=RootProtocol.DiagnosticStage.PM_BINDING;runtime.verifyInstalledMetadata(request.binding);
                     stage=RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE;guard.requireClear();guard.revalidate();
                     return readReply(request,"",0,0,"","UNKNOWN",false,null);
                 }
                 boolean export=request.command==RootProtocol.Command.EXPORT;
-                if(!export&&request.command!=RootProtocol.Command.INSPECT)throw new RootFailure(RootProtocol.Status.INVALID_REQUEST);
+                boolean observe=request.command==RootProtocol.Command.READ_SNAPSHOT;
+                if(!export&&!observe&&request.command!=RootProtocol.Command.INSPECT)throw new RootFailure(RootProtocol.Status.INVALID_REQUEST);
                 stage=RootProtocol.DiagnosticStage.LAYOUT_SCAN;
-                RootSaveTree.Snapshot captured=tree.scan(export);
+                RootSaveTree.Snapshot captured=observe?tree.observe():tree.scan(export);
                 stage=RootProtocol.DiagnosticStage.ARCHIVE_READ;
-                byte[] archive=export?tree.archive(captured):null;
-                stage=RootProtocol.DiagnosticStage.PM_BINDING;requireBinding(request.binding);
+                byte[] archive=observe?tree.observation(captured):export?tree.archive(captured):null;
+                stage=RootProtocol.DiagnosticStage.PM_BINDING;runtime.verifyInstalledMetadata(request.binding);
                 stage=RootProtocol.DiagnosticStage.ROOT_OPEN;tree.requireRootIdentity(captured);
                 stage=RootProtocol.DiagnosticStage.PRIVATE_WORKSPACE;guard.requireClear();guard.revalidate();
                 return readReply(request,captured.contentState,captured.inventory.hashes.size(),captured.inventory.bytes,

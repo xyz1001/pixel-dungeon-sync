@@ -15,7 +15,7 @@ public final class RootRunner {
     private RootRunner() { }
     public static long jobBudgetMillis(RootProtocol.Command command) {
         if(command==RootProtocol.Command.RESTORE||command==RootProtocol.Command.RECOVER)return MAX_JOB_MILLIS;
-        if(command==RootProtocol.Command.INSPECT||command==RootProtocol.Command.EXPORT)return 50000;
+        if(command==RootProtocol.Command.INSPECT||command==RootProtocol.Command.EXPORT||command==RootProtocol.Command.READ_SNAPSHOT)return 50000;
         return 25000;
     }
     public static void main(String[] args) {

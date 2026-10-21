@@ -42,7 +42,7 @@ public final class RootHostTests {
     }
     private static RootProtocol.Request request(RootProtocol.Command command) throws IOException { return new RootProtocol.Request(command, binding()); }
     public static void main(String[] args) throws Exception {
-        bindings(); protocol(); lifecycle(); filesystem(); limitsAndRaces(); service(); absentWorkspaceReads();
+        bindings(); protocol(); lifecycle(); filesystem(); limitsAndRaces(); service(); absentWorkspaceReads(); observation();
         System.out.println("Root host tests passed: " + assertions + " assertions; Android/root runtime NOT tested");
     }
     private static void bindings() throws Exception {
@@ -152,11 +152,11 @@ public final class RootHostTests {
         check(Arrays.equals(RootUidState.command(1010042), new String[]{"/system/bin/cmd", "activity", "get-uid-state", "1010042"}), "fixed numeric target argv");
     }
     private static final class Node {
-        final long inode; int mode, uid = UID, gid = UID; long links = 1, revision, declared = -1;
+        final long inode; int mode, uid = UID, gid = UID; long links = 1, revision, modifiedNanos, declared = -1;
         byte[] bytes; final Map<String, Node> children = new TreeMap<>();
         Node(long inode, int type, byte[] bytes) { this.inode = inode; this.mode = type | 0700; this.bytes = bytes; }
         RootFileSystem.Stat stat() { return new RootFileSystem.Stat(1, inode, mode, uid, gid, links,
-                declared >= 0 ? declared : bytes == null ? 0 : bytes.length, 1, "1:" + revision); }
+                declared >= 0 ? declared : bytes == null ? 0 : bytes.length, 1, "1:" + modifiedNanos + ":" + revision + ":0"); }
     }
     private static final class FakeFs implements RootFileSystem {
         final Node data = new Node(1, Stat.DIRECTORY, null), files = new Node(2, Stat.DIRECTORY, null);
@@ -292,8 +292,8 @@ public final class RootHostTests {
         bad(() -> tree(shrink).scan(true), "short read");
     }
     private static final class FakeRuntime implements RootRuntime {
-        final FakeFs fs = new FakeFs(); int euid, pmCalls, observeCalls, quietWaits;
-        RootBinding installed; boolean changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
+        final FakeFs fs = new FakeFs(); int euid, pmCalls, fullHashes, metadataChecks, observeCalls, quietWaits;
+        RootBinding installed; boolean metadataFailure, fullHashFailure, changeBinding, mutateQuiet, unreliable, foreground, mutateAfterExport, pending, guardChanged;
         int guardOpens, guardChecks, guardRevalidates, guardCloses;
         IOException guardFailure;
         FakeMutationOs readOs;
@@ -301,7 +301,14 @@ public final class RootHostTests {
         FakeRuntime() throws IOException { installed = binding(); fs.file("rankings.dat","synthetic"); }
         public int effectiveUid() { return euid; }
         public RootBinding installed(RootBinding request) throws IOException {
-            pmCalls++; return changeBinding && pmCalls > 1 ? binding("com.example.game",0,UID,request.dataDir,repeat('b',64)) : installed;
+            pmCalls++; fullHashes++;
+            if(fullHashFailure)throw new IOException("APK hash read failed");
+            return installed;
+        }
+        public void verifyInstalledMetadata(RootBinding request) throws IOException {
+            pmCalls++;metadataChecks++;
+            if(metadataFailure)throw new IOException("Fresh PM metadata unavailable");
+            if(changeBinding || !request.matchesInstalled(installed))throw new RootFailure(RootProtocol.Status.CHANGED);
         }
         public ReadGuard openReadGuard(RootBinding binding) throws IOException {
             guardOpens++;if(guardFailure!=null)throw guardFailure;
@@ -406,6 +413,22 @@ public final class RootHostTests {
                     "missing root stops before reads or writes " + command);
         }
     }
+    private static void observation() throws Exception {
+        FakeRuntime runtime=new FakeRuntime(); runtime.foreground=true;
+        runtime.fs.file("rankings.dat","scores");runtime.fs.file("game1/game.dat","run");runtime.fs.file("game1/level.dat","level");
+        runtime.fs.files.children.get("game1").children.get("game.dat").modifiedNanos=123000000;
+        RootProtocol.Request request=request(RootProtocol.Command.READ_SNAPSHOT);
+        RootProtocol.Response reply=new RootService(runtime).execute(request);
+        check(reply.status==RootProtocol.Status.OK,"observation reads during game activity");
+        check(runtime.fs.sourceReads==3&&runtime.observeCalls==0&&runtime.quietWaits==0,"observation each file once without lifecycle/wait");
+        ByteArrayOutputStream wire=new ByteArrayOutputStream(), payload=new ByteArrayOutputStream(); RootProtocol.writeResponse(wire,reply);
+        RootProtocol.Response decoded=RootProtocol.readResponse(new ByteArrayInputStream(wire.toByteArray()),payload); RootProtocol.requireReplyMatches(request,decoded);
+        SaveArchive.Observation observation=SaveArchive.readObservation(new ByteArrayInputStream(payload.toByteArray()));
+        check(observation.inventory.hashes.size()==3&&observation.payloads.size()==2,"observation full inventory subset bytes");
+        check(observation.inventory.fingerprint().equals(reply.contentFingerprint)&&observation.inventory.bytes==reply.contentBytes,"observation receipt matches payload");
+        check(!observation.payloads.containsKey("game1/level.dat"),"no full-save archive payload");
+        check(observation.modifiedMillis.get("game1/game.dat")==1123L,"root preserves actual subsecond timestamp");
+    }
     private static void service() throws Exception {
         FakeRuntime setup = new FakeRuntime();
         setup.foreground = true;
@@ -430,7 +453,7 @@ public final class RootHostTests {
             check(runtime.guardOpens==(command==RootProtocol.Command.PROBE?0:1),"read interlock opened only for content/lifecycle reads");
             check(runtime.guardCloses==runtime.guardOpens,"read guard closed on completion");
             check(response.status==RootProtocol.Status.OK,"read command success " + command);
-            check(runtime.pmCalls==2,"PM binding checked before and after " + command);
+            check(runtime.pmCalls==2&&runtime.fullHashes==1&&runtime.metadataChecks==1,"one full APK hash and fresh exit metadata " + command);
             check(response.bindingFingerprint.equals(binding().fingerprint()),"response identity echo");
             check(command==RootProtocol.Command.EXPORT ? response.archiveLength>0 : response.archiveLength==0,"archive command bounded");
         }
@@ -449,7 +472,19 @@ public final class RootHostTests {
             check(kernel.fs.operations==0,"failing private workspace never reads saves "+operation);
         }
         FakeRuntime changed=new FakeRuntime(); changed.changeBinding=true;
-        check(new RootService(changed).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.BINDING_MISMATCH,"PM changes reject export");
+        check(new RootService(changed).execute(request(RootProtocol.Command.EXPORT)).status==RootProtocol.Status.CHANGED,"PM changes reject export");
+        FakeRuntime failedEntry=new FakeRuntime();failedEntry.fullHashFailure=true;
+        check(new RootService(failedEntry).execute(request(RootProtocol.Command.READ_SNAPSHOT)).status==RootProtocol.Status.IO_ERROR,"initial APK hash failure blocks observation");
+        check(failedEntry.fs.sourceReads==0&&failedEntry.metadataChecks==0,"initial failure reads no save");
+        FakeRuntime failedExit=new FakeRuntime();failedExit.metadataFailure=true;
+        RootProtocol.Response exitReply=new RootService(failedExit).execute(request(RootProtocol.Command.READ_SNAPSHOT));
+        check(exitReply.status==RootProtocol.Status.IO_ERROR&&exitReply.archiveLength==0,"exit metadata failure returns no observation");
+        FakeRuntime nextJob=new FakeRuntime();RootService reuse=new RootService(nextJob);
+        check(reuse.execute(request(RootProtocol.Command.READ_SNAPSHOT)).status==RootProtocol.Status.OK,"first independent root job");
+        check(reuse.execute(request(RootProtocol.Command.READ_SNAPSHOT)).status==RootProtocol.Status.OK&&nextJob.fullHashes==2,"next read starts with fresh full APK hash");
+        nextJob.installed=binding("com.example.game",0,UID,binding().dataDir,repeat('b',64));
+        int priorReads=nextJob.fs.sourceReads;
+        check(reuse.execute(request(RootProtocol.Command.READ_SNAPSHOT)).status==RootProtocol.Status.BINDING_MISMATCH&&nextJob.fs.sourceReads==priorReads,"changed install rejected before next save read");
         FakeRuntime mismatch=new FakeRuntime(); mismatch.installed=binding("com.example.game",0,UID,binding().dataDir,repeat('b',64));
         check(new RootService(mismatch).execute(request(RootProtocol.Command.INSPECT)).status==RootProtocol.Status.BINDING_MISMATCH,"wrong initial APK");
         check(mismatch.fs.operations==0,"wrong APK never touches saves");

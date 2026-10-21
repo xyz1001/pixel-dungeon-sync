@@ -36,12 +36,12 @@ public final class RootSaveTree {
         public final String contentState;
         final Map<String, String> metadata;
         final Map<String, byte[]> bytes;
-        final Map<String, Long> modified;
+        final Map<String, Long> modified, sizes;
         Snapshot(Map<String, String> hashes, long count, String contentState, Map<String, String> metadata,
-                Map<String, byte[]> bytes, Map<String, Long> modified) {
+                Map<String, byte[]> bytes, Map<String, Long> modified, Map<String,Long> sizes) {
             this.inventory = new SaveArchive.Inventory(hashes, count); this.contentState = contentState;
             this.metadata = Collections.unmodifiableMap(new TreeMap<>(metadata));
-            this.bytes = bytes; this.modified = modified;
+            this.bytes = bytes; this.modified = modified; this.sizes = sizes;
         }
         public boolean same(Snapshot other) {
             return contentState.equals(other.contentState) && inventory.bytes == other.inventory.bytes
@@ -81,10 +81,12 @@ public final class RootSaveTree {
             }
         }
     }
-    public Snapshot scan(boolean capture) throws IOException {
+    public Snapshot scan(boolean capture) throws IOException { return scan(capture, false); }
+    public Snapshot observe() throws IOException { return scan(true, true); }
+    private Snapshot scan(boolean capture, boolean summaryOnly) throws IOException {
         Map<String, String> hashes = new TreeMap<>(), metadata = new TreeMap<>();
         Map<String, byte[]> bytes = capture ? new TreeMap<>() : null;
-        Map<String, Long> modified = new TreeMap<>();
+        Map<String, Long> modified = new TreeMap<>(), sizes = new TreeMap<>();
         try (RootFileSystem.Directory data = fs.openData(binding)) {
             RootFileSystem.Stat dataBefore = data.stat(); requireDirectory(dataBefore);
             RootFileSystem.Stat filesBefore;
@@ -92,7 +94,7 @@ public final class RootSaveTree {
             catch (RootFailure missing) {
                 if (missing.status != RootProtocol.Status.MISSING_DIRECTORY) throw missing;
                 metadata.put("<data>", dataBefore.identity()); metadata.put("", "<missing>");
-                Snapshot empty = new Snapshot(hashes, 0, "EMPTY_DIRECTORY", metadata, bytes, modified);
+                Snapshot empty = new Snapshot(hashes, 0, "EMPTY_DIRECTORY", metadata, bytes, modified, sizes);
                 requireFilesAbsent(data);
                 same(dataBefore, data.stat());
                 requireRootIdentity(empty);
@@ -108,13 +110,13 @@ public final class RootSaveTree {
                     throw failure(RootProtocol.Status.UNRECOGNIZED_LAYOUT);
                 metadata.put("<data>", dataBefore.identity()); metadata.put("", filesBefore.identity());
                 long[] total = {0}; int[] count = {0};
-                walk(files, "", 0, hashes, metadata, bytes, modified, new HashSet<>(), total, count);
+                walk(files, "", 0, hashes, metadata, bytes, modified, sizes, summaryOnly, new HashSet<>(), total, count);
                 same(filesBefore, files.stat()); same(dataBefore, data.stat());
                 same(filesBefore, fs.childStat(data, "files"));
                 fs.revalidateRoot(binding, data, files);
                 try { SaveArchive.requireCompleteRuns(hashes.keySet()); }
                 catch (IOException incomplete) { throw failure(RootProtocol.Status.CHANGED); }
-                return new Snapshot(hashes, total[0], content.state.name(), metadata, bytes, modified);
+                return new Snapshot(hashes, total[0], content.state.name(), metadata, bytes, modified, sizes);
             }
         }
     }
@@ -128,7 +130,7 @@ public final class RootSaveTree {
     }
     private void walk(RootFileSystem.Directory parent, String prefix, int depth,
             Map<String, String> hashes, Map<String, String> metadata, Map<String, byte[]> bytes,
-            Map<String, Long> modified, Set<String> names, long[] total, int[] count) throws IOException {
+            Map<String, Long> modified, Map<String,Long> sizes, boolean summaryOnly, Set<String> names, long[] total, int[] count) throws IOException {
         List<String> children = fs.children(parent, limits.entries);
         Collections.sort(children);
         for (String basename : children) {
@@ -146,7 +148,7 @@ public final class RootSaveTree {
                 try (RootFileSystem.Directory directory = fs.openDirectory(parent, basename)) {
                     same(before, directory.stat());
                     metadata.put(name, before.identity());
-                    walk(directory, name, depth + 1, hashes, metadata, bytes, modified, names, total, count);
+                    walk(directory, name, depth + 1, hashes, metadata, bytes, modified, sizes, summaryOnly, names, total, count);
                     same(before, directory.stat());
                 }
             } else {
@@ -154,7 +156,7 @@ public final class RootSaveTree {
                 if (hashes.size() >= limits.files || before.size < 0 || before.size > limits.bytes - total[0])
                     throw failure(RootProtocol.Status.TOO_LARGE);
                 MessageDigest hash = SaveArchive.digest(); long size = 0;
-                ByteArrayOutputStream copy = bytes == null ? null : new ByteArrayOutputStream((int) before.size);
+                ByteArrayOutputStream copy = bytes == null || (summaryOnly && !SaveArchive.summaryFile(name)) ? null : new ByteArrayOutputStream((int) before.size);
                 try (RootFileSystem.RegularFile file = fs.openFile(parent, basename)) {
                     same(before, file.stat()); requireRegular(file.stat());
                     try (InputStream input = file.input()) {
@@ -170,7 +172,7 @@ public final class RootSaveTree {
                     }
                 }
                 total[0] += size; hashes.put(name, SaveArchive.hex(hash.digest()));
-                metadata.put(name, before.identity()); modified.put(name, before.modifiedSeconds);
+                metadata.put(name, before.identity()); modified.put(name, modifiedMillis(before)); sizes.put(name, size);
                 if (copy != null) bytes.put(name, copy.toByteArray());
             }
             same(before, fs.childStat(parent, basename));
@@ -190,12 +192,28 @@ public final class RootSaveTree {
                     throw failure(RootProtocol.Status.CHANGED);
                 ZipEntry entry = new ZipEntry(item.getKey());
                 // Standard ZIP DOS timestamp, bounded to avoid overflow from untrusted metadata.
-                long seconds = snapshot.modified.get(item.getKey());
-                entry.setTime(seconds >= 0 && seconds <= 4102444800L ? seconds * 1000 : 0);
+                long millis = snapshot.modified.get(item.getKey());
+                entry.setTime(millis >= 0 && millis <= 4102444800000L ? millis : 0);
                 zip.putNextEntry(entry); zip.write(item.getValue()); zip.closeEntry();
             }
         }
         return output.toByteArray();
+    }
+    public byte[] observation(Snapshot snapshot) throws IOException {
+        SaveArchive.Observation observation = new SaveArchive.Observation(snapshot.inventory.hashes, snapshot.sizes, snapshot.modified, snapshot.bytes);
+        ByteArrayOutputStream output = new ByteArrayOutputStream(); SaveArchive.writeObservation(output, observation); return output.toByteArray();
+    }
+    private static long modifiedMillis(RootFileSystem.Stat stat) throws IOException {
+        if (stat.modifiedSeconds < Long.MIN_VALUE / 1000 || stat.modifiedSeconds > (Long.MAX_VALUE - 999) / 1000)
+            throw new IOException("Invalid file timestamp");
+        long nanos = 0;
+        String[] times = stat.times.split(":", -1);
+        if (times.length == 4) {
+            try { nanos = Long.parseLong(times[1]); }
+            catch (NumberFormatException invalid) { throw new IOException("Invalid timestamp precision", invalid); }
+            if (nanos < 0 || nanos >= 1000000000) throw new IOException("Invalid timestamp precision");
+        }
+        return stat.modifiedSeconds * 1000 + nanos / 1000000;
     }
     private void requireOwner(RootFileSystem.Stat stat) throws IOException {
         if (stat.uid != binding.uid || (stat.mode & 0002) != 0 || (stat.mode & 07000) != 0

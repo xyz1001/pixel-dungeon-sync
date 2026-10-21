@@ -23,11 +23,11 @@ public final class RootProtocol {
     public static final int VERSION = 2;
     public static final int MAX_METADATA = 65536;
     public static final int MAX_REQUEST = (int) SaveArchive.MAX_BYTES + MAX_METADATA;
-    public static final int MAX_RESPONSE = (int) SaveArchive.MAX_BYTES + 8192;
+    public static final int MAX_RESPONSE = SaveArchive.MAX_OBSERVATION_BYTES + 8192;
     public static final int MAX_STRING = 2048;
 
     public enum Command {
-        PROBE(1), INSPECT(2), EXPORT(3), OBSERVE(4), RESTORE(5), RECOVER(6);
+        PROBE(1), INSPECT(2), EXPORT(3), OBSERVE(4), RESTORE(5), RECOVER(6), READ_SNAPSHOT(7);
         public final int wire;
         Command(int wire) { this.wire = wire; }
         static Command decode(int wire) throws IOException {
@@ -300,7 +300,7 @@ public final class RootProtocol {
                 || !response.observationState.matches("UNKNOWN|FOREGROUND|BACKGROUND|CACHED|ABSENT")
                 || response.fileCount < 0 || response.fileCount > SaveArchive.MAX_FILES
                 || response.contentBytes < 0 || response.contentBytes > SaveArchive.MAX_BYTES
-                || response.archiveLength < 0 || response.archiveLength > SaveArchive.MAX_BYTES
+                || response.archiveLength < 0 || response.archiveLength > (response.command==Command.READ_SNAPSHOT ? SaveArchive.MAX_OBSERVATION_BYTES : SaveArchive.MAX_BYTES)
                 || (response.status != Status.OK && (response.archiveLength != 0 || response.reliable))
                 || (response.reliable && response.observationState.equals("UNKNOWN")))
             throw new IOException("Invalid root response");
