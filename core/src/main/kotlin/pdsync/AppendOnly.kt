@@ -59,6 +59,7 @@ const val MAX_REMOTE_SCAN_BYTES = 256L * 1024 * 1024
 
 /** Frozen exact publication bytes. Retry never recaptures a ZIP or rewrites ancestry. */
 data class UploadPlan(val commit: AppendCommit, val manifestBytes: ByteArray, val zip: ByteArray)
+internal class VerifiedUploadPlan(val plan:UploadPlan,val verified:VerifiedSnapshot)
 class RemoteIntegrityException(message: String): IllegalStateException(message)
 class UnsettledRemoteException(message: String): IllegalStateException(message)
 class LegacyProtocolException: IllegalStateException(CoreSessionMessages.A_LEGACY_HEAD_JSON_WAS_FOUND_NOTHING_WAS_MIGRATED_OR.text())
@@ -347,13 +348,14 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   return CommitGraph(complete, pending, if (verifyObjects) RemoteVerification.OBJECTS_VERIFIED else RemoteVerification.METADATA_ONLY)
  }
 
- fun download(store: AppendStore, commit: AppendCommit): Snapshot {
+ fun download(store: AppendStore, commit: AppendCommit): Snapshot = downloadVerified(store,commit).snapshot
+ internal fun downloadVerified(store: AppendStore, commit: AppendCommit): VerifiedSnapshot {
   checkCommit(commit)
   val bytes = store.readCommit(commit.id) ?: throw UnsettledRemoteException(CoreSessionMessages.THE_COMMIT_IS_NOT_VISIBLE_YET_TRY_AGAIN.text())
   require(decode(bytes, commit.id) == commit); remember(commit.id, bytes)
   val zip = store.readObject(commit.snapshot.id) ?: throw UnsettledRemoteException(CoreSessionMessages.THE_SNAPSHOT_IS_NOT_VISIBLE_YET_TRY_AGAIN.text())
   require(zip.size == commit.objectBytes)
-  return Snapshot(commit.snapshot, zip).also { Snapshots.verify(it, adapter); observeVerified(commit.id) }
+  return VerifiedSnapshot.read(Snapshot(commit.snapshot, zip),adapter).also { observeVerified(commit.id) }
  }
 
  fun pending(): UploadPlan? {
@@ -382,6 +384,28 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.json"), bytes)
   SafePaths.atomicWrite(marker, commit.id.encodeToByteArray())
   return requireNotNull(pending())
+ }
+ /** Freeze a fully verified request while retaining its selected-object proof, not an entire DAG. */
+ internal fun prepareVerified(verified:VerifiedSnapshot,parents:List<String>,kind:String="snapshot",operation:CommitOperationMetadata?=null):VerifiedUploadPlan {
+  require(pending()==null) { CoreValidationMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_OPERATION_FIRST.text() }
+  val snapshot=verified.snapshot
+  val family=adapter.packageName?.takeIf {recordedGamePackage(snapshot.manifest)==it || snapshot.manifest.game==adapter.id&&snapshot.manifest.gameSource==null}
+  val frozen=verified.withManifest(snapshot.manifest.copy(gamePackage=snapshot.manifest.gamePackage ?: family,id=UUID.randomUUID().toString(),parent=null))
+  val commit=AppendCommit(id=UUID.randomUUID().toString(),parents=parents.sorted(),snapshot=frozen.snapshot.manifest,objectBytes=frozen.snapshot.zip.size,kind=kind,operation=operation)
+  checkCommit(commit)
+  val bytes=json.encodeToString(commit).encodeToByteArray();require(bytes.size<=MAX_MANIFEST_BYTES)
+  val plan=UploadPlan(commit,bytes,frozen.snapshot.zip)
+  SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.zip"),plan.zip)
+  SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.json"),bytes)
+  SafePaths.atomicWrite(marker,commit.id.encodeToByteArray())
+  return VerifiedUploadPlan(plan,frozen).also(::requireFrozen)
+ }
+ private fun requireFrozen(verified:VerifiedUploadPlan) {
+  val plan=verified.plan
+  require(SafePaths.boundedRead(marker,128).decodeToString()==plan.commit.id)
+  require(SafePaths.boundedRead(pendingRoot.resolve("${plan.commit.id}.json"),MAX_MANIFEST_BYTES).contentEquals(plan.manifestBytes))
+  require(SafePaths.boundedRead(pendingRoot.resolve("${plan.commit.id}.zip"),MAX_SNAPSHOT_BYTES).contentEquals(plan.zip))
+  require(decode(plan.manifestBytes,plan.commit.id)==plan.commit && verified.verified.snapshot.manifest==plan.commit.snapshot)
  }
  /** Only identical bytes may be replayed; corrupt/truncated existing keys require explicit recovery. */
  private fun putVerified(read: () -> ByteArray?, write: () -> Unit, expected: ByteArray) {
@@ -414,6 +438,20 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   }
   remember(plan.commit.id, plan.manifestBytes)
   observeVerified(plan.commit.id)
+  return plan.commit
+ }
+ /** Upload verification remains complete; only unrelated ancestor object downloads are omitted. */
+ internal fun publishVerified(store:AppendStore,verified:VerifiedUploadPlan,expected:CommitMetadataGraph):AppendCommit {
+  requireFrozen(verified)
+  val plan=verified.plan
+  val graph=discoverMetadata(store);graph.requireSettled()
+  require(graph==expected) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
+  require(plan.commit.parents.all {it in graph.commits}) { CoreSessionMessages.PARENT_COMMITS_HAVE_NOT_BEEN_FULLY_VERIFIED_NOTHING_WAS_PUBLISHED.text() }
+  store.withFreshReads {
+   putVerified({store.readObject(plan.commit.snapshot.id)},{store.writeObject(plan.commit.snapshot.id,plan.zip)},plan.zip)
+   putVerified({store.readCommit(plan.commit.id)},{store.writeCommit(plan.commit.id,plan.manifestBytes)},plan.manifestBytes)
+  }
+  remember(plan.commit.id,plan.manifestBytes);observeVerified(plan.commit.id)
   return plan.commit
  }
  /** Caller records its safe baseline first; clearing never deletes immutable data. */

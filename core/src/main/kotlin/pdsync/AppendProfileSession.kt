@@ -16,6 +16,11 @@ data class AppendConflict(
  val publishedLocalCommit: String? = null
 )
 data class AppendRemoteEntry(val commit: AppendCommit, val entry: HistoryEntry)
+/** One selected object and a structural graph; unrelated history objects remain unverified. */
+internal class VerifiedTipRestore(
+ val owner:Any, val graph:CommitMetadataGraph, val selected:AppendCommit,
+ val verified:VerifiedSnapshot, val before:SaveFingerprint, val baseline:String?
+)
 internal data class HomeReadState(
  val baseline:String?,val pending:AppendCommit?,val legacyId:String?,val needsApply:Boolean,
  val aliases:Map<String,String>,val sidecar:SidecarRead,val transfer:String?
@@ -25,6 +30,14 @@ internal class HomeReadContext(
  val state:HomeReadState,val seed:MetadataReadSeed
 )
 internal class HomeReadResult(val context:HomeReadContext,val metadata:DetachedMetadataRead)
+internal class VerifiedSelectedRestore(
+ val owner:Any,val graph:CommitMetadataGraph,val selected:AppendCommit?,val verified:VerifiedSnapshot,
+ val before:Map<String,String>,val baseline:String?,val readOnly:Boolean,val historical:Boolean=false
+)
+internal class SelectedRestoreStage(
+ val selection:VerifiedSelectedRestore,val verified:VerifiedSnapshot,val graph:CommitMetadataGraph,
+ val plan:VerifiedUploadPlan?=null,val applied:Boolean=true,val localResult:RestoreResult?=null
+)
 sealed interface AppendPushResult {
  data class Success(val commit: AppendCommit, val localDirty: Boolean, val remoteAhead: Boolean = false): AppendPushResult
  data class Diverged(val conflict: AppendConflict): AppendPushResult
@@ -163,18 +176,12 @@ class AppendProfileSession(
   return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner)
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
- fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult = readLocked(store) {
-  local.guard(stopped);noLegacyPending();appliedOnly();require(repository.pending()==null){CoreSessionMessages.RESOLVE_THE_PENDING_UPLOAD_FIRST.text()}
-  val graph=discover(store);val chosen=requireNotNull(graph.snapshotCommit(snapshotId)) { CoreSessionMessages.THE_SELECTED_CLOUD_SNAPSHOT_NO_LONGER_EXISTS_RELOAD_HISTORY.text() }
-  val before=currentFiles()
-  require(expectedBefore==null || before==expectedBefore) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_CONFIRMATION_COMPARE_AGAIN.text() }
-  require(allowUniqueReplacement || before.isEmpty() || graph.commits.values.any { it.snapshot.files==before }) { CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNIQUE_PROGRESS_EXPLICITLY_CHOOSE_OVERWRITE_OR_MERGE.text() }
-  val snapshot=repository.download(store,chosen);local.remember(snapshot,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),repository.observedAt(chosen.id));local.checkRestore(snapshotId)
-  var restored:RestoreResult?=null
-  prepareAndApply(snapshot,listOfNotNull(repository.baseline()),"restore",CoreSessionMessages.RESTORE_CLOUD_HISTORY_PENDING_UPLOAD.text()) { plan ->
-   restored=local.restore(this.snapshot(plan),stopped,before)
-  }
-  requireNotNull(restored)
+ fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult {
+  val comparison=readLocked(store) {compareLocked(store,stopped,true)}
+  require(expectedBefore==null || comparison.localFiles==expectedBefore) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_CONFIRMATION_COMPARE_AGAIN.text() }
+  val selection=prepareSelectedRestore(comparison,snapshotId,store,allowUniqueReplacement,false,stopped,historical=true)
+  require(selection.selected!=null) { CoreSessionMessages.THE_SELECTED_CLOUD_SNAPSHOT_NO_LONGER_EXISTS_RELOAD_HISTORY.text() }
+  return requireNotNull(stageSelectedRestore(selection,store,stopped).localResult)
  }
  /** Explicit download-only restore. It never publishes, resolves branches or creates an upload
   * plan. An observed tip can become the exact verified baseline; older/local history remains new
@@ -280,6 +287,169 @@ class AppendProfileSession(
   repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
  }
  private fun currentFiles():Map<String,String> = Snapshots.fileHashes(root,adapter)
+ /** Common clean/empty single-tip restore needs only the selected object, not every ancestor ZIP. */
+ internal fun prepareTipRestore(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,stopped:()->Boolean):VerifiedTipRestore? = readLocked(store) {
+  require(comparison.owner===comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  val observed=comparison.graph ?: return@readLocked null
+  val selected=observed.snapshotCommit(snapshotId) ?: return@readLocked null
+  val baseline=repository.baseline()
+  val clean=if(baseline==null)comparison.localFiles.isEmpty() else comparison.localFiles==observed.commits[baseline]?.snapshot?.files
+  if(observed.tips!=setOf(selected.id) || !clean || comparison.retryablePending ||
+   baseline!=null && !observed.descendsFrom(selected.id,baseline))return@readLocked null
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null && baseline==comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  val before=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).fingerprint()
+  require(before.files==comparison.localFiles &&
+   (comparison.localSource!=LocalObservationSource.FILESYSTEM || before==comparison.fingerprint)) {
+   CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()
+  }
+  val graph=discoverMetadata(store)
+  require(graph.commits==observed.commits && graph.pending==observed.pending && graph.tips==comparison.observedTips) {
+   CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text()
+  }
+  val verified=repository.downloadVerified(store,selected)
+  local.checkRestore(verified)
+  VerifiedTipRestore(comparisonOwner,graph,selected,verified,before,baseline)
+ }
+ internal fun stageTipRestore(selection:VerifiedTipRestore,store:AppendStore,stopped:()->Boolean):RestoreResult = readLocked(store) {
+  require(selection.owner===comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null && repository.baseline()==selection.baseline) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  val graph=discoverMetadata(store)
+  require(graph==selection.graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
+  SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).requireUnchanged(selection.before)
+  local.remember(selection.verified,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),repository.observedAt(selection.selected.id))
+  SafePaths.atomicWrite(applyMarker,"selected-tip-restore".encodeToByteArray())
+  val restored=local.restore(selection.verified,stopped,selection.before.files)
+  repository.setSelectedBaseline(selection.selected,graph,selection.verified)
+  markDirectorySynced(selection.selected)
+  SafePaths.checked(applyMarker).deleteExisting()
+  restored
+ }
+ internal fun completedTipRestore(selection:VerifiedTipRestore):OnboardingComparison = local.locked {
+  require(selection.owner===comparisonOwner && repository.baseline()==selection.selected.id && !needsApply() && repository.pending()==null)
+  require(currentFiles()==selection.verified.snapshot.manifest.files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  OnboardingComparison(OnboardingKind.IDENTICAL,selection.verified.snapshot.manifest.files,selection.selected.id,
+   OnboardingLineage.SAME_TIP,emptyList(),selection.graph.tips,owner=comparisonOwner,graph=selection.graph.displayGraph,
+   localSource=LocalObservationSource.RESTORE_RECEIPT)
+ }
+ internal fun prepareSelectedRestore(comparison:OnboardingComparison,snapshotId:String,store:AppendStore,
+  allowUniqueReplacement:Boolean,readOnly:Boolean,stopped:()->Boolean,historical:Boolean=false):VerifiedSelectedRestore = readLocked(store) {
+  require(comparison.owner===comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null && repository.baseline()==comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  val observed=requireNotNull(comparison.graph)
+  val graph=discoverMetadata(store)
+  require(graph.commits==observed.commits && graph.pending==observed.pending && graph.tips==comparison.observedTips) {
+   CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text()
+  }
+  require(currentFiles()==comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  val selected=graph.displayGraph.snapshotCommit(snapshotId)
+  val verified=if(selected!=null)repository.downloadVerified(store,selected) else local.loadVerifiedSnapshot(snapshotId)
+  local.checkRestore(verified)
+  val verifiedIds=repository.verifiedCommitIds(graph.displayGraph)
+  val protected=verified.snapshot.manifest.files==comparison.localFiles ||
+   graph.commits.values.any {it.id in verifiedIds && it.snapshot.files==comparison.localFiles}
+  require(allowUniqueReplacement || comparison.localFiles.isEmpty() || protected) {
+   CoreSessionMessages.LOCAL_SAVES_CONTAIN_UNIQUE_PROGRESS_CONFIRM_OVERWRITE_EXPLICITLY_THE_ORIGINAL.text()
+  }
+  VerifiedSelectedRestore(comparisonOwner,graph,selected,verified,comparison.localFiles,comparison.baselineId,readOnly,historical)
+ }
+ private fun publishSelectedPlan(plan:VerifiedUploadPlan,graph:CommitMetadataGraph,store:AppendStore):CommitMetadataGraph {
+  repository.publishVerified(store,plan,graph)
+  val latest=discoverMetadata(store)
+  require(latest.commits[plan.plan.commit.id]==plan.plan.commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
+  local.remember(plan.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.plan.commit.kind),repository.observedAt(plan.plan.commit.id))
+  repository.setSelectedBaseline(plan.plan.commit,latest,plan.verified)
+  markDirectorySynced(plan.plan.commit,"upload");repository.clearPending()
+  return latest
+ }
+ internal fun stageSelectedRestore(selection:VerifiedSelectedRestore,store:AppendStore,stopped:()->Boolean):SelectedRestoreStage = readLocked(store) {
+  require(selection.owner===comparisonOwner)
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null && repository.baseline()==selection.baseline)
+  var graph=discoverMetadata(store)
+  require(graph==selection.graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
+  val selected=selection.selected
+  var chosen=selection.verified
+  local.remember(chosen,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),selected?.let {repository.observedAt(it.id)})
+  val isTip=!selection.historical && selected!=null && selected.id in graph.tips
+  val before=selection.before
+  val baselineFiles=selection.baseline?.let {graph.commits.getValue(it).snapshot.files}
+  val preserveLocal=!selection.readOnly && isTip && before.isNotEmpty() && (selection.baseline==null || before!=baselineFiles)
+  if(preserveLocal) {
+   val captured=VerifiedSnapshot.read(local.capture(stopped,null),adapter)
+   require(captured.snapshot.manifest.files==before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
+   val preservation=repository.prepareVerified(captured,listOfNotNull(selection.baseline),operation=local.operationMetadata())
+   local.remember(preservation.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text("snapshot"))
+   val expectedTips=(graph.tips-preservation.plan.commit.parents.toSet())+preservation.plan.commit.id
+   graph=publishSelectedPlan(preservation,graph,store)
+   if(graph.tips!=expectedTips)return@readLocked SelectedRestoreStage(selection,chosen,graph,applied=false)
+  }
+  if(selection.readOnly) {
+   val prior=(local.directoryMetadata.read() as? SidecarRead.Valid)?.value
+   val beforeRuns=runContentHashes(before);val afterRuns=runContentHashes(chosen.snapshot.manifest.files)
+   val source=chosen.snapshot.manifest.directoryMetadata
+   val used=source?.runs?.values?.mapNotNull {it.runUUID}?.toMutableSet() ?: mutableSetOf()
+   val runs=afterRuns.mapValues { (slot,digest)->
+    val remote=source?.runs?.get(slot)
+    val known=prior?.runs?.get(slot)?.takeIf {it.runUUID!=null&&it.contentSha256==digest&&beforeRuns[slot]==digest&&it.runUUID !in used}
+    if(remote?.runUUID!=null||known==null)remote ?: RunIdentity(null,digest) else known.also {used.add(requireNotNull(it.runUUID))}
+   }
+   val metadata=DirectorySnapshotMetadata(displayName=source?.displayName ?: "",contentSha256=contentSha256(chosen.snapshot.manifest.files),runs=runs).validated(chosen.snapshot.manifest.files)
+   chosen=chosen.withManifest(chosen.snapshot.manifest.copy(directoryMetadata=metadata))
+  }
+  // The last structural observation binds the exact chosen parents before any local replacement.
+  require(discoverMetadata(store)==graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_COMPARE_AGAIN.text() }
+  val direct=selection.readOnly || isTip && !preserveLocal && graph.tips.size==1 &&
+   (selection.baseline==null&&before.isEmpty() || before==baselineFiles&&graph.displayGraph.descendsFrom(requireNotNull(selected).id,requireNotNull(selection.baseline)))
+  if(direct) {
+   SafePaths.atomicWrite(applyMarker,"selected-restore".encodeToByteArray())
+   val restored=local.restore(chosen,stopped,before)
+   if(selected!=null && selected.id in graph.tips) {
+    repository.setSelectedBaseline(selected,graph,selection.verified)
+    markDirectorySynced(selected)
+   }
+   SafePaths.checked(applyMarker).deleteExisting()
+   return@readLocked SelectedRestoreStage(selection,chosen,graph,localResult=restored)
+  }
+  val parents=if(isTip&&graph.tips.size>1)graph.tips.sorted() else listOfNotNull(repository.baseline())
+  val kind=if(parents.size>1)"resolution" else "restore"
+  SafePaths.atomicWrite(applyMarker,kind.encodeToByteArray())
+  var plan:VerifiedUploadPlan?=null
+  try {
+   plan=repository.prepareVerified(chosen,parents,kind,local.operationMetadata())
+   local.remember(plan.verified,CoreSessionMessages.HISTORY_RESTORE_PENDING_PUBLICATION.text())
+   val restored=local.restore(plan.verified,stopped,before)
+   SafePaths.checked(applyMarker).deleteExisting()
+   SelectedRestoreStage(selection,plan.verified,graph,plan,localResult=restored)
+  } catch(failure:Exception) {
+   plan?.let {local.remember(it.verified,CoreSessionMessages.INCOMPLETE_LOCAL_RESTORE_ARCHIVED.text())}
+   repository.clearPending();throw failure
+  }
+ }
+ internal fun finishSelectedRestore(stage:SelectedRestoreStage,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
+  require(stage.selection.owner===comparisonOwner);local.guard(stopped);appliedOnly()
+  val graph=if(stage.plan!=null)publishSelectedPlan(stage.plan,stage.graph,store) else stage.graph
+  val files=if(stage.applied)stage.verified.snapshot.manifest.files else stage.selection.before
+  val baseline=repository.baseline()
+  val lineage=when {
+   baseline==null->OnboardingLineage.NONE
+   graph.tips.size>1->OnboardingLineage.BRANCHED
+   graph.tips.singleOrNull()==baseline->OnboardingLineage.SAME_TIP
+   graph.tips.singleOrNull()?.let {graph.displayGraph.descendsFrom(it,baseline)}==true->OnboardingLineage.ANCESTOR_OF_TIP
+   else->OnboardingLineage.BLOCKED
+  }
+  val kind=when {
+   graph.tips.size>1->OnboardingKind.BRANCHED
+   graph.tips.isEmpty()->if(files.isEmpty())OnboardingKind.BOTH_EMPTY else OnboardingKind.LOCAL_ONLY
+   files.isEmpty()->OnboardingKind.REMOTE_ONLY
+   files==graph.commits.getValue(graph.tips.single()).snapshot.files->OnboardingKind.IDENTICAL
+   else->OnboardingKind.DIFFERENT
+  }
+  OnboardingComparison(kind,files,baseline,lineage,emptyList(),graph.tips,owner=comparisonOwner,graph=graph.displayGraph,
+   localSource=LocalObservationSource.RESTORE_RECEIPT)
+ }
  private fun snapshot(plan: UploadPlan) = Snapshot(plan.commit.snapshot, plan.zip)
  private fun preserve(plan: UploadPlan, reason: String) = local.remember(snapshot(plan), reason)
  private fun preserveConflict(graph: CommitGraph, store: AppendStore, stopped: () -> Boolean): AppendConflict {
@@ -359,8 +529,11 @@ class AppendProfileSession(
  }
 
  /** Ordinary fast-forward is allowed only for a clean baseline or a genuinely empty new target. */
- fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult = readLocked(store) {
-  restoreRemoteLocked(snapshotId, store, stopped)
+ fun restoreRemote(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
+  val comparison=readLocked(store) {compareLocked(store,stopped,true)}
+  val selected=prepareTipRestore(comparison,snapshotId,store,stopped)
+  return if(selected!=null)stageTipRestore(selected,store,stopped)
+   else readLocked(store) {restoreRemoteLocked(snapshotId,store,stopped)}
  }
  private fun restoreRemoteLocked(snapshotId: String, store: AppendStore, stopped: () -> Boolean): RestoreResult {
   local.guard(stopped); noLegacyPending(); appliedOnly()

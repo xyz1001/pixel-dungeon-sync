@@ -203,13 +203,16 @@ class AndroidHistoricalRestorePublicationTest {
         }
     }
 
-    @Test fun gameProgressAfterRestoreVerificationBlocksInitialPublicationWithoutLosingPlan() {
+    @Test fun gameProgressAfterFinalReadbackSurvivesPublicationOfTheVerifiedRestore() {
         val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.bridge.afterRestoreExport = { rig.bridge.files = fixture(9) }
-        assertFails { rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false) }
+        val result=rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertEquals(fixture(9).mapValues { hash(it.value) }, rig.bridge.hashes())
-        assertEquals(2, rig.store.commits.size); assertEquals(2, rig.store.objectAttempts)
-        assertFalse(rig.facade.hasUnresolvedRestore()); assertNotNull(rig.pending())
+        assertEquals(3, rig.store.commits.size);assertEquals(first.snapshot.files,rig.store.latest().snapshot.files)
+        assertFalse(result.isPending);assertFalse(rig.facade.hasUnresolvedRestore());assertNull(rig.pending())
+        // A final receipt proves that readback, not an indefinitely unchanged running game.
+        // Later progress is observed by the next read; it is never overwritten after the receipt.
+        assertEquals("DIFFERENT",rig.facade.inspect().kind)
     }
 
     @Test fun acceptedWritesWithLostResponsesAreVerifiedWithoutRepeatingRestoreOrPublication() {

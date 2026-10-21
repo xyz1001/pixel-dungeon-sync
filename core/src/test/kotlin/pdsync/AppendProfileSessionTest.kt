@@ -218,8 +218,12 @@ class AppendProfileSessionTest {
 
  @Test fun failedRemoteApplyKeepsRestartGateAndOriginalHistoryUntilExplicitArchive() {
   val store = Memory(); published(session(), store)
-  val local = session(root(null)); val remote = local.readRemote(store).single(); var checks = 0
-  assertFails { local.restoreRemote(remote.entry.manifest.id, store) { ++checks == 1 } }
+  val local = session(root(null)); val remote = local.readRemote(store).single()
+  val marker=local.directory.resolve("append-v2/apply-required.txt")
+  assertFails { local.restoreRemote(remote.entry.manifest.id, store) {
+   if(marker.exists())throw SecurityException("Synthetic authorization revoked before apply")
+   true
+  } }
   assertTrue(local.hasPending()); assertNull(local.baseline())
   assertTrue(local.history().any { it.manifest.id == remote.entry.manifest.id })
   assertFails { local.push(store) { true } }

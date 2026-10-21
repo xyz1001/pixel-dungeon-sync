@@ -65,7 +65,8 @@ class AndroidSyncFacade internal constructor(
   val canCompleteWithoutTransfer get()=isObjectVerified && !needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.BOTH_EMPTY || it.kind==OnboardingKind.IDENTICAL && it.baselineLineage==OnboardingLineage.SAME_TIP }==true
   val canKeepLocalProgress get()=isObjectVerified && !needsRestoreRecovery && comparison?.let(::keepsLocalProgress)==true
  }
- class OperationResult(val message:String,val isConflict:Boolean,val isPending:Boolean,val snapshotId:String?)
+ class OperationResult @JvmOverloads constructor(val message:String,val isConflict:Boolean,val isPending:Boolean,val snapshotId:String?,
+  val refreshedInspection:Inspection?=null,val configurationComplete:Boolean=false)
  class AutoUploadResult(val status:String,val message:String,val snapshotId:String?,val needsUserChoice:Boolean,reason:SyncBlockReason?=null) {
   val reasonCode=reason?.name
  }
@@ -244,48 +245,57 @@ class AndroidSyncFacade internal constructor(
   immutable(cloud+session.history().filter {it.manifest.id !in ids}.map {version(it.manifest,null,false,it.reason)})
  }
  fun restoreSelected(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean)=restoreReadLocked {
-  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles)
-  val history=session.syncHistory();val commit=history.graph.snapshotCommit(snapshotId)
-  val snapshot=if(commit!=null)AppendRepository(session.directory.resolve("append-v2"),adapter,config.profile).download(store,commit) else session.loadSnapshot(snapshotId)
-  versions.checkRestore(snapshot,config.targetGame)
-  require(allowUniqueReplacement || comparison.localFiles.isEmpty() || history.currentProtected){CoreMessages.ANDROID_CURRENT_GAME_PROGRESS_HAS_NO_VERIFIED_CLOUD_COPY_EXPLICIT_REPLACEMENT_CONFIRMATION_IS_REQU.text()}
-  var result:OnboardingRestoreResult?=null
-  prepareGameRestore(comparison.localFiles,snapshot.manifest.files,"restore") {
-   when {commit!=null && commit.id in comparison.observedTips -> result=session.onboardingRestore(comparison,snapshotId,store,mirrorStopped)
-    commit!=null -> session.restoreCloudHistory(snapshotId,store,allowUniqueReplacement,comparison.localFiles,mirrorStopped)
-    else -> session.restoreHistory(snapshotId,mirrorStopped)}
-  }
-  if(result==null) {
-   // Historical restore only stages a frozen plan in core. Publish its first attempt here,
-   // after the helper has applied and verified the actual game files and cleared recovery.
-   // A fresh comparison binds the post-restore fingerprint; never reuse the pre-restore one.
-   // Failure leaves that exact plan available for explicit retry, without restoring again.
-   requireNoRecovery();checkActualUnchanged(snapshot.manifest.files)
-   val restored=session.compareOnboarding(store,mirrorStopped)
-   require(restored.retryablePending && restored.pendingCommit?.let {it.kind=="restore" && it.snapshot.files==snapshot.manifest.files}==true) {
-    restored.blocker ?: CoreMessages.ANDROID_THE_FROZEN_HISTORICAL_RESTORE_PLAN_COULD_NOT_BE_VERIFIED_COMPARE_AGAIN_BEFORE_RETRYING.text()
-   }
-   return@restoreReadLocked pushResult(session.onboardingUpload(restored,store,mirrorStopped),CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_VERIFIED_IN_THE_GAME_AND_PUBLISHED.text())
-  }
-  val published=result as? OnboardingRestoreResult.Published
-  if(published?.result is AppendPushResult.Diverged)pushResult(published.result)
-  else OperationResult(if(session.hasPending())CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME_A_RESTORE_REVISION_IS_PENDING_UPLOAD_PU.text() else CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text(),false,session.hasPending(),snapshotId)
+  restoreOtherSelection(inspection,snapshotId,allowUniqueReplacement,false)
  }
- /** Explicit caller-selected download mode, e.g. an authenticated expired official account.
-  * Account eligibility is the caller's responsibility; transport errors never select this mode. */
+ /** Explicit caller-selected download mode, e.g. an authenticated expired official account. */
  fun restoreSelectedReadOnly(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean)=restoreReadLocked {
-  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles)
-  val history=session.syncHistory();val commit=history.graph.snapshotCommit(snapshotId)
-  val snapshot=if(commit!=null)AppendRepository(session.directory.resolve("append-v2"),adapter,config.profile).download(store,commit) else session.loadSnapshot(snapshotId)
-  versions.checkRestore(snapshot,config.targetGame)
-  require(allowUniqueReplacement || comparison.localFiles.isEmpty() || history.currentProtected){CoreMessages.ANDROID_CURRENT_GAME_PROGRESS_HAS_NO_VERIFIED_CLOUD_COPY_EXPLICIT_REPLACEMENT_CONFIRMATION_IS_REQU.text()}
-  prepareGameRestore(comparison.localFiles,snapshot.manifest.files,"read-only-restore") {
-   session.restoreSelectedReadOnly(comparison,snapshotId,store,allowUniqueReplacement,mirrorStopped)
+  restoreOtherSelection(inspection,snapshotId,allowUniqueReplacement,true)
+ }
+ private fun restoreOtherSelection(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean,readOnly:Boolean):OperationResult {
+  val observed=presentationChecked(inspection)
+  val selection=session.prepareSelectedRestore(observed,snapshotId,store,allowUniqueReplacement,readOnly,mirrorStopped)
+  val before=inspection.homeObservation?.materializedReceipt ?: checkActualUnchanged(observed.localFiles)
+  val after=selection.verified.snapshot.manifest.files
+  var stage:SelectedRestoreStage?=null
+  val applied=prepareGameRestore(observed.localFiles,after,if(readOnly)"read-only-restore" else "restore",
+   verifiedProvider={stage?.verified}) {stage=session.stageSelectedRestore(selection,store,mirrorStopped)}
+  val staged=requireNotNull(stage)
+  if(staged.applied) {
+   val receipt=applied ?: before.takeIf {it.files==after}
+   require(receipt!=null && receipt.files==after && receipt.byteCount==staged.verified.byteCount) {
+    CoreMessages.ANDROID_THE_HELPER_RESTORE_COULD_NOT_BE_VERIFIED_UPLOAD_REMAINS_BLOCKED_RECOVER_OR_INSPECT_RETAINE.text()
+   }
   }
-  requireNoRecovery();checkActualUnchanged(snapshot.manifest.files)
-  val conflict=comparison.observedTips.size>1
-  OperationResult(if(conflict)CoreMessages.ANDROID_SELECTED_VERSION_DOWNLOADED_RESTORED_AND_VERIFIED_IN_THE_GAME_CLOUD_BRANCHES_REMAIN_UNRESO.text()
-   else CoreMessages.ANDROID_SELECTED_VERSION_DOWNLOADED_RESTORED_AND_VERIFIED_IN_THE_GAME.text(),conflict,false,snapshotId)
+  val completed=session.finishSelectedRestore(staged,store,mirrorStopped)
+  val summary=if(staged.applied)runCatching {SaveSummary.fromVerified(staged.verified)}.getOrNull() else inspection.history?.summary
+  val refreshed=inspectionFromComparison(completed,HomeLocalRead(completed.localFiles,summary))
+  val conflict=completed.observedTips.size>1
+  val complete=staged.applied && completed.kind==OnboardingKind.IDENTICAL && completed.baselineLineage==OnboardingLineage.SAME_TIP
+  val message=when {
+   !staged.applied || conflict->CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text()
+   staged.plan!=null->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_VERIFIED_IN_THE_GAME_AND_PUBLISHED.text()
+   readOnly->CoreMessages.ANDROID_SELECTED_VERSION_DOWNLOADED_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
+   else->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
+  }
+  return OperationResult(message,conflict,false,staged.plan?.plan?.commit?.snapshot?.id ?: snapshotId,refreshed,complete)
+ }
+ private fun restoreTipSelection(inspection:Inspection,snapshotId:String):OperationResult? {
+  val observed=presentationChecked(inspection)
+  val selection=session.prepareTipRestore(observed,snapshotId,store,mirrorStopped) ?: return null
+  val before=checkActualUnchanged(observed.localFiles)
+  val after=selection.verified.snapshot.manifest.files
+  val applied=prepareGameRestore(observed.localFiles,after,"restore",selection.verified) {
+   session.stageTipRestore(selection,store,mirrorStopped)
+  }
+  val receipt=applied ?: before.takeIf { it.files==after }
+  require(receipt!=null && receipt.files==after && receipt.byteCount==selection.verified.byteCount) {
+   CoreMessages.ANDROID_THE_HELPER_RESTORE_COULD_NOT_BE_VERIFIED_UPLOAD_REMAINS_BLOCKED_RECOVER_OR_INSPECT_RETAINE.text()
+  }
+  val completed=session.completedTipRestore(selection)
+  val summary=runCatching { SaveSummary.fromVerified(selection.verified) }.getOrNull()
+  val refreshed=inspectionFromComparison(completed,HomeLocalRead(after,summary))
+  return OperationResult(CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text(),
+   false,false,snapshotId,refreshed,true)
  }
  fun resolveConflict(inspection:Inspection,snapshotId:String)=restoreReadLocked {
   val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);val conflict=currentConflict(comparison)
@@ -389,29 +399,40 @@ class AndroidSyncFacade internal constructor(
   is AppendPushResult.Diverged -> OperationResult(CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text(),true,session.hasPending(),null)
   is AppendPushResult.Success -> OperationResult(when {result.remoteAhead->CoreMessages.ANDROID_SNAPSHOT_IS_PRESERVED_BUT_ANOTHER_CLOUD_BRANCH_ADVANCED_COMPARE_AGAIN.text();result.localDirty->CoreMessages.ANDROID_SNAPSHOT_UPLOADED_NEWER_LOCAL_CHANGES_REMAIN_COMPARE_AGAIN.text();else->success},false,session.hasPending(),result.commit.snapshot.id)
  }
- private fun prepareGameRestore(before:Map<String,String>,after:Map<String,String>,action:String,stage:()->Unit) {
+ private fun prepareGameRestore(before:Map<String,String>,after:Map<String,String>,action:String,verified:VerifiedSnapshot?=null,verifiedProvider:(()->VerifiedSnapshot?)?=null,stage:()->Unit):AndroidRestoreReceipt? {
   val target=verifiedTarget();val journal=RestoreJournal(profileScope=scope,gameSourceIdentity=identity.originalSourceIdentity,gamePackage=identity.packageName,installedApkSha256=target.apkSha256,sourceApkSha256=target.sourceApkSha256,expectedBefore=before,expectedAfter=after,action=action)
   writeJournal(journal)
   try {
    stage()
-   when(currentFiles()) {
-    after -> {if(before==after){clearCompletedJournal();return};val ready=journal.copy(ready=true);writeJournal(ready);applyPrepared(ready)}
-    before -> clearCompletedJournal()
+   return when(currentFiles()) {
+    after -> {if(before==after){clearCompletedJournal();null}else{val ready=journal.copy(ready=true);writeJournal(ready);applyPrepared(ready,verifiedProvider?.invoke() ?: verified)}}
+    before -> {clearCompletedJournal();null}
     else -> error(CoreMessages.ANDROID_UNEXPECTED_STAGED_FILES_RECOVERY_IS_REQUIRED_GAME_FILES_WERE_NOT_CHANGED.text())
    }
   }catch(e:Exception){val coreRecovery=Files.exists(session.directory.resolve("append-v2/apply-required.txt"));if(currentFiles()==after && !coreRecovery)writeJournal(journal.copy(ready=true)) else if(currentFiles()==before && !coreRecovery)Files.deleteIfExists(journalPath);throw e}
  }
- private fun applyPrepared(journal:RestoreJournal) {
-  val staged=versions.annotate(Snapshots.capture(mirror,adapter,config.profile,CoreMessages.ANDROID_ANDROID_STAGED_RESTORE.text(),null))
-  require(staged.manifest.files==journal.expectedAfter);versions.checkRestore(staged,config.targetGame)
+ private fun applyPrepared(journal:RestoreJournal,verifiedInput:VerifiedSnapshot?=null):AndroidRestoreReceipt {
+  val staged=verifiedInput?.snapshot ?: versions.annotate(Snapshots.capture(mirror,adapter,config.profile,CoreMessages.ANDROID_ANDROID_STAGED_RESTORE.text(),null))
+  val verified=verifiedInput ?: VerifiedSnapshot.read(staged,adapter)
+  require(staged.manifest.files==journal.expectedAfter);versions.checkRestore(verified,config.targetGame)
+  val target=verifiedTarget()
+  val direct=bridge.restoreVerified(staged,immutableMap(journal.expectedBefore))
+  if(direct!=null) {
+   require(direct.target==target && verifiedTarget()==target && direct.files==journal.expectedAfter && direct.byteCount==verified.byteCount) {
+    CoreMessages.ANDROID_THE_HELPER_RESTORE_COULD_NOT_BE_VERIFIED_UPLOAD_REMAINS_BLOCKED_RECOVER_OR_INSPECT_RETAINE.text()
+   }
+   clearCompletedJournal()
+   return direct
+  }
   val actual=freshExport {Snapshots.fileHashes(it,adapter)}
   if(actual!=journal.expectedAfter) {
    require(actual==journal.expectedBefore){CoreMessages.ANDROID_GAME_PROGRESS_CHANGED_AFTER_CONFIRMATION_RECOVERY_WILL_NOT_OVERWRITE_IT_BACKUPS_ARE_RETAIN.text()}
    val temp=Files.createTempDirectory(scratch,"restore-")
    try {copySaveFiles(mirror,temp);verifiedTarget();bridge.restoreFrom(temp,immutableMap(journal.expectedBefore));verifiedTarget()}finally{deleteTree(temp)}
   }
-  require(freshExport {Snapshots.fileHashes(it,adapter)}==journal.expectedAfter){CoreMessages.ANDROID_THE_HELPER_RESTORE_COULD_NOT_BE_VERIFIED_UPLOAD_REMAINS_BLOCKED_RECOVER_OR_INSPECT_RETAINE.text()}
+  val receipt=checkActualUnchanged(journal.expectedAfter)
   clearCompletedJournal()
+  return receipt
  }
  private fun readJournal(requireOriginalBuild:Boolean=true):RestoreJournal {
   require(Files.exists(journalPath)){CoreMessages.ANDROID_RECOVERY_BELONGS_TO_ANOTHER_GAME_OR_AN_OLDER_INSTALLATION_REOPEN_THAT_ORIGINAL_SELECTION_T.text()}
@@ -425,7 +446,10 @@ class AndroidSyncFacade internal constructor(
  private fun clearCompletedJournal(){Files.delete(journalPath)}
  private fun requireNoRecovery(){require(!anyUnresolvedRestore()){ CoreMessages.ANDROID_A_GAME_RESTORE_NEEDS_RECOVERY_BEFORE_ANOTHER_SYNC_ACTION_REOPEN_THE_ORIGINAL_GAME_AND_CONN.text() }}
  private fun anyUnresolvedRestore()=hasUnresolvedRestore(base)
- private fun checkActualUnchanged(expected:Map<String,String>)=freshExport {if(Snapshots.fileHashes(it,adapter)!=expected)throw AndroidSaveChangedException(CoreMessages.ANDROID_ACTUAL_GAME_PROGRESS_CHANGED_SINCE_COMPARISON_COMPARE_AGAIN_NO_GAME_FILES_WERE_REPLACED.text())}
+ private fun checkActualUnchanged(expected:Map<String,String>)=freshVerifiedExport {
+  if(it.snapshot.manifest.files!=expected)throw AndroidSaveChangedException(CoreMessages.ANDROID_ACTUAL_GAME_PROGRESS_CHANGED_SINCE_COMPARISON_COMPARE_AGAIN_NO_GAME_FILES_WERE_REPLACED.text())
+  AndroidRestoreReceipt(verifiedTarget(),it.snapshot.manifest.files,it.entries.values.sumOf { bytes->bytes.size.toLong() })
+ }
  private fun capture(root:Path)=Snapshots.capture(root,adapter,config.profile,CoreMessages.ANDROID_ANDROID_SAVE_EXPORT.text(),null)
  private fun currentFiles()=Snapshots.fileHashes(mirror,adapter)
  private fun <T> freshExport(block:(Path)->T):T {val temp=Files.createTempDirectory(scratch,"export-");try {verifiedTarget();DiagnosticTiming.measure(DiagnosticPhase.SAVE_EXPORT) {bridge.exportTo(temp)};verifiedTarget();validateExport(temp);val snapshot=capture(temp);Snapshots.verify(snapshot,adapter);versions.detect(snapshot);return block(temp)}finally{deleteTree(temp)}}
