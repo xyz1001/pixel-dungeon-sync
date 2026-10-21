@@ -29,7 +29,8 @@ class NoviceCopyTest {
  }
  @Test fun restoreWarningExplicitlyDescribesReplacementAndRemoval() {
   assertContains(NoviceCopy.restoreWarning, "替换本机存档")
-  assertContains(NoviceCopy.restoreWarning, "移除")
-  assertContains(NoviceCopy.restoreWarning, "先备份")
+  assertContains(NoviceCopy.restoreWarning, "丢失")
+  assertContains(NoviceCopy.restoreWarning, "不创建备份")
+  assertFalse(NoviceCopy.restoreWarning.contains("先备份"))
  }
 }

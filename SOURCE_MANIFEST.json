@@ -3145,8 +3145,8 @@
       "sha256": "7f6c3ecee01465d131e2dc42f20f61e95944b3c0de1144042c62a21330d82fd8"
     },
     "desktop/src/test/kotlin/pdsync/NoviceCopyTest.kt": {
-      "size": 1614,
-      "sha256": "326180fb39da698c906b8a45a9c2dfba7a6c10f1cbabca31796da48bfef7fe6c"
+      "size": 1683,
+      "sha256": "3d0527ccd67de3079e1575b5a3885cafa27bd19e5a74608311d7887ba1e05c04"
     },
     "desktop/src/test/kotlin/pdsync/OnboardingGateTest.kt": {
       "size": 3658,
