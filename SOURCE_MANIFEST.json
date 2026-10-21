@@ -2825,8 +2825,8 @@
       "sha256": "a284eb55ec5319baafd6c09913f3c93991bb70edeec2cf1838e1e8cc8e1fdea4"
     },
     "core/src/test/kotlin/pdsync/SharedSnapshotSelectionTest.kt": {
-      "size": 12388,
-      "sha256": "d46960d1b309e8acf3674efc00eb1a1318a52d6c0bbf4abd7c2acf44ed4fd24b"
+      "size": 12480,
+      "sha256": "0b9352ae44aed11b44a557f59548d41ea69b2697160d5633ac8450b55e5e2414"
     },
     "core/src/test/kotlin/pdsync/SnapshotMetadataTest.kt": {
       "size": 17947,

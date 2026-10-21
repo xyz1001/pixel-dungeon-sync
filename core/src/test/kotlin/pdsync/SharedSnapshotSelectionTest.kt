@@ -116,13 +116,13 @@ class SharedSnapshotSelectionTest {
   val store = Store(); val (first, second) = seed(store); val local = session()
   val restored = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(
    local.compareOnboarding(store) { true }, first.snapshot.id, store) { true })
-  val result = assertIs<AppendPushResult.Success>(restored.result)
-  assertEquals("resolution", result.commit.kind)
-  assertEquals(setOf(first.id, second.id), result.commit.parents.toSet())
-  assertNotEquals(first.snapshot.id, result.commit.snapshot.id)
-  assertFiles(files(), local.root)
-  assertEquals(3, local.syncHistory().graph.commits.size)
-  assertEquals(setOf(result.commit.id), local.syncHistory().graph.tips)
+  val result = assertIs<AppendPushResult.Diverged>(restored.result)
+  assertEquals(setOf(first.id,second.id),result.conflict.observedTips)
+  assertEquals(first.id,local.baseline());assertFalse(local.hasPending())
+  assertFiles(files(),local.root)
+  assertEquals(2,local.syncHistory().graph.commits.size)
+  assertEquals(setOf(first.id,second.id),local.syncHistory().graph.tips)
+  assertEquals(0,store.writes)
  }
 
  @Test fun explicitConflictDuplicateChoiceResolvesAllTipsAndRejectsDifferentArchiveBytes() {
@@ -134,8 +134,9 @@ class SharedSnapshotSelectionTest {
   })
   assertFailsWith<RemoteIntegrityException> { local.resolve(damaged, first.snapshot.id, store) { true } }
   assertEquals(0, store.writes); assertFalse(local.hasPending())
-  val result = assertIs<AppendPushResult.Success>(local.resolve(conflict, first.snapshot.id, store) { true })
-  assertEquals(setOf(first.id, second.id), result.commit.parents.toSet())
+  val result = assertIs<AppendPushResult.Diverged>(local.resolve(conflict, first.snapshot.id, store) { true })
+  assertEquals(setOf(first.id, second.id), result.conflict.observedTips)
+  assertEquals(first.id,local.baseline());assertFalse(local.hasPending());assertEquals(0,store.writes)
   assertFiles(files(), local.root)
  }
 
