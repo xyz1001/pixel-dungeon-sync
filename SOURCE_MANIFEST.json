@@ -2529,8 +2529,8 @@
       "sha256": "249d8fe16e51bca882ed64bfbafe1a54e6221d031788d2a3ed2cb6eec45d860c"
     },
     "core/src/main/kotlin/pdsync/presentation/HistoryPresentation.kt": {
-      "size": 13176,
-      "sha256": "73bf2f517eeb52b4d243adc920b7c326c3b485e66924f64c2f47d2d340050e17"
+      "size": 13288,
+      "sha256": "fc192ca6779568fded5a1828290f2a3f18f28d219732856f6bde131e046c3097"
     },
     "core/src/test/java/pdsync/DiagnosticDetailsJavaTest.java": {
       "size": 2634,
@@ -2697,12 +2697,12 @@
       "sha256": "0f1a826b449c4ec6cdc65275b95905c18efd4a992e13d4cfc813d630d904558a"
     },
     "core/src/test/kotlin/pdsync/HistoryContentGroupingTest.kt": {
-      "size": 11353,
-      "sha256": "d0ac722aa0dce27372330ffcb8365caf7cb7e8f68e6a781b1102a6b5671541a8"
+      "size": 11373,
+      "sha256": "33ccba08d99d578ec4239e2c5afcf343f886c2d86096b56667f4c9dad07dea48"
     },
     "core/src/test/kotlin/pdsync/HistoryPresentationTest.kt": {
-      "size": 30076,
-      "sha256": "da81f8f77071463511a758848d9da3de0c38a886d8624630277888e9a006afff"
+      "size": 30143,
+      "sha256": "64475435d44fb8fc3b3235c5b0c78c650c0ce39a4168a844d35281b6bc4850a4"
     },
     "core/src/test/kotlin/pdsync/HomeRestoreDiagnosticEvidenceTest.kt": {
       "size": 10911,
@@ -7161,12 +7161,12 @@
       "sha256": "9bda3547a0e211a2bbef1aa9d5f88a2b7a3102f1b18f729c87de16351e6946ce"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryRecordOrderRenderTest.kt": {
-      "size": 21001,
-      "sha256": "cb7b32e0880013461225a76caab11a4f4b5fa4ff937c95074a8ae9c2f8376cc0"
+      "size": 21091,
+      "sha256": "131a84eb02fa1bb8ea31d22700cf02c0602161dadffdd7d11a4223cbc36fc319"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHistoryRenderTest.kt": {
-      "size": 18067,
-      "sha256": "e8ce99545b81c883a2ae6113ee88df5adbc403b7db242b23ae6d2c5091d1b13c"
+      "size": 18235,
+      "sha256": "cc0ec090d37b7eb19e841578716bd2a5285cf195f5f499b2e7db1598361a7f1b"
     },
     "shared-ui/src/test/kotlin/io/github/xyz1001/pdsync/android/SharedHomeArchiveAvailabilityRenderTest.kt": {
       "size": 27305,

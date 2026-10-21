@@ -122,7 +122,7 @@ class HistoryContentGroupingTest {
   assertEquals(listOf(tip.id, base.id), view.nodes.filter { it.column == 0 }.map { it.id })
   assertEquals(HistoryPresentation.time("2026-10-02T00:00:00Z"), view.nodes.single { it.id == base.id }.time)
   assertEquals(base.snapshot.id, HistoryPresentation.representativeSnapshotId(history, duplicate.snapshot.id))
-  assertEquals(listOf(HistoryEdge(base.id, "local-current")), view.edges)
+  assertEquals(listOf(HistoryEdge("local-current", base.id, sameContent = true)), view.edges)
   val unmatched = history.copy(currentFiles = different("local"))
   assertEquals(duplicate.snapshot.id, HistoryPresentation.representativeSnapshotId(unmatched, base.snapshot.id))
   val dirty = HistoryPresentation.from(unmatched, 0)

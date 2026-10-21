@@ -93,14 +93,14 @@ class SharedHistoryRecordOrderRenderTest {
                         assertCloudTopOrder(layout, listOf("resolution", "branch"))
                         assertEquals(setOf(
                             HistoryEdge("branch", "resolution"),
-                            HistoryEdge("resolution", "local-current"),
+                            HistoryEdge("local-current", "resolution", sameContent = true),
                         ), layout.arrows.map { it.edge }.toSet())
                         assertEquals(listOf("original"), state.graph.commits.getValue("branch").parents,
                             "A hidden parent is never redirected into a new reverse edge")
                         assertEquals(3, state.graph.commits.size)
                         assertArrowOutsideTargets(layout)
-                        val restore = layout.arrows.single { it.edge.toId == "local-current" }
-                        assertTrue(restore.tip.x > restore.start.x, "the restore arrow continues to point toward local")
+                        val restore = layout.arrows.single { it.edge.fromId == "local-current" }
+                        assertTrue(restore.tip.x < restore.start.x, "restored local content points toward its matching cloud card")
                         assertEquals(state.graph.commits.getValue("original").snapshot,
                             state.graph.commits.getValue("resolution").snapshot,
                             "this really is a resolution record retaining the older snapshot")
@@ -148,12 +148,12 @@ class SharedHistoryRecordOrderRenderTest {
                 assertEquals(layout.cards.getValue("resolution").center.y,
                     layout.cards.getValue("local-baseline").center.y)
                 val expected = when (direction) {
-                    "restore" -> HistoryEdge("resolution", "local-baseline")
+                    "restore" -> HistoryEdge("local-baseline", "resolution", sameContent = true)
                     "upload" -> HistoryEdge("local-baseline", "resolution")
                     else -> HistoryEdge("local-baseline", "resolution", sameContent = true)
                 }
                 val cross = layout.arrows.single { it.edge == expected }
-                assertEquals(direction != "restore", cross.tip.x < cross.start.x)
+                assertTrue(cross.tip.x < cross.start.x, "local baseline always points toward its matching cloud card")
                 val change = layout.arrows.single { it.edge.dashed }
                 assertEquals(HistoryEdge("local-baseline", "local-current", dashed = true), change.edge)
                 assertTrue(change.tip.y < change.start.y, "the unsynced change still points from baseline to current")

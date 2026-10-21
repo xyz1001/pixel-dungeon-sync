@@ -118,9 +118,9 @@ class HistoryPresentationTest {
   assertTrue(view.edges.isEmpty())
  }
 
- @Test fun restoreDirectionIsCloudToLocalAndUnknownDirectionUsesContentEquivalence() {
+ @Test fun restoreAndUnknownDirectionsShowLocalToCloudContentEquivalence() {
   val history=state(listOf(commit("base")),"base",oldFiles,"restore")
-  assertEquals(listOf(HistoryEdge("base","local-current")),HistoryPresentation.from(history,0).edges)
+  assertEquals(listOf(HistoryEdge("local-current","base",sameContent=true)),HistoryPresentation.from(history,0).edges)
   assertEquals(listOf(HistoryEdge("local-current", "base", sameContent = true)), HistoryPresentation.from(history.copy(baselineDirection=null),0).edges)
  }
 
@@ -211,7 +211,7 @@ class HistoryPresentationTest {
   assertEquals(nodes.getValue("base").time, nodes.getValue("local-baseline").time)
   assertEquals(4, view.rows)
   assertEquals(setOf(HistoryEdge("middle", "newest"), HistoryEdge("base", "middle"),
-   HistoryEdge("base", "local-baseline"), HistoryEdge("local-baseline", "local-current", true)), view.edges.toSet())
+   HistoryEdge("local-baseline", "base", sameContent = true), HistoryEdge("local-baseline", "local-current", true)), view.edges.toSet())
  }
 
  @Test fun equalTimeNodesShareOnlyOppositeLanesAndOrderIsStableAcrossGraphInsertionOrder() {
@@ -257,7 +257,7 @@ class HistoryPresentationTest {
   val last = pages.last()
   assertEquals(last.nodes.single { it.id == "commit-000" }.row,
    last.nodes.single { it.id == "local-baseline" }.row)
-  assertEquals(setOf(HistoryEdge("commit-000", "local-baseline"),
+  assertEquals(setOf(HistoryEdge("local-baseline", "commit-000", sameContent = true),
    HistoryEdge("local-baseline", "local-current", true)), last.edges.toSet())
   assertEquals(41, allNodes.count { it.selectable && it.snapshotId != null })
  }
@@ -453,7 +453,7 @@ class HistoryPresentationTest {
   assertEquals((40 downTo 0).map { "node-%03d".format(it) }, nodes.filter { it.column == 0 }.map { it.id })
   assertEquals(19, pages.first().nodes.single { it.id == "node-021" }.row)
   assertEquals(19, pages.first().nodes.single { it.id == "local-current" }.row)
-  assertTrue(HistoryEdge("node-021", "local-current") in pages.first().edges)
+  assertTrue(HistoryEdge("local-current", "node-021", sameContent = true) in pages.first().edges)
   assertTrue(pages.flatMap { it.edges }.none { it.fromId == "node-020" && it.toId == "node-021" })
   pages.forEach { page ->
    val visible = page.nodes.map { it.id }.toSet()

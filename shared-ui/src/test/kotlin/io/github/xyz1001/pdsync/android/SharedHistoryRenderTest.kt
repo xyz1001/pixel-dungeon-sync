@@ -82,9 +82,10 @@ class SharedHistoryRenderTest {
                 assertTrue(newest.height > base.height, "real measured long names and details must wrap")
                 assertEquals(canvas.width / 2, baseline.center.x - base.center.x)
                 assertEquals(view.edges.toSet(), canvas.arrows.map { it.edge }.toSet())
-                val transfer = canvas.arrows.single { it.edge == HistoryEdge("base", "local-baseline") }
-                assertEquals(Offset(base.right, base.center.y), transfer.start)
-                assertTrue(transfer.tip.x < baseline.left)
+                val transfer = canvas.arrows.single { it.edge == HistoryEdge("local-baseline", "base", sameContent = true) }
+                assertEquals(Offset(baseline.left, baseline.center.y), transfer.start)
+                assertTrue(transfer.tip.x > base.right && transfer.tip.x < transfer.start.x,
+                    "local baseline points left toward matching cloud content and stops outside its card")
                 for (arrow in canvas.arrows) {
                     val target = canvas.cards.getValue(arrow.edge.toId)
                     assertFalse(target.contains(arrow.tip), "tip outside card: ${arrow.edge}")

@@ -219,7 +219,8 @@ data class HistoryPresentation(
     val local = if (state.localNodeCount == 2) "local-baseline" else "local-current"
     if (local in visible && baseline.id in visible) when (state.baselineDirection) {
      "upload" -> edges += HistoryEdge(local, baseline.id)
-     "restore" -> edges += HistoryEdge(baseline.id, local)
+     // Restore provenance stays in state; the cross-lane arrow describes matching content.
+     "restore" -> edges += HistoryEdge(local, baseline.id, sameContent = true)
     }
    }
    // Exact file-map equality is the canonical content hash input (no time/name/device metadata).
