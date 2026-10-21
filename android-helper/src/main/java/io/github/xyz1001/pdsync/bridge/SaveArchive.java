@@ -35,6 +35,81 @@ public final class SaveArchive {
     public static final int MAX_ENTRIES = 16384;
     public static final int MAX_FILES = 4096;
 
+    /** Uncompressed single-pass HOME observation, independent from the full transfer ZIP. */
+    public static final int OBSERVATION_VERSION = 1;
+    public static final int MAX_OBSERVATION_BYTES = (int) MAX_BYTES + MAX_FILES * 1120 + 16;
+    private static final int OBSERVATION_MAGIC = 0x50444f31;
+    public static boolean summaryFile(String name) {
+        return "rankings.dat".equals(name) || name.matches("game[0-9]+/game\\.dat");
+    }
+    public static final class Observation {
+        public final Inventory inventory;
+        public final SortedMap<String,Long> sizes, modifiedMillis;
+        public final SortedMap<String,byte[]> payloads;
+        public Observation(Map<String,String> hashes, Map<String,Long> sizes,
+                Map<String,Long> modifiedMillis, Map<String,byte[]> payloads) throws IOException {
+            if (hashes == null || sizes == null || modifiedMillis == null || payloads == null
+                    || hashes.size() > MAX_FILES || !hashes.keySet().equals(sizes.keySet())
+                    || !hashes.keySet().equals(modifiedMillis.keySet())) throw new IOException("Invalid observation inventory");
+            Set<String> names = new HashSet<>(), summaries = new HashSet<>(); long total = 0;
+            for (Map.Entry<String,String> item : hashes.entrySet()) {
+                String name = item.getKey(); Long size = sizes.get(name), time = modifiedMillis.get(name);
+                if (!safeName(name) || name.matches("game[0-9]+") || !names.add(name.toLowerCase(Locale.ROOT))
+                        || item.getValue() == null || !item.getValue().matches("[0-9a-f]{64}")
+                        || size == null || size < 0 || size > MAX_BYTES - total || time == null)
+                    throw new IOException("Invalid observation file");
+                total += size;
+                if (summaryFile(name)) {
+                    summaries.add(name); byte[] bytes = payloads.get(name);
+                    if (bytes == null || bytes.length != size || !sha256(bytes).equals(item.getValue()))
+                        throw new IOException("Observation summary bytes do not match inventory");
+                }
+            }
+            if (!payloads.keySet().equals(summaries)) throw new IOException("Unexpected observation payload");
+            requireCompleteRuns(hashes.keySet());
+            inventory = new Inventory(new TreeMap<>(hashes), total);
+            this.sizes = Collections.unmodifiableSortedMap(new TreeMap<>(sizes));
+            this.modifiedMillis = Collections.unmodifiableSortedMap(new TreeMap<>(modifiedMillis));
+            this.payloads = Collections.unmodifiableSortedMap(new TreeMap<>(payloads));
+        }
+    }
+    public static void writeObservation(OutputStream target, Observation observation) throws IOException {
+        DataOutputStream out = new DataOutputStream(new LimitedOutputStream(target, MAX_OBSERVATION_BYTES));
+        out.writeInt(OBSERVATION_MAGIC); out.writeInt(OBSERVATION_VERSION); out.writeInt(observation.inventory.hashes.size());
+        for (Map.Entry<String,String> item : observation.inventory.hashes.entrySet()) {
+            byte[] path = item.getKey().getBytes(StandardCharsets.US_ASCII);
+            out.writeInt(path.length); out.write(path);
+            out.write(item.getValue().getBytes(StandardCharsets.US_ASCII));
+            out.writeLong(observation.sizes.get(item.getKey())); out.writeLong(observation.modifiedMillis.get(item.getKey()));
+            byte[] payload = observation.payloads.get(item.getKey());
+            out.writeInt(payload == null ? -1 : payload.length); if (payload != null) out.write(payload);
+        }
+        out.flush();
+    }
+    public static Observation readObservation(InputStream source) throws IOException {
+        java.io.DataInputStream in = new java.io.DataInputStream(new LimitedInputStream(source, MAX_OBSERVATION_BYTES));
+        if (in.readInt() != OBSERVATION_MAGIC || in.readInt() != OBSERVATION_VERSION)
+            throw new IOException("Unsupported observation frame");
+        int count = in.readInt(); if (count < 0 || count > MAX_FILES) throw new IOException("Observation file count exceeds limit");
+        Map<String,String> hashes = new TreeMap<>(); Map<String,Long> sizes = new TreeMap<>(), times = new TreeMap<>();
+        Map<String,byte[]> payloads = new TreeMap<>(); Set<String> folded = new HashSet<>(); long total = 0;
+        for (int i = 0; i < count; i++) {
+            int length = in.readInt(); if (length < 1 || length > 1024) throw new IOException("Invalid observation path length");
+            byte[] path = new byte[length]; in.readFully(path); String name = new String(path, StandardCharsets.US_ASCII);
+            if (!safeName(name) || name.matches("game[0-9]+") || !folded.add(name.toLowerCase(Locale.ROOT)))
+                throw new IOException("Unsafe observation path");
+            byte[] digest = new byte[64]; in.readFully(digest); String hash = new String(digest, StandardCharsets.US_ASCII);
+            long size = in.readLong(), time = in.readLong(); int payloadLength = in.readInt();
+            if (!hash.matches("[0-9a-f]{64}") || size < 0 || size > MAX_BYTES - total
+                    || (summaryFile(name) ? payloadLength != size : payloadLength != -1))
+                throw new IOException("Invalid observation file metadata");
+            total += size; hashes.put(name, hash); sizes.put(name, size); times.put(name, time);
+            if (payloadLength >= 0) { byte[] bytes = new byte[payloadLength]; in.readFully(bytes); payloads.put(name, bytes); }
+        }
+        if (in.read() != -1) throw new IOException("Trailing observation data");
+        return new Observation(hashes, sizes, times, payloads);
+    }
+
     private SaveArchive() {
     }
 

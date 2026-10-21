@@ -65,6 +65,7 @@ class SaveLayoutSnapshotTests(unittest.TestCase):
                 'io.github.xyz1001.pdsync.bridge.AndroidApiCompat': '''package io.github.xyz1001.pdsync.bridge;
                     final class AndroidApiCompat {
                         static int closeOnExecFlag() { return 0; }
+                        static long modifiedMillis(android.system.StructStat s) { return s.mtime; }
                         static String statIdentity(android.system.StructStat s) {
                             return s.st_dev+":"+s.st_ino+":"+s.st_mode+":"+s.st_size+":"+s.mtime;
                         }
@@ -112,6 +113,14 @@ class SaveLayoutSnapshotTests(unittest.TestCase):
                                 catch(BridgeFailure denied) { check("UNRECOGNIZED_SAVE_LAYOUT".equals(denied.code),"unknown file still blocks transfer"); }
                                 Files.delete(root.resolve(name));
                             }
+                            Files.writeString(slot.resolve("depth1.dat"),"level bytes retained only as hash");
+                            Files.setLastModifiedTime(slot.resolve("game.dat"),java.nio.file.attribute.FileTime.fromMillis(1234567890123L));
+                            android.system.Os.opened.clear();
+                            SaveArchive.Observation observation=tree.observe();
+                            check(observation.inventory.hashes.size()==3 && android.system.Os.opened.size()==3,"single observation opens each allowed source exactly once");
+                            check(observation.payloads.size()==2 && !observation.payloads.containsKey("game1/depth1.dat"),"level bytes excluded from observation transport");
+                            check(observation.modifiedMillis.get("game1/game.dat")==1234567890123L,"actual source millisecond timestamp retained");
+                            check(new String(observation.payloads.get("game1/game.dat"),java.nio.charset.StandardCharsets.UTF_8).equals("unchanged-game-progress"),"summary receives real captured bytes");
                             System.out.println("PASS: "+assertions+" production save scanner assertions with host-only Android adapters.");
                         }
                     }

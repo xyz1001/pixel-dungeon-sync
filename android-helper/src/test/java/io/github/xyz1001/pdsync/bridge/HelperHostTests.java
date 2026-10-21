@@ -46,6 +46,37 @@ public final class HelperHostTests {
         Path empty=dir(base,"emptyzip");
         check(SaveArchive.extract(new ByteArrayInputStream(zip()),empty.toFile()).hashes.isEmpty(),"empty ZIP allowed");
     }
+    static byte[] observationFrame(String name, long size, int payloadLength) throws Exception {
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream(); DataOutputStream out=new DataOutputStream(bytes);
+        out.writeInt(0x50444f31);out.writeInt(1);out.writeInt(1);byte[] path=name.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        out.writeInt(path.length);out.write(path);out.write("0".repeat(64).getBytes());out.writeLong(size);out.writeLong(1);out.writeInt(payloadLength);return bytes.toByteArray();
+    }
+    static void observationTests() throws Exception {
+        byte[] game="run".getBytes(), rankings="scores".getBytes();
+        Map<String,String> hashes=Map.of("game1/game.dat",SaveArchive.sha256(game),"game1/depth1.dat",SaveArchive.sha256("level".getBytes()),"rankings.dat",SaveArchive.sha256(rankings));
+        Map<String,Long> sizes=Map.of("game1/game.dat",3L,"game1/depth1.dat",5L,"rankings.dat",6L);
+        Map<String,Long> times=Map.of("game1/game.dat",1234567890123L,"game1/depth1.dat",1234567890456L,"rankings.dat",1234567890789L);
+        SaveArchive.Observation original=new SaveArchive.Observation(hashes,sizes,times,Map.of("game1/game.dat",game,"rankings.dat",rankings));
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();SaveArchive.writeObservation(bytes,original);byte[] frame=bytes.toByteArray();
+        SaveArchive.Observation read=SaveArchive.readObservation(new ByteArrayInputStream(frame));
+        check(read.inventory.hashes.equals(hashes)&&read.inventory.bytes==14,"full observation inventory binds all real files");
+        check(read.modifiedMillis.equals(times)&&read.sizes.equals(sizes),"millisecond metadata roundtrip");
+        check(read.payloads.size()==2&&!read.payloads.containsKey("game1/depth1.dat"),"only summary raw bytes transferred");
+        check(Arrays.equals(read.payloads.get("game1/game.dat"),game),"summary bytes preserved");
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(Arrays.copyOf(frame,frame.length-1))),"truncated observation");
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(Arrays.copyOf(frame,frame.length+1))),"trailing observation");
+        byte[] corrupt=frame.clone();corrupt[corrupt.length-1]^=1;
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(corrupt)),"summary hash mismatch");
+        for(String name:List.of("../rankings.dat","settings.dat","game1"))
+            denied(()->SaveArchive.readObservation(new ByteArrayInputStream(observationFrame(name,0,-1))),"unsafe observed path");
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(observationFrame("rankings.dat",SaveArchive.MAX_BYTES+1,-1))),"size bound before allocation");
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(observationFrame("rankings.dat",3,2))),"summary length bound before allocation");
+        denied(()->SaveArchive.readObservation(new ByteArrayInputStream(observationFrame("badges.dat",3,3))),"non-summary payload refused");
+        denied(()->new SaveArchive.Observation(hashes,sizes,times,Map.of("game1/game.dat",game)),"missing required summary");
+        denied(()->new SaveArchive.Observation(Map.of("game1/level.dat",SaveArchive.sha256(game)),Map.of("game1/level.dat",3L),Map.of("game1/level.dat",1L),Map.of()),"incomplete run refused");
+        bytes.reset();SaveArchive.writeObservation(bytes,new SaveArchive.Observation(Map.of(),Map.of(),Map.of(),Map.of()));
+        check(SaveArchive.readObservation(new ByteArrayInputStream(bytes.toByteArray())).inventory.hashes.isEmpty(),"verified empty observation");
+    }
     static void policyTests(Path base) throws Exception {
         check(SaveDirectoryPolicy.content(base.resolve("missing").toFile()).state==SaveDirectoryPolicy.ContentState.MISSING_DIRECTORY,"missing save root");
         Path root=dir(base,"policy");
@@ -271,7 +302,7 @@ public final class HelperHostTests {
     }
     public static void main(String[] args) throws Exception {
         Path base=Files.createTempDirectory("pdsync-helper-host-");
-        archiveTests(base); policyTests(base); layoutDiagnosticTests(base); knownNonSaveFileTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
+        archiveTests(base); observationTests(); policyTests(base); layoutDiagnosticTests(base); knownNonSaveFileTests(base); identityTests(base); embeddedIdentityTests(base); workspaceTests(base);
         System.out.println("PASS: "+assertions+" helper host security assertions; no Android runtime executed.");
     }
 }

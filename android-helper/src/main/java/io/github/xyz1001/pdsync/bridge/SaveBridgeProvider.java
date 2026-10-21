@@ -99,7 +99,7 @@ public final class SaveBridgeProvider extends ContentProvider {
                         }
                         // Reject unknown methods before any workspace or save access.
                         if (!"inspect".equals(str) && !"export".equals(str)
-                                && !"restore".equals(str) && !"recover".equals(str))
+                                && !"restore".equals(str) && !"recover".equals(str) && !"readSnapshot".equals(str))
                             throw new IllegalArgumentException("Unknown bridge method");
                         initializeWorkspace();
                         if ("inspect".equals(str)) {
@@ -111,6 +111,9 @@ public final class SaveBridgeProvider extends ContentProvider {
                             noExtras(bundle);
                             requireNoPending();
                             return exportSave();
+                        }
+                        if ("readSnapshot".equals(str)) {
+                            noExtras(bundle); requireNoPending(); return readSnapshot();
                         }
                         if ("restore".equals(str)) {
                             requireNoPending();
@@ -148,6 +151,7 @@ public final class SaveBridgeProvider extends ContentProvider {
         reply.putBoolean("metadataOnly", true);
         reply.putInt("accessProtocolVersion", 1);
         reply.putInt("singlePassReadVersion", 1);
+        reply.putInt("readSnapshotVersion", 1);
         reply.putInt("restoreResultVersion", 1);
         return reply;
     }
@@ -295,6 +299,29 @@ public final class SaveBridgeProvider extends ContentProvider {
         } catch (IOException | RuntimeException failure) {
             descriptor.close(); throw failure;
         }
+    }
+
+    private Bundle readSnapshot() throws IOException {
+        File work = workspace();
+        try {
+            this.stage = FileFailureDetails.Stage.CAPTURE;
+            File root = this.guard.root(); String parent = verifySaveParent(root);
+            SaveDirectoryPolicy.Content content = SaveDirectoryPolicy.content(root);
+            SaveArchive.Observation observation;
+            if (content.state == SaveDirectoryPolicy.ContentState.MISSING_DIRECTORY) {
+                observation = new SaveArchive.Observation(Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
+                if (!parent.equals(verifySaveParent(root)) || SaveDirectoryPolicy.present(root))
+                    throw new BridgeFailure("SAVE_CHANGED", "Save directory appeared during capture");
+            } else observation = new SafeSaveTree(root, this.guard).observe();
+            File payload = new File(work, "observation.bin");
+            try (FileOutputStream output = new FileOutputStream(payload)) { SaveArchive.writeObservation(output, observation); }
+            ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(payload, ParcelFileDescriptor.MODE_READ_ONLY);
+            try {
+                if (!payload.delete()) throw new IOException("Cannot unlink observation temporary");
+                Bundle reply = describe(observation.inventory); describeContent(reply, content);
+                reply.putInt("readSnapshotVersion", 1); reply.putParcelable("snapshot", descriptor); return reply;
+            } catch (IOException | RuntimeException failure) { descriptor.close(); throw failure; }
+        } finally { deleteTree(work); }
     }
 
     private Bundle exportSave() throws IOException, ErrnoException {

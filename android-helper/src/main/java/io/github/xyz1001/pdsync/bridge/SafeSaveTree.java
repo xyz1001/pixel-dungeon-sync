@@ -11,6 +11,7 @@ import io.github.xyz1001.pdsync.bridge.SaveDirectoryPolicy;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.nio.file.StandardOpenOption;
@@ -49,7 +50,18 @@ final class SafeSaveTree {
         }
     }
 
+    SaveArchive.Observation observe() throws IOException {
+        Map<String,Long> sizes = new TreeMap<>(), times = new TreeMap<>();
+        Map<String,byte[]> payloads = new TreeMap<>();
+        State state = scan(null, true, sizes, times, payloads);
+        return new SaveArchive.Observation(state.inventory.hashes, sizes, times, payloads);
+    }
+
     State scan(File file, boolean z) throws IOException {
+        return scan(file, z, null, null, null);
+    }
+    private State scan(File file, boolean z, Map<String,Long> sizes, Map<String,Long> times,
+            Map<String,byte[]> payloads) throws IOException {
         checkDirectory(this.root.getParentFile());
         String strIdentity = identity(checkDirectory(this.root));
         SaveDirectoryPolicy.Content content = SaveDirectoryPolicy.content(this.root);
@@ -58,7 +70,7 @@ final class SafeSaveTree {
         TreeMap treeMap2 = new TreeMap();
         treeMap2.put("", strIdentity);
         long[] jArr = {0};
-        walk(this.root, "", file, treeMap, treeMap2, new HashSet<>(), jArr, new int[]{0});
+        walk(this.root, "", file, treeMap, treeMap2, new HashSet<>(), jArr, new int[]{0}, sizes, times, payloads);
         if (!strIdentity.equals(identity(checkDirectory(this.root)))) {
             throw new BridgeFailure("SAVE_CHANGED", "Save root changed while reading");
         }
@@ -100,7 +112,8 @@ final class SafeSaveTree {
     
     
     private void walk(File directory, String prefix, File copy, Map<String,String> hashes,
-                      Map<String,String> metadata, Set<String> names, long[] total, int[] count) throws IOException {
+                      Map<String,String> metadata, Set<String> names, long[] total, int[] count,
+                      Map<String,Long> sizes, Map<String,Long> times, Map<String,byte[]> payloads) throws IOException {
         File[] files = directory.listFiles();
         if (files == null) throw new BridgeFailure("SAVE_UNREADABLE", "Cannot list the private save directory");
         Arrays.sort(files, new Comparator<File>() {
@@ -116,7 +129,7 @@ final class SafeSaveTree {
             StructStat before = stat(file); requireOwner(before);
             if (OsConstants.S_ISDIR(before.st_mode)) {
                 metadata.put(name, identity(before));
-                walk(file, name, copy, hashes, metadata, names, total, count);
+                walk(file, name, copy, hashes, metadata, names, total, count, sizes, times, payloads);
                 if (!identity(before).equals(identity(stat(file)))) throw new BridgeFailure("SAVE_CHANGED", "Save directory changed during enumeration");
                 continue;
             }
@@ -131,6 +144,7 @@ final class SafeSaveTree {
                 File target = copy == null ? null : new File(copy, name);
                 if (target != null) SaveArchive.ensureParents(copy, target.getParentFile());
                 MessageDigest hash = SaveArchive.digest(); long size = 0;
+                ByteArrayOutputStream summary = payloads != null && SaveArchive.summaryFile(name) ? new ByteArrayOutputStream() : null;
                 try (FileInputStream input = new FileInputStream(fd);
                      OutputStream output = target == null ? new Sink() : Files.newOutputStream(target.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                     byte[] buffer = new byte[32768]; int n;
@@ -138,6 +152,7 @@ final class SafeSaveTree {
                         size += n;
                         if (size > before.st_size || total[0]+size > SaveArchive.MAX_BYTES) throw new BridgeFailure("SAVE_CHANGED", "Save file grew while reading");
                         hash.update(buffer,0,n); output.write(buffer,0,n);
+                        if (summary != null) summary.write(buffer,0,n);
                     }
                     if (size != before.st_size || !identity(before).equals(identity(Os.fstat(input.getFD()))))
                         throw new BridgeFailure("SAVE_CHANGED", "Save file changed during reading");
@@ -145,6 +160,8 @@ final class SafeSaveTree {
                 if (!identity(before).equals(identity(stat(file)))) throw new BridgeFailure("SAVE_CHANGED", "Save file was replaced during reading");
                 if (target != null) Files.setLastModifiedTime(target.toPath(), Files.getLastModifiedTime(file.toPath(), LinkOption.NOFOLLOW_LINKS));
                 total[0] += size; hashes.put(name,SaveArchive.hex(hash.digest())); metadata.put(name,identity(before));
+                if (sizes != null) { sizes.put(name,size); times.put(name,AndroidApiCompat.modifiedMillis(before)); }
+                if (summary != null) payloads.put(name,summary.toByteArray());
             } catch (ErrnoException error) {
                 throw new BridgeFailure("UNSAFE_SAVE_PATH", "Cannot safely open a private save file", error);
             } finally {

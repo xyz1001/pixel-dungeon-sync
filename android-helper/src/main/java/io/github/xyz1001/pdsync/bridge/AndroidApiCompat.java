@@ -122,11 +122,16 @@ final class AndroidApiCompat {
         return DescriptorFlags.read(new ByteArrayInputStream(data, 0, size));
     }
 
+    static long modifiedMillis(StructStat stat) throws IOException {
+        long seconds = stat.st_mtime;
+        if (seconds < Long.MIN_VALUE / 1000 || seconds > (Long.MAX_VALUE - 999) / 1000) throw new IOException("Invalid file timestamp");
+        return seconds * 1000 + (Build.VERSION.SDK_INT >= 27 ? Api27.modifiedNanos(stat) / 1000000 : 0);
+    }
     static String statIdentity(StructStat stat) {
         String object = stat.st_dev + ":" + stat.st_ino + ":" + stat.st_mode + ":"
                 + stat.st_uid + ":" + stat.st_nlink + ":" + stat.st_size + ":";
         // API 26 exposes seconds only. Keep every identity/owner/link check and the
-        // repeated full-content hash scans; never interpret a timestamp as proof
+        // per-file descriptor checks; never interpret a timestamp as proof
         // that a background writer cannot be active.
         return object + (Build.VERSION.SDK_INT >= 27 ? Api27.timestamps(stat)
                 : stat.st_mtime + ":0:" + stat.st_ctime + ":0");
@@ -138,6 +143,8 @@ final class AndroidApiCompat {
         static int closeOnExecFlag() {
             return OsConstants.O_CLOEXEC;
         }
+
+        static long modifiedNanos(StructStat stat) { return stat.st_mtim.tv_nsec; }
 
         static String timestamps(StructStat stat) {
             return stat.st_mtim.tv_sec + ":" + stat.st_mtim.tv_nsec + ":"
