@@ -1477,16 +1477,16 @@
       "sha256": "1a848ceb3006abdf9e6e34f266e7a5d6725fb7aad542bf7d6fde116d0cfd8c91"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/RootClientChecks.java": {
-      "size": 23556,
-      "sha256": "d6fdad965e14430c40e16daa1fe7272554b0648ed52119329b5af9f77ef122cc"
+      "size": 23553,
+      "sha256": "c29c96437a3ed1385fa253a6b5f37297fd4a19e2306bae1aac1a47223ecb63bc"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/RootReadinessChecks.java": {
       "size": 6796,
       "sha256": "c0921bebfcfdaf3725b5722e56aa25c31da351f7c7313c0e5390c611477a6001"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/RootRestoreClientChecks.java": {
-      "size": 19160,
-      "sha256": "b875cedb79e11daca7c75baa7836136f03d8c38ed9a241d7f431a568f65ded82"
+      "size": 19238,
+      "sha256": "6eb206902fcba86d4e545474603d1fb6b5b652e06a011b66397001516f750ba8"
     },
     "android-app/src/test/java/io/github/xyz1001/pdsync/android/RootTargetResolverChecks.java": {
       "size": 16873,
@@ -1985,8 +1985,8 @@
       "sha256": "1b411d935bc4d5b32873811f1dcb582872a74b92141cdb70e709fccc48446108"
     },
     "android-helper/src/test/test_embedded_runtime.py": {
-      "size": 16121,
-      "sha256": "d314b85c964bba6b2bac333b69dd851a6ff727a543e06c538efe911ee9ddc5ca"
+      "size": 14825,
+      "sha256": "623c7304cc3c0300c8e6e21d85304546cd120e2585c5e6584851fe50162bc6e5"
     },
     "android-helper/src/test/test_save_layout_snapshot.py": {
       "size": 10353,
@@ -2109,8 +2109,8 @@
       "sha256": "48d5d9d114468ec9b16d7596b69120878b87d77adc4eaddfc1b6e3e48115000f"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/RootHostTests.java": {
-      "size": 39650,
-      "sha256": "d4f400b54adb3ece38aba11da982d32ff6d83cb3a47927481a7076baa6c44b13"
+      "size": 39979,
+      "sha256": "fb8c8d9a582cccdf5d3582e2f4d225c51614a972a55b6d367a56f1ba8b232c94"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/RootInstalledStampTests.java": {
       "size": 2889,
@@ -2121,16 +2121,16 @@
       "sha256": "83a7b25cd350558f3c03a0eaedf82fa7be700a2e02497ff3eafa6df599c9f96c"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/RootRestoreAdapterTests.java": {
-      "size": 10448,
-      "sha256": "98c135339002289045b7fe55f124c0cc7496dfb5eaf88660354d4026aa216f52"
+      "size": 12233,
+      "sha256": "f6c588948cb432c287ca95b01c3e7a4d25035fbe1befb886a72b8ddff70bce4d"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/RootRestoreJobTests.java": {
-      "size": 11532,
-      "sha256": "a9830482bf6454ef5a2b8faee89634982bd72e0a78a3e54d04208255bdd08448"
+      "size": 11959,
+      "sha256": "8327de47a51d37f1b53fc46ec9c1a87837b1fe0a35d4ef241d403436c2e15ad0"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/mutation/FakeMutationOs.java": {
-      "size": 15380,
-      "sha256": "e99b5344024bbdea3de867901fbd23e9851e0fbc7387692fe032075908b18824"
+      "size": 15537,
+      "sha256": "f99dbd56a2ec0ba7e8fd49d2148a765284cdfaf59eff7aece2fba5d18dd89f30"
     },
     "android-root/src/test/java/io/github/xyz1001/pdsync/root/mutation/MutationHostTests.java": {
       "size": 27251,
