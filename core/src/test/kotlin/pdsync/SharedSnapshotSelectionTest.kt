@@ -85,7 +85,12 @@ class SharedSnapshotSelectionTest {
   assertFiles(files(), local.root)
   assertEquals(first.id, local.baseline()); assertFalse(local.hasPending())
   assertEquals(setOf(first.id, second.id), local.syncHistory().graph.tips)
-  assertIs<AutomaticPushResult.Skipped>(local.automaticPush(store) { true })
+  val reused=assertIs<AutomaticPushResult.Skipped>(local.automaticPush(store) { true })
+  assertEquals(RemoteVerification.OBJECTS_VERIFIED,reused.comparison.verification)
+  assertTrue(local.hasVerifiedUploadContent(reused.comparison))
+  assertEquals(first.id,local.baseline());assertFalse(local.hasPending())
+  assertEquals(setOf(first.id,second.id),local.syncHistory().graph.tips)
+  assertEquals(2,store.commits.size);assertFiles(files(),local.root)
   assertEquals(0, store.writes)
  }
 
@@ -198,7 +203,7 @@ class SharedSnapshotSelectionTest {
   val history = facade.historyPresentation()
   assertEquals(firstId, history.baseline)
   assertEquals(setOf(firstId, secondId), history.graph.tips)
-  assertEquals("SKIPPED_CONFLICT", facade.autoUpload().status)
+  assertEquals("UNCHANGED", facade.autoUpload().status)
   assertEquals(0, store.writes)
  }
 

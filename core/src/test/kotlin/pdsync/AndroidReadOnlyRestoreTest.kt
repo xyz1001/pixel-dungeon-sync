@@ -119,7 +119,7 @@ class AndroidReadOnlyRestoreTest {
         assertEquals(first.snapshot.directoryMetadata?.runs, rig.sidecar().runs)
         assertEquals(2, rig.store.commits.size)
         rig.store.expired = false
-        assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
+        assertEquals("UNCHANGED", rig.facade.autoUpload().status)
         assertEquals(2,rig.store.commits.size);assertEquals(second.id,rig.store.latest().id)
         assertEquals(first.id,rig.repo().baseline());assertNull(rig.repo().pending())
 
@@ -163,7 +163,7 @@ class AndroidReadOnlyRestoreTest {
         otherDevice.bridge.files = fixture(3)
         assertEquals("UPLOADED", otherDevice.facade.autoUpload().status)
         val sibling = rig.store.latest()
-        assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
+        assertEquals("UNCHANGED", rig.facade.autoUpload().status)
         val result = rig.facade.upload(rig.facade.inspect())
         assertFalse(result.isPending); assertFalse(result.isConflict)
         assertEquals(sibling.id,rig.store.latest().id); assertEquals(3,rig.store.commits.size)

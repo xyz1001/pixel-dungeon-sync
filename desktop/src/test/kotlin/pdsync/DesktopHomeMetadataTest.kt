@@ -41,7 +41,7 @@ class DesktopHomeMetadataTest {
   return store to session("local", "same progress")
  }
 
- @Test fun metadataPreviewIsZeroZipAndIdenticalManualUploadFullyVerifiesWithoutPutOrBaseline() {
+ @Test fun metadataPreviewIsZeroZipAndIdenticalManualUploadVerifiesAndAssociatesWithoutPut() {
   val (store, manager)=seeded()
   val preview=manager.readHomeHistory(store)
   assertEquals(0,store.objectReads)
@@ -52,7 +52,7 @@ class DesktopHomeMetadataTest {
   val result=assertIs<HomePushResult.Unchanged>(manager.pushFromHome(preview,store) { true })
   assertTrue(store.objectReads>0,"zero PUT still requires full object verification")
   assertEquals(0,store.puts)
-  assertNull(manager.baseline(),"no-transfer upload does not adopt cloud ancestry")
+  assertEquals(preview.graph.tips.single(),manager.baseline(),"verified no-transfer upload associates the existing content record")
   assertFalse(manager.hasPending())
   assertEquals(RemoteVerification.OBJECTS_VERIFIED,result.history.graph.verification)
   assertTrue(result.history.currentProtected)
@@ -83,7 +83,7 @@ class DesktopHomeMetadataTest {
   assertFalse(preview.currentProtected)
  }
 
- @Test fun metadataReadyOnlySchedulesFreshFullAutomaticCheckAndNeverCreatesBaseline() {
+ @Test fun metadataReadyOnlySchedulesFreshFullAutomaticCheckThatAssociatesVerifiedContent() {
   val (store,manager)=seeded()
   val preview=manager.readHomeHistory(store)
   assertEquals(0,store.objectReads)
@@ -91,12 +91,13 @@ class DesktopHomeMetadataTest {
   assertEquals(OnboardingKind.IDENTICAL,unchanged.comparison.kind)
   assertEquals(RemoteVerification.OBJECTS_VERIFIED,unchanged.comparison.verification)
   assertTrue(store.objectReads>0,"automatic path must upgrade by its own full comparison")
-  assertEquals(0,store.puts);assertNull(manager.baseline());assertFalse(manager.hasPending())
+  val associated=preview.graph.tips.single()
+  assertEquals(0,store.puts);assertEquals(associated,manager.baseline());assertFalse(manager.hasPending())
   assertEquals(RemoteVerification.METADATA_ONLY,preview.graph.verification)
   store.objects[store.objects.keys.single()]=byteArrayOf(1,2,3)
   val blocked=assertIs<AutomaticPushResult.Skipped>(manager.automaticPush(store) { true })
   assertEquals(OnboardingKind.BLOCKED,blocked.comparison.kind)
-  assertEquals(0,store.puts);assertNull(manager.baseline());assertFalse(manager.hasPending())
+  assertEquals(0,store.puts);assertEquals(associated,manager.baseline());assertFalse(manager.hasPending())
  }
 
  @Test fun branchAppearingAfterMetadataCannotAuthorizeAutomaticPublish() {
@@ -107,7 +108,7 @@ class DesktopHomeMetadataTest {
   store.puts=0;store.objectReads=0
   val skipped=assertIs<AutomaticPushResult.Skipped>(manager.automaticPush(store) { true })
   assertEquals(OnboardingKind.BRANCHED,skipped.comparison.kind)
-  assertTrue(store.objectReads>0);assertEquals(0,store.puts);assertNull(manager.baseline())
+  assertTrue(store.objectReads>0);assertEquals(0,store.puts);assertEquals(preview.graph.tips.single(),manager.baseline())
   assertEquals(1,preview.graph.tips.size,"original metadata must stay immutable")
  }
 

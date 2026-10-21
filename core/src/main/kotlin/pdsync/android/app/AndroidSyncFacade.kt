@@ -206,7 +206,8 @@ class AndroidSyncFacade internal constructor(
      inspection=inspectLocked();comparison=inspection.comparison ?: return@locked autoBlocked("SKIPPED_UNCERTAIN",inspection.blockReason ?: SyncBlockReason.COMPARISON_FAILED,true)
     }
    }
-   if(comparison.kind in setOf(OnboardingKind.IDENTICAL,OnboardingKind.BOTH_EMPTY)) return@locked AutoUploadResult("UNCHANGED",CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),null,false)
+   val reused=session.reuseVerifiedUploadContent(comparison,mirrorStopped)
+   if(comparison.kind in setOf(OnboardingKind.IDENTICAL,OnboardingKind.BOTH_EMPTY) || reused!=null) return@locked AutoUploadResult("UNCHANGED",CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),reused?.snapshot?.id,false)
    if(!AutomaticUploadEligibility.allows(comparison)) {
     val choice=comparison.observedTips.size>1 || comparison.kind==OnboardingKind.DIFFERENT || comparison.retryablePending
     val reason=comparison.blockReason ?: when {choice->SyncBlockReason.HISTORY_CONFLICT;comparison.kind==OnboardingKind.REMOTE_ONLY->SyncBlockReason.REMOTE_ONLY;comparison.baselineLineage==OnboardingLineage.BLOCKED->SyncBlockReason.BASELINE_UNVERIFIED;else->SyncBlockReason.COMPARISON_FAILED}
@@ -215,7 +216,7 @@ class AndroidSyncFacade internal constructor(
    checkActualUnchanged(comparison.localFiles)
    when(val result=session.onboardingUpload(comparison,store,mirrorStopped)) {
     is AppendPushResult.Prepared -> autoBlocked("SKIPPED_UNCERTAIN",SyncBlockReason.HISTORY_CONFLICT,true)
-    is AppendPushResult.Success -> AutoUploadResult("UPLOADED",if(result.remoteAhead)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_BUT_THE_CLOUD_ADVANCED_REVIEW_BEFORE_RESTORING.text() else CoreMessages.ANDROID_BACKGROUND_SNAPSHOT_UPLOADED_AND_VERIFIED.text(),result.commit.snapshot.id,result.remoteAhead)
+    is AppendPushResult.Success -> AutoUploadResult(if(result.reused)"UNCHANGED" else "UPLOADED",if(result.reused)CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text() else if(result.remoteAhead)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_BUT_THE_CLOUD_ADVANCED_REVIEW_BEFORE_RESTORING.text() else CoreMessages.ANDROID_BACKGROUND_SNAPSHOT_UPLOADED_AND_VERIFIED.text(),result.commit.snapshot.id,result.remoteAhead)
     is AppendPushResult.Diverged -> AutoUploadResult("SKIPPED_CONFLICT",CoreMessages.ANDROID_A_REMOTE_BRANCH_ARRIVED_DURING_UPLOAD_BOTH_IMMUTABLE_BRANCHES_ARE_PRESERVED_CHOOSE_EXPLICI.text(),result.conflict.branches.find {it.commit.id==result.conflict.publishedLocalCommit}?.snapshot?.manifest?.id,true,SyncBlockReason.HISTORY_CONFLICT)
    }
   } catch(e:Exception) {
@@ -237,7 +238,7 @@ class AndroidSyncFacade internal constructor(
   val tip=comparison.observedTips.singleOrNull()?.let {comparison.graph?.commits?.get(it)}
   if(inspection.comparison?.verification==RemoteVerification.METADATA_ONLY && comparison.verification==RemoteVerification.OBJECTS_VERIFIED &&
    comparison.kind==OnboardingKind.IDENTICAL && !comparison.retryablePending && comparison.pendingCommit==null && tip?.snapshot?.files==comparison.localFiles)
-   return@locked OperationResult(CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,null)
+   return@locked OperationResult(CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,requireNotNull(session.reuseVerifiedUploadContent(comparison,mirrorStopped)).snapshot.id)
   pushResult(session.onboardingUpload(comparison,store,mirrorStopped))
  }
  fun listVersions():List<Version> = locked {
@@ -403,7 +404,7 @@ class AndroidSyncFacade internal constructor(
  private fun pushResult(result:AppendPushResult,success:String=CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text())=when(result) {
   is AppendPushResult.Prepared -> OperationResult(CoreMessages.ANDROID_GAME_RESTORE_VERIFIED_ANY_FROZEN_UPLOAD_REMAINS_AVAILABLE_FOR_EXPLICIT_RETRY.text(),false,true,result.commit.snapshot.id)
   is AppendPushResult.Diverged -> OperationResult(CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text(),true,session.hasPending(),null)
-  is AppendPushResult.Success -> OperationResult(when {result.remoteAhead->CoreMessages.ANDROID_SNAPSHOT_IS_PRESERVED_BUT_ANOTHER_CLOUD_BRANCH_ADVANCED_COMPARE_AGAIN.text();result.localDirty->CoreMessages.ANDROID_SNAPSHOT_UPLOADED_NEWER_LOCAL_CHANGES_REMAIN_COMPARE_AGAIN.text();else->success},false,session.hasPending(),result.commit.snapshot.id)
+  is AppendPushResult.Success -> OperationResult(when {result.reused->CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text();result.remoteAhead->CoreMessages.ANDROID_SNAPSHOT_IS_PRESERVED_BUT_ANOTHER_CLOUD_BRANCH_ADVANCED_COMPARE_AGAIN.text();result.localDirty->CoreMessages.ANDROID_SNAPSHOT_UPLOADED_NEWER_LOCAL_CHANGES_REMAIN_COMPARE_AGAIN.text();else->success},false,session.hasPending(),result.commit.snapshot.id)
  }
  private fun prepareGameRestore(before:Map<String,String>,after:Map<String,String>,action:String,verified:VerifiedSnapshot?=null,verifiedProvider:(()->VerifiedSnapshot?)?=null,stage:()->Unit):AndroidRestoreReceipt? {
   val target=verifiedTarget();val journal=RestoreJournal(profileScope=scope,gameSourceIdentity=identity.originalSourceIdentity,gamePackage=identity.packageName,installedApkSha256=target.apkSha256,sourceApkSha256=target.sourceApkSha256,expectedBefore=before,expectedAfter=after,action=action)

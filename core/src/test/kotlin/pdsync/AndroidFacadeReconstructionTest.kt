@@ -336,6 +336,26 @@ class AndroidFacadeReconstructionTest {
         assertEquals(writes, store.writes); assertEquals(before, fingerprint(mirror(rig.root)))
         assertEquals(child.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
     }
+    @Test fun reassociatingHistoricalContentChangesOnlyLocalReceiptNotGameFiles() {
+        val store=MemoryAppendStore();val bridge=FakeBridge();val rig=publish(bridge,store)
+        val first=store.latest()
+        bridge.files=fixture(2);assertEquals("UPLOADED",rig.facade.autoUpload().status)
+        val second=store.latest()
+        bridge.files=fixture(1);rig.facade.inspect()
+        val root=mirror(rig.root)
+        fun gameFingerprint()=fingerprint(root).filterKeys {Shattered.includes(it) && !isDirectoryMetadata(it)}
+        val before=gameFingerprint();val writes=store.writes
+        val beforeMetadata=(DirectoryMetadataStore(root).read() as SidecarRead.Valid).value
+        assertEquals(second.id,beforeMetadata.lastSynced?.commitId)
+        assertEquals("UNCHANGED",rig.facade.autoUpload().status)
+        assertEquals(before,gameFingerprint());assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
+        val afterMetadata=(DirectoryMetadataStore(root).read() as SidecarRead.Valid).value
+        assertEquals(first.id,afterMetadata.lastSynced?.commitId)
+        assertEquals(beforeMetadata.displayName,afterMetadata.displayName)
+        assertEquals(beforeMetadata.runs,afterMetadata.runs)
+        assertEquals(first.id,rig.facade.historyPresentation(rig.facade.inspect()).baseline)
+        assertEquals(2,store.commits.size)
+    }
     @Test fun changedRemoteHistoryRequiresChoiceAndDoesNotOverwriteLocalProgress() {
         val store = MemoryAppendStore(); val aBridge = FakeBridge(); val a = publish(aBridge, store).facade
         val bBridge = FakeBridge(); val b = rig(bBridge, store).facade

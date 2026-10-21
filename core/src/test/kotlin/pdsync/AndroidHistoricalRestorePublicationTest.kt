@@ -135,7 +135,37 @@ class AndroidHistoricalRestorePublicationTest {
         assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
     }
 
+    @Test fun restoredHistoricalContentManualAndAutomaticUploadNeverWriteAgain() {
+        val rig = Rig(); val (first, second) = rig.publishTwo()
+        rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
+        val writes = rig.store.objectAttempts to rig.store.commitAttempts
+        rig.store.beforeWrite = { fail("Identical historical content must not be republished") }
+        val uploaded = rig.facade.upload(rig.facade.inspect())
+        assertEquals(first.snapshot.id, uploaded.snapshotId)
+        assertFalse(uploaded.isPending); assertFalse(uploaded.isConflict)
+        assertEquals("UNCHANGED", rig.facade.autoUpload().status)
+        assertEquals(writes, rig.store.objectAttempts to rig.store.commitAttempts)
+        assertEquals(setOf(first.id, second.id), rig.store.commits.keys)
+        assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
+        assertNull(rig.pending())
+    }
 
+    @Test fun returningContentAssociatesHistoricalRecordAndNewContentKeepsThatParent() {
+        val rig = Rig(); val (first, second) = rig.publishTwo()
+        rig.bridge.files = fixture(1)
+        val writes = rig.store.objectAttempts to rig.store.commitAttempts
+        val uploaded = rig.facade.upload(rig.facade.inspect())
+        assertEquals(first.snapshot.id, uploaded.snapshotId)
+        assertEquals(writes, rig.store.objectAttempts to rig.store.commitAttempts)
+        assertEquals(first.id, rig.facade.historyPresentation(rig.facade.inspect()).baseline)
+        assertEquals("UNCHANGED", rig.facade.autoUpload().status)
+        rig.bridge.files = fixture(3)
+        assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
+        assertEquals(writes, rig.store.objectAttempts to rig.store.commitAttempts)
+        assertTrue(rig.facade.upload(rig.facade.inspect()).isConflict)
+        assertEquals(listOf(first.id), rig.store.latest().parents)
+        assertEquals(3, rig.store.commits.size)
+    }
 
     @Test fun helperFailureRequiresRecoveryWithoutCreatingAnyUploadPlan() {
         val rig = Rig(); val (first, second) = rig.publishTwo()
@@ -155,7 +185,7 @@ class AndroidHistoricalRestorePublicationTest {
     @Test fun equalGameBytesDoNotPublishRestoreOrChangeBaselineOrCallHelper() {
         val rig = Rig(); val (first, _) = rig.publishTwo()
         rig.bridge.files = fixture(1)
-        assertEquals("UPLOADED", rig.facade.autoUpload().status)
+        assertEquals("UNCHANGED", rig.facade.autoUpload().status)
         val previous = rig.store.latest()
         val result = rig.facade.restoreSelected(rig.facade.inspect(), first.snapshot.id, false)
         assertFalse(result.isPending); assertFalse(result.isConflict)

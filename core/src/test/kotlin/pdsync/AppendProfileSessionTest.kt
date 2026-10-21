@@ -268,7 +268,8 @@ class AppendProfileSessionTest {
  @Test fun vanishedRemoteBaselineStopsPublicationAndNeverSilentlyStartsNewHistory() {
   val store = Memory(); val local = session(); val first = published(local, store)
   store.commits.remove(first.id); edit(local, "next")
-  assertFails { local.push(store) { true } }; assertEquals(0, store.commits.size); assertTrue(local.hasPending())
+  assertFails { local.push(store) { true } }; assertEquals(0, store.commits.size); assertFalse(local.hasPending())
+  assertEquals(first.id,local.baseline());assertEquals("next",content(local));assertEquals(1,store.objects.size)
  }
 
  @Test fun readRemoteReturnsEveryObservedTipWithoutWritesOrChangingLocalBaseline() {

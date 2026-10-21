@@ -55,9 +55,9 @@ class AutomaticPushSafetyTest {
  }
  private fun publish(local: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(local.push(store) { true }).commit
  private fun repository(local: AppendProfileSession) = AppendRepository(local.directory.resolve("append-v2"), Shattered, local.config.profile)
- private fun skippedWithoutWrites(local: AppendProfileSession, store: Memory): OnboardingComparison {
+ private fun skippedWithoutWrites(local: AppendProfileSession, store: Memory, expectedBaseline:String?=local.baseline()): OnboardingComparison {
   val writes = store.writes; val objects = store.objects.keys.toSet(); val commits = store.commits.keys.toSet()
-  val baseline = local.baseline(); val pending = repository(local).pending()
+  val baseline = expectedBaseline; val pending = repository(local).pending()
   val result = assertIs<AutomaticPushResult.Skipped>(local.automaticPush(store) { true })
   assertEquals(writes, store.writes); assertEquals(objects, store.objects.keys); assertEquals(commits, store.commits.keys)
   assertEquals(baseline, local.baseline()); assertEquals(pending?.commit, repository(local).pending()?.commit)
@@ -109,10 +109,11 @@ class AutomaticPushSafetyTest {
    assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(saved.onboardingProgress, true, false))
    assertNull(restarted.baseline()); assertFalse(restarted.hasPending()); assertEquals(writes, store.writes)
    // A later genuine exit event still runs the unchanged conservative automatic gate.
-   val comparison = skippedWithoutWrites(restarted, store)
+   val expectedBaseline=if(content=="remote progress")remote.id else null
+   val comparison = skippedWithoutWrites(restarted, store,expectedBaseline)
    assertEquals(OnboardingLineage.NONE, comparison.baselineLineage)
    assertEquals(setOf(remote.id), comparison.observedTips)
-   assertNull(restarted.baseline()); assertFalse(restarted.hasPending())
+   assertEquals(expectedBaseline,restarted.baseline()); assertFalse(restarted.hasPending())
    if (before == null) assertFalse(local.root.resolve("game1/game.dat").exists())
    else assertContentEquals(before, local.root.resolve("game1/game.dat").readBytes())
   }
@@ -133,13 +134,14 @@ class AutomaticPushSafetyTest {
   assertEquals(listOf(first.id), commit.parents); assertEquals(commit.id, local.baseline()); assertEquals(4, store.writes)
  }
 
- @Test fun oneUnknownRemoteTipDoesNotAuthorizeAnUnbasedRootOrEqualByteAssociation() {
-  val store = Memory(); publish(session("remote"), store)
+ @Test fun oneUnknownRemoteTipAllowsOnlyVerifiedEqualContentAssociation() {
+  val store = Memory();val remote=publish(session("remote"), store)
   for (content in listOf("independent local", "remote")) {
-   val local = session(content); val result = skippedWithoutWrites(local, store)
+   val expectedBaseline=if(content=="remote")remote.id else null
+   val local = session(content); val result = skippedWithoutWrites(local, store,expectedBaseline)
    assertEquals(OnboardingLineage.NONE, result.baselineLineage)
    assertEquals(if (content == "remote") OnboardingKind.IDENTICAL else OnboardingKind.DIFFERENT, result.kind)
-   assertNull(local.baseline()); assertFalse(local.hasPending())
+   assertEquals(expectedBaseline,local.baseline()); assertFalse(local.hasPending())
   }
  }
 

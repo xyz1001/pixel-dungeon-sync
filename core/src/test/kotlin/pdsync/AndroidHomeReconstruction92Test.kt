@@ -163,13 +163,13 @@ class AndroidHomeReconstruction92Test {
   assertExportsClean(rig.root)
  }
 
- @Test fun sameContentMetadataUploadVerifiesButDoesNotWriteOrAdoptBaseline() {
+ @Test fun sameContentMetadataUploadVerifiesAndAssociatesWithoutWriting() {
   val store=Store();publish(store);val bridge=Bridge();val rig=rig(bridge,store);val home=rig.facade.inspectHome();val writes=store.writes;val commits=store.commits.keys.toSet();val reads=store.objectReads.get()
   val result=rig.facade.upload(home)
-  assertFalse(result.isConflict);assertFalse(result.isPending);assertNull(result.snapshotId)
+  assertFalse(result.isConflict);assertFalse(result.isPending);assertEquals(store.latest().snapshot.id,result.snapshotId)
   assertEquals(writes,store.writes);assertEquals(commits,store.commits.keys);assertTrue(store.objectReads.get()>reads)
-  val verified=rig.facade.inspect();assertTrue(verified.isObjectVerified);assertNull(verified.comparison?.baselineId)
-  assertFalse(verified.canCompleteWithoutTransfer);assertFalse(verified.canAutoUpload)
+  val verified=rig.facade.inspect();assertTrue(verified.isObjectVerified);assertEquals(store.latest().id,verified.comparison?.baselineId)
+  assertTrue(verified.canCompleteWithoutTransfer);assertFalse(verified.canAutoUpload)
  }
 
  @Test fun differentMetadataContentRetainsPublishingBranchBehavior() {

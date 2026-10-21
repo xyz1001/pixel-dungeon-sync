@@ -468,6 +468,19 @@ class AppendProfileSession(
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
    else AppendPushResult.Success(commit, runCatching { currentFiles() != commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != commit.id)
  }
+ /** Content identity is the complete normalized game-file map, never capture/portable metadata.
+  * This helper consumes existing object evidence and performs no discovery or object reads. */
+ private fun matchingUpload(graph:CommitGraph,files:Map<String,String>):AppendCommit? {
+  if(files.isEmpty() || graph.verification!=RemoteVerification.OBJECTS_VERIFIED || graph.pending.isNotEmpty())return null
+  val baseline=repository.baseline()
+  return graph.commits.values.filter {it.snapshot.files==files}
+   .sortedWith(compareBy<AppendCommit> {it.id!=baseline}.thenBy {it.id !in graph.tips}.thenBy {it.id}).firstOrNull()
+ }
+ internal fun hasVerifiedUploadContent(comparison:OnboardingComparison):Boolean {
+  require(comparison.owner===comparisonOwner)
+  if(comparison.retryablePending || comparison.kind==OnboardingKind.BLOCKED)return false
+  return comparison.graph?.let {matchingUpload(it,comparison.localFiles)}!=null
+ }
  private fun associateUpload(commit:AppendCommit,graph:CommitGraph) {
   val receipt=DirectorySyncBaseline(hash(directory.toString().encodeToByteArray()),commit.id,contentSha256(commit.snapshot.files))
   val sidecar=local.directoryMetadata.read()
@@ -483,25 +496,50 @@ class AppendProfileSession(
   associateUpload(commit,graph)
   repository.clearPending()
  }
+ private fun reuseUpload(commit:AppendCommit,graph:CommitGraph,pending:UploadPlan?=null):AppendPushResult.Success {
+  pending?.let {preserve(it,CoreSessionMessages.APPEND_ONLY_UPLOAD_ARCHIVED.text())}
+  associateUpload(commit,graph)
+  if(pending!=null)repository.clearPending()
+  return AppendPushResult.Success(commit,currentFiles()!=commit.snapshot.files,graph.tips.singleOrNull()!=commit.id,reused=true)
+ }
+ /** Associate a fresh, already object-verified automatic comparison without another cloud read. */
+ internal fun reuseVerifiedUploadContent(comparison:OnboardingComparison,stopped:()->Boolean):AppendCommit? = local.locked {
+  if(!hasVerifiedUploadContent(comparison))return@locked null
+  local.guard(stopped);noLegacyPending();appliedOnly()
+  require(repository.pending()==null && repository.baseline()==comparison.baselineId) {
+   CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()
+  }
+  SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+  val graph=requireNotNull(comparison.graph)
+  val commit=matchingUpload(graph,comparison.localFiles) ?: return@locked null
+  associateUpload(commit,graph)
+  commit
+ }
  fun push(store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
-  // Freeze stopped, stable local bytes and real parents BEFORE contacting the network. An offline
-  // first attempt is durable, and restarting can retry these exact bytes without startup recapture.
-  val plan = repository.pending() ?: run {
-   val baseline = repository.baseline()
+  val pending=repository.pending()
+  val stability=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis)
+  val fingerprint=if(pending==null)stability.awaitStable() else null
+  val files=pending?.commit?.snapshot?.files ?: requireNotNull(fingerprint).files
+  fun freeze():UploadPlan {
    val captured = captureContent(stopped)
-   val previous = baseline?.let { repository.cachedGraph().commits[it] }
-   // Identical content AND portable metadata is already protected by this verified baseline.
-   // Still observe the graph so a remote advance/conflict is reported without creating a sibling.
-   if (previous != null && previous.snapshot.files == captured.manifest.files &&
-       previous.snapshot.directoryMetadata == captured.manifest.directoryMetadata) {
-    val graph = discover(store)
-    return@locked if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
-     else AppendPushResult.Success(previous, currentFiles() != previous.snapshot.files, graph.tips.singleOrNull() != previous.id)
-   }
-   repository.prepare(captured, listOfNotNull(baseline), operation = local.operationMetadata())
+   require(captured.manifest.files==files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+   fingerprint?.let(stability::requireUnchanged)
+   return repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
   }
-  publish(plan, store, stopped)
+  // The publication graph is acquired once, before capture. Metadata/UUID/time differences
+  // cannot manufacture a ZIP for content already verified anywhere in live cloud history.
+  val graph=try { discover(store) } catch(error:java.io.IOException) {
+   // Keep the established offline retry contract without treating unavailable evidence as a
+   // match. Integrity/settlement failures are not transport failures and never enter this path.
+   if(error is io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException)throw error
+   if(pending==null)preserve(freeze(),CoreSessionMessages.APPEND_ONLY_SYNC.text("normal"))
+   throw error
+  }
+  fingerprint?.let(stability::requireUnchanged)
+  matchingUpload(graph,files)?.let {return@locked reuseUpload(it,graph,pending)}
+  val plan=pending ?: freeze()
+  publish(plan,store,stopped,graph)
  }
 
  /** Verify every observed tip, presenting exact duplicate snapshots once. The graph retains all
@@ -511,15 +549,15 @@ class AppendProfileSession(
    local.guard(stopped);noLegacyPending();appliedOnly()
    if(observedHistory==null || repository.pending()!=null)return@locked null
    require(observedHistory.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
-   if(observedHistory.graph.verification!=RemoteVerification.METADATA_ONLY || observedHistory.graph.pending.isNotEmpty())return@locked null
-   val candidate=observedHistory.graph.tips.singleOrNull()?.let(observedHistory.graph.commits::get) ?: return@locked null
-   if(candidate.snapshot.files.isEmpty() || candidate.snapshot.files!=currentFiles())return@locked null
+   if(observedHistory.graph.pending.isNotEmpty())return@locked null
+   val files=currentFiles()
+   val candidate=observedHistory.graph.commits.values.firstOrNull {it.snapshot.files.isNotEmpty() && it.snapshot.files==files} ?: return@locked null
    val stability=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis);val fingerprint=stability.awaitStable()
    if(candidate.snapshot.files!=fingerprint.files)return@locked null
    val fresh=discover(store);stability.requireUnchanged(fingerprint);noLegacyPending();appliedOnly()
    if(repository.pending()!=null)return@locked null
-   val tip=fresh.tips.singleOrNull()?.let(fresh.commits::get) ?: return@locked null
-   if(tip.snapshot.files!=fingerprint.files)return@locked null
+   val matched=matchingUpload(fresh,fingerprint.files) ?: return@locked null
+   associateUpload(matched,fresh)
    val history=historyView(fresh);stability.requireUnchanged(fingerprint);history
   }
   return unchanged?.let(HomePushResult::Unchanged) ?: HomePushResult.Published(push(store,stopped))
@@ -855,21 +893,24 @@ class AppendProfileSession(
   * The same session-bound proof is revalidated by onboardingUpload under the physical-root lock. */
  fun automaticPush(store: AppendStore, stopped: () -> Boolean): AutomaticPushResult {
   val comparison = compareOnboarding(store, stopped)
-  if (!AutomaticUploadEligibility.allows(comparison)) return AutomaticPushResult.Skipped(comparison)
+  if (reuseVerifiedUploadContent(comparison,stopped)!=null || !AutomaticUploadEligibility.allows(comparison)) return AutomaticPushResult.Skipped(comparison)
   return AutomaticPushResult.Published(onboardingUpload(comparison, store, stopped))
  }
 
  /** Upload follows an explicit choice or the strict automatic gate, including a frozen retry. Never freeze empty saves. */
  fun onboardingUpload(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
-  revalidateComparison(comparison, store, stopped, allowPending = true)
-  val plan = repository.pending() ?: run {
+  val graph=revalidateComparison(comparison, store, stopped, allowPending = true)
+  val pending=repository.pending()
+  val files=pending?.commit?.snapshot?.files ?: comparison.localFiles
+  matchingUpload(graph,files)?.let {return@locked reuseUpload(it,graph,pending)}
+  val plan = pending ?: run {
    require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }
    val captured = captureContent(stopped)
    require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
   }
-  publish(plan, store, stopped)
+  publish(plan, store, stopped,graph)
  }
 
  /** Applies the selected cloud branch without publishing overwritten local bytes. */

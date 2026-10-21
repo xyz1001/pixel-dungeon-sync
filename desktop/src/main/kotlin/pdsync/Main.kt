@@ -474,16 +474,24 @@ internal fun runSyncApplication(
       trace.record(OperationEvent.WORK_STARTED)
       val stopped = { true }
       val remoteStore by lazy { syncAccess.store(manager.config, manager.adapter.id, secret) }
-      fun store() = remoteStore
-      // Explicit manual upload may retry failed initial app-folder preparation.
-      // Background history reads and automatic upload never provision folders.
-      if (action == Action.PUSH && !isAutomatic && manager.config.connectionProvider == "official" &&
-          isDesktopOfficialRoot(manager.config.endpoint)) {
-       store().ensureNamespace { !appClosed && session === manager && config == operationConfig }
+      val uploadStore: AppendStore by lazy {
+       if (action == Action.PUSH && !isAutomatic && manager.config.connectionProvider == "official" &&
+           isDesktopOfficialRoot(manager.config.endpoint)) object : AppendStore by remoteStore {
+        private var namespaceReady = false
+        private fun prepareWrite() {
+         if (!namespaceReady) {
+          remoteStore.ensureNamespace { !appClosed && session === manager && config == operationConfig }
+          namespaceReady = true
+         }
+        }
+        override fun writeObject(id: String, bytes: ByteArray) { prepareWrite(); remoteStore.writeObject(id, bytes) }
+        override fun writeCommit(id: String, bytes: ByteArray) { prepareWrite(); remoteStore.writeCommit(id, bytes) }
+       } else remoteStore
       }
+      fun store(): AppendStore = uploadStore
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
        is AppendPushResult.Prepared -> OperationResult(DesktopMessages.LOCAL_MERGE_COMPLETE_BUT_CLOUD_UPLOAD_IS_INCOMPLETE_CLICK_UPLOAD_TO_RETRY_T.text())
-       is AppendPushResult.Success -> OperationResult(DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text() + (if (result.localDirty) DesktopMessages.LOCAL_CHANGES_REMAIN_UNUPLOADED_THE_NEXT_SYNC_WILL_CREATE_A_SEPARATE_COMMIT.text() else DesktopMessages.THE_SELECTED_PROGRESS_IS_NOW_THIS_DEVICE_S_SYNC_BASELINE.text()) + (if (result.remoteAhead) DesktopMessages.ADDITIONAL_LATER_BRANCHES_HAVE_BEEN_OBSERVED_AND_CAN_BE_VIEWED.text() else ""))
+       is AppendPushResult.Success -> OperationResult((if (result.reused) DesktopMessages.PROGRESS_SYNCED_LOCAL_AND_CLOUD_PROFILES_ARE_IDENTICAL.text() else DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text()) + (if (result.localDirty) DesktopMessages.LOCAL_CHANGES_REMAIN_UNUPLOADED_THE_NEXT_SYNC_WILL_CREATE_A_SEPARATE_COMMIT.text() else if (!result.reused) DesktopMessages.THE_SELECTED_PROGRESS_IS_NOW_THIS_DEVICE_S_SYNC_BASELINE.text() else "") + (if (result.remoteAhead) DesktopMessages.ADDITIONAL_LATER_BRANCHES_HAVE_BEEN_OBSERVED_AND_CAN_BE_VIEWED.text() else ""))
        is AppendPushResult.Diverged -> OperationResult(DesktopMessages.FOUND_1_S_PROGRESS_BRANCHES_ALL_SNAPSHOTS_HAVE_BEEN_PRESERVED_PLEASE_CHOOSE.text(result.conflict.branches.size), result.conflict)
       }
       val completed = when (action) {
@@ -523,8 +531,9 @@ internal fun runSyncApplication(
      if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE,Action.MERGE,Action.MERGE_CURRENT)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
      if (result.verifiedHistory != null) {
-      // Verification of identical content does not silently establish an automatic baseline.
-      automatic.skipped()
+      val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
+      if (baseline != null && baseline == result.verifiedHistory.currentFiles) automatic.succeeded(baseline)
+      else automatic.skipped()
      } else if (result.automaticSkipped) {
       automatic.skipped(); automaticStatus = result.message
      } else if (action == Action.PUSH) {
