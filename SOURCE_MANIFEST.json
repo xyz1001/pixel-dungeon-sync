@@ -3061,8 +3061,8 @@
       "sha256": "11c1b6a1683dbd3e8b8795c74f950a5959a722717d85f4ae7c13ebc9334fdf50"
     },
     "desktop/src/test/kotlin/pdsync/DesktopConflictDialogTest.kt": {
-      "size": 8983,
-      "sha256": "af864478f5e5ec92e630d9c2cfe0fc64656971793d107268d6144ef06115e08d"
+      "size": 9719,
+      "sha256": "2e388d8f8a04b0a4b8aa9b55e5bd4808a8be54f42d059cd04bc260453d6b4c4d"
     },
     "desktop/src/test/kotlin/pdsync/DesktopConnectionAdapterTest.kt": {
       "size": 15997,
