@@ -114,7 +114,13 @@ class DesktopSharedComparisonFlowTest {
  }
 
  @Test fun multiHeadSelectionChangesTokenAndNeverSilentlyPicksABranch() {
-  val store = Memory(); publish(session("one"), store); session("two").push(store) { true }
+  val store = Memory(); publish(session("one"), store)
+  // Existing independent legacy head, not an unconfirmed upload through current policy.
+  val legacy=Memory();publish(session("two"),legacy)
+  legacy.objects.forEach {(id,bytes)->store.writeObject(id,bytes)}
+  legacy.commits.forEach {(id,bytes)->store.writeCommit(id,bytes)}
+  val commitsBefore=store.commits.mapValues {it.value.copyOf()}
+  val objectsBefore=store.objects.mapValues {it.value.copyOf()}
   val manager = session("local")
   val observed = manager.compareOnboarding(store) { true }
   assertEquals(OnboardingKind.BRANCHED, observed.kind)
@@ -133,6 +139,10 @@ class DesktopSharedComparisonFlowTest {
   adapter.observed(manager.compareOnboarding(store) { true })
   assertNull(adapter.dialog)
   assertNull(adapter.selectedId)
+  assertEquals(commitsBefore.keys,store.commits.keys);assertEquals(objectsBefore.keys,store.objects.keys)
+  commitsBefore.forEach {(id,bytes)->assertContentEquals(bytes,store.commits[id])}
+  objectsBefore.forEach {(id,bytes)->assertContentEquals(bytes,store.objects[id])}
+  assertNull(manager.baseline());assertFalse(manager.hasPending())
  }
 
  @Test fun realUploadFinishCompletesOnceOnlyAfterSuccessAndFreshCoreConfirmation() {

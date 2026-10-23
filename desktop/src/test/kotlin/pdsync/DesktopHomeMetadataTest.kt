@@ -60,14 +60,17 @@ class DesktopHomeMetadataTest {
   assertEquals(preview.currentFiles,result.history.currentFiles)
  }
 
- @Test fun changedContentKeepsOriginalBranchPublishingSemantics() {
+ @Test fun changedContentWaitsForConfirmationWithoutPublishing() {
   val (store,manager)=seeded()
   manager.root.resolve("game1/game.dat").writeText("different local progress")
   val preview=manager.readHomeHistory(store)
   val result=assertIs<HomePushResult.Published>(manager.pushFromHome(preview,store) { true })
   assertIs<AppendPushResult.Diverged>(result.result)
-  assertTrue(store.puts>0)
-  assertEquals(2,manager.syncHistory().graph.tips.size)
+  assertEquals(0,store.puts,"opening conflict must not publish")
+  assertEquals(preview.graph.tips,manager.syncHistory().graph.tips)
+  assertEquals(1,store.commits.size);assertEquals(1,store.objects.size)
+  assertNull(manager.baseline());assertFalse(manager.hasPending())
+  assertEquals("different local progress",manager.root.resolve("game1/game.dat").readText())
  }
 
  @Test fun wrongOwnerAndCorruptedObjectsCannotProduceVerifiedNoTransferResult() {
@@ -104,7 +107,10 @@ class DesktopHomeMetadataTest {
   val (store,manager)=seeded()
   val preview=manager.readHomeHistory(store)
   val sibling=session("sibling","independent branch")
-  assertIs<AppendPushResult.Diverged>(sibling.push(store) { true })
+  // Explicit legacy seed: current unbased upload must not create another root.
+  val legacy=Store();assertIs<AppendPushResult.Success>(sibling.push(legacy) { true })
+  legacy.objects.forEach {(id,bytes)->store.writeObject(id,bytes)}
+  legacy.commits.forEach {(id,bytes)->store.writeCommit(id,bytes)}
   store.puts=0;store.objectReads=0
   val skipped=assertIs<AutomaticPushResult.Skipped>(manager.automaticPush(store) { true })
   assertEquals(OnboardingKind.BRANCHED,skipped.comparison.kind)
