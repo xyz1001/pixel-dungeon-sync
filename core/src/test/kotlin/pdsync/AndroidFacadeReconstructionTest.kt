@@ -473,11 +473,10 @@ class AndroidFacadeReconstructionTest {
         val store = MemoryAppendStore(); val bridgeA = FakeBridge(fixture(1))
         val rigA = publish(bridgeA, store); val a = store.latest()
         val expectedFiles = bridgeA.files.mapValues { it.value.copyOf() }
-        val facadeB = rig(FakeBridge(fixture(2)), store).facade
-        val inspectionB = facadeB.inspect()
-        assertFalse(inspectionB.canAutoUpload)
-        // The independent source is published only through the explicit manual upload path.
-        assertTrue(facadeB.upload(inspectionB).isConflict)
+        // An independent branch left by an old writer; current unanchored upload is read-only.
+        val legacy = MemoryAppendStore(); publish(FakeBridge(fixture(2)), legacy)
+        legacy.objects.forEach { (id, bytes) -> store.writeObject(id, bytes) }
+        legacy.commits.forEach { (id, bytes) -> store.writeCommit(id, bytes) }
         val b = store.latest(); assertTrue(b.parents.isEmpty())
         val oldCommits = store.commits.mapValues { it.value.copyOf() }
         val oldObjects = store.objects.mapValues { it.value.copyOf() }

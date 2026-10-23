@@ -148,7 +148,9 @@ class AutomaticPushSafetyTest {
  @Test fun remoteOnlyAndMultipleHeadsNeverPublishAutomatically() {
   val store = Memory(); publish(session("remote"), store)
   assertEquals(OnboardingKind.REMOTE_ONLY, skippedWithoutWrites(session(null), store).kind)
-  assertIs<AppendPushResult.Diverged>(session("independent branch").push(store) { true })
+  val legacy=Memory();publish(session("independent branch"),legacy)
+  legacy.objects.forEach {(id,bytes)->store.writeObject(id,bytes)}
+  legacy.commits.forEach {(id,bytes)->store.writeCommit(id,bytes)}
   val local = session(); assertEquals(OnboardingKind.BRANCHED, skippedWithoutWrites(local, store).kind)
   assertNull(local.baseline()); assertFalse(local.hasPending())
  }

@@ -977,7 +977,12 @@ class AppendProfileSession(
 
  /** Upload follows an explicit choice or the strict automatic gate, including a frozen retry. Never freeze empty saves. */
  fun onboardingUpload(comparison: OnboardingComparison, store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
-  uploadWithGraph(comparison,revalidateComparison(comparison,store,stopped,allowPending=true),store,stopped,false)
+  val graph=revalidateComparison(comparison,store,stopped,allowPending=true)
+  val pending=repository.pending()
+  val pendingCoversTips=pending!=null && (pending.commit.parents.toSet()==graph.tips || matchingUpload(graph,pending.commit.snapshot.files)!=null)
+  if(!pendingCoversTips && uploadNeedsOverwrite(graph,comparison.baselineId,comparison.localFiles))
+   return@locked AppendPushResult.Diverged(preserveConflict(graph,store,stopped))
+  uploadWithGraph(comparison,graph,store,stopped,false)
  }
  /** Fresh proof is acquired and consumed under one physical-root lock, never supplied by UI. */
  internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:(OnboardingComparison)->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {

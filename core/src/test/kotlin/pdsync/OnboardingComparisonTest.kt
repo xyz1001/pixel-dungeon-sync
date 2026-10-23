@@ -65,7 +65,12 @@ class OnboardingComparisonTest {
  private fun repository(session: AppendProfileSession) = AppendRepository(session.directory.resolve("append-v2"), Shattered, "demo")
  private fun dirtyBranchedBaseline(): Triple<Memory, AppendProfileSession, AppendCommit> {
   val store = Memory(); val local = session("base"); val base = publish(local, store)
-  assertIs<AppendPushResult.Diverged>(session("sibling").push(store) { true }); edit(local, "dirty")
+  // Simulate an independent root already published by an old writer. A new manual
+  // upload without a verified baseline must no longer manufacture this branch.
+  val legacy = Memory(); publish(session("sibling"), legacy)
+  legacy.objects.forEach { (id, bytes) -> store.writeObject(id, bytes) }
+  legacy.commits.forEach { (id, bytes) -> store.writeCommit(id, bytes) }
+  edit(local, "dirty")
   return Triple(store, local, base)
  }
 
@@ -167,7 +172,13 @@ class OnboardingComparisonTest {
   assertFails { local.onboardingRestore(old, first.snapshot.id, store) { true } }
   edit(local,"genuinely new local progress")
   val current = compare(local, store)
-  local.onboardingUpload(current, store) { true }
+  val writes=store.writes
+  assertIs<AppendPushResult.Diverged>(local.onboardingUpload(current, store) { true })
+  assertEquals(writes,store.writes);assertNull(local.baseline())
+  // Establish a different baseline by an actual explicit restore, not an unconfirmed upload.
+  val selected=local.readRemote(store).single().entry.manifest.id
+  local.onboardingRestore(current,selected,store){true}
+  edit(local,"genuinely new local progress")
   assertFails { local.onboardingUpload(current, store) { true } }
   assertEquals("genuinely new local progress", content(local))
  }
@@ -225,7 +236,10 @@ class OnboardingComparisonTest {
  }
 
  @Test fun emptyLocalCanChooseAmongAllBranchesWithoutAnyPublication() {
-  val store = Memory(); val chosen = publish(session("a"), store); session("b").push(store) { true }
+  val store = Memory(); val chosen = publish(session("a"), store)
+  val legacy = Memory(); publish(session("b"), legacy)
+  legacy.objects.forEach { (id, bytes) -> store.writeObject(id, bytes) }
+  legacy.commits.forEach { (id, bytes) -> store.writeCommit(id, bytes) }
   val local = session(null); val comparison = compare(local, store)
   assertEquals(OnboardingKind.BRANCHED, comparison.kind); assertEquals(2, comparison.remoteEntries.size)
   val result = assertIs<OnboardingRestoreResult.Published>(local.onboardingRestore(comparison, chosen.snapshot.id, store) { true })
@@ -320,11 +334,10 @@ class OnboardingComparisonTest {
   store.failWrites = false
   val uploaded = assertIs<AppendPushResult.Diverged>(local.onboardingUpload(next, store) { true })
   val graph = repository(local).discover(store)
-  val newCommit = graph.commits.getValue(requireNotNull(local.baseline()))
-  assertEquals(listOf(base.id), newCommit.parents); assertEquals("snapshot", newCommit.kind)
-  assertEquals(hash("newer".encodeToByteArray()), newCommit.snapshot.files["game1/game.dat"])
-  assertEquals((comparison.observedTips - base.id) + newCommit.id, uploaded.conflict.observedTips)
-  assertEquals(3, store.commits.size); assertEquals(6, store.writes); assertEquals("newer", content(local))
+  assertEquals(base.id, local.baseline())
+  assertEquals(comparison.observedTips, uploaded.conflict.observedTips)
+  assertTrue(graph.commits.values.none {it.snapshot.files["game1/game.dat"]==hash("newer".encodeToByteArray())})
+  assertEquals(2, store.commits.size); assertEquals(4, store.writes); assertEquals("newer", content(local))
  }
 
  @Test fun selectedBaselineLocalEditDuringVerificationNeverRestoresOverNewerBytes() {

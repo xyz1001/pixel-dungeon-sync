@@ -172,12 +172,12 @@ class AndroidHomeReconstruction92Test {
   assertTrue(verified.canCompleteWithoutTransfer);assertFalse(verified.canAutoUpload)
  }
 
- @Test fun differentMetadataContentRetainsPublishingBranchBehavior() {
+ @Test fun differentMetadataContentWaitsForConfirmationWithoutPublishingUnrelatedBranch() {
   val store=Store();publish(store);val oldTip=store.latest();val bridge=Bridge(files(2));val rig=rig(bridge,store);val home=rig.facade.inspectHome();val writes=store.writes
   val result=rig.facade.upload(home)
-  assertTrue(store.writes>writes);assertTrue(result.isConflict)
-  assertTrue(store.commits.containsKey(oldTip.id));assertEquals(2,store.commits.size)
-  assertTrue(store.latest().parents.isEmpty())
+  assertEquals(writes,store.writes);assertTrue(result.isConflict)
+  assertEquals(setOf(oldTip.id),store.commits.keys);assertEquals(setOf(oldTip.snapshot.id),store.objects.keys)
+  assertNull(rig.facade.historyPresentation(rig.facade.inspectHome()).baseline)
  }
 
  @Test fun changedRemoteGraphRejectsMetadataActionBeforeWrites() {

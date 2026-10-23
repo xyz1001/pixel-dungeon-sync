@@ -313,7 +313,8 @@ class OnboardingMergeProofTest {
   val fixture = fixture()
   val observed = compare(fixture)
   fixture.store.failWrites = true
-  assertFails { fixture.local.onboardingUpload(observed, fixture.store) { true } }
+  // Existing frozen retry left by an old writer; current preflight must not create it.
+  assertFails { legacyPublish(fixture.local,fixture.store) }
   fixture.store.failWrites = false
   val pending = assertNotNull(repository(fixture.local).pending())
   val retry = compare(fixture)
