@@ -49,9 +49,9 @@ class AndroidSelectedRestoreEfficiency94Test {
   override fun writeDeletion(id:String,bytes:ByteArray){deletions.putIfAbsent(id,bytes.copyOf())}
   override fun deleteCommit(id:String){if(failDelete || removed.size>=failDeleteAfter)throw java.io.IOException("synthetic delete failure");commits.remove(id);removed+=id}
   override fun deleteObject(id:String){if(failObjectDelete)throw java.io.IOException("synthetic object delete failure");objects.remove(id)}
-  var listings=0;var writes=0;var objectReads=0;var afterReadObject:(()->Unit)?=null;var afterCommit:(()->Unit)?=null
+  var listings=0;var writes=0;var objectReads=0;var failCommitReads=false;var afterReadObject:(()->Unit)?=null;var afterCommit:(()->Unit)?=null
   override fun listCommits(cursor:String?):CommitPage {listings++;return CommitPage(commits.keys.toList())}
-  override fun readCommit(id:String)=commits[id]?.copyOf()
+  override fun readCommit(id:String):ByteArray? {if(failCommitReads)throw java.io.IOException("synthetic unavailable readback");return commits[id]?.copyOf()}
   override fun readObject(id:String):ByteArray? {
    objectReads++;val bytes=objects[id]?.copyOf();afterReadObject?.also {afterReadObject=null}?.invoke();return bytes
   }
@@ -64,6 +64,15 @@ class AndroidSelectedRestoreEfficiency94Test {
    objects[child.snapshot.id]=zip
    return child.also {commits[it.id]=json.encodeToString(it).encodeToByteArray()}
   }
+ }
+ private fun legacyPublished(store:Store,bridge:Bridge,parent:AppendCommit):AppendCommit {
+  val source=temp.resolve("legacy-${sequence++}");source.createDirectories()
+  bridge.content.forEach {(name,bytes)->source.resolve(name).also {it.parent.createDirectories();it.writeBytes(bytes)}}
+  val snapshot=Snapshots.capture(source,AndroidGameAdapter(identity),connection.profile,"synthetic",null)
+  val id=contentSha256(snapshot.manifest.files)
+  val commit=parent.copy(id=id,parents=listOf(parent.id),snapshot=snapshot.manifest.copy(id=id),objectBytes=snapshot.zip.size)
+  store.objects[id]=snapshot.zip;store.commits[id]=json.encodeToString(commit).encodeToByteArray()
+  return commit
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
  private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store,0))}
@@ -163,7 +172,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    bridge.content=files(2).toMutableMap();r.facade.upload(r.facade.inspectHome());val b=store.latest()
    val c=store.child(b);val tail=store.child(c)
    bridge.content=files(9).toMutableMap()
-   if(prepublished)assertTrue(r.facade.upload(r.facade.inspectHome()).isConflict)
+   if(prepublished) {val d=legacyPublished(store,bridge,b);repository(r).setBaseline(d.id,repository(r).discover(store))}
    val observed=r.facade.inspectHome();assertEquals(tail.snapshot.id,observed.overwriteTargetSnapshotId);store.failDelete=failure
    if(failure) {
     assertFailsWith<java.io.IOException>{r.facade.overwriteCloudSuccessors(observed,tail.snapshot.id)}
@@ -180,12 +189,80 @@ class AndroidSelectedRestoreEfficiency94Test {
   }
  }
 
+ @Test fun uploadConflictBeforeConfirmationDoesNotWriteOrMoveBaseline() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val a=store.latest()
+  bridge.content=files(2).toMutableMap();r.facade.upload(r.facade.inspectHome());val b=store.latest()
+  val c=store.child(b);bridge.content=files(9).toMutableMap()
+  val writes=store.writes;val ids=store.commits.keys.toSet()
+  repeat(2) {
+   val result=r.facade.upload(r.facade.inspectHome())
+   assertTrue(result.isConflict)
+   assertEquals(writes,store.writes,"upload must ask before any remote write")
+   assertEquals(ids,store.commits.keys);assertTrue(store.removed.isEmpty());assertEquals(b.id,repository(r).baseline())
+   val refreshed=r.facade.inspectHome()
+   assertEquals(c.snapshot.id,refreshed.overwriteTargetSnapshotId)
+  }
+ }
+
+ @Test fun acceptedUploadWithLateSiblingCanClearPendingWithoutRepeatingWrites() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
+  bridge.content=files(9).toMutableMap();val observed=r.facade.inspectHome()
+  store.afterCommit={store.child(b);store.failCommitReads=true;throw java.io.IOException("synthetic lost response")}
+  assertFailsWith<java.io.IOException>{r.facade.upload(observed)}
+  assertNotNull(repository(r).pending());val writes=store.writes;val records=store.commits.mapValues {hash(it.value)}
+  store.failCommitReads=false
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  reopened.upload(reopened.inspectHome())
+  assertNull(repository(r).pending());assertEquals(writes,store.writes)
+  assertEquals(records,store.commits.mapValues {hash(it.value)});assertTrue(store.removed.isEmpty())
+  assertEquals(2,repository(r).discover(store).tips.size)
+ }
+
+ @Test fun historyKeepsPreviouslyObservedLocalAssociationAfterContentChangesAndRestart() {
+  val store=Store();publish(store);val b=store.latest();store.child(b)
+  val bridge=Bridge();val r=rig(bridge,store)
+  val first=r.facade.historyPresentation(r.facade.inspectHome())
+  assertNull(first.baseline)
+  assertTrue(pdsync.presentation.HistoryPresentation.from(first,0).edges.any {it.fromId=="local-current"&&it.toId==b.id})
+  bridge.content=files(9).toMutableMap()
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  val history=reopened.historyPresentation(reopened.inspectHome())
+  val shown=pdsync.presentation.HistoryPresentation.from(history,0)
+  assertTrue(shown.nodes.any {it.id=="local-baseline"},"refresh must retain the observed local history anchor")
+  assertTrue(shown.edges.any {it.fromId=="local-baseline"&&it.toId==b.id})
+  assertNull(history.baseline,"display association cannot grant upload ancestry")
+  val observed=reopened.inspectHome();val writes=store.writes
+  assertNull(observed.overwriteTargetSnapshotId)
+  assertFails {reopened.overwriteCloudSuccessors(observed,store.latest().snapshot.id)}
+  assertEquals(writes,store.writes);assertTrue(store.removed.isEmpty());assertTrue(store.deletions.isEmpty())
+ }
+
+ @Test fun legacyDoubleTipKeepsLocalLineageWhenLocalContentChangesAgain() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val a=store.latest()
+  bridge.content=files(2).toMutableMap();r.facade.upload(r.facade.inspectHome());val b=store.latest()
+  val c=store.child(b);bridge.content=files(9).toMutableMap()
+  val d=legacyPublished(store,bridge,b);repository(r).setBaseline(d.id,repository(r).discover(store))
+  bridge.content=files(10).toMutableMap();val writes=store.writes
+  val preflight=r.facade.upload(r.facade.inspectHome());assertTrue(preflight.isConflict);assertEquals(writes,store.writes)
+  val shown=r.facade.historyPresentation(r.facade.inspectHome())
+  assertEquals(0,pdsync.presentation.HistoryPresentation.from(shown,0).nodes.count {it.status==pdsync.i18n.CoreMessages.CURRENT_CLOUD_BRANCH.text()})
+  val home=r.facade.inspectHome();assertEquals(c.snapshot.id,home.overwriteTargetSnapshotId)
+  val done=r.facade.overwriteCloudSuccessors(home,requireNotNull(home.overwriteTargetSnapshotId))
+  assertFalse(done.isConflict);assertFalse(done.isPending)
+  val graph=repository(r).discover(store);assertFalse(c.id in graph.commits)
+  assertTrue(setOf(a.id,b.id,d.id).all {it in graph.commits});assertEquals(1,graph.tips.size)
+  val e=graph.commits.getValue(graph.tips.single());assertEquals(listOf(d.id),e.parents)
+  assertEquals(bridge.content.mapValues {hash(it.value)},e.snapshot.files)
+ }
+
  @Test fun automaticOverwriteTargetNeverChoosesBetweenIndependentCloudSuccessors() {
   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
-  store.child(b);store.child(b);bridge.content=files(9).toMutableMap()
+  val c=store.child(b);store.child(b);bridge.content=files(9).toMutableMap()
   val before=store.writes
-  assertNull(r.facade.inspectHome().overwriteTargetSnapshotId)
-  assertEquals(before,store.writes);assertTrue(store.removed.isEmpty())
+  val observed=r.facade.inspectHome();assertNull(observed.overwriteTargetSnapshotId)
+  assertTrue(r.facade.upload(observed).isConflict)
+  assertFails {r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),c.snapshot.id)}
+  assertEquals(before,store.writes);assertTrue(store.removed.isEmpty());assertTrue(store.deletions.isEmpty())
  }
 
  @Test fun uploadValidatesRemoteTipFormatWithoutDeclaredSaveVersions() {
@@ -212,15 +289,20 @@ class AndroidSelectedRestoreEfficiency94Test {
   }
  }
 
- @Test fun sameCurrentTipWithoutBaselineVerifiesButDoesNotPublishRestoreOrAdopt() {
+ @Test fun explicitSameTipRestoreRemembersBaselineWithoutCloudOrGameWrites() {
   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge();val r=rig(bridge,store)
   val home=r.facade.inspectHome();val writes=store.writes;val objects=store.objectReads;val lists=store.listings
   val result=r.facade.restoreSelected(home,chosen.snapshot.id,false)
   assertEquals(1,bridge.exports);assertEquals(0,bridge.restores);assertEquals(writes,store.writes)
   assertEquals(objects+1,store.objectReads);assertEquals(lists+2,store.listings)
-  assertFalse(result.isConflict);assertFalse(result.isPending);assertFalse(result.configurationComplete)
-  assertEquals("IDENTICAL",result.refreshedInspection?.kind);assertNull(result.refreshedInspection?.comparison?.baselineId)
-  assertNull(repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
+  assertFalse(result.isConflict);assertFalse(result.isPending);assertTrue(result.configurationComplete)
+  assertEquals("IDENTICAL",result.refreshedInspection?.kind);assertEquals(chosen.id,result.refreshedInspection?.comparison?.baselineId)
+  assertEquals(chosen.id,repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
+  bridge.content=files(9).toMutableMap()
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  val shown=pdsync.presentation.HistoryPresentation.from(reopened.historyPresentation(reopened.inspectHome()),0)
+  assertTrue(shown.nodes.any {it.id=="local-baseline"})
+  assertTrue(shown.edges.any {it.fromId=="local-baseline" && it.toId==chosen.id})
  }
 
  @Test fun sameTipIsUnchangedWhileDifferentDescendantRestoresVerifiedContent() {
@@ -294,14 +376,14 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertTrue(recoveryFiles(r).isEmpty())
  }
 
- @Test fun lateBranchDuringNoOpIsReportedByFinalDiscoveryWithoutBaselineChange() {
+ @Test fun lateBranchDuringNoOpKeepsExplicitSelectedBaselineAndReportsConflict() {
   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge();val r=rig(bridge,store)
   val home=r.facade.inspectHome();val writes=store.writes;var late:AppendCommit?=null
   store.afterReadObject={late=store.child(chosen,emptyList())}
   val result=r.facade.restoreSelected(home,chosen.snapshot.id,false)
   assertEquals(writes,store.writes);assertEquals(0,bridge.restores);assertTrue(result.isConflict);assertFalse(result.configurationComplete)
   assertEquals(setOf(chosen.id,requireNotNull(late).id),result.refreshedInspection?.comparison?.observedTips)
-  assertNull(repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
+  assertEquals(chosen.id,repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
  }
 
  @Test fun missingOrCorruptInitialObjectCannotRestoreOrPublishEvenWhenFilesMatch() {
@@ -393,7 +475,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertEquals(2,requests.count {it.startsWith("PROPFIND ")});assertEquals(0,requests.count {it.startsWith("PUT ")})
    assertEquals(exports+1,bridge.exports);assertEquals(restores+if(noop)0 else 1,bridge.restores)
    assertEquals(chosen.snapshot.files,bridge.content.mapValues {hash(it.value)});assertFalse(result.isConflict)
-   assertEquals(!noop&&!historical,result.configurationComplete)
+   assertEquals(!historical,result.configurationComplete)
   }
  }
  @Test fun uploadScopeReusesHistoricalObjectsButKeepsFreshPublicationReads() {

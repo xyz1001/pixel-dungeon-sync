@@ -141,8 +141,8 @@ class UnchangedBaselineLineageTest {
   assertFails { local.advanceUnchangedBaseline(blocked, store) { true } }; assertEquals(base.id, local.baseline())
  }
  @Test fun pendingAndRecoveryNeverPermitAutomaticBaselineAdvance() {
-  val (local, store, base) = setup(); store.child(base); edit(local); store.failWrites = true
-  assertFails { local.push(store) { true } }; val pending = compare(local, store)
+  val (local, store, base) = setup(); edit(local); store.failWrites = true
+  assertFails { local.push(store) { true } }; store.child(base); val pending = compare(local, store)
   assertEquals(SyncBlockReason.PENDING_UPLOAD, pending.blockReason); assertFails { local.advanceUnchangedBaseline(pending, store) { true } }
   local.directory.resolve("append-v2/apply-required.txt").writeText("interrupted")
   assertEquals(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, compare(local, store).blockReason)

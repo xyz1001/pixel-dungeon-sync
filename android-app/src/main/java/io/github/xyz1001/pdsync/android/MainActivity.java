@@ -4095,13 +4095,13 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         && ownerContext.accepts(currentHomeContext(sharedHomeRenderToken), true, busy);
             }
             private boolean hasBranch(String snapshotId) {
-                if (observed == null || kind() != OnboardingKind.BRANCHED || !cloudVerified) return false;
+                if (observed == null || !observed.isOverwriteConflict() || !cloudVerified) return false;
                 for (AndroidSyncFacade.Version branch : observed.getRemoteVersions())
                     if (branch.getSnapshotId().equals(snapshotId)) return true;
                 return false;
             }
             private boolean canResolve() {
-                return current() && observed != null && kind() == OnboardingKind.BRANCHED && cloudVerified
+                return current() && observed != null && observed.isOverwriteConflict() && cloudVerified
                         && connection != null && !restoreNeedsAttention()
                         && !observed.isRetryablePending();
             }

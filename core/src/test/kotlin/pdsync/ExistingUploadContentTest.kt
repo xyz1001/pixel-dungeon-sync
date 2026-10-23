@@ -88,9 +88,9 @@ class ExistingUploadContentTest {
   assertEquals(setOf(b.id),session.syncHistory().graph.tips)
   edit(session,"C")
   assertIs<AppendPushResult.Diverged>(session.push(store){true})
-  val c=session.syncHistory().graph.commits.getValue(requireNotNull(session.baseline()))
-  assertEquals(listOf(a.id),c.parents)
-  assertEquals(3,store.commits.size);assertEquals(3,store.objects.size)
+  assertEquals(a.id,session.baseline())
+  assertEquals(writes,store.writes)
+  assertEquals(2,store.commits.size);assertEquals(2,store.objects.size)
  }
  @Test fun homeAndAutomaticUseAnyVerifiedHistoryWithoutExtraScanOrCapture() {
   val (session,store,records)=seeded();val (a,b)=records;edit(session,"A")

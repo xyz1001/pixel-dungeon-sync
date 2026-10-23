@@ -25,6 +25,8 @@ public final class MainActivity {
         }
         static final class Inspection {
             boolean pending;
+            boolean overwriteConflict = true;
+            boolean isOverwriteConflict() { return overwriteConflict; }
             String overwriteTarget = "branch-a";
             String getOverwriteTargetSnapshotId() { return overwriteTarget; }
             List<Version> branches = List.of(new Version("branch-a"), new Version("branch-b"));
@@ -224,7 +226,7 @@ public final class MainActivity {
     }
     static void capabilities() {
         resolutionBlocked(a -> a.inspection = null, "missing observation");
-        resolutionBlocked(a -> a.observedKind = OnboardingKind.READY, "unbranched observation");
+        resolutionBlocked(a -> a.inspection.overwriteConflict = false, "non-conflicting observation");
         resolutionBlocked(a -> a.cloudVerified = false, "unverified observation");
         resolutionBlocked(a -> a.connection = null, "disconnected account");
 

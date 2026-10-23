@@ -63,8 +63,9 @@ class AndroidSyncFacade internal constructor(
   val remoteVersions=immutable(remoteVersions)
   /** Bind overwrite to the sole non-local cloud tip; never choose an arbitrary sibling. */
   val overwriteTargetSnapshotId:String? get()=comparison?.let { c ->
-   c.graph?.let { g -> g.tips.mapNotNull(g.commits::get).filter { it.snapshot.files!=c.localFiles }.singleOrNull()?.snapshot?.id }
+   c.graph?.let { g -> cloudOverwriteSelection(g,c.baselineId,c.localFiles)?.let {g.commits.getValue(it.target).snapshot.id} }
   }
+  val isOverwriteConflict:Boolean get()=comparison?.let { c -> c.graph?.let {uploadNeedsOverwrite(it,c.baselineId,c.localFiles)} }==true
   /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
   fun diagnosticBlockReason():String? = blockReason?.name
   val isObjectVerified get()=comparison?.graph!=null && comparison.verification==RemoteVerification.OBJECTS_VERIFIED
@@ -279,7 +280,8 @@ class AndroidSyncFacade internal constructor(
   var stage:SelectedRestoreStage?=null
   val applied=if(selection.unchanged) {
    // A complete selected archive and one fresh actual-game export prove this no-op. Do not
-   // create a journal, replace the mirror, publish, or turn equality into a sync baseline.
+   // create a journal, replace the mirror, or publish. Explicit selection may remember
+   // verified provenance; passive content equality never grants an operational baseline.
    stage=session.stageSelectedRestore(selection,store,mirrorStopped);null
   } else prepareGameRestore(observed.localFiles,after,if(readOnly)"read-only-restore" else "restore",
    verifiedProvider={stage?.verified}) {stage=session.stageSelectedRestore(selection,store,mirrorStopped)}

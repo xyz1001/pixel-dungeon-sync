@@ -13,7 +13,8 @@ data class AppendConflict(
  val observedTips: Set<String>,
  val branches: List<AppendBranch>,
  val observedLocalFiles: Map<String, String>,
- val publishedLocalCommit: String? = null
+ val publishedLocalCommit: String? = null,
+ val overwriteTargetSnapshotId:String? = null
 )
 data class AppendRemoteEntry(val commit: AppendCommit, val entry: HistoryEntry)
 /** One selected object and a structural graph; unrelated history objects remain unverified. */
@@ -173,8 +174,26 @@ class AppendProfileSession(
    owner=comparisonOwner,graph=graph,pendingCommit=state.pending,localSource=LocalObservationSource.BRIDGE_INVENTORY)
   val direction=state.transfer?.split(' ')?.takeIf {it.size==2&&it[0]==state.baseline&&it[1] in setOf("upload","restore")}?.get(1)
   val history=SyncHistory(graph,state.baseline,context.files,(state.sidecar as? SidecarRead.Valid)?.value?.displayName.orEmpty(),
-   context.summary,state.aliases,direction,repository.verifiedCommitIds(graph),comparisonOwner)
+   context.summary,state.aliases,direction,repository.verifiedCommitIds(graph),comparisonOwner,displayAnchor(graph,context.files,state.baseline))
   comparison to history
+ }
+ /** Preserve a previously displayed association without inventing an operational baseline. */
+ private fun displayAnchor(graph:CommitGraph,files:Map<String,String>,baseline:String?):String? {
+  val path=directory.resolve("history-display-anchor.txt")
+  val selected=baseline?.let(graph.commits::get) ?: graph.commits.values
+   .filter {it.snapshot.files==files && files.isNotEmpty()}.sortedBy {it.id}.firstOrNull()
+  fun stamp(commit:AppendCommit)=commit.id+" "+hash(json.encodeToString(commit).encodeToByteArray())
+  if(selected!=null) {
+   val value=stamp(selected)
+   if(!SafePaths.checked(path).exists() || SafePaths.boundedRead(path,256).decodeToString()!=value)
+    SafePaths.atomicWrite(path,value.encodeToByteArray())
+   return selected.id
+  }
+  if(!SafePaths.checked(path).exists())return null
+  val old=SafePaths.boundedRead(path,256).decodeToString().split(' ')
+  if(old.size!=2 || !validRecordId(old[0]))return null
+  val commit=graph.commits[old[0]] ?: return null
+  return commit.id.takeIf {stamp(commit)==old.joinToString(" ")}
  }
  private fun historyView(graph:CommitGraph,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory {
   val files=currentFiles();val baseline=repository.baseline()
@@ -182,7 +201,7 @@ class AppendProfileSession(
   val transfer=directory.resolve("baseline-transfer.txt")
   val direction=if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString().split(' ').takeIf { it.size==2&&it[0]==baseline&&it[1] in setOf("upload","restore") }?.get(1) else null
   val verifiedIds=if(graph.verification==RemoteVerification.OBJECTS_VERIFIED)graph.commits.keys.toSet() else repository.verifiedCommitIds(graph)
-  return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner)
+  return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner,displayAnchor(graph,files,baseline))
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
  fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult {
@@ -381,7 +400,14 @@ class AppendProfileSession(
   require(currentFiles()==selection.before) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_NOTHING_WAS_RESTORED.text() }
   val selected=selection.selected
   var chosen=selection.verified
-  if(selection.unchanged)return@readLocked SelectedRestoreStage(selection,chosen,graph,unchanged=true)
+  if(selection.unchanged) {
+   // An explicit verified restore confirms provenance even when game bytes need no replacement.
+   if(selection.baseline==null && selected!=null) {
+    repository.setSelectedBaseline(selected,graph,selection.verified)
+    markDirectorySynced(selected)
+   }
+   return@readLocked SelectedRestoreStage(selection,chosen,graph,unchanged=true)
+  }
   local.remember(chosen,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),selected?.let {repository.observedAt(it.id)})
   val isTip=!selection.historical && selected!=null && selected.id in graph.tips
   val before=selection.before
@@ -446,7 +472,7 @@ class AppendProfileSession(
   val current = currentFiles()
   local.guard(stopped)
   require(currentFiles() == current) { CoreSessionMessages.SAVES_CHANGED_WHILE_READING_CONFLICTS_EXIT_THE_GAME_AND_TRY.text() }
-  return AppendConflict(graph.tips, branches, current, repository.baseline())
+  return AppendConflict(graph.tips, branches, current, repository.baseline(),cloudOverwriteSelection(graph,repository.baseline(),current)?.let {graph.commits.getValue(it.target).snapshot.id})
  }
  private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean, expected:CommitGraph?=null,uploadDelta:Boolean=false): AppendPushResult {
   preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
@@ -540,6 +566,11 @@ class AppendProfileSession(
    throw error
   }
   fingerprint?.let(stability::requireUnchanged)
+  // A previously confirmed merge already froze these exact observed parents. It may be
+  // explicitly published without another overwrite prompt, but never absorb a new tip.
+  // An already verified matching record only clears the pending receipt below: no replay.
+  val pendingCoversTips=pending!=null && (pending.commit.parents.toSet()==graph.tips || matchingUpload(graph,files)!=null)
+  if(!pendingCoversTips && uploadNeedsOverwrite(graph,repository.baseline(),files))return@locked AppendPushResult.Diverged(preserveConflict(graph,store,stopped))
   matchingUpload(graph,files)?.let {return@locked reuseUpload(it,graph,pending)}
   val plan=pending ?: freeze()
   publish(plan,store,stopped,graph)
@@ -564,6 +595,7 @@ class AppendProfileSession(
    if(candidate.snapshot.files!=fingerprint.files)return@locked null
    val fresh=discover(store);stability.requireUnchanged(fingerprint);noLegacyPending();appliedOnly()
    if(repository.pending()!=null)return@locked null
+   if(uploadNeedsOverwrite(fresh,repository.baseline(),fingerprint.files))return@locked null
    val matched=matchingUpload(fresh,fingerprint.files) ?: return@locked null
    associateUpload(matched,fresh)
    val history=historyView(fresh);stability.requireUnchanged(fingerprint);history
@@ -927,15 +959,15 @@ class AppendProfileSession(
   }
   validate(fresh)
   val existing=graph.findByContent(fresh.localFiles)
-  val base=retry?.base ?: if(existing!=null && existing.id==fresh.baselineId) graph.parentIds(existing).singleOrNull() else fresh.baselineId
-  requireNotNull(base) {"No unambiguous confirmed upload base"}
+  val selection=if(retry==null)requireNotNull(cloudOverwriteSelection(graph,fresh.baselineId,fresh.localFiles)) {"No unambiguous confirmed cloud line"} else null
+  if(selection!=null)require(graph.commits.getValue(selection.target).snapshot.id==selectedSnapshot) {"Confirmed cloud target changed"}
+  val base=retry?.base ?: requireNotNull(selection).base
   require(base in graph.commits)
   if(existing==null)uploadWithGraph(fresh,graph,store,stopped,true)
   val after=repository.cachedGraph();after.requireSettled()
   val replacement=retry?.replacement ?: requireNotNull(after.findByContent(fresh.localFiles)).id
   require(after.commits[replacement]?.snapshot?.files==fresh.localFiles)
-  val selected=if(retry!=null)null else after.commits.values.singleOrNull {it.snapshot.id==selectedSnapshot && it.id!=replacement}?.id
-   ?: after.tips.filter {it!=replacement&&after.descendsFrom(it,base)}.singleOrNull()
+  val selected=selection?.target
   val plan=retry ?: deletion.prepare(store,after,base,requireNotNull(selected) {"Select one replaceable cloud line"},replacement)
   deletion.finish(store,plan,after,repository::forgetDeleted,local::forgetOverwrittenSnapshot)
   val complete=repository.cachedGraph();complete.requireObjectsVerified();complete.requireSettled();repository.setBaseline(replacement,complete)
@@ -956,6 +988,9 @@ class AppendProfileSession(
   require(fresh.localFiles==comparison.localFiles && (comparison.localSource!=LocalObservationSource.FILESYSTEM || fresh.fingerprint==comparison.fingerprint)) {CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()}
   require(fresh.baselineId==comparison.baselineId && fresh.pendingCommit==comparison.pendingCommit)
   beforePublish(fresh)
+  val pending=repository.pending()
+  val pendingCoversTips=pending!=null && (pending.commit.parents.toSet()==graph.tips || matchingUpload(graph,pending.commit.snapshot.files)!=null)
+  if(!pendingCoversTips && uploadNeedsOverwrite(graph,fresh.baselineId,fresh.localFiles))return@readLocked AppendPushResult.Diverged(preserveConflict(graph,store,stopped)) to fresh
   val result=uploadWithGraph(fresh,graph,store,stopped,true)
   val after=repository.cachedGraph();after.requireObjectsVerified();after.requireSettled()
   val files=currentFiles();val baseline=repository.baseline()

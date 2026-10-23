@@ -127,7 +127,8 @@ class HistoryPresentationTest {
  @Test fun realDagEdgesPointFromParentsToChildren() {
   val view=HistoryPresentation.from(state(listOf(commit("root"),commit("left",listOf("root"), newFiles),commit("right",listOf("root"), uniqueFiles("right")))),0)
   assertEquals(setOf(HistoryEdge("root","left"),HistoryEdge("root","right")),view.edges.toSet())
-  assertEquals(setOf("left","right"),view.nodes.filter {it.status=="云端当前分支"}.map {it.id}.toSet())
+  assertTrue(view.nodes.none {it.status=="云端当前分支"},"unresolved tips must not claim a unique current branch")
+  assertEquals(setOf("left","right"),view.nodes.filter {it.cloudHead}.map {it.id}.toSet())
  }
 
  @Test fun branchHistoryDoesNotChooseAWinner() {

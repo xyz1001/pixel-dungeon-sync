@@ -89,9 +89,10 @@ class AndroidRestoreReceiptRoundTrip97Test {
   bridge.content=files(3).toMutableMap()
   val uploaded=r.facade.upload(r.facade.inspect())
   val next=store.latest()
-  assertEquals(listOf(a.id),next.parents,"new gameplay is parented at restored A, not cloud tip B")
-  assertEquals(bridge.content.mapValues {hash(it.value)},next.snapshot.files)
-  assertTrue(uploaded.isConflict,"existing B and new A descendant are honest branches")
+  assertEquals(b.id,next.id,"preflight must not publish new gameplay before confirmation")
+  assertEquals(2,store.commits.size)
+  assertEquals(a.id,r.facade.historyPresentation(r.facade.inspectHome()).baseline)
+  assertTrue(uploaded.isConflict,"restored A versus cloud B requires confirmation before writes")
  }
  @Test fun restoredOneObjectDoesNotVerifyUnrelatedCloudObjects() {
   val store=Store();val source=Bridge(files(1));val sourceRig=publish(store,source);val a=store.latest()

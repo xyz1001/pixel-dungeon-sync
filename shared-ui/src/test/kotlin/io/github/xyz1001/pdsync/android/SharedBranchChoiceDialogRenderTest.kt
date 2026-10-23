@@ -1,3 +1,4 @@
+@file:Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
 @file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 
 package io.github.xyz1001.pdsync.android
@@ -31,6 +32,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
 import org.jetbrains.skia.EncodedImageFormat
+import pdsync.*
+import pdsync.android.app.*
+import kotlinx.serialization.encodeToString
+import pdsync.presentation.HistoryPresentation
+import kotlin.io.path.*
 import pdsync.i18n.SharedMessages
 import pdsync.i18n.UiLocale
 import kotlin.test.Test
@@ -56,18 +62,101 @@ class SharedBranchChoiceDialogRenderTest {
         var actions by mutableStateOf<SharedBranchChoiceActions>(this)
         lateinit var interactions: SharedBranchChoiceInteractions
         val calls = mutableListOf<String>()
+        var uploadAction: (() -> Unit)? = null
+        var overwriteAction: ((String) -> Unit)? = null
+        var history by mutableStateOf<HistoryPresentation?>(null)
         override fun select(snapshotId: String) {
             calls += "select:$snapshotId"; state = state.copy(selectedId = snapshotId)
         }
         override fun back() { calls += "back"; visible = false; state = state.copy(pageActive = false) }
         override fun refresh() = start("refresh")
-        override fun overwrite(snapshotId: String) = start("overwrite:$snapshotId")
+        override fun overwrite(snapshotId: String) { start("overwrite:$snapshotId"); overwriteAction?.invoke(snapshotId) }
         override fun merge() = start("merge")
         override fun preserveLocal() = start("preserve")
         private fun start(action: String) {
             // Hosts retain the synchronous operation lock used by the real platforms.
             if (!state.canInteract) return
             calls += action; state = state.copy(busy = true)
+        }
+    }
+
+    @org.junit.jupiter.api.io.TempDir lateinit var flowRoot: Path
+    private val flowIdentity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic", "a".repeat(64),AndroidSaveCapabilities(802,896,AndroidMergePolicy.SHATTERED_896))
+    private val flowConnection=AndroidConnection("https://dav.example.test/synthetic/","synthetic","fixture-only","hero")
+    private fun flowFiles(turn:Int)=linkedMapOf("game1/game.dat" to """{"version":896,"init_ver":896,"turn":$turn}""".encodeToByteArray(),"game1/depth1.dat" to byteArrayOf(turn.toByte()))
+    private inner class FlowBridge:AndroidGameBridge {
+        var files=flowFiles(1)
+        override fun targetGame()=AndroidGameTarget(flowIdentity,"synthetic",896,"b".repeat(64),"c".repeat(64))
+        override fun exportTo(emptyDestination:Path) { files.forEach {(name,bytes)->emptyDestination.resolve(name).also {it.parent.createDirectories();it.writeBytes(bytes)}} }
+        override fun readSnapshot()=AndroidSaveObservation(targetGame(),files.mapValues {AndroidSaveFile(hash(it.value),it.value.size.toLong(),1700000000000)},files.filterKeys {it.endsWith("/game.dat")})
+        override fun restoreFrom(preparedDirectory:Path,expectedCurrentFiles:Map<String,String>)=error("No game restore allowed")
+    }
+    private class FlowStore:AppendStore {
+        val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>();val receipts=linkedMapOf<String,ByteArray>()
+        val writes=mutableListOf<String>();var failDelete=false
+        override fun legacyPresent()=false
+        override fun listCommits(cursor:String?)=CommitPage(commits.keys.toList())
+        override fun readCommit(id:String)=commits[id]?.copyOf()
+        override fun readObject(id:String)=objects[id]?.copyOf()
+        override fun writeCommit(id:String,bytes:ByteArray){writes+="PUT commit";commits[id]=bytes.copyOf()}
+        override fun writeObject(id:String,bytes:ByteArray){writes+="PUT object";objects[id]=bytes.copyOf()}
+        override fun readDeletion(id:String)=receipts[id]?.copyOf()
+        override fun writeDeletion(id:String,bytes:ByteArray){writes+="PUT receipt";receipts[id]=bytes.copyOf()}
+        override fun deleteCommit(id:String){writes+="DELETE commit";if(failDelete)throw java.io.IOException("fixture");commits.remove(id)}
+        override fun deleteObject(id:String){writes+="DELETE object";objects.remove(id)}
+    }
+    @Test fun actualHomeUploadCancelRefreshConfirmAndRestartUseRealFacadeAndProductionMapping() {
+        for(legacy in listOf(false,true))for(deleteFailure in listOf(false,true)) {
+            val root=flowRoot.resolve("$legacy-$deleteFailure");val bridge=FlowBridge();val store=FlowStore()
+            var facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0)
+            facade.upload(facade.inspectHome());bridge.files=flowFiles(2);facade.upload(facade.inspectHome())
+            val beforeCloud=facade.historyPresentation(facade.inspectHome());val b=beforeCloud.graph.commits.getValue(requireNotNull(beforeCloud.baseline))
+            if(legacy){bridge.files=flowFiles(9);facade.upload(facade.inspectHome())}
+            val source=root.resolve("fixture-cloud");source.createDirectories();flowFiles(3).forEach {(name,bytes)->source.resolve(name).also {it.parent.createDirectories();it.writeBytes(bytes)}}
+            val snapshot=Snapshots.capture(source,AndroidGameAdapter(flowIdentity),flowConnection.profile,"fixture",null)
+            val id=contentSha256(snapshot.manifest.files);val c=b.copy(id=id,parents=listOf(b.id),snapshot=snapshot.manifest.copy(id=id),objectBytes=snapshot.zip.size)
+            store.commits[id]=json.encodeToString(c).encodeToByteArray();store.objects[id]=snapshot.zip
+            bridge.files=flowFiles(if(legacy)10 else 9)
+            var observed=facade.inspectHome()
+            val host=Host(androidCloudOverwriteState(observed,facade.historyPresentation(observed),null,true,false,true,true,false,"",""))
+            host.visible=false
+            fun refresh(){ observed=facade.inspectHome();host.history=HistoryPresentation.from(facade.historyPresentation(observed),0) }
+            refresh()
+            val originalBaseline=facade.historyPresentation(observed).baseline
+            val writes=store.writes.size;val commitIds=store.commits.keys.toSet()
+            host.uploadAction={
+                val result=facade.upload(observed)
+                if(result.isConflict){observed=requireNotNull(result.refreshedInspection);host.state=androidCloudOverwriteState(observed,facade.historyPresentation(observed),null,true,false,true,true,false,"","");host.visible=true}
+                else {host.visible=false;refresh()}
+            }
+            host.overwriteAction={ target ->
+                try {facade.overwriteCloudSuccessors(observed,target)}catch(expected:java.io.IOException){assertTrue(deleteFailure)}
+                host.visible=false;refresh()
+            }
+            val scene=scene(host)
+            fun clickHomeUpload(){val n=nodes(scene).single {it.config.contains(SemanticsActions.OnClick)&&SharedMessages.UPLOAD_CLOUD.text() in texts(descendants(it))};val at=n.boundsInRoot.center;scene.sendPointerEvent(PointerEventType.Press,at);scene.sendPointerEvent(PointerEventType.Release,at)}
+            try {
+                render(scene,"flow-home-$legacy-$deleteFailure");clickHomeUpload();render(scene,"flow-conflict-$legacy-$deleteFailure")
+                assertEquals(writes,store.writes.size);assertEquals(commitIds,store.commits.keys)
+                assertFalse(button(scene,SharedMessages.OVERWRITE_CLOUD.text()).config.contains(SemanticsProperties.Disabled))
+                assertFalse(SharedMessages.HANDLE_CONFLICT.text() in modalTexts(scene))
+                click(scene,SharedMessages.CANCEL.text());refresh();render(scene,"flow-cancel-$legacy-$deleteFailure")
+                assertEquals(writes,store.writes.size);assertEquals(commitIds,store.commits.keys)
+                facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0);refresh()
+                assertEquals(originalBaseline,facade.historyPresentation(observed).baseline)
+                assertEquals(writes,store.writes.size)
+                clickHomeUpload();render(scene,"flow-reopen-$legacy-$deleteFailure")
+                store.failDelete=deleteFailure;click(scene,SharedMessages.OVERWRITE_CLOUD.text());render(scene,"flow-result-$legacy-$deleteFailure")
+                if(deleteFailure){assertTrue(observed.isRetryablePending);store.failDelete=false;facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0);refresh();clickHomeUpload();render(scene,"flow-retry-$legacy")}
+                assertFalse(observed.isRetryablePending);assertFalse(c.id in store.commits)
+                val reopened=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0)
+                val final=reopened.historyPresentation(reopened.inspectHome())
+                assertEquals(1,final.graph.tips.size);assertEquals(bridge.files.mapValues {hash(it.value)},final.graph.commits.getValue(final.graph.tips.single()).snapshot.files)
+                assertEquals((commitIds-c.id)+final.graph.tips.single(),final.graph.commits.keys)
+                assertEquals(listOf(originalBaseline),final.graph.commits.getValue(final.graph.tips.single()).parents)
+                assertEquals(1,HistoryPresentation.from(final,0).nodes.count {it.status==pdsync.i18n.CoreMessages.CURRENT_CLOUD_BRANCH.text()})
+                assertTrue(store.writes.indexOfLast {it=="PUT commit"}<store.writes.indexOfFirst {it=="DELETE commit"})
+            } finally {scene.close()}
         }
     }
 
@@ -308,10 +397,10 @@ class SharedBranchChoiceDialogRenderTest {
         ImageComposeScene(width = width, height = height, density = Density(1f, scale)) {
             SharedConnectionTheme {
                 Box(Modifier.fillMaxSize().background(SharedUiColors.background)) {
-                    SharedHomeScreen(SharedHomeState(null, "Synthetic home", pageActive = false),
+                    SharedHomeScreen(SharedHomeState(null, "Synthetic home", pageActive = !host.visible, canUpload = host.uploadAction != null, history = host.history),
                         object : SharedHomeActions {
                             override fun settings() = Unit
-                            override fun upload() = Unit
+                            override fun upload() { host.uploadAction?.invoke() }
                             override fun restore() = Unit
                             override fun launch() = Unit
                             override fun selectSnapshot(snapshotId: String) = Unit

@@ -91,6 +91,13 @@ class RunMergeTest {
   assertIs<AppendPushResult.Success>(a.push(remote){true});b.restoreRemote(b.readRemote(remote).single().entry.manifest.id,remote){true}
   aRoot.resolve("game1/depth1.dat").writeText("remote A1");a.confirmRunIdentity("game1",a.observedFiles(),true){true};a.push(remote){true}
   bRoot.resolve("game2/depth1.dat").writeText("local B1");b.confirmRunIdentity("game2",b.observedFiles(),true){true}
+  // Existing old-client branches remain mergeable; new upload preflight never creates one.
+  fun legacyPublish(session:AppendProfileSession) {
+   val repo=AppendRepository(session.directory.resolve("append-v2"),Shattered,"demo")
+   val plan=repo.prepare(session.loadSnapshot(session.createSnapshot {true}.manifest.id),listOfNotNull(session.baseline()))
+   val commit=repo.publish(remote,plan);repo.setBaseline(commit.id,repo.discover(remote));repo.clearPending()
+  }
+  legacyPublish(b)
   val conflict=assertIs<AppendPushResult.Diverged>(b.push(remote){true}).conflict
   val preview=b.previewMerge(conflict,remote){true};assertEquals(2,preview.slots);assertEquals(0,preview.addedSlots)
   val originalCommits=remote.commits.mapValues { it.value.copyOf() }
@@ -103,7 +110,7 @@ class RunMergeTest {
   val mergedFiles=b.observedFiles();assertEquals(preview.snapshot.manifest.files,mergedFiles)
   remote.fail=false;val result=assertIs<AppendPushResult.Success>(b.push(remote){true});assertEquals(prepared.commit,result.commit);assertEquals(mergedFiles,result.commit.snapshot.files);assertEquals(conflict.observedTips,result.commit.parents.toSet());assertFalse(b.hasPending())
   assertEquals("remote A1",bRoot.resolve("game1/depth1.dat").readText());assertEquals("local B1",bRoot.resolve("game2/depth1.dat").readText())
-  aRoot.resolve("game1/depth1.dat").writeText("remote A2");a.confirmRunIdentity("game1",a.observedFiles(),true){true};a.push(remote){true}
+  aRoot.resolve("game1/depth1.dat").writeText("remote A2");a.confirmRunIdentity("game1",a.observedFiles(),true){true};legacyPublish(a)
   bRoot.resolve("game2/depth1.dat").writeText("local B2");b.confirmRunIdentity("game2",b.observedFiles(),true){true}
   assertEquals(2,b.previewMerge(b.inspectConflict(remote){true}!!,remote){true}.slots)
   val beforeMergeCommits=remote.commits.keys.toSet();val beforeMergeBaseline=b.baseline()

@@ -1306,8 +1306,7 @@ internal fun runSyncApplication(
        }
        Page.CONFLICT -> key(pageGeneration) { conflict?.let { value ->
         val owner = conflictOwner()
-        val overwriteTarget = value.branches.filter { it.snapshot.manifest.files != value.observedLocalFiles }
-         .singleOrNull()?.snapshot?.manifest?.id
+        val overwriteTarget = value.overwriteTargetSnapshotId
         fun current() = !appClosed && !busy && !connectingAtStartup &&
          owner.matches(conflictOwner(), page == Page.CONFLICT)
         fun canResolve() = current() && connected && !serviceExpired && !pending

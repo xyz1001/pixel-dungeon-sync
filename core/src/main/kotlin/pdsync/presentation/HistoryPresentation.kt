@@ -102,7 +102,7 @@ data class HistoryPresentation(
     groups.getOrPut(key) { mutableListOf() }.add(commit)
    }
    val tips = state.graph.tips
-   val matchingBaseline = state.baselineCommit?.takeIf { it.snapshot.files == state.currentFiles }?.id
+   val matchingBaseline = state.displayBaselineCommit?.takeIf { it.snapshot.files == state.currentFiles }?.id
    return groups.map { (key, members) ->
     val representative = members.firstOrNull { it.id in tips }
      ?: members.firstOrNull { it.id == matchingBaseline } ?: members.first()
@@ -156,7 +156,7 @@ data class HistoryPresentation(
    val groups = cloudGroups(state)
    val allCloud = groups.map { it.representative }
    val cloudOrder = allCloud.mapIndexed { index, commit -> commit.id to index }.toMap()
-   val baseline = state.baselineCommit
+   val baseline = state.displayBaselineCommit
    val baselineGroup = baseline?.let { original -> groups.firstOrNull { group -> group.members.any { it.id == original.id } } }
    // File-map equality permits display association even after reinstall loses verification caches.
    // It does not prove cloud protection, establish a baseline, or authorize any operation.
@@ -175,7 +175,7 @@ data class HistoryPresentation(
       ?: CoreMessages.SAVE_1_S.text((group.content?.sha256 ?: commit.id).take(6)),
      time(recordedAt?.toString()),
      CoreMessages.SOURCE_AND_SLOTS.text(snapshot.metadata?.device?.label ?: CoreMessages.UNKNOWN_SOURCE.text(), slots(snapshot.saveVersions?.runs?.size)),
-     if (group.cloudHead) CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
+     if (group.cloudHead && groups.count { it.cloudHead }==1) CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
      0, 0, selectable = true, cloudHead = group.cloudHead
     ), recordedAt)
    }

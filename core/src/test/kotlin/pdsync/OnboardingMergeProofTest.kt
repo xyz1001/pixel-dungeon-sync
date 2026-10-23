@@ -85,6 +85,15 @@ class OnboardingMergeProofTest {
  private fun repository(session: AppendProfileSession) =
   AppendRepository(session.directory.resolve("append-v2"), Shattered, "demo")
 
+ /** Explicitly seed a pre-107 writer; current upload must not manufacture this fixture. */
+ private fun legacyPublish(session:AppendProfileSession,store:Memory):AppendCommit {
+  val repo=repository(session)
+  val snapshot=session.loadSnapshot(session.createSnapshot {true}.manifest.id)
+  val plan=repo.prepare(snapshot,listOfNotNull(session.baseline()))
+  val commit=repo.publish(store,plan);repo.setBaseline(commit.id,repo.discover(store));repo.clearPending()
+  return commit
+ }
+
  private fun files(root: Path): Map<String, List<Byte>> = Files.walk(root).use { paths ->
   paths.filter { Files.isRegularFile(it) }.toList().associate {
    root.relativize(it).toString() to it.readBytes().toList()
@@ -153,7 +162,7 @@ class OnboardingMergeProofTest {
 
  @Test fun observedMultiheadMergeRetainsEveryRealBranchAsAnAncestor() {
   val fixture = fixture()
-  assertIs<AppendPushResult.Diverged>(fixture.local.push(fixture.store) { true })
+  legacyPublish(fixture.local,fixture.store)
   val observed = compare(fixture)
   assertEquals(OnboardingKind.BRANCHED, observed.kind)
   assertEquals(2, observed.observedTips.size)
@@ -261,8 +270,7 @@ class OnboardingMergeProofTest {
   var lateCommitId: String? = null
   store.afterCommitWrite = { id ->
    localCommitId = id
-   assertIs<AppendPushResult.Diverged>(lateDevice.push(store) { true })
-   lateCommitId = lateDevice.baseline()
+   lateCommitId = legacyPublish(lateDevice,store).id
   }
 
   val prepared = assertIs<AppendPushResult.Prepared>(local.mergeCurrent(observed, store) { true })

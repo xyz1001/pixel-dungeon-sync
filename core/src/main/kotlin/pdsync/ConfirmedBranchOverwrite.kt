@@ -6,7 +6,36 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlin.io.path.*
 
-/** Explicit single-client overwrite. This is NOT a cross-device atomic transaction. */
+/** A confirmed local lineage, not current-byte inequality, identifies the replaceable cloud line. */
+data class CloudOverwriteSelection(val base:String,val target:String)
+fun cloudOverwriteSelection(graph:CommitGraph,baseline:String?,files:Map<String,String>):CloudOverwriteSelection? {
+ val anchor=baseline?.takeIf {it in graph.commits} ?: return null
+ val tips=graph.tips.mapNotNull(graph.commits::get)
+ val matching=tips.filter {it.snapshot.files==files}.map {it.id}.toSet()
+ val other=tips.filter { !graph.descendsFrom(it.id,anchor) }
+ val candidates=if(other.isNotEmpty())other else tips.filter {it.id!=anchor && it.id !in matching}
+ val target=candidates.singleOrNull()?.id ?: return null
+ fun line(id:String):List<String>? {
+  val result=mutableListOf<String>();var at=id
+  while(true) {
+   if(at in result)return null
+   result+=at
+   val parents=graph.parentIds(graph.commits[at] ?: return null)
+   if(parents.isEmpty())return result
+   if(parents.size!=1)return null
+   at=parents.single()
+  }
+ }
+ val localLine=line(anchor) ?: return null
+ val remoteLine=line(target) ?: return null
+ val base=localLine.firstOrNull {it in remoteLine} ?: return null
+ if(base==target)return null
+ return CloudOverwriteSelection(base,target)
+}
+internal fun uploadNeedsOverwrite(graph:CommitGraph,baseline:String?,files:Map<String,String>):Boolean =
+ graph.tips.size>1 || (baseline!=null && graph.tips.isNotEmpty() && graph.tips.singleOrNull()!=baseline &&
+  graph.commits.values.none {it.snapshot.files==files})
+
 @Serializable internal data class DeletionReceipt(val id:String,val recordHash:String,val replacement:String,val game:String,val profile:String) {
  companion object {
   fun decode(bytes:ByteArray,id:String,game:String,profile:String):DeletionReceipt=json.decodeFromString<DeletionReceipt>(bytes.decodeToString()).also {

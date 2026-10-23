@@ -15,6 +15,11 @@ class AppendProfileSessionTest {
  private class Memory: AppendStore {
   val commits = linkedMapOf<String, ByteArray>()
   val objects = linkedMapOf<String, ByteArray>()
+  val deletions = linkedMapOf<String, ByteArray>()
+  override fun readDeletion(id:String)=deletions[id]?.copyOf()
+  override fun writeDeletion(id:String,bytes:ByteArray){deletions[id]=bytes.copyOf()}
+  override fun deleteCommit(id:String){commits.remove(id)}
+  override fun deleteObject(id:String){objects.remove(id)}
   var failWrite = false
   var legacy = false
   var beforeObject: (() -> Unit)? = null
@@ -41,6 +46,32 @@ class AppendProfileSessionTest {
  private fun edit(session: AppendProfileSession, value: String) = session.root.resolve("game1/game.dat").writeText(value)
  private fun published(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit
  private fun graph(session: AppendProfileSession, store: Memory) = AppendRepository(session.directory.resolve("append-v2"), Shattered, "demo").discover(store)
+ private fun seedIndependentLegacyBranch(session:AppendProfileSession,store:Memory) {
+  val isolated=Memory();published(session,isolated)
+  store.commits.putAll(isolated.commits);store.objects.putAll(isolated.objects)
+ }
+
+ @Test fun desktopHomeUploadCancelRefreshAndExplicitOverwriteKeepFrozenBase() {
+  val store=Memory();val local=session();val a=published(local,store)
+  edit(local,"B");val b=published(local,store)
+  val remote=session(root(null));remote.restoreRemote(remote.readRemote(store).single().entry.manifest.id,store){true}
+  edit(remote,"C");val c=published(remote,store);edit(local,"D")
+  val records=store.commits.mapValues {hash(it.value)};val objects=store.objects.mapValues {hash(it.value)}
+  repeat(2) {
+   val request=assertIs<HomePushResult.Published>(local.pushFromHome(local.syncHistory(),store){true})
+   val conflict=assertIs<AppendPushResult.Diverged>(request.result).conflict
+   assertEquals(c.snapshot.id,conflict.overwriteTargetSnapshotId)
+   assertEquals(records,store.commits.mapValues {hash(it.value)});assertEquals(objects,store.objects.mapValues {hash(it.value)})
+   assertTrue(store.deletions.isEmpty());assertEquals(b.id,local.baseline())
+   local.readRemote(store)
+  }
+  val conflict=assertIs<AppendPushResult.Diverged>(assertIs<HomePushResult.Published>(local.pushFromHome(local.syncHistory(),store){true}).result).conflict
+  local.overwriteCloudConflict(conflict,requireNotNull(conflict.overwriteTargetSnapshotId),store){true}
+  val final=graph(local,store);val d=final.commits.getValue(final.tips.single())
+  assertEquals(setOf(a.id,b.id,d.id),final.commits.keys);assertEquals(listOf(b.id),d.parents)
+  assertEquals(hash("D".encodeToByteArray()),d.snapshot.files["game1/game.dat"])
+  assertFalse(c.snapshot.id in store.objects);assertEquals("D",content(local))
+ }
 
  @Test fun cloudHistorySelectionRequiresApprovalForUniqueBytesAndCreatesNoBackup() {
   val store=Memory();val a=session();val first=published(a,store)
@@ -68,16 +99,15 @@ class AppendProfileSessionTest {
   assertEquals(first.id,a.baseline());assertEquals(2,store.commits.size)
  }
 
- @Test fun ordinaryPublicationParentsOnlyItsRealBaselineAndKeepsSiblingBranches() {
+ @Test fun ordinaryPublicationAsksBeforeWritingAConflictingDescendant() {
   val store = Memory(); val a = session(); val first = published(a, store)
   val b = session(root(null)); b.restoreRemote(b.readRemote(store).single().entry.manifest.id, store) { true }
   edit(a, "a-later"); val second = published(a, store)
   edit(b, "b-later"); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
-  assertEquals(2, conflict.branches.size)
-  assertEquals(setOf(second.id, b.baseline()), conflict.observedTips)
-  val own = conflict.branches.single { it.commit.id == b.baseline() }.commit
-  assertEquals(listOf(first.id), own.parents); assertFalse(second.id in own.parents)
-  assertEquals("b-later", content(b)); assertEquals(3, store.commits.size)
+  assertEquals(1, conflict.branches.size)
+  assertEquals(setOf(second.id), conflict.observedTips);assertEquals(first.id,b.baseline())
+  assertEquals(second.snapshot.id,conflict.overwriteTargetSnapshotId)
+  assertEquals("b-later", content(b)); assertEquals(2, store.commits.size);assertEquals(2,store.objects.size)
  }
 
  @Test fun explicitRemoteApplyAdoptsMatchingUnbaselinedPopulatedDirectory() {
@@ -141,11 +171,8 @@ class AppendProfileSessionTest {
   assertEquals(first.id, local.baseline()); assertFalse(local.hasPending()); assertEquals(2,store.commits.size)
   edit(local, "post-restore-edit")
   val result = assertIs<AppendPushResult.Diverged>(local.push(store) { true })
-  val own = result.conflict.branches.single { it.commit.id == local.baseline() }.commit
-  assertEquals("snapshot",own.kind); assertEquals(listOf(first.id),own.parents)
-  assertEquals(setOf(second.id,own.id),result.conflict.observedTips)
-  assertEquals(hash("post-restore-edit".encodeToByteArray()),own.snapshot.files["game1/game.dat"])
-  assertNotEquals(first.snapshot.files,own.snapshot.files); assertEquals(3,store.commits.size)
+  assertEquals(first.id,local.baseline());assertEquals(setOf(second.id),result.conflict.observedTips)
+  assertEquals("post-restore-edit",content(local));assertEquals(2,store.commits.size);assertEquals(2,store.objects.size)
  }
 
  @Test fun failedVersionCheckLeavesTargetAndBaselineUnchangedWithoutRestorePlan() {
@@ -159,7 +186,8 @@ class AppendProfileSessionTest {
  @Test fun threeBranchesOfferAllChoicesAndRestoreKeepsEveryCloudTip() {
   val store = Memory(); published(session(root("a")), store)
   val b = session(root("b")); assertIs<AppendPushResult.Diverged>(b.push(store) { true })
-  val c = session(root("c")); val conflict = assertIs<AppendPushResult.Diverged>(c.push(store) { true }).conflict
+  val c = session(root("c")); seedIndependentLegacyBranch(c,store)
+  val conflict = assertIs<AppendPushResult.Diverged>(c.push(store) { true }).conflict
   assertEquals(3, conflict.branches.size); val choice = conflict.branches.single { it.commit.id == b.baseline() }
   val commitsBefore=store.commits.mapValues { it.value.copyOf() };val objectsBefore=store.objects.mapValues { it.value.copyOf() }
   val result = assertIs<AppendPushResult.Diverged>(c.resolve(conflict, choice.snapshot.manifest.id, store) { true })
@@ -183,7 +211,7 @@ class AppendProfileSessionTest {
  @Test fun changedRemoteTipsReturnAllNewChoicesWithoutApplyingStaleChoice() {
   val store = Memory(); published(session(root("a")), store)
   val b = session(root("b")); val old = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
-  session(root("c")).push(store) { true }
+  seedIndependentLegacyBranch(session(root("c")),store)
   val current = assertIs<AppendPushResult.Diverged>(b.resolve(old, old.branches.first().snapshot.manifest.id, store) { true }).conflict
   assertEquals(3, current.branches.size); assertEquals("b", content(b)); assertEquals(3, store.commits.size)
   assertFalse(b.hasPending())
@@ -193,7 +221,7 @@ class AppendProfileSessionTest {
   val store = Memory(); val a = session(root("a")); published(a, store)
   val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   val thirdStore = Memory(); thirdStore.commits.putAll(store.commits); thirdStore.objects.putAll(store.objects)
-  val c = session(root("late")); c.push(thirdStore) { true }
+  val c = session(root("late")); seedIndependentLegacyBranch(c,thirdStore)
   val late = thirdStore.commits.keys - store.commits.keys
   val baseline=b.baseline()
   store.afterReadObject = { late.forEach { store.commits[it] = thirdStore.commits.getValue(it) }; store.objects.putAll(thirdStore.objects) }
@@ -212,10 +240,8 @@ class AppendProfileSessionTest {
   assertEquals("a", content(b)); assertFalse(b.hasPending());assertEquals(choice.commit.id,b.baseline());assertEquals(2,store.commits.size)
   edit(b, "newer"); store.failWrite = false
   val done = assertIs<AppendPushResult.Diverged>(b.push(store) { true })
-  val published=done.conflict.branches.single { it.commit.id==b.baseline() }.commit
-  assertEquals(listOf(choice.commit.id),published.parents);assertEquals("snapshot",published.kind)
-  assertEquals(hash("newer".encodeToByteArray()),published.snapshot.files["game1/game.dat"])
-  assertEquals("newer", content(b));assertEquals(3,store.commits.size)
+  assertEquals(conflict.observedTips,done.conflict.observedTips);assertEquals(choice.commit.id,b.baseline())
+  assertEquals("newer", content(b));assertEquals(2,store.commits.size);assertEquals(2,store.objects.size)
  }
 
  @Test fun interruptedLocalApplyCannotBeReplayedAsPublicationBeforeExplicitArchive() {

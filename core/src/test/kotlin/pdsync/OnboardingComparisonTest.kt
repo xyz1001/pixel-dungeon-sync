@@ -385,13 +385,16 @@ class OnboardingComparisonTest {
 
  @Test fun ordinaryResolveAndFreshComparisonStillRejectHistoricalBaselineAfterPreservation() {
   val (store, local, base) = dirtyBranchedBaseline(); val original = compare(local, store)
+  // Seed the already-published branch left by old clients, without using the new preflight.
+  val repo=repository(local);val plan=repo.prepare(versions("v1").annotate(Snapshots.capture(local.root,Shattered,"demo","fixture",null)),listOf(base.id))
+  val legacy=repo.publish(store,plan);repo.setBaseline(legacy.id,repo.discover(store));repo.clearPending()
   val conflict = assertIs<AppendPushResult.Diverged>(local.push(store) { true }).conflict
   val historical = AppendBranch(base, local.loadSnapshot(base.snapshot.id))
   assertFails { local.resolve(conflict, base.snapshot.id, store) { true } }
   assertFails { local.resolve(conflict.copy(branches = conflict.branches + historical), base.snapshot.id, store) { true } }
   assertFails { local.onboardingRestore(compare(local, store), base.snapshot.id, store) { true } }
   assertFails { local.onboardingRestore(original, base.snapshot.id, store) { true } }
-  assertEquals("dirty", content(local)); assertEquals(3, store.commits.size); assertFalse(local.hasPending())
+  assertEquals("dirty", content(local)); assertEquals(3, store.commits.size); assertEquals(6,store.writes); assertFalse(local.hasPending())
  }
 
  @Test fun lateSiblingDuringVerificationRejectsSoleTipRestoreWithoutPublication() {

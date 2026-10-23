@@ -243,6 +243,9 @@ class SnapshotMetadataTest {
   a.root.resolve("game1/game.dat").writeText("chosen A")
   val aBranch = assertIs<AppendPushResult.Success>(a.push(remote) { true }).commit
   b.root.resolve("game1/game.dat").writeText("other B")
+  val repo=AppendRepository(b.directory.resolve("append-v2"),Shattered,"demo")
+  val legacyPlan=repo.prepare(policy.annotate(Snapshots.capture(b.root,Shattered,"demo","fixture",null)),listOf(initial.id))
+  val legacy=repo.publish(remote,legacyPlan);repo.setBaseline(legacy.id,repo.discover(remote));repo.clearPending()
   val conflict = assertIs<AppendPushResult.Diverged>(b.push(remote) { true }).conflict
   val originalCommits = remote.commits.mapValues { it.value.copyOf() }
   val originalObjects=remote.objects.mapValues {it.value.copyOf()};val writes=remote.writes

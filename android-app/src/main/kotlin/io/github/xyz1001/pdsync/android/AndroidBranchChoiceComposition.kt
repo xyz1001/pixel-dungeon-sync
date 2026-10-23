@@ -22,29 +22,8 @@ object AndroidBranchChoiceComposition {
              recovery: Boolean, notice: String, details: String, historyPage: Int,
              homeSelection: String?, homeStatus: String, homeStatusKind: SharedHomeStatusKind,
              actions: SharedBranchChoiceActions): View {
-        val branched = observed?.kind == "BRANCHED"
-        val pending = observed?.isRetryablePending == true
-        val state = SharedBranchChoiceState(
-            observation = observed,
-            branches = if (!branched) emptyList() else observed?.remoteVersions.orEmpty().map { branch ->
-                val manifest = history?.cloud?.firstOrNull { it.snapshot.id == branch.snapshotId }?.snapshot
-                SharedBranchChoice(branch.snapshotId, branch.displayName,
-                    listOf(branch.deviceLabel ?: UNKNOWN_SOURCE.text(),
-                        HistoryPresentation.time(manifest?.metadata?.latestFileModifiedAt),
-                        FILE_COUNT.text(branch.fileCount)).joinToString(" · "))
-            },
-            selectedId = observed?.overwriteTargetSnapshotId, game = game, pageActive = pageActive, busy = busy,
-            connected = connected, observationCurrent = cloudVerified && branched,
-            resolutionBlocked = recovery || pending,
-            overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
-            canPreserveLocal = false,
-            notice = listOf(notice, when {
-                recovery -> AN_UNFINISHED_RESTORE_EXISTS_RETURN_TO_SETTINGS.text()
-                pending -> THE_PREVIOUS_UPLOAD_IS_UNFINISHED_RETRY_UPLOADING.text()
-                else -> ""
-            }).filter(String::isNotBlank).distinct().joinToString("\n"),
-            details = details,
-        )
+        val state = androidCloudOverwriteState(observed, history, game, pageActive, busy,
+            connected, cloudVerified, recovery, notice, details)
         return ComposeView(activity).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {

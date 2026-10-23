@@ -9,6 +9,8 @@ MAIN = (REPO / 'android-app/src/main/java/io/github/xyz1001/pdsync/android/MainA
 ADAPTER = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidBranchChoiceComposition.kt').read_text()
 
 
+MODEL = (REPO / 'shared-ui/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidCloudOverwriteState.kt').read_text()
+
 class SharedBranchChoiceAndroidContract(unittest.TestCase):
     def test_modal_replaces_legacy_chrome_and_uses_real_home_history(self):
         host = body(MAIN, 'private void renderConflict()')
@@ -41,16 +43,16 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
             self.assertNotIn(forbidden, ADAPTER)
 
     def test_adapter_preserves_existing_branch_capabilities_and_metadata(self):
-        for required in ('observation = observed', 'observed?.kind == "BRANCHED"',
+        for required in ('observation = observed', 'observed?.isOverwriteConflict == true',
                          'branch.snapshotId, branch.displayName', 'selectedId = observed?.overwriteTargetSnapshotId',
                          'pageActive = pageActive, busy = busy',
                          'connected = connected, observationCurrent = cloudVerified && branched',
                          'resolutionBlocked = recovery || pending',
                          'overwriteSupported = true, mergeSupported = false, cloudOverwrite = true',
                          'canPreserveLocal = false'):
-            self.assertIn(required, ADAPTER)
-        self.assertNotIn('capturedAt', ADAPTER)
-        self.assertNotIn('preparedAt', ADAPTER)
+            self.assertIn(required, MODEL)
+        self.assertNotIn('capturedAt', MODEL)
+        self.assertNotIn('preparedAt', MODEL)
 
     def test_ordinary_upload_has_no_new_chooser_or_confirmation(self):
         request = body(MAIN, '\n    public void requestUpload()')

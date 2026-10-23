@@ -163,8 +163,10 @@ class AndroidHistoricalRestorePublicationTest {
         assertEquals("SKIPPED_CONFLICT", rig.facade.autoUpload().status)
         assertEquals(writes, rig.store.objectAttempts to rig.store.commitAttempts)
         assertTrue(rig.facade.upload(rig.facade.inspect()).isConflict)
-        assertEquals(listOf(first.id), rig.store.latest().parents)
-        assertEquals(3, rig.store.commits.size)
+        assertEquals(second.id, rig.store.latest().id)
+        assertEquals(writes, rig.store.objectAttempts to rig.store.commitAttempts)
+        assertEquals(first.id,rig.facade.historyPresentation(rig.facade.inspect()).baseline)
+        assertEquals(2, rig.store.commits.size)
     }
 
     @Test fun helperFailureRequiresRecoveryWithoutCreatingAnyUploadPlan() {
