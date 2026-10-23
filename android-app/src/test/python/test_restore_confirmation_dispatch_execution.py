@@ -19,12 +19,13 @@ class RestoreConfirmationDispatchExecution(unittest.TestCase):
 package io.github.xyz1001.pdsync.android;
 public class MainActivity {
  enum SyncPage { HOME, CONFIRM, CONFLICT, SETTINGS }
- enum DiagnosticAction { RESTORE, RESOLVE }
+ enum DiagnosticAction { PUSH, RESTORE, RESOLVE }
  interface Task<T> { T run() throws Exception; }
  interface Done<T> { void accept(T value) throws Exception; }
  static class AndroidSyncFacade {
   static class OperationResult {}
   Object withRestoreReadScope(Task task) throws Exception { return task.run(); }
+  Object withUploadReadScope(Task task) throws Exception { return task.run(); }
  }
  static class OperationOutcome {}
  static class Message { String text(){return "cancelled";} }

@@ -1697,8 +1697,8 @@
       "sha256": "dc38a71dfaacc7cd1d9de289d528e2632a02a8bcb68d2411bf2d1e021e991b8e"
     },
     "android-app/src/test/python/test_restore_confirmation_dispatch_execution.py": {
-      "size": 5203,
-      "sha256": "f3a09b1db820f0ca65e68a2181bbda071c0db0cf5522005a51b7984609af5cf0"
+      "size": 5289,
+      "sha256": "2abf949ee4f39b853f6c9fa5ba830fe7f76bfc1ae504f1e630356d063702263f"
     },
     "android-app/src/test/python/test_restore_receipt_execution.py": {
       "size": 14662,
