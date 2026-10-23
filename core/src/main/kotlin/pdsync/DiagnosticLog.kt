@@ -61,7 +61,11 @@ class DiagnosticTrace internal constructor(val id: String, val action: Diagnosti
  * oldest complete records of a full day are dropped. No account, URL, path, save ID, exception text,
  * stack trace, request/response body or headers can be supplied to the record schema.
  *
- * Every write is forced; recorder failures cannot change synchronization results. Export revalidates
+ * Appends are ordered; durability is batched at 32 records / 64 KiB, and forced on operation
+ * FINISHED, reconfiguration and export. Before a successful flush, a crash/power loss may lose at
+ * most 32 records / 64 KiB, including a batch being forced (I/O failures remain best effort).
+ * No save durability policy is changed.
+ * Recorder failures cannot change synchronization results. Export revalidates
  * and reserializes this schema instead of trusting on-disk bytes. Snapshots and writes use one lock.
  * The path checks reject symlinks but cannot defeat hostile concurrent ancestor replacement, as with
  * SafePaths elsewhere. Callers must bind explicitly inside each worker/coroutine's synchronous block;
@@ -72,6 +76,26 @@ object DiagnosticLog {
  internal const val RETENTION_DAYS = 7L
  internal const val MAX_TOTAL_BYTES = MAX_FILE_BYTES * 7
  private const val MAX_LINE_BYTES = 32 * 1024
+ internal const val FORCE_RECORD_LIMIT = 32
+ internal const val FORCE_BYTE_LIMIT = 64 * 1024
+ private val dirtyFiles = linkedSetOf<Path>()
+ private var pendingRecords = 0
+ private var pendingBytes = 0
+ internal var forceForTests: ((FileChannel) -> Unit)? = null
+ private fun flushPending() {
+  for (file in dirtyFiles) {
+   if (!Files.exists(file, NOFOLLOW_LINKS)) continue
+   requireRegularOrAbsent(file)
+   FileChannel.open(SafePaths.checked(file), WRITE, NOFOLLOW_LINKS).use { channel ->
+    forceForTests?.invoke(channel) ?: channel.force(true)
+   }
+  }
+  dirtyFiles.clear(); pendingRecords = 0; pendingBytes = 0
+ }
+ private inline fun <T> preservingInterrupt(action:()->T):T {
+  val interrupted=Thread.interrupted()
+  try {return action()} finally {if(interrupted)Thread.currentThread().interrupt()}
+ }
  private val lock = Any()
  private val current = ThreadLocal<DiagnosticTrace?>()
  internal fun currentTrace():DiagnosticTrace? = current.get()
@@ -100,10 +124,12 @@ object DiagnosticLog {
  @JvmStatic fun configure(applicationPrivateDirectory: Path, version: String, platform: String) {
   configureForTests(applicationPrivateDirectory, version, platform, Clock.systemDefaultZone())
  }
- internal fun configureForTests(directory: Path, version: String, platform: String, clock: Clock) = synchronized(lock) {
+ internal fun configureForTests(directory: Path, version: String, platform: String, clock: Clock) = preservingInterrupt { synchronized(lock) {
+  try { flushPending() } catch (_: Exception) { /* Previous configuration is best effort. */ }
+  dirtyFiles.clear(); pendingRecords=0; pendingBytes=0
   configuration = Configuration(directory.resolve("diagnostics-v1"), safeVersion(version), safePlatform(platform), clock)
   try { val config = configuration!!; prepare(config); prune(config) } catch (_: Exception) { /* Best effort only. */ }
- }
+ }}
 
  @JvmStatic fun begin(action: DiagnosticAction, automatic: Boolean): DiagnosticTrace =
   DiagnosticTrace(UUID.randomUUID().toString(), action, automatic).also { it.record(DiagnosticStage.QUEUED, DiagnosticResult.STARTED) }
@@ -155,7 +181,7 @@ object DiagnosticLog {
    category, null, httpStatus(error), details)
  }
  internal fun write(trace: DiagnosticTrace, stage: DiagnosticStage, result: DiagnosticResult, failure: DiagnosticFailure,
-                    method: DiagnosticHttpMethod? = null, status: Int? = null, details: DiagnosticDetails? = null): Boolean = synchronized(lock) {
+                    method: DiagnosticHttpMethod? = null, status: Int? = null, details: DiagnosticDetails? = null): Boolean = preservingInterrupt { synchronized(lock) {
   try {
    val config = configuration ?: return@synchronized false
    prepare(config); prune(config)
@@ -185,6 +211,7 @@ object DiagnosticLog {
     // Preserve a crash-truncated record as rejected input; do not concatenate a new valid record.
     if (tail.array()[0] != '\n'.code.toByte()) line = byteArrayOf('\n'.code.toByte()) + line
    }
+   if (pendingBytes + line.size > FORCE_BYTE_LIMIT) flushPending()
    if (size + line.size > MAX_FILE_BYTES) {
     val lines = readRecords(file, config).map { codec.encodeToString(it) + "\n" }
     var keptBytes = line.size
@@ -199,15 +226,17 @@ object DiagnosticLog {
     replaceBucket(config, file, (kept.joinToString("") + line.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
    } else {
     FileChannel.open(SafePaths.checked(file), CREATE, WRITE, APPEND, NOFOLLOW_LINKS).use { channel ->
-     val bytes = ByteBuffer.wrap(line); while (bytes.hasRemaining()) channel.write(bytes); channel.force(true)
+     val bytes = ByteBuffer.wrap(line); while (bytes.hasRemaining()) channel.write(bytes)
     }
    }
+   dirtyFiles.add(file); pendingRecords++; pendingBytes+=line.size
+   if (stage == DiagnosticStage.FINISHED || pendingRecords >= FORCE_RECORD_LIMIT || pendingBytes >= FORCE_BYTE_LIMIT) flushPending()
    true
   } catch (_: Exception) { false }
- }
+ }}
 
  /** Immutable ZIP of validated records, taken under the same lock as append/rotation. No legacy files. */
- @JvmStatic fun snapshotExport(): ByteArray = synchronized(lock) {
+ @JvmStatic fun snapshotExport(): ByteArray = preservingInterrupt { synchronized(lock) {
   val config = configuration
   val now = config?.clock?.instant() ?: Instant.now()
   val zone = safeZone(config?.clock?.zone ?: ZoneOffset.UTC)
@@ -215,7 +244,7 @@ object DiagnosticLog {
   val records = ArrayList<Record>()
   if (config != null) {
    try {
-    prepare(config); prune(config)
+    prepare(config); prune(config); flushPending()
     logFiles(config).forEach { file ->
      try { records.addAll(readRecords(file, config)) } catch (_: Exception) { available = false }
     }
@@ -235,7 +264,7 @@ object DiagnosticLog {
    entry(CoreMessages.APPLICATION_LOG.text(), readableLog(metadata, records))
   }
   bytes.toByteArray()
- }
+ }}
  /** A human-readable view of the same validated snapshot, never arbitrary exception/logcat text. */
  private fun readableLog(metadata: Metadata, records: List<Record>): String = buildString {
   appendLine(CoreMessages.PD_SYNC_APPLICATION_LOG.text())

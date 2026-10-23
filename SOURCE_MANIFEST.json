@@ -2365,8 +2365,8 @@
       "sha256": "90f53e1474d284deb452339ca0eb019ff9607975e58e779866edcc3665414548"
     },
     "core/src/main/kotlin/pdsync/DiagnosticLog.kt": {
-      "size": 32601,
-      "sha256": "cbe9b796e30dd254820f886a05df5ded9d999ea57dc409e6380aa4b20b28249f"
+      "size": 34196,
+      "sha256": "25b052497da02d948c906e5bae588ee97cdcecd9f97e55d4e479c295901bf6f2"
     },
     "core/src/main/kotlin/pdsync/DiagnosticTiming.kt": {
       "size": 4186,
@@ -2695,6 +2695,10 @@
     "core/src/test/kotlin/pdsync/DetachedHomeReadTest.kt": {
       "size": 3688,
       "sha256": "e4bd7351fe0373479aedcbab0c0b988925e16041f7c89df18430e71a86a02269"
+    },
+    "core/src/test/kotlin/pdsync/DiagnosticBatchDurabilityTest.kt": {
+      "size": 3429,
+      "sha256": "3ab5a1a63d7a401b8aea6b4442dd6fd8cf65389a65008f4dfb6edfada9715c85"
     },
     "core/src/test/kotlin/pdsync/DiagnosticCapabilityEvidence94Test.kt": {
       "size": 6202,
