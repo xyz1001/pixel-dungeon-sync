@@ -2925,8 +2925,8 @@
       "sha256": "ee22352860f7251d0a0dc8c0ed9a52d30c0df8b68d611336bff08b63492a351a"
     },
     "desktop/gradle-linux-amd64.lockfile": {
-      "size": 14212,
-      "sha256": "ac119f77f71fae7882223a5a0f05968a5fbe571fef98f3933f525acf91dd1e2a"
+      "size": 14254,
+      "sha256": "af819f1a83f784e8baf16a4abd2b10cb4df264bfdbe89fedb3afa2dc6ee0b265"
     },
     "desktop/src/main/kotlin/pdsync/ApplicationWorkspace.kt": {
       "size": 389,
