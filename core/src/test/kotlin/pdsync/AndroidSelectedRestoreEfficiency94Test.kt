@@ -507,8 +507,24 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertEquals(!historical,result.configurationComplete)
   }
  }
+ @Test fun largeDeclaredObjectsUseSingleReadBatchesWithoutExceedingRetentionBudget() {
+  val store=Store();publish(store);store.child(store.latest())
+  store.commits.replaceAll {_,bytes->json.encodeToString(json.decodeFromString<AppendCommit>(bytes.decodeToString()).copy(objectBytes=MAX_SNAPSHOT_BYTES)).encodeToByteArray()}
+  val batches=mutableListOf<Int>()
+  val transport=object:AppendStore by store {
+   override val historyReadParallelism:Int get()=4
+   override fun readHistoryObjects(ids:List<String>,cancellation:MetadataReadCancellation,limits:Map<String,Int>):Map<String,ByteArray?> {
+    batches+=ids.size;assertEquals(MAX_SNAPSHOT_BYTES,limits.getValue(ids.single()))
+    return ids.associateWith {null}
+   }
+  }
+  val graph=AppendRepository(temp.resolve("large-read-budget"),AndroidGameAdapter(identity),connection.profile).discover(transport)
+  assertEquals(listOf(1,1),batches);assertEquals(2,graph.pending.size)
+ }
+
  @Test fun uploadScopeReusesHistoricalObjectsButKeepsFreshPublicationReads() {
-  for(mode in listOf("upload")) MockWebServer().use { server ->
+  val timings=mutableMapOf<String,Long>()
+  for(mode in listOf("serial","parallel","corrupt","missing")) MockWebServer().use { server ->
    val historical=mode=="different-history";val noop=mode=="same-tip-no-op"
    val seed=Store();val seedBridge=Bridge();val seedRig=publish(seed,seedBridge);val first=seed.latest()
    seedBridge.content=files(2);assertEquals("UPLOADED",seedRig.facade.autoUpload().status)
@@ -521,6 +537,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    server.dispatcher=object:Dispatcher() {
     override fun dispatch(request:RecordedRequest):MockResponse {
      requests+="${request.method} ${request.path}"
+     if(request.method=="GET")Thread.sleep(90)
      return when(request.method) {
       "GET"->remote[request.path]?.let {MockResponse().setBody(okio.Buffer().write(it))} ?: MockResponse().setResponseCode(404)
       "PUT"->{remote[requireNotNull(request.path)]=request.body.readByteArray();MockResponse().setResponseCode(201)}
@@ -534,13 +551,23 @@ class AndroidSelectedRestoreEfficiency94Test {
    }
    server.start()
    val endpoint=server.url("/dav/").toString()
+   val dav=AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password)
+   val selectedStore=object:AppendStore by dav {override val historyReadParallelism:Int get()=if(mode=="serial")1 else 4}
    val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
    val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
-    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0)
+    selectedStore,0)
    bridge.content=Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)).toMutableMap()
    facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
    bridge.content=files(9).toMutableMap()
    val home=facade.inspectHome();val exports=bridge.exports;val restores=bridge.restores;requests.clear();val started=System.nanoTime()
+   if(mode=="corrupt" || mode=="missing") {
+    val path=folder+"pdsync-v3-object-${first.snapshot.id}.zip"
+    if(mode=="corrupt")remote[path]=byteArrayOf(1) else remote.remove(path)
+    assertFails {facade.withUploadReadScope(java.util.concurrent.Callable {facade.upload(home)})}
+    assertEquals(0,requests.count {it.startsWith("PUT ") || it.startsWith("DELETE ")},"bad fresh object forbids all mutation")
+    assertEquals(1,requests.count {it.startsWith("PROPFIND ")})
+    return@use
+   }
    val result=facade.withUploadReadScope(java.util.concurrent.Callable { facade.upload(home) })
    val oldObjects=seed.objects.keys.map { folder+"pdsync-v3-object-$it.zip" }.toSet()
    oldObjects.forEach { path->assertEquals(1,requests.count {it=="GET $path"},"old immutable object read once") }
@@ -549,8 +576,11 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertEquals(1,requests.takeWhile {!it.startsWith("PUT ")}.count {it.startsWith("PROPFIND ")},"exactly one fresh history before upload")
    assertNotNull(result.refreshedInspection,"UI uses completed operation receipt, no full refresh")
    assertEquals(0,bridge.restores)
-   println("UPLOAD104_BENCH http=${requests.size} old_objects=${oldObjects.size} old_object_gets=${requests.count {it.removePrefix("GET ") in oldObjects}}")
+   timings[mode]=(System.nanoTime()-started)/1_000_000
+   println("UPLOAD108_BENCH mode=$mode elapsed_ms=${timings[mode]} http=${requests.size} old_objects=${oldObjects.size} old_object_gets=${requests.count {it.removePrefix("GET ") in oldObjects}}")
   }
+  println("UPLOAD108_LATENCY serial_ms=${timings["serial"]} parallel_ms=${timings["parallel"]}")
+  assertTrue(timings.getValue("parallel")<timings.getValue("serial")*0.85,"bounded preflight reads reduce delayed end-to-end upload time")
  }
 
  @Test fun uploadFreshRejectsCorruptInitialObjectAndCancellationBeforeWriting() {

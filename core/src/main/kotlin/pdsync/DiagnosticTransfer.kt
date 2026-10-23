@@ -6,7 +6,7 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.json.Json
 
 /** Bounded in-memory operation totals. No paths, URLs, content or account identifiers. */
-@Serializable enum class DiagnosticTransferKind { OBJECT_GET, COMMIT_GET, LIST, OBJECT_PUT, COMMIT_PUT, NAMESPACE, OTHER, CACHE_HIT, CACHE_MISS }
+@Serializable enum class DiagnosticTransferKind { OBJECT_GET, COMMIT_GET, LIST, OBJECT_PUT, COMMIT_PUT, NAMESPACE, OTHER, CACHE_HIT, CACHE_MISS, HISTORY_OBJECT_GET }
 @Serializable data class DiagnosticTransferMeasurement(val count:Long,val failed:Long,val canceled:Long,
  val headersMs:Long,val bodyMs:Long,val totalMs:Long,val sentBytes:Long,val receivedBytes:Long)
 internal class DiagnosticTransferCollector {

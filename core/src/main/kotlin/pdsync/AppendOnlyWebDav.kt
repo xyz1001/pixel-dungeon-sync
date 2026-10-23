@@ -234,6 +234,41 @@ class AppendOnlyWebDav(
  override fun readCommit(id: String): ByteArray? = get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES)
  override fun readCommit(id: String, cancellation: MetadataReadCancellation): ByteArray? =
   get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES, cancellation)
+ override val historyReadParallelism:Int get()=4
+ override fun readHistoryObjects(ids:List<String>,cancellation:MetadataReadCancellation,limits:Map<String,Int>):Map<String,ByteArray?> {
+  require(ids.size<=4)
+  cancellation.checkActive()
+  val cache=readScopes.get()
+  val reuse=cache!=null && (freshReadDepth.get()?:0)==0
+  val result=linkedMapOf<String,ByteArray?>()
+  val missing=mutableListOf<String>()
+  // Cache ownership stays on the calling thread; workers always perform fresh network reads.
+  ids.forEach {id->
+   beforeRequest.check();cancellation.checkActive()
+   val key=fileUrl(objectName(id)).toString()
+   val hit=if(reuse)cache!!.read(key) else null
+   if(hit!=null) {
+    result[id]=hit
+    DiagnosticLog.currentTrace()?.transfers?.add(DiagnosticTransferKind.CACHE_HIT,0,0,0,0,hit.size.toLong(),DiagnosticResult.SUCCEEDED)
+   } else {
+    missing+=id
+    DiagnosticLog.currentTrace()?.transfers?.add(DiagnosticTransferKind.CACHE_MISS,0,0,0,0,0,DiagnosticResult.SUCCEEDED)
+   }
+  }
+  val fetched=DiagnosticTiming.measure(DiagnosticPhase.HISTORY_OBJECT_READ) {
+   historyReadBatch(missing,cancellation) {id->
+    val limit=limits[id]?:MAX_SNAPSHOT_BYTES;require(limit in 1..MAX_SNAPSHOT_BYTES)
+    get(fileUrl(objectName(id)),limit,cancellation, true)
+   }
+  }
+  fetched.forEach {(id,bytes)->
+   val key=fileUrl(objectName(id)).toString()
+   if(bytes==null)cache?.remove(key) else if(reuse)cache!!.remember(key,bytes)
+   result[id]=bytes
+  }
+  cancellation.checkActive()
+  return ids.associateWith {result[it]}
+ }
  override fun readObject(id: String): ByteArray? = getObject(fileUrl(objectName(id)))
  override fun legacyPresent(): Boolean = get(fileUrl("head.json"), MAX_MANIFEST_BYTES) != null
  override fun legacyPresent(cancellation:MetadataReadCancellation):Boolean =
@@ -275,8 +310,8 @@ class AppendOnlyWebDav(
   }
  }
 
- private fun get(url: HttpUrl, limit: Int, cancellation: MetadataReadCancellation? = null): ByteArray? =
-  execute(request(url).get().build(), cancellation = cancellation) { response ->
+ private fun get(url: HttpUrl, limit: Int, cancellation: MetadataReadCancellation? = null, historyObject:Boolean = false): ByteArray? =
+  execute(request(url).get().build(), cancellation = cancellation, historyObject = historyObject) { response ->
   when (response.code) {
    404 -> null
    200 -> readBounded(response, limit)
@@ -318,12 +353,13 @@ class AppendOnlyWebDav(
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
  private fun <T> execute(request: Request, requestClient: OkHttpClient = client,
-  cancellation: MetadataReadCancellation? = null, block: (Response) -> T): T {
+  cancellation: MetadataReadCancellation? = null, historyObject:Boolean = false, block: (Response) -> T): T {
   cancellation?.checkActive()
   beforeRequest.check()
   val requestStarted = System.nanoTime()
   val transferTrace=DiagnosticLog.currentTrace()
   val kind=when {
+   historyObject -> DiagnosticTransferKind.HISTORY_OBJECT_GET
    request.method=="PROPFIND" -> DiagnosticTransferKind.LIST
    request.method=="MKCOL" -> DiagnosticTransferKind.NAMESPACE
    request.method=="GET" && request.url.encodedPath.endsWith(".zip") -> DiagnosticTransferKind.OBJECT_GET
