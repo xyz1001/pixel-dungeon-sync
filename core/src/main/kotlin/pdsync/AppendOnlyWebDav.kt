@@ -329,6 +329,14 @@ class AppendOnlyWebDav(
  }
  catch (error: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw error }
  catch (error: IOException) {
+  // A network change can invalidate several pooled sockets. Discard only idle connections;
+  // the current request still fails and only a later explicit operation may reconnect.
+  // This catch also covers response-body reads. Never treat cancellation, interruption,
+  // timeouts, DNS, TLS or HTTP/business failures as evidence of stale pooled sockets.
+  if (!call.isCanceled() && !Thread.currentThread().isInterrupted
+   && (error is java.net.SocketException || error is java.io.EOFException)) {
+   requestClient.connectionPool.evictAll()
+  }
   DiagnosticLog.networkFailure(error, context(error))
   // Diagnostic only: retain a plain IOException so callers' retry classification is unchanged.
   // Never copy transport text, causes or suppressed exceptions, which can contain credentials/URLs.

@@ -2309,8 +2309,8 @@
       "sha256": "ef3dfe0aafe045a8c36c2a075490b6f0e29855fbae3c122e6ed9ec382f881ffe"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
-      "size": 30861,
-      "sha256": "122b60b6e05f72709e90d6b6e0f3ac1045d7f5b07eb45bb8e8a3dff8fd307320"
+      "size": 31408,
+      "sha256": "eb6ce67c50034f021758b927298ec3d2a028112a6d2a77cb3f926884c2bc5aae"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
       "size": 67114,
@@ -2535,6 +2535,10 @@
     "core/src/main/kotlin/pdsync/presentation/HistoryPresentation.kt": {
       "size": 14447,
       "sha256": "719582a8bd43b18bc4cb1fc470b94fa8319b57a0883a95a1c16a8feebec87fd7"
+    },
+    "core/src/test/java/pdsync/DavIdleConnectionRecoveryTest.java": {
+      "size": 9243,
+      "sha256": "d892398f3e2bc5431576788a33a36451cc64b1d994f048f52c7ccf44a54c0a23"
     },
     "core/src/test/java/pdsync/DiagnosticDetailsJavaTest.java": {
       "size": 2634,
