@@ -359,6 +359,21 @@ class AppendRepositoryTest {
   assertTrue(remote.writes().isEmpty()); assertPlanEquals(plan, repo.pending())
  }
 
+ @Test fun serialDelegatingStoreKeepsAllReadOverridesOnTheOwner() {
+  val remote=Memory();val source=snapshot();val record=commit(source)
+  val calls=mutableListOf<String>();val owner=Thread.currentThread()
+  fun called(name:String){assertSame(owner,Thread.currentThread());calls+=name}
+  val store=object:AppendStore by remote {
+   override fun legacyPresent():Boolean {called("legacy");return false}
+   override fun listCommits(cursor:String?):CommitPage {called("list");return CommitPage(listOf(record.id))}
+   override fun readCommit(id:String):ByteArray {called("commit");return encoded(record)}
+   override fun readObject(id:String):ByteArray {called("object");return source.zip}
+  }
+  assertEquals(setOf(record.id),repository().discover(store).commits.keys)
+  assertEquals(listOf("legacy","list","commit","object"),calls)
+  assertTrue(remote.events.isEmpty(),"delegation must not bypass read overrides")
+ }
+
  @Test fun underreportedObjectLengthsCannotBypassTheActualByteBudget() {
   val remote = Memory(); val source = snapshot(); val payload = ByteArray(8 * 1024 * 1024)
   val expectedMaximumReads = (MAX_REMOTE_SCAN_BYTES / payload.size).toInt()

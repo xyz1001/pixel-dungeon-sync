@@ -2309,8 +2309,8 @@
       "sha256": "50ce9903b27e754b446d919c20047ada42c6826fd36a259561ce4cbda9a0e1c5"
     },
     "core/src/main/kotlin/pdsync/AppendOnly.kt": {
-      "size": 39953,
-      "sha256": "4fcc6042a922ed856700eed45f065bc4066ef5807ac91fcca1b902d6d0b0a829"
+      "size": 40237,
+      "sha256": "3e8ac2726e37316a60cfec1c325633efccc777500b1337ef8d5b19060c44c04a"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
       "size": 36574,
@@ -2633,8 +2633,8 @@
       "sha256": "450ab5237d6ac98772c6a5bb65c0b3abe5ed179379cd5f78a76b47db1eac1d9a"
     },
     "core/src/test/kotlin/pdsync/AppendRepositoryTest.kt": {
-      "size": 43779,
-      "sha256": "c0674b30f439930816e6cff22c01f91d775af22a524d6481f5d4f8cbe0778bab"
+      "size": 44694,
+      "sha256": "d9a5e8fb9ad888835fbf9dc4ec3c4509ac67dbe87bab4eea758f09928d6032c9"
     },
     "core/src/test/kotlin/pdsync/AtomicStateWriteTest.kt": {
       "size": 931,

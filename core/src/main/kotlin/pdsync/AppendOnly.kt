@@ -297,13 +297,13 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   fun observed(id:String) { if(evidence==null)observe(id) else evidence.observed.add(id) }
   fun knownBytes(id:String):ByteArray? = if(evidence==null)known(id) else evidence.known[id]
   fun rememberBytes(id:String,bytes:ByteArray) { if(evidence==null)remember(id,bytes) else evidence.known[id]=bytes }
-  if (store.legacyPresent(cancellation)) throw LegacyProtocolException()
+  if (if(verifyObjects && parallelism==1)store.legacyPresent() else store.legacyPresent(cancellation)) throw LegacyProtocolException()
   val ids = (if(evidence==null)idsIn(knownRoot)+idsIn(observedRoot) else evidence.expected.keys+evidence.observed).toMutableSet()
   (if(evidence==null)baseline() else evidence.baseline)?.let { ids.add(it) }; require(ids.size <= MAX_COMMITS)
   val cursors = mutableSetOf<String>(); var cursor: String? = null; var pages = 0; var listed = 0L
   do {
    require(++pages <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_LISTING_PAGES_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-   val page = store.listCommits(cursor,cancellation)
+   val page = if(verifyObjects && parallelism==1)store.listCommits(cursor) else store.listCommits(cursor,cancellation)
    listed += page.ids.size; require(listed <= MAX_COMMITS) { CoreValidationMessages.LISTING_ENTRY_WORK_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
    require(page.ids.all(::validRecordId)) { CoreValidationMessages.INVALID_COMMIT_FILENAME.text() }
    ids.addAll(page.ids); require(ids.size <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_COMMITS_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
@@ -349,7 +349,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
     }
     if(verifyObjects) {
      fetched.putAll(if(parallelism>1) historyReadBatch(batch,cancellation) {store.readCommit(it,cancellation)}
-      else batch.associateWith {store.readCommit(it,cancellation)})
+      else batch.associateWith {cancellation.checkActive();store.readCommit(it)})
     }
     // Validate manifests and reserve object budgets on the owner before fetching any ZIP.
     val decoded=linkedMapOf<String,AppendCommit>()
@@ -368,7 +368,9 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
     // Bound each response by its already-validated manifest, including chunked bodies.
     val prefetchObjects=verifyObjects && limits.values.sumOf {it.toLong()}<=MAX_SNAPSHOT_BYTES
     // Large histories still parallelize small manifests, but never retain four maximum ZIPs.
-    val objects=if(prefetchObjects) store.readHistoryObjects(limits.keys.toList(),cancellation,limits) else emptyMap()
+    fun readObjects(ids:List<String>):Map<String,ByteArray?> = if(parallelism>1)store.readHistoryObjects(ids,cancellation,limits)
+     else ids.associateWith {cancellation.checkActive();store.readObject(it)}
+    val objects=if(prefetchObjects) readObjects(limits.keys.toList()) else emptyMap()
     // Completion order detects failures promptly; decoding still follows discovery order.
     for (id in batch) {
      val bytes = fetched[id]
@@ -392,7 +394,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
      if (verifyObjects) {
       require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
       if(operationSeed[id]!=commit) {
-      val zip = if(prefetchObjects)objects[commit.snapshot.id] else store.readHistoryObjects(listOf(commit.snapshot.id),cancellation,limits)[commit.snapshot.id]
+      val zip = if(prefetchObjects)objects[commit.snapshot.id] else readObjects(listOf(commit.snapshot.id))[commit.snapshot.id]
       if (zip == null) { pending[id] = "missing object"; continue }
       scanBytes += maxOf(0, zip.size - commit.objectBytes)
       require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
