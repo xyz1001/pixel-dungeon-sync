@@ -36,12 +36,11 @@ object AndroidBranchChoiceComposition {
             selectedId = selectedId, game = game, pageActive = pageActive, busy = busy,
             connected = connected, observationCurrent = cloudVerified && branched,
             resolutionBlocked = recovery || pending,
-            overwriteSupported = restoreSupported, mergeSupported = restoreSupported,
-            canPreserveLocal = branched && !recovery && history?.currentProtected == false,
+            overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
+            canPreserveLocal = false,
             notice = listOf(notice, when {
                 recovery -> AN_UNFINISHED_RESTORE_EXISTS_RETURN_TO_SETTINGS.text()
                 pending -> THE_PREVIOUS_UPLOAD_IS_UNFINISHED_RETRY_UPLOADING.text()
-                !restoreSupported -> THE_CURRENT_ACCESS_METHOD_DOES_NOT_40.text()
                 else -> ""
             }).filter(String::isNotBlank).distinct().joinToString("\n"),
             details = details,

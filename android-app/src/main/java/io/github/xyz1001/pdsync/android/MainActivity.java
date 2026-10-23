@@ -3978,7 +3978,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             return;
         }
         if (kind() == OnboardingKind.BRANCHED) {
-            navigate(SyncPage.CONFLICT);
+            this.notice = SELECT_A_CLOUD_SAVE_FIRST_151.text();
+            render();
             return;
         }
         final String str = this.selected;
@@ -4100,7 +4101,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             }
             private boolean canResolve() {
                 return current() && observed != null && kind() == OnboardingKind.BRANCHED && cloudVerified
-                        && connection != null && restoreSupported() && !restoreNeedsAttention()
+                        && connection != null && !restoreNeedsAttention()
                         && !observed.isRetryablePending();
             }
             @Override public void select(String snapshotId) {
@@ -4114,12 +4115,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 if (canResolve() && hasBranch(snapshotId) && snapshotId.equals(selected))
                     m86xfa720d6a(observed, snapshotId);
             }
-            @Override public void merge() { if (canResolve()) previewMerge(); }
-            @Override public void preserveLocal() {
-                if (current() && cloudVerified && observed != null && kind() == OnboardingKind.BRANCHED
-                        && connection != null && !restoreNeedsAttention() && history != null
-                        && !history.getCurrentProtected()) upload();
-            }
+            @Override public void merge() { }
+            @Override public void preserveLocal() { }
         };
         // render() supplies a legacy root for this route. Replace all of its chrome, rather than
         // nesting the shared card inside a second heading, scroll view or footer.
@@ -4161,18 +4158,20 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: lambda$renderConflict$78$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m85x84f7e729(AndroidSyncFacade.Inspection inspection, String str) throws Exception {
-        requireRestoreSupport();
-        return sync().resolveConflict(inspection, str);
+        return sync().overwriteCloudSuccessors(inspection, str);
     }
 
     /* renamed from: lambda$renderConflict$79$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m86xfa720d6a(final AndroidSyncFacade.Inspection inspection, final String str) {
-        operation(DiagnosticAction.RESOLVE, VERIFYING_AND_PUBLISHING_THE_BRANCH_SELECTION_160.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda102
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m85x84f7e729(inspection, str);
-            }
-        }, THE_SELECTED_BRANCH_WAS_WRITTEN_TO_161.text());
+        final AndroidSyncFacade owner = this.facade;
+        if (owner == null || this.busy) return;
+        this.page = SyncPage.HOME;
+        work(DiagnosticAction.PUSH, VERIFYING_AND_PUBLISHING_THE_BRANCH_SELECTION_160.text(),
+                () -> owner.withUploadReadScope(() -> m54xc977a20(() -> m85x84f7e729(inspection, str))),
+                outcome -> {
+                    m55x8211a061(LOCAL_SAVES_UPLOADED_AND_VERIFIED_148.text(), outcome);
+                    this.page = SyncPage.HOME;
+                });
     }
 
     /* JADX INFO: Access modifiers changed from: private */

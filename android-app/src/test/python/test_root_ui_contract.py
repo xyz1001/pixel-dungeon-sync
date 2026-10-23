@@ -110,7 +110,7 @@ class RootUiContract(unittest.TestCase):
         for signature in ('public void requestRestore()', 'public void previewMerge()', 'void m87x12f15700()'):
             self.assertIn('if (!allowRestoreAction()) return;', body(MAIN, signature))
         for signature in ('AndroidSyncFacade.OperationResult m141x92df934d(', 'AndroidSyncFacade.OperationResult m142x859b98e(',
-                          'AndroidSyncFacade.OperationResult m85x84f7e729(', 'AndroidSyncFacade.OperationResult m61xf9a4e77a('):
+                          'AndroidSyncFacade.OperationResult m61xf9a4e77a('):
             self.assertIn('requireRestoreSupport()', body(MAIN, signature))
         recovery = body(MAIN, 'String m113x3e2c50ed()')
         self.assertLess(recovery.index('capabilities().interruptedBackupRecovery'), recovery.index('recoverInterruptedBackup()'))

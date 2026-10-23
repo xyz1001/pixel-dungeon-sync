@@ -87,14 +87,14 @@ class BranchChoiceHostExecution(unittest.TestCase):
         self.assert_detected('&& !observed.isRetryablePending()', '', 'pending upload: resolution dispatched')
 
     def test_detects_unsupported_resolution_bypass(self):
-        self.assert_detected('&& restoreSupported() && !restoreNeedsAttention()', '&& !restoreNeedsAttention()',
-                             'Unsupported restore reached I/O')
+        self.assert_detected('&& !restoreNeedsAttention()', '',
+                             'unfinished restore: resolution dispatched')
 
     def test_detects_selected_branch_mismatch(self):
         self.assert_detected('&& snapshotId.equals(selected)', '', 'overwrite must match selected observed branch')
 
-    def test_detects_protected_local_preserve_bypass(self):
-        self.assert_detected('&& !history.getCurrentProtected()', '', 'preserve already protected: preserve dispatched')
+    def test_detects_removed_preserve_dispatch(self):
+        self.assert_detected('@Override public void preserveLocal() { }', '@Override public void preserveLocal() { operations++; }', 'replaced root: stale callback dispatched')
 
     def test_detects_ordinary_upload_guard_bypass(self):
         self.assert_detected('if (this.page == SyncPage.HOME && !canHomeUpload()) return;', '',

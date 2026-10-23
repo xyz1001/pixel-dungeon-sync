@@ -486,6 +486,9 @@ internal fun runSyncApplication(
         }
         override fun writeObject(id: String, bytes: ByteArray) { prepareWrite(); remoteStore.writeObject(id, bytes) }
         override fun writeCommit(id: String, bytes: ByteArray) { prepareWrite(); remoteStore.writeCommit(id, bytes) }
+        override fun deleteCommit(id:String) {prepareWrite();remoteStore.deleteCommit(id)}
+        override fun deleteObject(id:String) {prepareWrite();remoteStore.deleteObject(id)}
+        override fun writeDeletion(id:String,bytes:ByteArray) {prepareWrite();remoteStore.writeDeletion(id,bytes)}
        } else remoteStore
       }
       fun store(): AppendStore = uploadStore
@@ -509,7 +512,7 @@ internal fun runSyncApplication(
        Action.REMOTE_TIP -> manager.restoreRemote(requireNotNull(chosen), store(), stopped).let { OperationResult(DesktopMessages.CLOUD_SAVE_RESTORED_A_PRE_RESTORE_BACKUP_WAS_ADDED_TO_HISTORY.text(), appliedFiles = it.restored.files) }
        Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult(DesktopMessages.RESTORE_COMPLETE_A_BACKUP_WAS_ADDED_TO_HISTORY_THE_RESTORE_COMMIT_IS_FROZEN.text(), appliedFiles = it.restored.files) }
        Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult(DesktopMessages.SELECTED_CLOUD_HISTORY_RESTORED_ORIGINAL_HISTORY_PRESERVED_THE_RESULT_IS_AW.text(),appliedFiles=it.restored.files)}
-       Action.RESOLVE -> pushed(manager.resolve(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped)).copy(appliedFiles = divergence.branches.single { it.snapshot.manifest.id == branchChoice }.snapshot.manifest.files)
+       Action.RESOLVE -> {manager.overwriteCloudConflict(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped);OperationResult(DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text())}
        Action.MERGE -> pushed(manager.merge(requireNotNull(divergence),store(),stopped)).let { result ->
         if(result.conflict==null) result.copy(appliedFiles=manager.observedFiles()) else result
        }
@@ -1334,7 +1337,7 @@ internal fun runSyncApplication(
          },
          onBack = { if (current()) navigate(Page.HOME) },
          onConfirm = { id ->
-          if (canResolve() && conflictSelection == id && conflictRestoreIssue == null &&
+          if (canResolve() && conflictSelection == id &&
            value.branches.any { it.snapshot.manifest.id == id }) execute(operationEvents.begin(Action.RESOLVE))
          },
          onMerge = { if (canResolve()) execute(operationEvents.begin(Action.MERGE)) })
@@ -1470,7 +1473,7 @@ private fun ConflictDialog(value: AppendConflict, selected: String?, restoreIssu
   },
   selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
   observationCurrent = true, resolutionBlocked = pending,
-  overwriteSupported = restoreIssue == null, mergeSupported = true,
+  overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
   notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else if (selected != null) restoreIssue.orEmpty() else "",
  )
  SharedBranchChoiceDialog(state, object : SharedBranchChoiceActions {

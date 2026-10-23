@@ -30,13 +30,14 @@ public final class MainActivity {
             List<Version> getRemoteVersions() { return branches; }
         }
         static final class OperationResult {}
+        <T>T withUploadReadScope(java.util.concurrent.Callable<T> task)throws Exception{return task.call();}
         int uploads, resolutions;
         Inspection dispatchedObservation;
         String resolvedId;
         OperationResult upload(Inspection observed) {
             uploads++; dispatchedObservation = observed; return new OperationResult();
         }
-        OperationResult resolveConflict(Inspection observed, String id) {
+        OperationResult overwriteCloudSuccessors(Inspection observed, String id) {
             resolutions++; dispatchedObservation = observed; resolvedId = id; return new OperationResult();
         }
     }
@@ -120,6 +121,13 @@ public final class MainActivity {
         try { task.run(); } catch (Exception failure) { throw new AssertionError(failure); }
     }
 
+    static class OperationOutcome {}
+    interface Done {void accept(OperationOutcome value)throws Exception;}
+    OperationOutcome m54xc977a20(Task task)throws Exception {task.run();return new OperationOutcome();}
+    void m55x8211a061(String message,OperationOutcome value) {page=SyncPage.CONFLICT;}
+    void work(DiagnosticAction action,String label,Task task,Done done) {
+        busy=true;operations++;try {done.accept((OperationOutcome)task.run());}catch(Exception e){throw new AssertionError(e);}
+    }
     /* PRODUCTION_METHODS */
 
     static int checks;
@@ -220,11 +228,11 @@ public final class MainActivity {
         resolutionBlocked(a -> a.observedKind = OnboardingKind.READY, "unbranched observation");
         resolutionBlocked(a -> a.cloudVerified = false, "unverified observation");
         resolutionBlocked(a -> a.connection = null, "disconnected account");
-        resolutionBlocked(a -> a.restoreAllowed = false, "unsupported restore");
+
         resolutionBlocked(a -> a.recovery = true, "unfinished restore");
         resolutionBlocked(a -> a.inspection.pending = true, "pending upload");
         MainActivity a = fresh(); a.actions.merge(); a.actions.merge();
-        check(a.merges == 1 && a.operations == 0, "merge routes only to existing preview once while busy");
+        check(a.merges == 0 && a.operations == 0, "removed merge never dispatches");
         preserveBlocked(b -> b.inspection = null, "preserve missing observation");
         preserveBlocked(b -> b.observedKind = OnboardingKind.READY, "preserve unbranched observation");
         preserveBlocked(b -> b.cloudVerified = false, "preserve unverified observation");
@@ -234,9 +242,9 @@ public final class MainActivity {
         preserveBlocked(b -> b.history.protectedLocal = true, "preserve already protected");
         a = fresh(); a.restoreAllowed = false; a.inspection.pending = true; a.render();
         SharedBranchChoiceActions old = a.actions; old.preserveLocal(); old.preserveLocal();
-        check(a.facade.uploads == 1 && a.operations == 1 && a.facade.resolutions == 0 && a.merges == 0,
-                "preserve keeps existing pending-upload retry without requiring restore support");
-        check(a.facade.dispatchedObservation == a.inspection, "preserve keeps exact upload observation");
+        check(a.facade.uploads == 0 && a.operations == 0 && a.facade.resolutions == 0 && a.merges == 0,
+                "removed preserve never dispatches");
+        check(a.facade.dispatchedObservation == null, "removed preserve retains no dispatched observation");
     }
     static void ordinaryUploadRouting() {
         MainActivity a = fresh(); a.page = SyncPage.HOME; a.observedKind = OnboardingKind.READY;

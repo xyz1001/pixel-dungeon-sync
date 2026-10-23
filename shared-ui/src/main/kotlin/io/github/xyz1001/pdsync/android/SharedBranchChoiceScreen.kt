@@ -59,7 +59,7 @@ fun SharedBranchChoiceScreen(state: SharedBranchChoiceState, actions: SharedBran
             if (state.notice.isNotBlank()) Text(state.notice,
                 Modifier.fillMaxWidth().padding(top = 12.dp), color = SharedUiColors.muted,
                 fontSize = 13.sp, lineHeight = 19.5.sp)
-            if (state.canPreserveLocal) SharedActionButton(SharedMessages.UPLOAD_KEEP_BOTH.text(), interactions::preserveLocal,
+            if (state.canPreserveLocal && !state.cloudOverwrite) SharedActionButton(SharedMessages.UPLOAD_KEEP_BOTH.text(), interactions::preserveLocal,
                 enabled = state.preserveEnabled && confirmation == null, style = SharedButtonStyle.SECONDARY,
                 modifier = Modifier.padding(top = 12.dp).then(observedBranch("preserve", observer)))
             if (state.details.isNotBlank()) {

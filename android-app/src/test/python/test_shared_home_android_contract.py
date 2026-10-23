@@ -287,7 +287,8 @@ class SharedHomeAndroidContract(unittest.TestCase):
         confirmation = body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2, boolean destructive)')
         self.assertIn('this.confirmationDestructive = destructive', confirmation)
         self.assertIn('this.confirmationDestructive', body(MAIN, 'private void renderConfirmation()'))
-        self.assertIn('navigate(SyncPage.CONFLICT)', restore)
+        self.assertNotIn('navigate(SyncPage.CONFLICT)', restore)
+        self.assertNotIn('overwriteCloudSuccessors', restore)
         # Protected local bytes still restore directly; UI migration adds no universal prompt.
         protected = body(restore, 'if (mayRestoreWithoutReplacementConfirmation(syncHistory))')
         self.assertIn('operation(DiagnosticAction.RESTORE', protected)

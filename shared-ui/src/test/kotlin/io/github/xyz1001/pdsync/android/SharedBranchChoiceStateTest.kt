@@ -26,6 +26,16 @@ class SharedBranchChoiceStateTest {
         override fun preserveLocal() { calls += "preserve"; state = state.copy(busy = true) }
     }
 
+    @Test fun cloudOverwriteHasOneDestructiveChoiceAndConsumesConfirmationOnce() {
+        val host=Host(ready().copy(selectedId="real-b",cloudOverwrite=true,canPreserveLocal=true))
+        host.interactions.preserveLocal();assertTrue(host.calls.isEmpty())
+        host.interactions.primary();val dialog=host.interactions.presentation!!
+        assertNull(dialog.secondaryLabel);assertFalse(dialog.secondaryEnabled)
+        host.interactions.merge(dialog.token);assertTrue(host.calls.isEmpty())
+        host.interactions.confirm(dialog.token);host.interactions.confirm(dialog.token)
+        assertEquals(listOf("overwrite:real-b"),host.calls);assertNull(host.interactions.presentation)
+    }
+
     @Test fun compositionAndSelectionNeverWriteAndUnknownIdsNeverSelect() {
         val host = Host(ready())
         assertTrue(host.calls.isEmpty())

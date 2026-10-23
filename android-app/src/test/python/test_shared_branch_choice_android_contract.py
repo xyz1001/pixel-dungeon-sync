@@ -46,8 +46,8 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
                          'pageActive = pageActive, busy = busy',
                          'connected = connected, observationCurrent = cloudVerified && branched',
                          'resolutionBlocked = recovery || pending',
-                         'overwriteSupported = restoreSupported, mergeSupported = restoreSupported',
-                         'canPreserveLocal = branched && !recovery && history?.currentProtected == false'):
+                         'overwriteSupported = true, mergeSupported = false, cloudOverwrite = true',
+                         'canPreserveLocal = false'):
             self.assertIn(required, ADAPTER)
         self.assertNotIn('capturedAt', ADAPTER)
         self.assertNotIn('preparedAt', ADAPTER)
@@ -62,7 +62,8 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
                           'SyncPage.CONFLICT', 'SharedBranchChoice', 'showUploadConfirmation('):
             self.assertNotIn(forbidden, request + upload)
         restore = body(MAIN, '\n    public void requestRestore()')
-        self.assertIn('navigate(SyncPage.CONFLICT)', body(restore, 'if (kind() == OnboardingKind.BRANCHED)'))
+        self.assertNotIn('SyncPage.CONFLICT', restore)
+        self.assertNotIn('overwriteCloudSuccessors', restore)
 
     def test_conflict_callbacks_keep_platform_guard_and_original_operation_routes(self):
         host = body(MAIN, 'private void renderConflict()')
@@ -70,14 +71,17 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
                          '!busy && !sharedAppreciationOnly', 'inspection == observed',
                          'facade == ownerFacade', 'connection == ownerConnection',
                          'ownerContext.accepts(currentHomeContext(sharedHomeRenderToken), true, busy)',
-                         'm86xfa720d6a(observed, snapshotId)', 'if (canResolve()) previewMerge()',
-                         '!history.getCurrentProtected()) upload()'):
+                         'm86xfa720d6a(observed, snapshotId)', '@Override public void merge() { }',
+                         '@Override public void preserveLocal() { }'):
             self.assertIn(required, host)
         work = body(MAIN, 'private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)')
         self.assertLess(work.index('this.busy = true'), work.index('this.f9io.execute'))
         self.assertIn('requireOfficialSyncAccess(this.connection)', body(MAIN, 'private AndroidSyncFacade sync()'))
         resolve = body(MAIN, 'AndroidSyncFacade.OperationResult m85x84f7e729(')
-        self.assertLess(resolve.index('requireRestoreSupport()'), resolve.index('sync().resolveConflict(inspection, str)'))
+        self.assertIn('sync().overwriteCloudSuccessors(inspection, str)', resolve)
+        dispatch = body(MAIN, 'void m86xfa720d6a(')
+        self.assertLess(dispatch.index('this.page = SyncPage.HOME'), dispatch.index('work(DiagnosticAction.PUSH'))
+        self.assertIn('m85x84f7e729(inspection, str)', dispatch)
 
 
 if __name__ == '__main__':

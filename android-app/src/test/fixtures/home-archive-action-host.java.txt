@@ -460,12 +460,12 @@ public final class MainActivity {
                 "reopened confirmation restores only newly selected target");
         a = fresh(true, true); a.observedKind = OnboardingKind.BRANCHED;
         a.requestRestore();
-        check(a.page == SyncPage.CONFLICT && a.confirmations == 0 && a.operations == 0,
-                "default selected tip still needs real branch choice");
+        check(a.page == SyncPage.HOME && a.confirmations == 0 && a.operations == 0,
+                "restore requires explicit selection and never enters cloud overwrite");
         a = fresh(true, true); a.observedKind = OnboardingKind.BRANCHED;
         a.selected = "missing-history"; a.explicitHomeSelection = a.selected; a.requestRestore();
-        check(a.page == SyncPage.CONFLICT && a.confirmations == 0 && a.operations == 0,
-                "missing explicit history must not bypass real branch choice");
+        check(a.page == SyncPage.HOME && a.confirmations == 0 && a.operations == 0,
+                "missing explicit history cannot restore or enter cloud overwrite");
         a = fresh(true, true); a.history.matchesCloudTip = true;
         a.selected = "different-history"; a.explicitHomeSelection = a.selected; a.requestRestore();
         check(a.confirmations == 1 && a.operations == 0,

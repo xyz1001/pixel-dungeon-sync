@@ -87,7 +87,7 @@ internal fun SharedBranchChoiceDialogBody(
             }
             if (state.notice.isNotBlank()) Text(state.notice, Modifier.fillMaxWidth(),
                 color = SharedUiColors.muted, fontSize = 13.sp, lineHeight = 19.5.sp)
-            if (state.canPreserveLocal) SharedActionButton(SharedMessages.UPLOAD_KEEP_BOTH.text(),
+            if (state.canPreserveLocal && !state.cloudOverwrite) SharedActionButton(SharedMessages.UPLOAD_KEEP_BOTH.text(),
                 interactions::preserveLocal, enabled = state.preserveEnabled, style = SharedButtonStyle.SECONDARY)
             if (state.details.isNotBlank()) {
                 SharedActionButton(if (expanded) SharedMessages.HIDE_DETAILS.text() else SharedMessages.DETAILS.text(),

@@ -23,6 +23,7 @@ data class SharedBranchChoiceState(
     val canPreserveLocal: Boolean = false,
     val notice: String = "",
     val details: String = "",
+    val cloudOverwrite: Boolean = false,
 )
 
 interface SharedBranchChoiceActions {
@@ -74,18 +75,18 @@ internal class SharedBranchChoiceInteractions(
         a.observation === b.observation && a.branches == b.branches && a.selectedId == b.selectedId &&
             a.game == b.game && a.connected == b.connected && a.observationCurrent == b.observationCurrent &&
             a.resolutionBlocked == b.resolutionBlocked && a.overwriteSupported == b.overwriteSupported &&
-            a.mergeSupported == b.mergeSupported
+            a.mergeSupported == b.mergeSupported && a.cloudOverwrite == b.cloudOverwrite
 
     val presentation: SharedConfirmationState? get() = currentConfirmation()?.let { proof ->
         val current = state()
         val selected = current.branches.singleOrNull { it.snapshotId == current.selectedId }
         SharedConfirmationState(proof.token, SharedMessages.CONFLICT_TITLE.text(),
             listOfNotNull(selected?.let { SharedMessages.SELECTED_SAVE.text(it.name) },
-                SharedMessages.USE_SELECTED_WARNING.text())
+                (if(current.cloudOverwrite) SharedMessages.OVERWRITE_CLOUD_WARNING else SharedMessages.USE_SELECTED_WARNING).text())
                 .joinToString("\n\n"),
-            confirmLabel = SharedMessages.USE_SELECTED.text(), confirmEnabled = current.canResolve && current.overwriteSupported && current.hasSelection,
-            secondaryLabel = if (current.mergeSupported) SharedMessages.MERGE.text() else null,
-            secondaryEnabled = current.canResolve && current.mergeSupported, busy = current.busy)
+            confirmLabel = (if(current.cloudOverwrite) SharedMessages.OVERWRITE_CLOUD else SharedMessages.USE_SELECTED).text(), confirmEnabled = current.canResolve && current.overwriteSupported && current.hasSelection,
+            secondaryLabel = if (current.mergeSupported && !current.cloudOverwrite) SharedMessages.MERGE.text() else null,
+            secondaryEnabled = current.canResolve && current.mergeSupported && !current.cloudOverwrite, busy = current.busy)
     }
 
     fun select(snapshotId: String) {
@@ -112,7 +113,7 @@ internal class SharedBranchChoiceInteractions(
     }
 
     fun preserveLocal() {
-        if (attached && state().preserveEnabled && currentConfirmation() == null) actions().preserveLocal()
+        if (attached && !state().cloudOverwrite && state().preserveEnabled && currentConfirmation() == null) actions().preserveLocal()
     }
 
     fun confirm(token: Long) {
