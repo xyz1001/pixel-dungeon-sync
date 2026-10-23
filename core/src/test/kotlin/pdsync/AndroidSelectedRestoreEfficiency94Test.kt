@@ -218,6 +218,22 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals(2,repository(r).discover(store).tips.size)
  }
 
+ @Test fun manualUploadWithoutVerifiedBaselineNeverPublishesBeforeConfirmation() {
+  for(associated in listOf(false,true)) {
+   val store=Store();publish(store);val bridge=Bridge(if(associated)files() else files(9));val r=rig(bridge,store)
+   r.facade.inspectHome();bridge.content=files(9).toMutableMap()
+   val writes=store.writes;val records=store.commits.mapValues {hash(it.value)}
+   repeat(2) {
+    val facade=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+    val observed=facade.inspectHome();assertNull(repository(r).baseline())
+    val result=facade.upload(observed)
+    assertTrue(result.isConflict);assertEquals(writes,store.writes)
+    assertEquals(records,store.commits.mapValues {hash(it.value)})
+    assertNull(repository(r).baseline());assertTrue(store.removed.isEmpty());assertTrue(store.deletions.isEmpty())
+   }
+  }
+ }
+
  @Test fun historyKeepsPreviouslyObservedLocalAssociationAfterContentChangesAndRestart() {
   val store=Store();publish(store);val b=store.latest();store.child(b)
   val bridge=Bridge();val r=rig(bridge,store)
@@ -255,6 +271,19 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals(bridge.content.mapValues {hash(it.value)},e.snapshot.files)
  }
 
+ @Test fun matchingSiblingIsNotOfferedAsItsOwnOverwriteReplacement() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
+  val c=store.child(b);bridge.content=files(9).toMutableMap()
+  val d=legacyPublished(store,bridge,b);repository(r).setBaseline(d.id,repository(r).discover(store))
+  bridge.content=Snapshots.verify(Snapshot(c.snapshot,store.objects.getValue(c.snapshot.id)),AndroidGameAdapter(identity)).toMutableMap()
+  val observed=r.facade.inspectHome();val writes=store.writes;val ids=store.commits.keys.toSet()
+  assertNull(observed.overwriteTargetSnapshotId)
+  assertTrue(r.facade.upload(observed).isConflict)
+  assertFails {r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),c.snapshot.id)}
+  assertEquals(writes,store.writes);assertEquals(ids,store.commits.keys)
+  assertEquals(d.id,repository(r).baseline());assertTrue(store.removed.isEmpty());assertTrue(store.deletions.isEmpty())
+ }
+
  @Test fun automaticOverwriteTargetNeverChoosesBetweenIndependentCloudSuccessors() {
   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
   val c=store.child(b);store.child(b);bridge.content=files(9).toMutableMap()
@@ -280,8 +309,8 @@ class AndroidSelectedRestoreEfficiency94Test {
    Snapshots.verify(Snapshot(manifest,snapshot.zip),AndroidGameAdapter(identity))
    val r=rig(Bridge(files(9)),store);val home=r.facade.inspectHome();val writes=store.writes;val lists=store.listings
    if(valid) {
-    val result=r.facade.upload(home);assertFalse(result.isPending);assertEquals(writes+2,store.writes)
-    assertEquals(lists+2,store.listings)
+    val result=r.facade.upload(home);assertFalse(result.isPending);assertTrue(result.isConflict);assertEquals(writes,store.writes)
+    assertEquals(lists+1,store.listings)
    } else {
     assertFailsWith<UnsupportedAndroidSaveFormatException>{r.facade.upload(home)}
     assertEquals(writes,store.writes);assertEquals(lists+1,store.listings);assertNull(repository(r).pending())
@@ -508,7 +537,9 @@ class AndroidSelectedRestoreEfficiency94Test {
    val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
    val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
     AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0)
-   if(historical)facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
+   bridge.content=Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)).toMutableMap()
+   facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
+   bridge.content=files(9).toMutableMap()
    val home=facade.inspectHome();val exports=bridge.exports;val restores=bridge.restores;requests.clear();val started=System.nanoTime()
    val result=facade.withUploadReadScope(java.util.concurrent.Callable { facade.upload(home) })
    val oldObjects=seed.objects.keys.map { folder+"pdsync-v3-object-$it.zip" }.toSet()
@@ -533,7 +564,8 @@ class AndroidSelectedRestoreEfficiency94Test {
  }
  @Test fun uploadDeltaKeepsConcurrentBranchAndDetectsCorruptReadback() {
   for(corrupt in listOf(false,true)) {
-   val store=Store();publish(store);val parent=store.latest();val bridge=Bridge(files(9));val r=rig(bridge,store)
+   val store=Store();publish(store);val parent=store.latest();val bridge=Bridge();val r=rig(bridge,store)
+   r.facade.restoreSelected(r.facade.inspectHome(),parent.snapshot.id,false);bridge.content=files(9).toMutableMap()
    val home=r.facade.inspectHome();val listed=store.listings
    var branch:AppendCommit?=null
    store.afterCommit={if(corrupt)store.objects[store.latest().snapshot.id]=byteArrayOf(1) else branch=store.child(parent)}
@@ -550,7 +582,8 @@ class AndroidSelectedRestoreEfficiency94Test {
 
  @Test fun uploadDeltaRejectsChangedOrDeletedPreviouslyKnownCommit() {
   for(deleted in listOf(false,true)) {
-   val store=Store();publish(store);val parent=store.latest();val r=rig(Bridge(files(9)),store);val home=r.facade.inspectHome()
+   val store=Store();publish(store);val parent=store.latest();val bridge=Bridge();val r=rig(bridge,store)
+   r.facade.restoreSelected(r.facade.inspectHome(),parent.snapshot.id,false);bridge.content=files(9).toMutableMap();val home=r.facade.inspectHome()
    store.afterCommit={if(deleted)store.commits.remove(parent.id) else store.commits[parent.id]=json.encodeToString(parent.copy(kind="restore")).encodeToByteArray()}
    assertFails {r.facade.upload(home)}
    assertNotNull(repository(r).pending(),"metadata inconsistency cannot clear frozen pending")

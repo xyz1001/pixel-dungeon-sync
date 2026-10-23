@@ -15,6 +15,9 @@ fun cloudOverwriteSelection(graph:CommitGraph,baseline:String?,files:Map<String,
  val other=tips.filter { !graph.descendsFrom(it.id,anchor) }
  val candidates=if(other.isNotEmpty())other else tips.filter {it.id!=anchor && it.id !in matching}
  val target=candidates.singleOrNull()?.id ?: return null
+ // The selected cloud content cannot also be the replacement. Do not infer permission
+ // to delete the other local line merely because bytes now match this sibling.
+ if(target in matching)return null
  fun line(id:String):List<String>? {
   val result=mutableListOf<String>();var at=id
   while(true) {
@@ -33,7 +36,7 @@ fun cloudOverwriteSelection(graph:CommitGraph,baseline:String?,files:Map<String,
  return CloudOverwriteSelection(base,target)
 }
 internal fun uploadNeedsOverwrite(graph:CommitGraph,baseline:String?,files:Map<String,String>):Boolean =
- graph.tips.size>1 || (baseline!=null && graph.tips.isNotEmpty() && graph.tips.singleOrNull()!=baseline &&
+ graph.tips.size>1 || (graph.tips.isNotEmpty() && graph.tips.singleOrNull()!=baseline &&
   graph.commits.values.none {it.snapshot.files==files})
 
 @Serializable internal data class DeletionReceipt(val id:String,val recordHash:String,val replacement:String,val game:String,val profile:String) {

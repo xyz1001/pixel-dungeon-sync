@@ -51,6 +51,19 @@ class AppendProfileSessionTest {
   store.commits.putAll(isolated.commits);store.objects.putAll(isolated.objects)
  }
 
+ @Test fun desktopManualUploadWithoutBaselineDoesNotPublishUnrelatedRoot() {
+  val store=Memory();published(session(),store)
+  val local=session(root("different"));val records=store.commits.mapValues {hash(it.value)}
+  val objects=store.objects.mapValues {hash(it.value)}
+  repeat(2) {
+   val result=assertIs<HomePushResult.Published>(local.pushFromHome(local.syncHistory(),store){true})
+   assertIs<AppendPushResult.Diverged>(result.result)
+   assertEquals(records,store.commits.mapValues {hash(it.value)})
+   assertEquals(objects,store.objects.mapValues {hash(it.value)})
+   assertNull(local.baseline());assertTrue(store.deletions.isEmpty())
+  }
+ }
+
  @Test fun desktopHomeUploadCancelRefreshAndExplicitOverwriteKeepFrozenBase() {
   val store=Memory();val local=session();val a=published(local,store)
   edit(local,"B");val b=published(local,store)
@@ -185,7 +198,7 @@ class AppendProfileSessionTest {
 
  @Test fun threeBranchesOfferAllChoicesAndRestoreKeepsEveryCloudTip() {
   val store = Memory(); published(session(root("a")), store)
-  val b = session(root("b")); assertIs<AppendPushResult.Diverged>(b.push(store) { true })
+  val b = session(root("b")); seedIndependentLegacyBranch(b,store); assertIs<AppendPushResult.Diverged>(b.push(store) { true })
   val c = session(root("c")); seedIndependentLegacyBranch(c,store)
   val conflict = assertIs<AppendPushResult.Diverged>(c.push(store) { true }).conflict
   assertEquals(3, conflict.branches.size); val choice = conflict.branches.single { it.commit.id == b.baseline() }
@@ -205,12 +218,12 @@ class AppendProfileSessionTest {
   val local = session(root("local")); val conflict = assertIs<AppendPushResult.Diverged>(local.push(store) { true }).conflict
   edit(local, "changed-during-dialog")
   assertFails { local.resolve(conflict, conflict.branches.first().snapshot.manifest.id, store) { true } }
-  assertEquals("changed-during-dialog", content(local)); assertEquals(2, store.commits.size); assertFalse(local.hasPending())
+  assertEquals("changed-during-dialog", content(local)); assertEquals(1, store.commits.size); assertFalse(local.hasPending())
  }
 
  @Test fun changedRemoteTipsReturnAllNewChoicesWithoutApplyingStaleChoice() {
   val store = Memory(); published(session(root("a")), store)
-  val b = session(root("b")); val old = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  val b = session(root("b")); seedIndependentLegacyBranch(b,store); val old = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   seedIndependentLegacyBranch(session(root("c")),store)
   val current = assertIs<AppendPushResult.Diverged>(b.resolve(old, old.branches.first().snapshot.manifest.id, store) { true }).conflict
   assertEquals(3, current.branches.size); assertEquals("b", content(b)); assertEquals(3, store.commits.size)
@@ -219,7 +232,7 @@ class AppendProfileSessionTest {
 
  @Test fun lateSiblingDuringBranchDownloadInvalidatesSelectionWithoutWritingCloud() {
   val store = Memory(); val a = session(root("a")); published(a, store)
-  val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  val b = session(root("b")); seedIndependentLegacyBranch(b,store); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   val thirdStore = Memory(); thirdStore.commits.putAll(store.commits); thirdStore.objects.putAll(store.objects)
   val c = session(root("late")); seedIndependentLegacyBranch(c,thirdStore)
   val late = thirdStore.commits.keys - store.commits.keys
@@ -232,7 +245,7 @@ class AppendProfileSessionTest {
 
  @Test fun conflictRestoreWorksWithWritesDisabledAndOnlyLaterExplicitPushPublishesEdits() {
   val store = Memory(); val a = session(root("a")); published(a, store)
-  val b = session(root("b")); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
+  val b = session(root("b")); seedIndependentLegacyBranch(b,store); val conflict = assertIs<AppendPushResult.Diverged>(b.push(store) { true }).conflict
   val choice = conflict.branches.single { it.commit.id == a.baseline() }
   store.failWrite = true
   val result=assertIs<AppendPushResult.Diverged>(b.resolve(conflict, choice.snapshot.manifest.id, store) { true })
@@ -299,7 +312,7 @@ class AppendProfileSessionTest {
  }
 
  @Test fun readRemoteReturnsEveryObservedTipWithoutWritesOrChangingLocalBaseline() {
-  val store = Memory(); published(session(root("a")), store); session(root("b")).push(store) { true }
+  val store = Memory(); published(session(root("a")), store); seedIndependentLegacyBranch(session(root("b")),store)
   val local = session(); val remote = local.readRemote(store)
   assertEquals(2, remote.size); assertEquals(2, store.commits.size); assertNull(local.baseline()); assertEquals("alive", content(local))
   assertFails { local.restoreRemote(remote.first().entry.manifest.id, store) { true } }
