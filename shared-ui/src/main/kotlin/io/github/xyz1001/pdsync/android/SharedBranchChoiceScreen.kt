@@ -30,6 +30,10 @@ internal val LocalSharedBranchChoiceLayoutObserver = staticCompositionLocalOf<Sh
 /** The multi-head extension of the reference's single Handle Conflict action. No platform I/O. */
 @Composable
 fun SharedBranchChoiceScreen(state: SharedBranchChoiceState, actions: SharedBranchChoiceActions) {
+    if (state.cloudOverwrite) {
+        SharedBranchChoiceDialog(state, actions)
+        return
+    }
     SharedConnectionTheme {
         val currentState by rememberUpdatedState(state)
         val currentActions by rememberUpdatedState(actions)

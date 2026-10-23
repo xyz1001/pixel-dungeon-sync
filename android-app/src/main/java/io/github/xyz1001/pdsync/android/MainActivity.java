@@ -4081,6 +4081,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private void renderConflict() {
+        this.selected = this.inspection == null ? null : this.inspection.getOverwriteTargetSnapshotId();
         final LinearLayout ownerRoot = this.root;
         final AndroidSyncFacade.Inspection observed = this.inspection;
         final AndroidSyncFacade ownerFacade = this.facade;
@@ -4104,11 +4105,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         && connection != null && !restoreNeedsAttention()
                         && !observed.isRetryablePending();
             }
-            @Override public void select(String snapshotId) {
-                if (!current() || !hasBranch(snapshotId)) return;
-                selected = snapshotId;
-                render();
-            }
+            @Override public void select(String snapshotId) { }
             @Override public void back() { if (current()) m84xf7dc0e8(); }
             @Override public void refresh() { if (current()) m83x9a039aa7(); }
             @Override public void overwrite(String snapshotId) {

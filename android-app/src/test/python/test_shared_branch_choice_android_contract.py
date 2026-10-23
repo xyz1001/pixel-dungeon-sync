@@ -42,7 +42,7 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
 
     def test_adapter_preserves_existing_branch_capabilities_and_metadata(self):
         for required in ('observation = observed', 'observed?.kind == "BRANCHED"',
-                         'branch.snapshotId, branch.displayName', 'selectedId = selectedId',
+                         'branch.snapshotId, branch.displayName', 'selectedId = observed?.overwriteTargetSnapshotId',
                          'pageActive = pageActive, busy = busy',
                          'connected = connected, observationCurrent = cloudVerified && branched',
                          'resolutionBlocked = recovery || pending',

@@ -63,6 +63,14 @@ internal fun SharedBranchChoiceDialogBody(
     interactions: SharedBranchChoiceInteractions,
     modifier: Modifier = Modifier,
 ) {
+    if (state.cloudOverwrite) {
+        SharedConfirmationDialogBody(
+            SharedConfirmationState(0, SharedMessages.OVERWRITE_CLOUD.text(),
+                SharedMessages.OVERWRITE_CLOUD_WARNING.text(), SharedMessages.OVERWRITE_CLOUD.text(),
+                confirmEnabled = state.canResolve && state.overwriteSupported && state.hasSelection, busy = state.busy),
+            onConfirm = { interactions.confirmCloudOverwrite(state) }, onDismiss = { interactions.back() }, modifier = modifier)
+        return
+    }
     // Keep the existing expandable details behavior, including across confirmation cancellation.
     var expanded by remember(state.observation, state.details) { mutableStateOf(false) }
     val confirmation = interactions.presentation

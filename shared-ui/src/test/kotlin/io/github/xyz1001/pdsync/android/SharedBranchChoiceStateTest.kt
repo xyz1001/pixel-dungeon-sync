@@ -36,6 +36,21 @@ class SharedBranchChoiceStateTest {
         assertEquals(listOf("overwrite:real-b"),host.calls);assertNull(host.interactions.presentation)
     }
 
+    @Test fun directCloudOverwriteRejectsStaleBusyDisconnectedAndPendingEvidence() {
+        val ready = ready().copy(selectedId="real-b",cloudOverwrite=true)
+        for (changed in listOf(ready.copy(busy=true), ready.copy(connected=false), ready.copy(resolutionBlocked=true),
+                ready.copy(pageActive=false), ready.copy(observation=Any()), ready.copy(selectedId="real-a"),
+                ready.copy(overwriteSupported=false), ready.copy(observationCurrent=false))) {
+            val host=Host(ready);host.state=changed
+            host.interactions.confirmCloudOverwrite(ready);assertTrue(host.calls.isEmpty())
+        }
+        val host=Host(ready)
+        host.interactions.confirmCloudOverwrite(ready)
+        host.state=ready
+        host.interactions.confirmCloudOverwrite(ready)
+        assertEquals(listOf("overwrite:real-b"),host.calls)
+    }
+
     @Test fun compositionAndSelectionNeverWriteAndUnknownIdsNeverSelect() {
         val host = Host(ready())
         assertTrue(host.calls.isEmpty())

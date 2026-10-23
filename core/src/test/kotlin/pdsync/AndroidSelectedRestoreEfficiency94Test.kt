@@ -164,7 +164,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    val c=store.child(b);val tail=store.child(c)
    bridge.content=files(9).toMutableMap()
    if(prepublished)assertTrue(r.facade.upload(r.facade.inspectHome()).isConflict)
-   val observed=r.facade.inspectHome();store.failDelete=failure
+   val observed=r.facade.inspectHome();assertEquals(tail.snapshot.id,observed.overwriteTargetSnapshotId);store.failDelete=failure
    if(failure) {
     assertFailsWith<java.io.IOException>{r.facade.overwriteCloudSuccessors(observed,tail.snapshot.id)}
     assertTrue(c.id in store.commits && tail.id in store.commits)
@@ -178,6 +178,14 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertTrue(a.snapshot.id in store.objects && b.snapshot.id in store.objects)
    val fresh=rig(Bridge(files(9)),store).facade.inspectHome();assertEquals("IDENTICAL",fresh.kind)
   }
+ }
+
+ @Test fun automaticOverwriteTargetNeverChoosesBetweenIndependentCloudSuccessors() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
+  store.child(b);store.child(b);bridge.content=files(9).toMutableMap()
+  val before=store.writes
+  assertNull(r.facade.inspectHome().overwriteTargetSnapshotId)
+  assertEquals(before,store.writes);assertTrue(store.removed.isEmpty())
  }
 
  @Test fun uploadValidatesRemoteTipFormatWithoutDeclaredSaveVersions() {

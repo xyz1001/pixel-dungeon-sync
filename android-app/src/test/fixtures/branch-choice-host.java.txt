@@ -25,6 +25,8 @@ public final class MainActivity {
         }
         static final class Inspection {
             boolean pending;
+            String overwriteTarget = "branch-a";
+            String getOverwriteTargetSnapshotId() { return overwriteTarget; }
             List<Version> branches = List.of(new Version("branch-a"), new Version("branch-b"));
             boolean isRetryablePending() { return pending; }
             List<Version> getRemoteVersions() { return branches; }
@@ -197,21 +199,18 @@ public final class MainActivity {
         old.select("unknown-branch");
         check(a.renders == 0 && a.selected.equals("branch-a"), "unknown branch cannot be selected");
         old.select("branch-b");
-        check(a.renders == 1 && a.selected.equals("branch-b") && a.operations == 0,
-                "select only rerenders observed branch");
-        invokeAll(old);
-        check(a.renders == 1 && a.operations == 0 && a.merges == 0 && a.navigations == 0 && a.refreshes == 0,
-                "callback after selection render is stale");
-        a.actions.overwrite("branch-a"); a.actions.overwrite("unknown-branch");
+        check(a.renders == 0 && a.selected.equals("branch-a") && a.operations == 0,
+                "overwrite target is automatic; old selection callback cannot change it");
+        a.actions.overwrite("branch-b"); a.actions.overwrite("unknown-branch");
         check(a.operations == 0, "overwrite must match selected observed branch");
         SharedBranchChoiceActions selected = a.actions;
-        selected.overwrite("branch-b"); selected.overwrite("branch-b"); selected.merge(); selected.preserveLocal();
+        selected.overwrite("branch-a"); selected.overwrite("branch-a"); selected.merge(); selected.preserveLocal();
         check(a.operations == 1 && a.facade.resolutions == 1 && a.facade.uploads == 0 && a.merges == 0,
                 "busy repeated confirmation is dispatched once");
-        check(a.facade.dispatchedObservation == a.inspection && a.facade.resolvedId.equals("branch-b"),
-                "resolve keeps exact observation and selected ID");
-        a = fresh(); a.selected = "unknown-branch"; a.render(); a.actions.overwrite("unknown-branch");
-        check(a.operations == 0, "selected ID must still belong to observed branches");
+        check(a.facade.dispatchedObservation == a.inspection && a.facade.resolvedId.equals("branch-a"),
+                "resolve keeps exact observation and automatic target ID");
+        a = fresh(); a.inspection.overwriteTarget = null; a.render(); a.actions.overwrite("branch-a");
+        check(a.operations == 0, "ambiguous target cannot execute");
         blocked(MainActivity::render, "explicit rerender");
         a = fresh(); old = a.actions; old.back(); invokeAll(old);
         check(a.page == SyncPage.HOME && a.navigations == 1 && a.operations == 0 && a.refreshes == 0,

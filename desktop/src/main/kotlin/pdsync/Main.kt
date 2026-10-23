@@ -173,7 +173,6 @@ internal fun runSyncApplication(
   var diagnosticExportNotice by remember { mutableStateOf<String?>(null) }
   var confirmationNotice by remember { mutableStateOf<String?>(null) }
   var restoreIssue by remember { mutableStateOf<String?>(DesktopMessages.SELECT_A_SNAPSHOT.text()) }
-  var conflictRestoreIssue by remember { mutableStateOf<String?>(DesktopMessages.NOT_VERIFIED.text()) }
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
   var status by remember { mutableStateOf(DesktopMessages.CHECKING_THE_DEFAULT_SAVE_LOCATION.text()) }
   var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown(DesktopMessages.SELECT_THE_OFFICIAL_GAME_JAR_IN_SETTINGS.text())) }
@@ -996,16 +995,6 @@ internal fun runSyncApplication(
      pageGeneration == generation && targetInfo == target && graphHistory === observedHistory) restoreIssue = issue
    }
   }
-  LaunchedEffect(session, conflict, conflictSelection, busy, config, pageGeneration, targetInfo) {
-   conflictRestoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
-   val manager = session; val value = conflict; val id = conflictSelection
-   val owner = conflictOwner(); val target = targetInfo
-   if (manager != null && value != null && id != null && !busy && !appClosed && page == Page.CONFLICT) {
-    val issue = withContext(Dispatchers.IO) { desktopConflictCompatibilityIssue { manager.checkResolution(id) } }
-    if (!appClosed && !busy && owner.matches(conflictOwner(), page == Page.CONFLICT) &&
-     conflictSelection == id && targetInfo == target) conflictRestoreIssue = issue
-   }
-  }
   MaterialTheme(colors = lightColors(primary = green, secondary = Color(0xFF8A6B42)), shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
    directoryEditor?.takeUnless { directoryInline && page == Page.HOME }?.let { metadata ->
     SharedNamingDialog(SharedNamingState(System.identityHashCode(metadata).toLong(), directoryName,
@@ -1317,6 +1306,8 @@ internal fun runSyncApplication(
        }
        Page.CONFLICT -> key(pageGeneration) { conflict?.let { value ->
         val owner = conflictOwner()
+        val overwriteTarget = value.branches.filter { it.snapshot.manifest.files != value.observedLocalFiles }
+         .singleOrNull()?.snapshot?.manifest?.id
         fun current() = !appClosed && !busy && !connectingAtStartup &&
          owner.matches(conflictOwner(), page == Page.CONFLICT)
         fun canResolve() = current() && connected && !serviceExpired && !pending
@@ -1325,22 +1316,20 @@ internal fun runSyncApplication(
          override fun selectSnapshot(snapshotId: String) = Unit; override fun rename(snapshotId: String?) = Unit
          override fun changeHistoryPage(page: Int) = Unit
         })
-        ConflictDialog(value, conflictSelection, conflictRestoreIssue, busy || connectingAtStartup, connected && !serviceExpired,
+        ConflictDialog(value, overwriteTarget, busy || connectingAtStartup, connected && !serviceExpired,
          game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
           gameIdentity(it)
          }, pending = pending,
-         onSelect = { id ->
-          if (current() && connected && !serviceExpired && value.branches.any { it.snapshot.manifest.id == id }) {
-           if (conflictSelection != id) conflictRestoreIssue = DesktopMessages.VERIFYING_THE_ACTUAL_VERSION.text()
-           conflictSelection = id
-          }
-         },
+         onSelect = { },
          onBack = { if (current()) navigate(Page.HOME) },
          onConfirm = { id ->
-          if (canResolve() && conflictSelection == id &&
-           value.branches.any { it.snapshot.manifest.id == id }) execute(operationEvents.begin(Action.RESOLVE))
+          if (canResolve() && overwriteTarget == id &&
+           value.branches.any { it.snapshot.manifest.id == id }) {
+           conflictSelection = id
+           execute(operationEvents.begin(Action.RESOLVE))
+          }
          },
-         onMerge = { if (canResolve()) execute(operationEvents.begin(Action.MERGE)) })
+         onMerge = { })
        } }
        Page.CONFIRM -> confirm?.let { trace ->
         SharedHomeScreen(homeState().copy(pageActive = false), object : SharedHomeActions {
@@ -1457,7 +1446,7 @@ private fun DesktopSharedConnectionPage(
 }
 
 @Composable
-private fun ConflictDialog(value: AppendConflict, selected: String?, restoreIssue: String?, busy: Boolean, connected: Boolean,
+private fun ConflictDialog(value: AppendConflict, selected: String?, busy: Boolean, connected: Boolean,
  game: SharedGameIdentity?, pending: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit,
  onConfirm: (String) -> Unit, onMerge: () -> Unit) {
  val state = SharedBranchChoiceState(
@@ -1474,7 +1463,7 @@ private fun ConflictDialog(value: AppendConflict, selected: String?, restoreIssu
   selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
   observationCurrent = true, resolutionBlocked = pending,
   overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
-  notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else if (selected != null) restoreIssue.orEmpty() else "",
+  notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else "",
  )
  SharedBranchChoiceDialog(state, object : SharedBranchChoiceActions {
   override fun select(snapshotId: String) = onSelect(snapshotId)

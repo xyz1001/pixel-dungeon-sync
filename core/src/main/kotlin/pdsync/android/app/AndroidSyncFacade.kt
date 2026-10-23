@@ -61,6 +61,10 @@ class AndroidSyncFacade internal constructor(
  }
  class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null,internal val homeObservation:HomeReadContext?=null) {
   val remoteVersions=immutable(remoteVersions)
+  /** Bind overwrite to the sole non-local cloud tip; never choose an arbitrary sibling. */
+  val overwriteTargetSnapshotId:String? get()=comparison?.let { c ->
+   c.graph?.let { g -> g.tips.mapNotNull(g.commits::get).filter { it.snapshot.files!=c.localFiles }.singleOrNull()?.snapshot?.id }
+  }
   /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
   fun diagnosticBlockReason():String? = blockReason?.name
   val isObjectVerified get()=comparison?.graph!=null && comparison.verification==RemoteVerification.OBJECTS_VERIFIED

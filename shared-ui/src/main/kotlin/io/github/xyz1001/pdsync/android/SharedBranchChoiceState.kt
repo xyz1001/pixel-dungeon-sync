@@ -60,6 +60,15 @@ internal class SharedBranchChoiceInteractions(
     private var confirmation by mutableStateOf<Confirmation?>(null)
     private var serial = 0L
     private var attached = true
+    private var cloudOverwriteConsumed = false
+
+    fun confirmCloudOverwrite(rendered: SharedBranchChoiceState) {
+        val current = state()
+        if (!attached || cloudOverwriteConsumed || !current.cloudOverwrite || !sameEvidence(rendered, current) ||
+            !current.canResolve || !current.overwriteSupported || !current.hasSelection) return
+        cloudOverwriteConsumed = true
+        actions().overwrite(requireNotNull(current.selectedId))
+    }
 
     private fun currentConfirmation(): Confirmation? {
         val current = state()

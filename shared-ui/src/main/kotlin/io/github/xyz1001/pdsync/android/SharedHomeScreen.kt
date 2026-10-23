@@ -152,7 +152,7 @@ private fun SharedHomeContent(state: SharedHomeState, actions: SharedHomeActions
                 SharedMessages.RESTORE_DESCRIPTION.text(), interactions::restore, state.restoreEnabled,
                 state.restoreEnabled, actionModifier.then(observed("restore")), icon = "download",
                 pending = state.pending == SharedHomeOperation.RESTORE, badge = if (state.restoreEnabled) {
-                    if (state.statusKind == SharedHomeStatusKind.CONFLICT) SharedMessages.RESOLVE_CONFLICT.text() else SharedMessages.RECOMMENDED.text()
+                    SharedMessages.RECOMMENDED.text()
                 } else null)
         }
         if (narrow) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {

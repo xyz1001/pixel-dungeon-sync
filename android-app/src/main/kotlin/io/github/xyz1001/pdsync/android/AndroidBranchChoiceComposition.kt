@@ -33,7 +33,7 @@ object AndroidBranchChoiceComposition {
                         HistoryPresentation.time(manifest?.metadata?.latestFileModifiedAt),
                         FILE_COUNT.text(branch.fileCount)).joinToString(" · "))
             },
-            selectedId = selectedId, game = game, pageActive = pageActive, busy = busy,
+            selectedId = observed?.overwriteTargetSnapshotId, game = game, pageActive = pageActive, busy = busy,
             connected = connected, observationCurrent = cloudVerified && branched,
             resolutionBlocked = recovery || pending,
             overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,

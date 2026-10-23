@@ -4,7 +4,7 @@ package pdsync.i18n;
 public final class SharedMessages {
     private SharedMessages() {}
     public static final UiText OVERWRITE_CLOUD = new UiText("shared.overwrite_cloud", "覆盖云端后续", "Overwrite cloud successors");
-    public static final UiText OVERWRITE_CLOUD_WARNING = new UiText("shared.overwrite_cloud_warning", "上传当前本地进度，并删除所选云端后续进度，不保留备份。", "Upload the current local progress and delete the selected cloud successors without a backup.");
+    public static final UiText OVERWRITE_CLOUD_WARNING = new UiText("shared.overwrite_cloud_warning", "上传当前本地进度，并删除对应的云端后续进度，不保留备份。", "Upload the current local progress and delete the corresponding cloud successors without a backup.");
     public static final UiText REFRESH = new UiText("shared.refresh", "刷新", "Refresh");
     public static final UiText SAVE_NAME = new UiText("shared.save_name", "存档名称", "Save name");
     public static final UiText NAME_HINT = new UiText("shared.name_hint", "留空使用默认名，最多40字", "Leave blank for the default name; up to 40 characters");

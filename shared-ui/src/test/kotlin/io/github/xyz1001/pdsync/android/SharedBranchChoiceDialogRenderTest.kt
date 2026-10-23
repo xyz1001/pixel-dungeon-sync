@@ -71,6 +71,33 @@ class SharedBranchChoiceDialogRenderTest {
         }
     }
 
+    @Test fun cloudOverwriteRendersOnlyDirectConfirmationAndBindsOneTarget() {
+        val host = Host(ready().copy(selectedId = "snapshot-b", cloudOverwrite = true))
+        val scene = scene(host)
+        try {
+            render(scene, "cloud-overwrite-direct")
+            val text = modalTexts(scene)
+            for (old in listOf("Expedition A", "Expedition B", SharedMessages.HANDLE_CONFLICT.text(),
+                    SharedMessages.CHOOSE_PROGRESS.text(), SharedMessages.CHOOSE_CLOUD_SAVE.text(), SharedMessages.MERGE.text()))
+                assertFalse(old in text, "old chooser must not render: $old")
+            assertTrue(SharedMessages.OVERWRITE_CLOUD_WARNING.text() in text)
+            assertTrue(host.calls.isEmpty(), "rendering never writes")
+            click(scene, SharedMessages.OVERWRITE_CLOUD.text())
+            assertEquals(listOf("overwrite:snapshot-b"), host.calls)
+            render(scene, "cloud-overwrite-busy")
+            click(scene, SharedMessages.OVERWRITE_CLOUD.text())
+            assertEquals(1, host.calls.size)
+        } finally { scene.close() }
+        val missing = Host(ready().copy(cloudOverwrite = true))
+        val blocked = scene(missing)
+        try {
+            render(blocked, "cloud-overwrite-no-unique-target")
+            assertTrue(button(blocked, SharedMessages.OVERWRITE_CLOUD.text()).config.contains(SemanticsProperties.Disabled))
+            click(blocked, SharedMessages.OVERWRITE_CLOUD.text());assertTrue(missing.calls.isEmpty())
+            click(blocked, SharedMessages.CANCEL.text());assertEquals(listOf("back"), missing.calls)
+        } finally { blocked.close() }
+    }
+
     @Test fun explicitSelectionConfirmationCancelAndRepeatKeepOriginalWriteSemantics() {
         val host = Host(ready())
         val scene = scene(host)
