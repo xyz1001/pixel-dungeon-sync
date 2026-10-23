@@ -110,6 +110,34 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertFalse(c.snapshot.id in store.objects || tail.snapshot.id in store.objects)
   }
  }
+ @Test fun changedLocalProgressCannotPublishWhileDeletionOfFrozenReplacementIsPending() {
+  for(objectFailure in listOf(false,true)) {
+   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
+   val c=store.child(b);val tail=store.child(c);bridge.content=files(9).toMutableMap()
+   if(objectFailure)store.failObjectDelete=true else store.failDeleteAfter=1
+   assertFailsWith<java.io.IOException>{r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),tail.snapshot.id)}
+   store.failObjectDelete=false;store.failDeleteAfter=Int.MAX_VALUE
+   val pendingPath=repository(r).overwriteDirectory().resolve("pending.json")
+   val pending=pendingPath.readBytes();val writes=store.writes;val removed=store.removed.toList()
+   fun bytes(map:Map<String,ByteArray>)=map.mapValues {hash(it.value)}
+   val commits=bytes(store.commits);val objects=bytes(store.objects);val receipts=bytes(store.deletions)
+   bridge.content=files(10).toMutableMap();val local=bytes(bridge.content)
+   repeat(2) {
+    val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+    assertTrue(reopened.inspectHome().isRetryablePending)
+    assertFailsWith<IllegalArgumentException>{reopened.upload(reopened.inspectHome())}
+    assertEquals(writes,store.writes,"changed local progress must not publish before pending validation")
+    assertEquals(commits,bytes(store.commits));assertEquals(objects,bytes(store.objects));assertEquals(receipts,bytes(store.deletions))
+    assertEquals(removed,store.removed);assertContentEquals(pending,pendingPath.readBytes())
+    assertEquals(local,bytes(bridge.content));assertEquals(0,bridge.restores)
+    assertTrue(reopened.inspectHome().isRetryablePending)
+   }
+   bridge.content=files(9).toMutableMap()
+   val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+   assertFalse(reopened.upload(reopened.inspectHome()).isPending)
+   assertEquals(writes,store.writes);assertFalse(pendingPath.exists());assertEquals(2,store.commits.size)
+  }
+ }
  @Test fun failedUploadAndCanceledConfirmationNeverDeleteOldProgress() {
   for(cancel in listOf(false,true)) {
    val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest();val c=store.child(b)

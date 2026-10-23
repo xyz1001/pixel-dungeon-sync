@@ -920,6 +920,11 @@ class AppendProfileSession(
   val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified();graph.requireSettled()
   require(fresh.localFiles==comparison.localFiles) {"Local saves changed after confirmation"}
   if(retry==null)require(graph.commits==comparison.graph?.commits) {"Cloud history changed after confirmation"}
+  // A deletion retry is bound to the already published replacement, never new local progress.
+  // Reject before validation callbacks or uploadWithGraph can initiate any further cloud writes.
+  if(retry!=null)require(graph.commits[retry.replacement]?.snapshot?.files==fresh.localFiles) {
+   "Local saves changed while confirmed cloud deletion is pending"
+  }
   validate(fresh)
   val existing=graph.findByContent(fresh.localFiles)
   val base=retry?.base ?: if(existing!=null && existing.id==fresh.baselineId) graph.parentIds(existing).singleOrNull() else fresh.baselineId
