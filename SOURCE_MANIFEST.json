@@ -2305,16 +2305,16 @@
       "sha256": "50ce9903b27e754b446d919c20047ada42c6826fd36a259561ce4cbda9a0e1c5"
     },
     "core/src/main/kotlin/pdsync/AppendOnly.kt": {
-      "size": 36688,
-      "sha256": "dc64b55d7a45dc150ff14fea32b8e50b69f2a49e689d88b921fdc071bb023177"
+      "size": 38052,
+      "sha256": "67a4ba456b5bde7b50a5a73ccb8c32aec0ecbc967b14d8fdb00a4436e9a7349f"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
-      "size": 34032,
-      "sha256": "70ef9f05274989c4ad1969512776bf45bf19e8b469fa993d5c9fe73b7a9aad95"
+      "size": 34889,
+      "sha256": "7ddcc74332b7a9bf66928f0cf12001391c3a5968ca11d51b1f8c39c6596f3ff2"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 70198,
-      "sha256": "eddd0f48a36dbcb1c6ad54a01b48c73481e40924f5cbc1e9e0af6418e3325803"
+      "size": 73589,
+      "sha256": "fb983a6f47caf69751a7c72a0a1664cc0659cca988d1a829cdb476d24f5da242"
     },
     "core/src/main/kotlin/pdsync/AutomaticUploadEligibility.kt": {
       "size": 1078,
@@ -2323,6 +2323,10 @@
     "core/src/main/kotlin/pdsync/BadgeMerge.kt": {
       "size": 3260,
       "sha256": "59bddc5cf8ab759adebacd8c68b31240395f656624ddfe25909d9a60cac950bd"
+    },
+    "core/src/main/kotlin/pdsync/ConfirmedBranchOverwrite.kt": {
+      "size": 5519,
+      "sha256": "82bcc1a37480bc348403f278dc8c58ba9e758ca3a32a218cb87b0b9570f2ebac"
     },
     "core/src/main/kotlin/pdsync/ConnectionSetup.kt": {
       "size": 9927,
@@ -2445,8 +2449,8 @@
       "sha256": "0bf63ab6fe3f1586c3b493fb2fea60dda1fdc7903bd0a4cfd03878627777ca52"
     },
     "core/src/main/kotlin/pdsync/ProfileSession.kt": {
-      "size": 26684,
-      "sha256": "b09703fc780b04576e77226327ebad033ea5ab773ad94feafd4f85a3e9572d08"
+      "size": 27008,
+      "sha256": "a4a1fae31920854cfe6494c23e498aa4be1fd9fb1e6491717da0558b888383a9"
     },
     "core/src/main/kotlin/pdsync/RankingsMerge.kt": {
       "size": 14036,
@@ -2529,8 +2533,8 @@
       "sha256": "aed6c14aa563120fdf6528ed3bd59e870341422a070baba1098110a0c772f037"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidSyncFacade.kt": {
-      "size": 51457,
-      "sha256": "baf86ef9e23e9bfd4c8eac2474f83cf850e816a225cc80d5f2137efea9e89496"
+      "size": 52763,
+      "sha256": "23549737a6a4567dd57cc607da32af98e2c5c36646e7915501ae7f0ef9606e81"
     },
     "core/src/main/kotlin/pdsync/presentation/AppPresentation.kt": {
       "size": 1012,
@@ -2609,8 +2613,8 @@
       "sha256": "6b6f36e89d0e7bd1ebb789895059c628131da6afa20f75bccc46e187bcd6cd2f"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
-      "size": 26235,
-      "sha256": "a9cc254b5a512d2edd48bc99c6da86d48ce5a14bbfc4706ce2167b68bac650c7"
+      "size": 32672,
+      "sha256": "c47cef41b843e54dbe9ff4ce9f4414f79d4e30c7c8fecf91d64c9badde372577"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
       "size": 19752,
@@ -2643,6 +2647,10 @@
     "core/src/test/kotlin/pdsync/CanonicalCloudNamespaceTest.kt": {
       "size": 26415,
       "sha256": "cfced0e49b953fe36e431ed3b0615c2cdd1b7cb54874bac1181ac3fc877aadba"
+    },
+    "core/src/test/kotlin/pdsync/ConfirmedDeletionWebDavTest.kt": {
+      "size": 1317,
+      "sha256": "a7b82c699de5c213cea16b49118ebb444a72b43d532460f10d1ffc6fe5852bbb"
     },
     "core/src/test/kotlin/pdsync/ConnectionProvisioningTest.kt": {
       "size": 8643,

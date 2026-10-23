@@ -44,14 +44,19 @@ class AndroidSelectedRestoreEfficiency94Test {
  }
  private class Store:AppendStore {
   val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>()
+  val deletions=linkedMapOf<String,ByteArray>();var failDelete=false;var failDeleteAfter=Int.MAX_VALUE;var failObjectDelete=false;var failWrites=false;val removed=mutableListOf<String>()
+  override fun readDeletion(id:String)=deletions[id]?.copyOf()
+  override fun writeDeletion(id:String,bytes:ByteArray){deletions.putIfAbsent(id,bytes.copyOf())}
+  override fun deleteCommit(id:String){if(failDelete || removed.size>=failDeleteAfter)throw java.io.IOException("synthetic delete failure");commits.remove(id);removed+=id}
+  override fun deleteObject(id:String){if(failObjectDelete)throw java.io.IOException("synthetic object delete failure");objects.remove(id)}
   var listings=0;var writes=0;var objectReads=0;var afterReadObject:(()->Unit)?=null;var afterCommit:(()->Unit)?=null
   override fun listCommits(cursor:String?):CommitPage {listings++;return CommitPage(commits.keys.toList())}
   override fun readCommit(id:String)=commits[id]?.copyOf()
   override fun readObject(id:String):ByteArray? {
    objectReads++;val bytes=objects[id]?.copyOf();afterReadObject?.also {afterReadObject=null}?.invoke();return bytes
   }
-  override fun writeObject(id:String,bytes:ByteArray) {writes++;objects[id]=bytes.copyOf()}
-  override fun writeCommit(id:String,bytes:ByteArray) {writes++;commits[id]=bytes.copyOf();afterCommit?.also {afterCommit=null}?.invoke()}
+  override fun writeObject(id:String,bytes:ByteArray) {if(failWrites)throw java.io.IOException("synthetic write failure");writes++;objects[id]=bytes.copyOf()}
+  override fun writeCommit(id:String,bytes:ByteArray) {if(failWrites)throw java.io.IOException("synthetic write failure");writes++;commits[id]=bytes.copyOf();afterCommit?.also {afterCommit=null}?.invoke()}
   override fun legacyPresent()=false
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
   fun child(parent:AppendCommit,parents:List<String> = listOf(parent.id)):AppendCommit {
@@ -66,6 +71,86 @@ class AndroidSelectedRestoreEfficiency94Test {
  private fun mirror(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->paths.filter {it.fileName.toString()=="mirror"}.findFirst().orElseThrow()}
  private fun repository(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->AppendRepository(paths.filter {it.fileName.toString()=="append-v2"}.findFirst().orElseThrow(),AndroidGameAdapter(identity),connection.profile)}
  private fun recoveryFiles(rig:Rig)=Files.walk(rig.root).use {paths->paths.filter {it.fileName.toString() in setOf("apply-required.txt","active-plan.txt") || it.toString().contains("restore-journals")&&it.fileName.toString().endsWith(".json")}.toList()}
+
+ @Test fun deletionKeepsObjectsReferencedByRetainedPhysicalAliasesAndChecksReplacementReadback() {
+  for(broken in listOf(false,true)) {
+   val store=Store();publish(store);val base=store.latest();val victim=store.child(base);val replacement=store.child(base)
+   val objectId=UUID.randomUUID().toString();val victimId=UUID.randomUUID().toString();val aliasId=UUID.randomUUID().toString()
+   val snapshot=victim.snapshot.copy(id=objectId)
+   val selected=victim.copy(schema=2,id=victimId,parents=listOf(base.id),snapshot=snapshot)
+   val alias=selected.copy(id=aliasId,parents=emptyList())
+   val graph=CommitGraph(mapOf(base.id to base,victimId to selected,aliasId to alias,replacement.id to replacement),emptyMap())
+   store.commits.remove(victim.id);store.commits[victimId]=json.encodeToString(selected).encodeToByteArray();store.commits[aliasId]=json.encodeToString(alias).encodeToByteArray()
+   store.objects[objectId]=store.objects.getValue(victim.snapshot.id)
+   val deletion=ConfirmedBranchOverwrite(temp.resolve("delete-${sequence++}"),AndroidGameAdapter(identity),connection.profile)
+   val plan=deletion.prepare(store,graph,base.id,victimId,replacement.id)
+   assertTrue(plan.objects.isEmpty())
+   if(broken) {
+    store.objects[replacement.snapshot.id]=byteArrayOf(1)
+    assertFails {deletion.finish(store,plan,graph,{})};assertTrue(store.removed.isEmpty());assertNotNull(deletion.pending())
+   } else {
+    deletion.finish(store,plan,graph,{})
+    assertFalse(victimId in store.commits);assertTrue(aliasId in store.commits);assertTrue(objectId in store.objects);assertNull(deletion.pending())
+   }
+  }
+ }
+
+ @Test fun overwritePartialDeletionAndObjectFailureResumeViaExplicitUploadAfterReopen() {
+  for(objectFailure in listOf(false,true)) {
+   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest()
+   val c=store.child(b);val tail=store.child(c);bridge.content=files(9).toMutableMap()
+   if(objectFailure)store.failObjectDelete=true else store.failDeleteAfter=1
+   assertFailsWith<java.io.IOException>{r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),tail.snapshot.id)}
+   assertTrue(store.removed.isNotEmpty());store.failObjectDelete=false;store.failDeleteAfter=Int.MAX_VALUE
+   val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+   val home=reopened.inspectHome();assertTrue(home.isRetryablePending)
+   assertEquals("SKIPPED_PENDING",reopened.autoUpload().status)
+   val done=reopened.upload(reopened.inspectHome());assertFalse(done.isPending)
+   assertEquals(2,store.commits.size);assertEquals(0,bridge.restores)
+   assertFalse(c.snapshot.id in store.objects || tail.snapshot.id in store.objects)
+  }
+ }
+ @Test fun failedUploadAndCanceledConfirmationNeverDeleteOldProgress() {
+  for(cancel in listOf(false,true)) {
+   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest();val c=store.child(b)
+   bridge.content=files(9).toMutableMap();val home=r.facade.inspectHome();store.failWrites=!cancel
+   if(cancel)Thread.currentThread().interrupt()
+   try {assertFails {r.facade.overwriteCloudSuccessors(home,c.snapshot.id)}} finally {Thread.interrupted()}
+   assertTrue(c.id in store.commits);assertTrue(c.snapshot.id in store.objects);assertTrue(store.removed.isEmpty())
+  }
+ }
+ @Test fun observedClientRetiresDeletedBaselineAndCorruptReceiptIsRejected() {
+  val store=Store();val bridge=Bridge();val r=publish(store,bridge);val b=store.latest();val c=store.child(b)
+  val other=rig(Bridge(files(7)),store);other.facade.inspectHome();repository(other).setBaseline(c.id,repository(other).discover(store))
+  bridge.content=files(9).toMutableMap();r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),c.snapshot.id)
+  val home=other.facade.inspectHome();assertNotEquals("BLOCKED",home.kind);assertNull(repository(other).baseline())
+  val receipt=store.deletions.getValue(c.id)
+  assertFails {DeletionReceipt.decode(receipt,c.id,identity.packageName,"different-profile")}
+  assertFails {DeletionReceipt.decode("{}".encodeToByteArray(),"../../outside",Shattered.id,connection.profile)}
+ }
+
+ @Test fun confirmedOverwriteDeletesOnlySelectedSuccessorsAndResumesAfterFailure() {
+  for(prepublished in listOf(false,true))for(failure in listOf(false,true)) {
+   val store=Store();val bridge=Bridge();val r=publish(store,bridge);val a=store.latest()
+   bridge.content=files(2).toMutableMap();r.facade.upload(r.facade.inspectHome());val b=store.latest()
+   val c=store.child(b);val tail=store.child(c)
+   bridge.content=files(9).toMutableMap()
+   if(prepublished)assertTrue(r.facade.upload(r.facade.inspectHome()).isConflict)
+   val observed=r.facade.inspectHome();store.failDelete=failure
+   if(failure) {
+    assertFailsWith<java.io.IOException>{r.facade.overwriteCloudSuccessors(observed,tail.snapshot.id)}
+    assertTrue(c.id in store.commits && tail.id in store.commits)
+    store.failDelete=false
+   }
+   val result=r.facade.overwriteCloudSuccessors(r.facade.inspectHome(),tail.snapshot.id)
+   assertFalse(result.isPending);assertFalse(result.isConflict);assertEquals(0,bridge.restores)
+   val graph=repository(r).discover(store);val d=graph.commits.values.single {it.snapshot.files==bridge.content.mapValues {hash(it.value)}}
+   assertEquals(setOf(a.id,b.id,d.id),graph.commits.keys);assertEquals(setOf(d.id),graph.tips)
+   assertEquals(listOf(b.id),d.parents);assertFalse(c.snapshot.id in store.objects);assertFalse(tail.snapshot.id in store.objects)
+   assertTrue(a.snapshot.id in store.objects && b.snapshot.id in store.objects)
+   val fresh=rig(Bridge(files(9)),store).facade.inspectHome();assertEquals("IDENTICAL",fresh.kind)
+  }
+ }
 
  @Test fun uploadValidatesRemoteTipFormatWithoutDeclaredSaveVersions() {
   for(valid in listOf(false,true)) {

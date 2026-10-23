@@ -68,7 +68,7 @@ class AppendOnlyWebDav(
  // A collision is returned to AppendSync for bounded fresh readback and content verification.
  private val writeClient = this.client.newBuilder().addNetworkInterceptor { chain ->
   val response = chain.proceed(chain.request())
-  if (response.code !in setOf(200, 201, 204)) {
+  if (response.code !in setOf(200, 201, 204) && !(chain.request().method=="DELETE" && response.code==404)) {
    val error = WebDavException(response.code)
    response.close()
    throw error
@@ -245,6 +245,19 @@ class AppendOnlyWebDav(
  override fun writeObject(id: String, bytes: ByteArray) {
   validateWritableId(id)
   put(fileUrl(objectName(id)), bytes, MAX_SNAPSHOT_BYTES, "application/zip")
+ }
+
+ private fun deletionName(id:String):String {validateId(id);return "pdsync-deleted-$id.json"}
+ override fun readDeletion(id:String)=get(fileUrl(deletionName(id)),MAX_MANIFEST_BYTES)
+ override fun writeDeletion(id:String,bytes:ByteArray)=put(fileUrl(deletionName(id)),bytes,MAX_MANIFEST_BYTES,"application/json")
+ override fun deleteCommit(id:String)=deleteFile(fileUrl(commitName(id)))
+ override fun deleteObject(id:String)=deleteFile(fileUrl(objectName(id)))
+ private fun deleteFile(url:HttpUrl) {
+  readScopes.get()?.remove(url.toString())
+  try {execute(request(url).delete().build(),writeClient) {response->
+   if(response.code !in setOf(200,204,404))throw WebDavException(response.code)
+   readBounded(response,MAX_MANIFEST_BYTES)
+  }} finally {readScopes.get()?.remove(url.toString())}
  }
 
  override fun listCommits(cursor: String?): CommitPage = listCommitsImpl(cursor,null)

@@ -47,6 +47,9 @@ class AndroidSyncFacade internal constructor(
   object:AppendStore by delegate {
    override fun writeObject(id:String,bytes:ByteArray) { verifiedTarget();delegate.writeObject(id,bytes) }
    override fun writeCommit(id:String,bytes:ByteArray) { verifiedTarget();delegate.writeCommit(id,bytes) }
+   override fun deleteCommit(id:String) {verifiedTarget();delegate.deleteCommit(id)}
+   override fun deleteObject(id:String) {verifiedTarget();delegate.deleteObject(id)}
+   override fun writeDeletion(id:String,bytes:ByteArray) {verifiedTarget();delegate.writeDeletion(id,bytes)}
   }
  }
  private val session by lazy { AppendProfileSession(config,state,adapter,versions,quietMillis) { "Android" } }
@@ -166,7 +169,7 @@ class AndroidSyncFacade internal constructor(
   context.accepted.set(true)
   val remote=comparison.remoteCommits.map {version(it,true,CoreMessages.CLOUD_HISTORY.text())}
   Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: CoreMessages.CLOUD_HISTORY.text(),comparison.localFiles.size,
-   remote,comparison.retryablePending,comparison.canAdoptRemote,false,history=if(comparison.kind==OnboardingKind.BLOCKED)null else history,homeObservation=context)
+   remote,comparison.retryablePending || session.hasOverwritePending(),comparison.canAdoptRemote,false,history=if(comparison.kind==OnboardingKind.BLOCKED)null else history,homeObservation=context)
  }
  fun inspectHome():Inspection {
   val context=captureHomeReadContext() ?: return locked {inspectLocked(metadataOnly=true)}
@@ -190,13 +193,14 @@ class AndroidSyncFacade internal constructor(
   return try {
    if(comparison.verification==RemoteVerification.OBJECTS_VERIFIED)comparison.remoteEntries.forEach { versions.detect(session.loadSnapshot(it.commit.snapshot.id)) }
    val history=if(comparison.kind==OnboardingKind.BLOCKED)null else if(homeLocal!=null)session.syncHistory(comparison,homeLocal.files,homeLocal.summary) else session.syncHistory(comparison)
-   Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: if(comparison.verification==RemoteVerification.METADATA_ONLY)CoreMessages.CLOUD_HISTORY.text() else description(comparison),currentFiles().size,remote,comparison.retryablePending,comparison.canAdoptRemote,false,history=history)
+   Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: if(comparison.verification==RemoteVerification.METADATA_ONLY)CoreMessages.CLOUD_HISTORY.text() else description(comparison),currentFiles().size,remote,comparison.retryablePending || session.hasOverwritePending(),comparison.canAdoptRemote,false,history=history)
   } catch(e:UnsupportedAndroidSaveFormatException) {
    Inspection(owner,null,"BLOCKED",e.message ?: CoreMessages.ANDROID_UNSUPPORTED_CLOUD_SAVE_FORMAT.text(),currentFiles().size,remote,false,false,false,SyncBlockReason.UNSUPPORTED_SAVE_FORMAT)
   }
  }
 
  fun autoUpload():AutoUploadResult=locked {
+  if(session.hasOverwritePending())return@locked autoBlocked("SKIPPED_PENDING",SyncBlockReason.PENDING_UPLOAD,true)
   try {
    var inspection=inspectLocked()
    var comparison=inspection.comparison ?: return@locked autoBlocked("SKIPPED_UNCERTAIN",inspection.blockReason ?: SyncBlockReason.COMPARISON_FAILED,true)
@@ -233,7 +237,8 @@ class AndroidSyncFacade internal constructor(
   }
  }
  private fun autoBlocked(status:String,reason:SyncBlockReason,needsChoice:Boolean)=AutoUploadResult(status,reason.safeMessage,null,needsChoice,reason)
- fun upload(inspection:Inspection)=uploadReadLocked {
+ fun upload(inspection:Inspection):OperationResult=uploadReadLocked {
+  if(session.hasOverwritePending())return@uploadReadLocked overwriteCloudSuccessorsLocked(inspection,"")
   val comparison=presentationChecked(inspection)
   val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {fresh->
    // Restore the metadata-home format gate using snapshots already verified by this preflight.
@@ -311,6 +316,17 @@ class AndroidSyncFacade internal constructor(
   val refreshed=inspectionFromComparison(completed,HomeLocalRead(after,summary))
   return OperationResult(CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text(),
    false,false,snapshotId,refreshed,true)
+ }
+ fun overwriteCloudSuccessors(inspection:Inspection,snapshotId:String)=uploadReadLocked {overwriteCloudSuccessorsLocked(inspection,snapshotId)}
+ private fun overwriteCloudSuccessorsLocked(inspection:Inspection,snapshotId:String):OperationResult {
+  val observed=presentationChecked(inspection)
+  val completed=session.overwriteCloudSuccessors(observed,snapshotId,store,mirrorStopped) {fresh->
+   fresh.remoteEntries.forEach {versions.detect(session.loadSnapshot(it.commit.snapshot.id))}
+   checkActualUnchanged(fresh.localFiles)
+  }
+  checkActualUnchanged(completed.localFiles)
+  return OperationResult("",false,false,
+   completed.baselineId,inspectionFromComparison(completed),completed.kind==OnboardingKind.IDENTICAL)
  }
  fun resolveConflict(inspection:Inspection,snapshotId:String)=restoreReadLocked {
   val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);val conflict=currentConflict(comparison)

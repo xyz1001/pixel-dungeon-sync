@@ -291,6 +291,12 @@ class ProfileSession(
    entry
   }.sortedByDescending { it.savedAt } }
  }
+ /** Remove only an explicitly overwritten, unreferenced snapshot cache; never game files. */
+ internal fun forgetOverwrittenSnapshot(id:String) {
+  require(validRecordId(id))
+  SafePaths.checked(historyRoot.resolve("$id.entry.json")).deleteIfExists()
+  SafePaths.checked(historyRoot.resolve("$id.zip")).deleteIfExists()
+ }
  fun loadSnapshot(id: String): Snapshot = loadVerifiedSnapshot(id).snapshot
  internal fun loadVerifiedSnapshot(id:String):VerifiedSnapshot {
   require(validRecordId(id))

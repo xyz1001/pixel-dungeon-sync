@@ -130,7 +130,7 @@ class AppendProfileSession(
   require(context.owner===comparisonOwner)
   val metadata=repository.readMetadata(store,context.seed,cancellation)
   metadata.graph.requireSettled();metadata.graph.commits.values.snapshotRepresentatives(metadata.graph.tips)
-  context.state.baseline?.let { require(it in metadata.graph.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
+  context.state.baseline?.let { require(it in metadata.graph.commits || it in metadata.retired) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
   return HomeReadResult(context,metadata)
  }
  /** Null means stale; no evidence is merged until the captured control state still matches. */
@@ -138,7 +138,7 @@ class AppendProfileSession(
   val context=result.context
   require(context.owner===comparisonOwner)
   if(homeReadState()!=context.state)return@locked null
-  val state=context.state;val graph=result.metadata.graph.displayGraph
+  val state=if(context.state.baseline in result.metadata.retired)context.state.copy(baseline=null,transfer=null) else context.state;val graph=result.metadata.graph.displayGraph
   repository.mergeMetadata(result.metadata)
   val lineage=when {
    state.baseline==null->OnboardingLineage.NONE
@@ -256,10 +256,10 @@ class AppendProfileSession(
  /** Read-only observation, deliberately not a mutation-lock contender. Any racing/incomplete
   * observation is discarded by the UI generation/busy check; mutation rechecks all gates under lock. */
  fun observedFiles(): Map<String, String> = currentFiles()
- fun retryablePending(): Boolean = !needsApply() && local.legacyPending() == null && repository.pending() != null
+ fun retryablePending(): Boolean = !needsApply() && local.legacyPending() == null && (repository.pending() != null || hasOverwritePending())
  /** The frozen plan is verified by pending(); a marker alone never proves an upload source. */
  fun retryablePendingSourceAvailable(): Boolean = local.locked {
-  !needsApply() && local.legacyPending() == null && repository.pending()?.commit?.snapshot?.files?.isNotEmpty() == true
+  !needsApply() && local.legacyPending() == null && (repository.pending()?.commit?.snapshot?.files?.isNotEmpty() == true || hasOverwritePending())
  }
  fun inspectConflict(store: AppendStore, stopped: () -> Boolean): AppendConflict? = local.locked {
   local.guard(stopped)
@@ -277,7 +277,8 @@ class AppendProfileSession(
  fun createSnapshot(stopped: () -> Boolean): HistoryEntry = local.locked {
   local.remember(captureContent(stopped), CoreSessionMessages.LOCAL_SNAPSHOT.text())
  }
- fun hasPending(): Boolean = local.locked { repository.pending() != null || local.legacyPending() != null || needsApply() }
+ fun hasOverwritePending():Boolean = ConfirmedBranchOverwrite(repository.overwriteDirectory(),adapter,config.profile).pending()!=null
+ fun hasPending(): Boolean = local.locked { repository.pending() != null || local.legacyPending() != null || needsApply() || hasOverwritePending() }
  fun baseline(): String? = local.locked { repository.baseline() }
  private fun needsApply() = SafePaths.checked(applyMarker).exists()
  private fun appliedOnly() {
@@ -547,6 +548,11 @@ class AppendProfileSession(
  /** Verify every observed tip, presenting exact duplicate snapshots once. The graph retains all
   * commit IDs and tips; a listing is never a promise of a global latest save. */
  fun pushFromHome(observedHistory:SyncHistory?,store:AppendStore,stopped:()->Boolean):HomePushResult {
+  if(hasOverwritePending())return readLocked(store) {
+   val fresh=compareLocked(store,stopped,false)
+   overwriteCloudFresh(fresh,fresh,"",store,stopped,{})
+   HomePushResult.Unchanged(historyView(repository.cachedGraph()))
+  }
   val unchanged=local.locked {
    local.guard(stopped);noLegacyPending();appliedOnly()
    if(observedHistory==null || repository.pending()!=null)return@locked null
@@ -897,6 +903,39 @@ class AppendProfileSession(
   val comparison = compareOnboarding(store, stopped)
   if (reuseVerifiedUploadContent(comparison,stopped)!=null || !AutomaticUploadEligibility.allows(comparison)) return AutomaticPushResult.Skipped(comparison)
   return AutomaticPushResult.Published(onboardingUpload(comparison, store, stopped))
+ }
+
+ /** Explicit destructive cloud overwrite; ordinary restore never calls this path. */
+ internal fun overwriteCloudSuccessors(comparison:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison = readLocked(store) {
+  overwriteCloudFresh(comparison,compareLocked(store,stopped,false),selectedSnapshot,store,stopped,validate)
+ }
+ fun overwriteCloudConflict(conflict:AppendConflict,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
+  val fresh=compareLocked(store,stopped,false)
+  require(fresh.observedTips==conflict.observedTips && fresh.localFiles==conflict.observedLocalFiles) {"Conflict changed after confirmation"}
+  overwriteCloudFresh(fresh,fresh,selectedSnapshot,store,stopped,{})
+ }
+ private fun overwriteCloudFresh(comparison:OnboardingComparison,fresh:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison {
+  val deletion=ConfirmedBranchOverwrite(repository.overwriteDirectory(),adapter,config.profile)
+  val retry=deletion.pending()
+  val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified();graph.requireSettled()
+  require(fresh.localFiles==comparison.localFiles) {"Local saves changed after confirmation"}
+  if(retry==null)require(graph.commits==comparison.graph?.commits) {"Cloud history changed after confirmation"}
+  validate(fresh)
+  val existing=graph.findByContent(fresh.localFiles)
+  val base=retry?.base ?: if(existing!=null && existing.id==fresh.baselineId) graph.parentIds(existing).singleOrNull() else fresh.baselineId
+  requireNotNull(base) {"No unambiguous confirmed upload base"}
+  require(base in graph.commits)
+  if(existing==null)uploadWithGraph(fresh,graph,store,stopped,true)
+  val after=repository.cachedGraph();after.requireSettled()
+  val replacement=retry?.replacement ?: requireNotNull(after.findByContent(fresh.localFiles)).id
+  require(after.commits[replacement]?.snapshot?.files==fresh.localFiles)
+  val selected=if(retry!=null)null else after.commits.values.singleOrNull {it.snapshot.id==selectedSnapshot && it.id!=replacement}?.id
+   ?: after.tips.filter {it!=replacement&&after.descendsFrom(it,base)}.singleOrNull()
+  val plan=retry ?: deletion.prepare(store,after,base,requireNotNull(selected) {"Select one replaceable cloud line"},replacement)
+  deletion.finish(store,plan,after,repository::forgetDeleted,local::forgetOverwrittenSnapshot)
+  val complete=repository.cachedGraph();complete.requireObjectsVerified();complete.requireSettled();repository.setBaseline(replacement,complete)
+  repository.clearPending();markDirectorySynced(complete.commits.getValue(replacement),"upload")
+  return compareLocked(store,stopped,true)
  }
 
  /** Upload follows an explicit choice or the strict automatic gate, including a frozen retry. Never freeze empty saves. */

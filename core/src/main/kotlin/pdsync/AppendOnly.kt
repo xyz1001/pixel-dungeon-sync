@@ -35,6 +35,10 @@ interface AppendStore {
  fun readObject(id: String): ByteArray?
  fun writeCommit(id: String, bytes: ByteArray)
  fun writeObject(id: String, bytes: ByteArray)
+ fun deleteCommit(id:String):Unit = error("Store does not support confirmed deletion")
+ fun deleteObject(id:String):Unit = error("Store does not support confirmed deletion")
+ fun readDeletion(id:String):ByteArray? = null
+ fun writeDeletion(id:String,bytes:ByteArray):Unit = error("Store does not support confirmed deletion")
  fun legacyPresent(): Boolean
  fun legacyPresent(cancellation:MetadataReadCancellation):Boolean {
   cancellation.checkActive();return legacyPresent()
@@ -110,8 +114,9 @@ data class CommitMetadataGraph internal constructor(val displayGraph: CommitGrap
  fun requireSettled() = displayGraph.requireSettled()
 }
 internal class MetadataReadSeed(val known:Map<String,String>,val observed:Set<String>,val baseline:String?)
-internal class DetachedMetadataRead(val graph:CommitMetadataGraph,val known:Map<String,ByteArray>,val observed:Set<String>)
+internal class DetachedMetadataRead(val graph:CommitMetadataGraph,val known:Map<String,ByteArray>,val observed:Set<String>,val retired:Set<String> = emptySet())
 private class MetadataEvidence(seed:MetadataReadSeed) {
+ val retired=linkedSetOf<String>()
  val expected=seed.known
  val known=linkedMapOf<String,ByteArray>()
  val observed=LinkedHashSet(seed.observed)
@@ -194,6 +199,12 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   if (old != null && !old.contentEquals(bytes)) throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
   if (old == null) SafePaths.atomicWrite(knownRoot.resolve("$id.json"), bytes)
  }
+ internal fun forgetDeleted(id:String) {
+  require(validRecordId(id))
+  listOf(knownRoot.resolve("$id.json"),observedRoot.resolve("$id.json"),observationRoot.resolve("$id.txt")).forEach {SafePaths.checked(it).deleteIfExists()}
+  if(baseline()==id) {SafePaths.checked(baselinePath).deleteIfExists();SafePaths.checked(baselineMarker).deleteIfExists()}
+ }
+ internal fun overwriteDirectory():Path=directory.resolve("confirmed-overwrite")
  fun baseline(): String? {
   if (!SafePaths.checked(baselinePath).exists()) {
    check(!SafePaths.checked(baselineMarker).exists()) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_EXISTING_HISTORY_WAS_NOT_TREATED.text() }; return null
@@ -261,7 +272,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  internal fun readMetadata(store:AppendStore,seed:MetadataReadSeed,cancellation:MetadataReadCancellation):DetachedMetadataRead {
   val evidence=MetadataEvidence(seed)
   val graph=CommitMetadataGraph(discoverGraph(store,false,4,evidence,cancellation))
-  return DetachedMetadataRead(graph,evidence.known.toMap(),evidence.observed.toSet())
+  return DetachedMetadataRead(graph,evidence.known.toMap(),evidence.observed.toSet(),evidence.retired.toSet())
  }
  internal fun mergeMetadata(read:DetachedMetadataRead) {
   // Validate the complete delta before the first write. This never records object verification.
@@ -270,6 +281,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
    if(old!=null && !old.contentEquals(bytes))throw RemoteIntegrityException(CoreSessionMessages.KNOWN_COMMIT_WAS_MODIFIED_SYNC_STOPPED.text(id))
    decode(bytes,id)
   }
+  read.retired.forEach(::forgetDeleted)
   read.observed.forEach(::observe)
   read.known.forEach { (id,bytes)->remember(id,bytes) }
  }
@@ -333,7 +345,16 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
     // Completion order detects failures promptly; decoding still follows discovery order.
     for (id in batch) {
      val bytes = if (executor != null) fetched[id] else if (cancellation != null) store.readCommit(id, cancellation) else store.readCommit(id)
-     if (bytes == null) { pending[id] = "missing manifest"; continue }
+     if (bytes == null) {
+      val receipt=store.readDeletion(id)?.let { DeletionReceipt.decode(it,id,adapter.id,profile) }
+      if(receipt!=null) {
+       evidence?.expected?.get(id)?.let {require(it==receipt.recordHash)}
+       knownBytes(id)?.let { require(hash(it)==receipt.recordHash) {"Deleted record proof changed"} }
+       if(evidence==null)forgetDeleted(id) else { evidence.known.remove(id);evidence.observed.remove(id);evidence.retired.add(id) }
+       continue
+      }
+      pending[id] = "missing manifest"; continue
+     }
      scanBytes += bytes.size; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
      val old = knownBytes(id)
      if (old != null && !old.contentEquals(bytes) || evidence?.expected?.get(id)?.let {it!=hash(bytes)}==true)
