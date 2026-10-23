@@ -237,7 +237,7 @@ class AndroidSyncFacade internal constructor(
   val comparison=presentationChecked(inspection)
   val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {checkActualUnchanged(comparison.localFiles)}
   // A fresh game read after remote completion preserves the existing post-upload safety check.
-  val rendered=run {
+  val rendered=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_REFRESH) {
    checkActualUnchanged(completed.localFiles)
    inspectionFromComparison(completed)
   }

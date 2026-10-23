@@ -10,7 +10,8 @@ import kotlinx.serialization.json.Json
 @Serializable enum class DiagnosticPhase {
  QUEUE_WAIT, OPERATION_LOCK_WAIT, IDENTITY_VERIFICATION, SAVE_EXPORT, LOCAL_EXPORT_VERIFY,
  MIRROR_COPY, LOCAL_SUMMARY, COMPARISON, REMOTE_METADATA, UI_COMPLETION,
- BRIDGE_READ_SNAPSHOT, BRIDGE_SAVE_EXPORT, BRIDGE_RESTORE_WRITE
+ BRIDGE_READ_SNAPSHOT, BRIDGE_SAVE_EXPORT, BRIDGE_RESTORE_WRITE,
+ ENTITLEMENT, UPLOAD_PREFLIGHT, UPLOAD_CAPTURE, UPLOAD_PUBLISH, UPLOAD_DELTA, UPLOAD_REFRESH
 }
 @Serializable data class DiagnosticPhaseMeasurement(val durationMs:Long,val count:Int,val failed:Int=0,val canceled:Int=0,val skipped:Int=0)
 internal class DiagnosticPhaseCollector {

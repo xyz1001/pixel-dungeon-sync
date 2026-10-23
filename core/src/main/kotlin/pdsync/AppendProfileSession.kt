@@ -449,17 +449,17 @@ class AppendProfileSession(
  }
  private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean, expected:CommitGraph?=null,uploadDelta:Boolean=false): AppendPushResult {
   preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
-  val publication=repository.publishResult(store,plan,expected)
+  val publication=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PUBLISH) {repository.publishResult(store,plan,expected)}
   val commit=publication.commit
   if(publication.reused) {
    // Publication verified the winning object. Its real record (including legacy ID) is returned;
    // reusing content never moves ancestry, adds a parent, or recaptures the current directory.
-   val graph=if(uploadDelta)repository.discoverUploadDelta(store,requireNotNull(expected),commit) else repository.cachedGraph()
+   val graph=if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else repository.cachedGraph()
    graph.requireSettled()
    finishReusedPending(commit,graph,plan)
    return AppendPushResult.Success(commit,currentFiles()!=commit.snapshot.files,graph.tips.singleOrNull()!=commit.id,reused=true)
   }
-  val graph = if(uploadDelta)repository.discoverUploadDelta(store,requireNotNull(expected),commit) else discover(store)
+  val graph = if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else discover(store)
   graph.requireSettled()
   require(graph.commits[commit.id]==commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
   val actual=if(hash(plan.zip)==commit.snapshot.sha256)Snapshot(commit.snapshot,plan.zip) else repository.download(store,commit)
@@ -524,7 +524,7 @@ class AppendProfileSession(
   val fingerprint=if(pending==null)stability.awaitStable() else null
   val files=pending?.commit?.snapshot?.files ?: requireNotNull(fingerprint).files
   fun freeze():UploadPlan {
-   val captured = captureContent(stopped)
+   val captured = DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_CAPTURE) {captureContent(stopped)}
    require(captured.manifest.files==files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
    fingerprint?.let(stability::requireUnchanged)
    return repository.prepare(captured,listOfNotNull(repository.baseline()),operation=local.operationMetadata())
@@ -906,7 +906,7 @@ class AppendProfileSession(
  /** Fresh proof is acquired and consumed under one physical-root lock, never supplied by UI. */
  internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:()->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {
   require(comparison.owner===comparisonOwner)
-  val fresh=compareLocked(store,stopped,false)
+  val fresh=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PREFLIGHT) {compareLocked(store,stopped,false)}
   val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified();graph.requireSettled()
   require(graph.commits==comparison.graph?.commits && graph.pending==comparison.graph?.pending && fresh.observedTips==comparison.observedTips) {CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text()}
   require(fresh.localFiles==comparison.localFiles && (comparison.localSource!=LocalObservationSource.FILESYSTEM || fresh.fingerprint==comparison.fingerprint)) {CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()}
@@ -927,7 +927,7 @@ class AppendProfileSession(
   matchingUpload(graph,files)?.let {return reuseUpload(it,graph,pending)}
   val plan = pending ?: run {
    require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }
-   val captured = captureContent(stopped)
+   val captured = DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_CAPTURE) {captureContent(stopped)}
    require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
    SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())

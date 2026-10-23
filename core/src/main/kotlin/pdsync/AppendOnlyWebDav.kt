@@ -1,5 +1,7 @@
 package pdsync
 
+import okio.buffer
+
 import pdsync.i18n.CoreValidationMessages
 
 import okhttp3.Credentials
@@ -276,8 +278,12 @@ class AppendOnlyWebDav(
   if (reuse && cache!!.contains(key)) {
    // A frozen byte hit must never bypass the current access/permission check.
    beforeRequest.check()
-   cache.read(key)?.let { return it }
+   cache.read(key)?.let {
+    DiagnosticLog.currentTrace()?.transfers?.add(DiagnosticTransferKind.CACHE_HIT,0,0,0,0,it.size.toLong(),DiagnosticResult.SUCCEEDED)
+    return it
+   }
   }
+  DiagnosticLog.currentTrace()?.transfers?.add(DiagnosticTransferKind.CACHE_MISS,0,0,0,0,0,DiagnosticResult.SUCCEEDED)
   val bytes = get(url, MAX_SNAPSHOT_BYTES)
   if (bytes == null) cache?.remove(key)
   else if (reuse) cache!!.remember(key, bytes)
@@ -303,7 +309,31 @@ class AppendOnlyWebDav(
   cancellation?.checkActive()
   beforeRequest.check()
   val requestStarted = System.nanoTime()
-  val call = requestClient.newCall(request)
+  val transferTrace=DiagnosticLog.currentTrace()
+  val kind=when {
+   request.method=="PROPFIND" -> DiagnosticTransferKind.LIST
+   request.method=="MKCOL" -> DiagnosticTransferKind.NAMESPACE
+   request.method=="GET" && request.url.encodedPath.endsWith(".zip") -> DiagnosticTransferKind.OBJECT_GET
+   request.method=="PUT" && request.url.encodedPath.endsWith(".zip") -> DiagnosticTransferKind.OBJECT_PUT
+   request.method=="GET" && request.url.encodedPath.substringAfterLast('/').startsWith("pdsync-") -> DiagnosticTransferKind.COMMIT_GET
+   request.method=="PUT" -> DiagnosticTransferKind.COMMIT_PUT
+   else -> DiagnosticTransferKind.OTHER
+  }
+  var sent=0L;var received=0L;var headersNanos=0L;var bodyNanos=0L
+  var transferResult=DiagnosticResult.FAILED
+  val measuredBody=request.body?.let { original -> object:okhttp3.RequestBody() {
+   override fun contentType()=original.contentType()
+   override fun contentLength()=original.contentLength()
+   override fun isOneShot()=original.isOneShot()
+   override fun isDuplex()=original.isDuplex()
+   override fun writeTo(sink:okio.BufferedSink) {
+    val counting=object:okio.ForwardingSink(sink) {
+     override fun write(source:okio.Buffer,byteCount:Long) {super.write(source,byteCount);sent+=byteCount}
+    }.buffer()
+    original.writeTo(counting);counting.flush()
+   }
+  }}
+  val call = requestClient.newCall(request.newBuilder().method(request.method,measuredBody).build())
   // Elapsed until response headers (or the observed transport failure), never request data.
   fun context(error:IOException? = null) = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
    .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0))
@@ -312,10 +342,23 @@ class AppendOnlyWebDav(
   val registration = cancellation?.register { call.cancel() }
   return try {
   cancellation?.checkActive()
-  call.execute().use { response ->
+  val headersStarted=System.nanoTime()
+  val raw=try {call.execute()} finally {headersNanos=System.nanoTime()-headersStarted}
+  raw.use {
+   val response=raw.body?.let { original -> raw.newBuilder().body(object:okhttp3.ResponseBody() {
+    private val counted=object:okio.ForwardingSource(original.source()) {
+     override fun read(sink:okio.Buffer,byteCount:Long):Long {
+      val start=System.nanoTime()
+      return try {super.read(sink,byteCount).also {if(it>0)received+=it}} finally {bodyNanos+=System.nanoTime()-start}
+     }
+    }.buffer()
+    override fun contentType()=original.contentType()
+    override fun contentLength()=original.contentLength()
+    override fun source()=counted
+   }).build()} ?: raw
    // The recorder accepts only a closed method enum and status, never URL, headers or payload.
    DiagnosticLog.http(diagnosticMethod(request.method), response.code, context())
-   block(response)
+   block(response).also {transferResult=DiagnosticResult.SUCCEEDED}
   }
  } catch (e: NamespaceProvisioningException) {
   // The namespace interceptor rejects bad statuses before execute can expose its response.
@@ -352,7 +395,11 @@ class AppendOnlyWebDav(
    else -> "IO"
   }
   throw IOException("WebDAV network request failed [$category]")
- } finally { registration?.close() }
+ } finally {
+  if(call.isCanceled() || Thread.currentThread().isInterrupted)transferResult=DiagnosticResult.CANCELED
+  transferTrace?.transfers?.add(kind,headersNanos,bodyNanos,System.nanoTime()-requestStarted,sent,received,transferResult)
+  registration?.close()
+ }
  }
 
  private fun diagnosticMethod(method: String): DiagnosticHttpMethod = when (method) {

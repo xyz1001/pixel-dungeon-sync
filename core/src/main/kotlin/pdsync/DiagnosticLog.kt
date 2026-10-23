@@ -44,6 +44,7 @@ import javax.net.ssl.SSLException
 
 class DiagnosticTrace internal constructor(val id: String, val action: DiagnosticAction, val automatic: Boolean) {
  internal val timings = DiagnosticPhaseCollector()
+ internal val transfers = DiagnosticTransferCollector()
  internal val capabilities = DiagnosticCapabilityCollector()
  internal val startedNanos = System.nanoTime()
  fun record(stage: DiagnosticStage, result: DiagnosticResult): Boolean = record(stage, result, DiagnosticFailure.NONE)
@@ -162,6 +163,8 @@ object DiagnosticLog {
    val phaseTotals = if (stage == DiagnosticStage.FINISHED) trace.timings.snapshot() else emptyMap()
    var finishedDetails = details
    if (stage == DiagnosticStage.FINISHED) {
+    val transferTotals = trace.transfers.snapshot()
+    if (transferTotals.isNotEmpty()) finishedDetails = (finishedDetails ?: DiagnosticDetails.builder().build()).withTransfers(transferTotals)
     val capabilityEvidence = trace.capabilities.snapshot()
     if (!capabilityEvidence.isEmpty()) finishedDetails = (finishedDetails ?: DiagnosticDetails.builder().build()).withCapabilityEvidence(capabilityEvidence)
     if (phaseTotals.isNotEmpty()) finishedDetails = (finishedDetails ?: DiagnosticDetails.builder().build()).withPhaseTimings(phaseTotals)

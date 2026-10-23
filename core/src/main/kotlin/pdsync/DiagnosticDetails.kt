@@ -70,6 +70,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("installationCache") INSTALLATION_CACHE,
   @SerialName("installationElapsedMs") INSTALLATION_ELAPSED_MS,
   @SerialName("phaseTimings") PHASE_TIMINGS,
+  @SerialName("transferTotals") TRANSFER_TOTALS,
   @SerialName("helperAccessProtocolVersion") HELPER_ACCESS_PROTOCOL_VERSION,
   @SerialName("helperSinglePassReadVersion") HELPER_SINGLE_PASS_READ_VERSION,
   @SerialName("helperReadSnapshotVersion") HELPER_READ_SNAPSHOT_VERSION,
@@ -89,6 +90,10 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
  internal fun withPhaseTimings(timings:Map<DiagnosticPhase,DiagnosticPhaseMeasurement>):DiagnosticDetails {
   val encoded=DiagnosticTimingEvidence.encode(timings) ?: return this
   return DiagnosticDetails(values+(Field.PHASE_TIMINGS to encoded))
+ }
+ internal fun withTransfers(values:Map<DiagnosticTransferKind,DiagnosticTransferMeasurement>):DiagnosticDetails {
+  val encoded=DiagnosticTransferEvidence.encode(values) ?: return this
+  return DiagnosticDetails(this.values+(Field.TRANSFER_TOTALS to encoded))
  }
  fun isEmpty(): Boolean = values.isEmpty()
  fun isValid(): Boolean = values.all { (field, value) -> valid(field, value) } && validLayoutTotal(values)
@@ -292,6 +297,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    else -> null
   }
   private fun valid(field: Field, value: String): Boolean {
+   if (field == Field.TRANSFER_TOTALS) return DiagnosticTransferEvidence.isValid(value)
    if (field == Field.PHASE_TIMINGS) return DiagnosticTimingEvidence.isValid(value)
    if (field == Field.PREPARATION) return PreparationDiagnosticEvidence.isValid(value)
    if (field == Field.HOME_RESTORE) return HomeRestoreDiagnosticEvidence.isValid(value)

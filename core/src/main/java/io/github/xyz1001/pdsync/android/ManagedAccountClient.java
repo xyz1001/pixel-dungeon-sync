@@ -288,18 +288,21 @@ final class ManagedAccountClient {
     }
 
     Entitlement entitlement() throws ManagedAccountException {
+        pdsync.DiagnosticTiming.Scope timing = pdsync.DiagnosticTiming.start(pdsync.DiagnosticPhase.ENTITLEMENT);
         recordEntitlement(pdsync.DiagnosticResult.STARTED, pdsync.DiagnosticFailure.NONE);
         try {
             Entitlement result = readEntitlement();
             recordEntitlement(pdsync.DiagnosticResult.SUCCEEDED, pdsync.DiagnosticFailure.NONE);
             return result;
         } catch (ManagedAccountException failure) {
+            timing.failed(failure);
             recordEntitlement(pdsync.DiagnosticResult.FAILED, failure.diagnosticFailure());
             throw failure;
         } catch (RuntimeException malformed) {
+            timing.failed(malformed);
             recordEntitlement(pdsync.DiagnosticResult.FAILED, pdsync.DiagnosticFailure.VALIDATION);
             throw invalid();
-        }
+        } finally { timing.close(); }
     }
 
     private static void recordEntitlement(pdsync.DiagnosticResult result, pdsync.DiagnosticFailure failure) {

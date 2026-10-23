@@ -586,6 +586,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.busy || isDestroyed()) {
             return;
         }
+        final DiagnosticTrace trace = DiagnosticLog.begin(action, false);
         cancelDetachedHomeRead();
         invalidatePathPreview();
         if (!preserveAutomaticHistory) this.automaticHistoryState.outcome = null;
@@ -606,7 +607,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.status.setVisibility(View.VISIBLE);
             disable(this.root);
         }
-        final DiagnosticTrace trace = DiagnosticLog.begin(action, false);
         final DiagnosticTiming.Scope queueWait = DiagnosticTiming.start(trace, DiagnosticPhase.QUEUE_WAIT);
         this.f9io.execute(new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda56
             @Override // java.lang.Runnable
