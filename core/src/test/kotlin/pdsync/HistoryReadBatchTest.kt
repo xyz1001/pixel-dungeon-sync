@@ -96,11 +96,13 @@ class HistoryReadBatchTest {
   server.start(java.net.InetAddress.getByName("127.0.0.1"),0)
   val dav=AppendOnlyWebDav(server.url("/dav/").toString(),"synthetic","history","","")
   val outcome=AtomicReference<Throwable?>()
-  val owner=Thread {try {dav.readHistoryObjects(ids,MetadataReadCancellation())}catch(t:Throwable){outcome.set(t)}}
+  val interrupted=AtomicReference<Boolean>()
+  val owner=Thread {try {dav.readHistoryObjects(ids,MetadataReadCancellation())}catch(t:Throwable){outcome.set(t);interrupted.set(Thread.currentThread().isInterrupted)}}
   owner.start()
   repeat(4){assertNotNull(server.takeRequest(5,TimeUnit.SECONDS))}
   owner.interrupt();owner.join(1500)
   assertFalse(owner.isAlive);assertNotNull(outcome.get())
+  assertEquals(true,interrupted.get(),"batch cancellation must preserve owner interruption")
   assertTrue(Thread.getAllStackTraces().keys.none {it.isAlive && it.name=="pdsync-history-read"})
   assertEquals(4,server.requestCount,"cancel never replays GET or writes")
  }

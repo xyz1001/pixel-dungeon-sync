@@ -2401,8 +2401,8 @@
       "sha256": "62a1b1d8ee1f75abbc2638bd36cee82bdb75817d4f22cc04523b72ede56e4b8d"
     },
     "core/src/main/kotlin/pdsync/HistoryReadBatch.kt": {
-      "size": 1788,
-      "sha256": "be53bc4331dc162f2e01de98a4bcddd86bc96123d6fe0e6be82d775d7d9eb5f0"
+      "size": 1937,
+      "sha256": "3a51ce066dd9b2b8e4dd63c8f4a553655a0eca9e8cd21f5d159761c0e9686f1d"
     },
     "core/src/main/kotlin/pdsync/HomeRestoreDiagnosticEvidence.kt": {
       "size": 6185,
@@ -2749,8 +2749,8 @@
       "sha256": "499484e64822556d5885cf9213e097aaa51a685a77563c7331f8758305f363d4"
     },
     "core/src/test/kotlin/pdsync/HistoryReadBatchTest.kt": {
-      "size": 5824,
-      "sha256": "e65d5a83e1f522eb2bf5dc56ec7ac82c17b7632e6ddf81e969690fcd33d47393"
+      "size": 6016,
+      "sha256": "797188d8ce34e9ffa33d09a6b50088bde743904520d1be699efbe5fc5a41ed8b"
     },
     "core/src/test/kotlin/pdsync/HomeRestoreDiagnosticEvidenceTest.kt": {
       "size": 10911,

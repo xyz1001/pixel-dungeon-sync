@@ -29,6 +29,8 @@ internal fun <K,V> historyReadBatch(keys:List<K>, cancellation:MetadataReadCance
   cancellation.checkActive()
   return keys.associateWith {results.getValue(it)}
  } catch(failure:Throwable) {
+  // Blocking waits clear the owner flag when throwing InterruptedException.
+  if(failure is InterruptedException)Thread.currentThread().interrupt()
   cancellation.cancel()
   throw failure
  } finally {
