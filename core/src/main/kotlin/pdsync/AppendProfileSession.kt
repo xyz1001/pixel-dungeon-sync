@@ -904,14 +904,14 @@ class AppendProfileSession(
   uploadWithGraph(comparison,revalidateComparison(comparison,store,stopped,allowPending=true),store,stopped,false)
  }
  /** Fresh proof is acquired and consumed under one physical-root lock, never supplied by UI. */
- internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:()->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {
+ internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:(OnboardingComparison)->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {
   require(comparison.owner===comparisonOwner)
   val fresh=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PREFLIGHT) {compareLocked(store,stopped,false)}
   val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified();graph.requireSettled()
   require(graph.commits==comparison.graph?.commits && graph.pending==comparison.graph?.pending && fresh.observedTips==comparison.observedTips) {CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text()}
   require(fresh.localFiles==comparison.localFiles && (comparison.localSource!=LocalObservationSource.FILESYSTEM || fresh.fingerprint==comparison.fingerprint)) {CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()}
   require(fresh.baselineId==comparison.baselineId && fresh.pendingCommit==comparison.pendingCommit)
-  beforePublish()
+  beforePublish(fresh)
   val result=uploadWithGraph(fresh,graph,store,stopped,true)
   val after=repository.cachedGraph();after.requireObjectsVerified();after.requireSettled()
   val files=currentFiles();val baseline=repository.baseline()

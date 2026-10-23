@@ -67,6 +67,30 @@ class AndroidSelectedRestoreEfficiency94Test {
  private fun repository(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->AppendRepository(paths.filter {it.fileName.toString()=="append-v2"}.findFirst().orElseThrow(),AndroidGameAdapter(identity),connection.profile)}
  private fun recoveryFiles(rig:Rig)=Files.walk(rig.root).use {paths->paths.filter {it.fileName.toString() in setOf("apply-required.txt","active-plan.txt") || it.toString().contains("restore-journals")&&it.fileName.toString().endsWith(".json")}.toList()}
 
+ @Test fun uploadValidatesRemoteTipFormatWithoutDeclaredSaveVersions() {
+  for(valid in listOf(false,true)) {
+   val store=Store();publish(store);val original=store.latest()
+   val content=files(3).toMutableMap()
+   if(!valid)content["game1/game.dat"]="unrecognized synthetic save".encodeToByteArray()
+   val source=temp.resolve("raw-${sequence++}");source.createDirectories()
+   content.forEach {(name,bytes)->source.resolve(name).also {it.parent.createDirectories();it.writeBytes(bytes)}}
+   val snapshot=Snapshots.capture(source,AndroidGameAdapter(identity),connection.profile,"synthetic",null)
+   val id=contentSha256(snapshot.manifest.files)
+   val manifest=original.snapshot.copy(id=id,files=snapshot.manifest.files,sha256=snapshot.manifest.sha256,saveVersions=null,directoryMetadata=null)
+   val tip=original.copy(id=id,parents=emptyList(),snapshot=manifest,objectBytes=snapshot.zip.size)
+   store.commits.clear();store.objects.clear();store.commits[id]=json.encodeToString(tip).encodeToByteArray();store.objects[id]=snapshot.zip
+   Snapshots.verify(Snapshot(manifest,snapshot.zip),AndroidGameAdapter(identity))
+   val r=rig(Bridge(files(9)),store);val home=r.facade.inspectHome();val writes=store.writes;val lists=store.listings
+   if(valid) {
+    val result=r.facade.upload(home);assertFalse(result.isPending);assertEquals(writes+2,store.writes)
+    assertEquals(lists+2,store.listings)
+   } else {
+    assertFailsWith<UnsupportedAndroidSaveFormatException>{r.facade.upload(home)}
+    assertEquals(writes,store.writes);assertEquals(lists+1,store.listings);assertNull(repository(r).pending())
+   }
+  }
+ }
+
  @Test fun sameCurrentTipWithoutBaselineVerifiesButDoesNotPublishRestoreOrAdopt() {
   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge();val r=rig(bridge,store)
   val home=r.facade.inspectHome();val writes=store.writes;val objects=store.objectReads;val lists=store.listings

@@ -235,7 +235,11 @@ class AndroidSyncFacade internal constructor(
  private fun autoBlocked(status:String,reason:SyncBlockReason,needsChoice:Boolean)=AutoUploadResult(status,reason.safeMessage,null,needsChoice,reason)
  fun upload(inspection:Inspection)=uploadReadLocked {
   val comparison=presentationChecked(inspection)
-  val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {checkActualUnchanged(comparison.localFiles)}
+  val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {fresh->
+   // Restore the metadata-home format gate using snapshots already verified by this preflight.
+   fresh.remoteEntries.forEach {versions.detect(session.loadSnapshot(it.commit.snapshot.id))}
+   checkActualUnchanged(comparison.localFiles)
+  }
   // A fresh game read after remote completion preserves the existing post-upload safety check.
   val rendered=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_REFRESH) {
    checkActualUnchanged(completed.localFiles)
