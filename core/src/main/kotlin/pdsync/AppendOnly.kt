@@ -236,6 +236,14 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  /** Missing later listings never erase remembered IDs. Parents are fetched even when omitted. */
  fun discover(store: AppendStore): CommitGraph = discoverGraph(store, verifyObjects = true)
 
+ /** Only called with this upload's freshly verified graph and a server-read-back commit.
+  * Re-list IDs and re-read every manifest to detect mutation/deletion and new branches.
+  * Only unchanged manifests reuse this operation's already verified object evidence. */
+ internal fun discoverUploadDelta(store:AppendStore,verified:CommitGraph,published:AppendCommit):CommitGraph {
+  verified.requireObjectsVerified();verified.requireSettled()
+  require(known(published.id)?.let {decode(it,published.id)==published}==true && observedAt(published.id)!=null)
+  return discoverGraph(store,true,operationSeed=verified.commits+(published.id to published))
+ }
  fun discoverMetadata(store: AppendStore, parallelism: Int = 4): CommitMetadataGraph {
   require(parallelism in 1..4)
   return CommitMetadataGraph(discoverGraph(store, verifyObjects = false, metadataParallelism = parallelism))
@@ -267,7 +275,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  }
 
  private fun discoverGraph(store: AppendStore, verifyObjects: Boolean, metadataParallelism: Int = 1,
-  evidence:MetadataEvidence?=null,externalCancellation:MetadataReadCancellation?=null): CommitGraph {
+  evidence:MetadataEvidence?=null,externalCancellation:MetadataReadCancellation?=null,operationSeed:Map<String,AppendCommit> = emptyMap()): CommitGraph {
   val cancellation = externalCancellation ?: if (verifyObjects) null else MetadataReadCancellation()
   fun observed(id:String) { if(evidence==null)observe(id) else evidence.observed.add(id) }
   fun knownBytes(id:String):ByteArray? = if(evidence==null)known(id) else evidence.known[id]
@@ -335,12 +343,14 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
      if(commit.schema == 2) commit.parents.forEach { queue.add(it) }
      if (verifyObjects) {
       scanBytes += commit.objectBytes; require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+      if(operationSeed[id]!=commit) {
       val zip = store.readObject(commit.snapshot.id)
       if (zip == null) { pending[id] = "missing object"; continue }
       scanBytes += maxOf(0, zip.size - commit.objectBytes)
       require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
       try { require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter) }
       catch (_: Exception) { pending[id] = "invalid object"; continue }
+      }
       observeVerified(id)
      }
      candidates[id] = commit

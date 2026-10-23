@@ -62,6 +62,7 @@ class MainActivity {
    check(!active,"scope nested unexpectedly");opened++;active=true;
    try{return task.call();}finally{active=false;closed++;}
   }
+  <T>T withUploadReadScope(java.util.concurrent.Callable<T> task) throws Exception {return withRestoreReadScope(task);}
   void completeOnboarding(Object observed){check(active==expected,"onboarding outside action scope");completed++;}
  }
  static class OperationOutcome{String refreshFailure;DiagnosticFailure refreshDiagnosticFailure=DiagnosticFailure.NONE;boolean requiresBridgeUpgrade,stale;AndroidSyncFacade.OperationResult result;}
@@ -95,7 +96,7 @@ class MainActivity {
  static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
  public static void main(String[] args){
   for(DiagnosticAction action:DiagnosticAction.values())for(boolean failed:new boolean[]{false,true}){
-   MainActivity a=new MainActivity();a.facade.expected=action==DiagnosticAction.RESTORE || action==DiagnosticAction.RESOLVE;a.failRefresh=failed;
+   MainActivity a=new MainActivity();a.facade.expected=action==DiagnosticAction.RESTORE || action==DiagnosticAction.RESOLVE || action==DiagnosticAction.PUSH;a.failRefresh=failed;
    a.operation(action,"existing progress",()->{check(a.facade.active==a.facade.expected,"restore action outside scope");return new AndroidSyncFacade.OperationResult();},"existing success");
    check(a.reads==1,"post-action read missing");
    check(a.facade.opened==(a.facade.expected?1:0) && a.facade.closed==a.facade.opened && !a.facade.active,"scope leaked");

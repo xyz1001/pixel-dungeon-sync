@@ -333,8 +333,8 @@
       "sha256": "1d202144153c1dd85a2b58d59cb3cc551403c37277b091436d3ebe7bbbc45b9e"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/MainActivity.java": {
-      "size": 308514,
-      "sha256": "7f5e47c66aca0ee0d37307317a86fb5adcef96b7f7733bd52024e82420da7d62"
+      "size": 308681,
+      "sha256": "f2b3183baeca33e8fc30adf05c8af7bdbe40e82f26a9ee9c12042ceab7686388"
     },
     "android-app/src/main/java/io/github/xyz1001/pdsync/android/ManagedAccountPanel.java": {
       "size": 4298,
@@ -1641,8 +1641,8 @@
       "sha256": "5f7cd176a3f3d0406c9f817eafc62cc678c9d3a678ee32d9fb1b0ffecfea4061"
     },
     "android-app/src/test/python/test_home_scope_timing_execution.py": {
-      "size": 12252,
-      "sha256": "10ab7a40c19b23fb1881c318a0e73da6f81c610ebfee3340f6b5a1136481479f"
+      "size": 12405,
+      "sha256": "f0fca50a1c4e6d81486bb3c8d077dd2573ce4ef06b85b0d67b8dc9f06691a52d"
     },
     "android-app/src/test/python/test_inline_appreciation_android_contract.py": {
       "size": 4996,
@@ -2305,16 +2305,16 @@
       "sha256": "50ce9903b27e754b446d919c20047ada42c6826fd36a259561ce4cbda9a0e1c5"
     },
     "core/src/main/kotlin/pdsync/AppendOnly.kt": {
-      "size": 35939,
-      "sha256": "ef3dfe0aafe045a8c36c2a075490b6f0e29855fbae3c122e6ed9ec382f881ffe"
+      "size": 36688,
+      "sha256": "dc64b55d7a45dc150ff14fea32b8e50b69f2a49e689d88b921fdc071bb023177"
     },
     "core/src/main/kotlin/pdsync/AppendOnlyWebDav.kt": {
       "size": 31408,
       "sha256": "eb6ce67c50034f021758b927298ec3d2a028112a6d2a77cb3f926884c2bc5aae"
     },
     "core/src/main/kotlin/pdsync/AppendProfileSession.kt": {
-      "size": 67114,
-      "sha256": "9cb8974843a7c45ab12c029194f53a7e05c4e80dc68c4007e218fab80b51de22"
+      "size": 69821,
+      "sha256": "75f17095f840f63a0dbd41d73e70c6dcc4dfd00c382e102feaa05c1885283202"
     },
     "core/src/main/kotlin/pdsync/AutomaticUploadEligibility.kt": {
       "size": 1078,
@@ -2525,8 +2525,8 @@
       "sha256": "aed6c14aa563120fdf6528ed3bd59e870341422a070baba1098110a0c772f037"
     },
     "core/src/main/kotlin/pdsync/android/app/AndroidSyncFacade.kt": {
-      "size": 50959,
-      "sha256": "e6684517166f31b87df49764f0c57392590b5df7fcc8a08a084429a06313b591"
+      "size": 51200,
+      "sha256": "b25c1f3ae7ff0ed39b57e3e4317fb3b575d19466627b30b68a5a0954da8b47e4"
     },
     "core/src/main/kotlin/pdsync/presentation/AppPresentation.kt": {
       "size": 1012,
@@ -2605,8 +2605,8 @@
       "sha256": "6b6f36e89d0e7bd1ebb789895059c628131da6afa20f75bccc46e187bcd6cd2f"
     },
     "core/src/test/kotlin/pdsync/AndroidSelectedRestoreEfficiency94Test.kt": {
-      "size": 18901,
-      "sha256": "0e938a14ff2f52c0dd3231ae3a64bb09ea95c2b3320caf322cac61cc06151ee8"
+      "size": 24621,
+      "sha256": "25f14a34b33cb49ab6de3ea21da511deadf7ee110451d5e72d735fac45ef1577"
     },
     "core/src/test/kotlin/pdsync/AppendOnlyWebDavTest.kt": {
       "size": 19752,

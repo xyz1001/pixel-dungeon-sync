@@ -233,14 +233,19 @@ class AndroidSyncFacade internal constructor(
   }
  }
  private fun autoBlocked(status:String,reason:SyncBlockReason,needsChoice:Boolean)=AutoUploadResult(status,reason.safeMessage,null,needsChoice,reason)
- fun upload(inspection:Inspection)=locked {
-  val comparison=checked(inspection,true);checkActualUnchanged(comparison.localFiles)
-  val tip=comparison.observedTips.singleOrNull()?.let {comparison.graph?.commits?.get(it)}
-  if(inspection.comparison?.verification==RemoteVerification.METADATA_ONLY && comparison.verification==RemoteVerification.OBJECTS_VERIFIED &&
-   comparison.kind==OnboardingKind.IDENTICAL && !comparison.retryablePending && comparison.pendingCommit==null && tip?.snapshot?.files==comparison.localFiles)
-   return@locked OperationResult(CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,requireNotNull(session.reuseVerifiedUploadContent(comparison,mirrorStopped)).snapshot.id)
-  pushResult(session.onboardingUpload(comparison,store,mirrorStopped))
+ fun upload(inspection:Inspection)=uploadReadLocked {
+  val comparison=presentationChecked(inspection)
+  val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {checkActualUnchanged(comparison.localFiles)}
+  // A fresh game read after remote completion preserves the existing post-upload safety check.
+  val rendered=run {
+   checkActualUnchanged(completed.localFiles)
+   inspectionFromComparison(completed)
+  }
+  val outcome=pushResult(result)
+  OperationResult(outcome.message,outcome.isConflict,outcome.isPending,outcome.snapshotId,rendered,
+   !outcome.isConflict && !outcome.isPending && completed.kind==OnboardingKind.IDENTICAL && completed.baselineLineage==OnboardingLineage.SAME_TIP)
  }
+
  fun listVersions():List<Version> = locked {
   requireNoRecovery();verifiedTarget();session.readRemote(store)
   val history=session.syncHistory();val cloud=history.cloud.map {version(it,it.id in history.graph.tips,CoreMessages.ANDROID_VERIFIED_CLOUD_HISTORY.text())};val ids=cloud.map {it.snapshotId}.toSet()
@@ -531,6 +536,9 @@ class AndroidSyncFacade internal constructor(
   require(Snapshots.fileHashes(destination,adapter)==source.snapshot.manifest.files){CoreMessages.ANDROID_STAGING_COPY_FAILED_CONTENT_VERIFICATION.text()}
  }
  fun <T> withRestoreReadScope(action:Callable<T>):T=store.withReadScope(scratch.resolve("read-cache")) {action.call()}
+ /** Freeze object bytes only for this operation; publication still forces fresh reads. */
+ fun <T> withUploadReadScope(action:Callable<T>):T=store.withReadScope(scratch.resolve("read-cache")) {action.call()}
+ private fun <T> uploadReadLocked(action:()->T):T=locked {store.withReadScope(scratch.resolve("read-cache"),action)}
  private fun <T> restoreReadLocked(action:()->T):T=locked {store.withReadScope(scratch.resolve("read-cache"),action)}
  private fun <T> locked(mutation:Boolean=true,action:()->T):T {
   DiagnosticTiming.start(DiagnosticPhase.OPERATION_LOCK_WAIT).use {timing->

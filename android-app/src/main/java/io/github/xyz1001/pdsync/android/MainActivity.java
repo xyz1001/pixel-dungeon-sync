@@ -4347,6 +4347,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
                 AndroidSyncFacade owner = MainActivity.this.facade;
+                if (action == DiagnosticAction.PUSH && owner != null)
+                    return owner.withUploadReadScope(() -> MainActivity.this.m54xc977a20(task));
                 if ((action == DiagnosticAction.RESTORE || action == DiagnosticAction.RESOLVE) && owner != null)
                     return owner.withRestoreReadScope(() -> MainActivity.this.m54xc977a20(task));
                 return MainActivity.this.m54xc977a20(task);

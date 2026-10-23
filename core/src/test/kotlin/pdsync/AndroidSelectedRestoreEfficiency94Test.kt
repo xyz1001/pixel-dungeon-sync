@@ -251,4 +251,83 @@ class AndroidSelectedRestoreEfficiency94Test {
    assertEquals(!noop&&!historical,result.configurationComplete)
   }
  }
+ @Test fun uploadScopeReusesHistoricalObjectsButKeepsFreshPublicationReads() {
+  for(mode in listOf("upload")) MockWebServer().use { server ->
+   val historical=mode=="different-history";val noop=mode=="same-tip-no-op"
+   val seed=Store();val seedBridge=Bridge();val seedRig=publish(seed,seedBridge);val first=seed.latest()
+   seedBridge.content=files(2);assertEquals("UPLOADED",seedRig.facade.autoUpload().status)
+   repeat(5) {seed.child(seed.latest())};val tip=seed.latest();val chosen=if(historical)first else tip
+   val folder="/dav/${AndroidGameAdapter(identity).id}/${connection.profile}/"
+   val remote=ConcurrentHashMap<String,ByteArray>()
+   seed.commits.forEach {(id,bytes)->remote[folder+"pdsync-v${if(validContentHashId(id))3 else 2}-commit-$id.json"]=bytes}
+   seed.objects.forEach {(id,bytes)->remote[folder+"pdsync-v${if(validContentHashId(id))3 else 2}-object-$id.zip"]=bytes}
+   val requests=CopyOnWriteArrayList<String>()
+   server.dispatcher=object:Dispatcher() {
+    override fun dispatch(request:RecordedRequest):MockResponse {
+     requests+="${request.method} ${request.path}"
+     return when(request.method) {
+      "GET"->remote[request.path]?.let {MockResponse().setBody(okio.Buffer().write(it))} ?: MockResponse().setResponseCode(404)
+      "PUT"->{remote[requireNotNull(request.path)]=request.body.readByteArray();MockResponse().setResponseCode(201)}
+      "PROPFIND"->{
+       fun entry(path:String,collection:Boolean=false)="""<d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype>${if(collection)"<d:collection/>" else ""}</d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+       MockResponse().setResponseCode(207).setHeader("Content-Type","application/xml").setBody("""<d:multistatus xmlns:d="DAV:">${entry(folder,true)}${remote.keys.sorted().joinToString("") {entry(it)}}</d:multistatus>""")
+      }
+      else->MockResponse().setResponseCode(405)
+     }
+    }
+   }
+   server.start()
+   val endpoint=server.url("/dav/").toString()
+   val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
+   val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
+    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0)
+   if(historical)facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
+   val home=facade.inspectHome();val exports=bridge.exports;val restores=bridge.restores;requests.clear();val started=System.nanoTime()
+   val result=facade.withUploadReadScope(java.util.concurrent.Callable { facade.upload(home) })
+   val oldObjects=seed.objects.keys.map { folder+"pdsync-v3-object-$it.zip" }.toSet()
+   oldObjects.forEach { path->assertEquals(1,requests.count {it=="GET $path"},"old immutable object read once") }
+   assertEquals(2,requests.count {it.startsWith("PUT ")},"one object and one conditional commit")
+   assertEquals(2,requests.count {it.startsWith("PROPFIND ")},"one preflight and one delta listing")
+   assertEquals(1,requests.takeWhile {!it.startsWith("PUT ")}.count {it.startsWith("PROPFIND ")},"exactly one fresh history before upload")
+   assertNotNull(result.refreshedInspection,"UI uses completed operation receipt, no full refresh")
+   assertEquals(0,bridge.restores)
+   println("UPLOAD104_BENCH http=${requests.size} old_objects=${oldObjects.size} old_object_gets=${requests.count {it.removePrefix("GET ") in oldObjects}}")
+  }
+ }
+
+ @Test fun uploadFreshRejectsCorruptInitialObjectAndCancellationBeforeWriting() {
+  for(cancel in listOf(false,true)) {
+   val store=Store();publish(store);val chosen=store.latest();val bridge=Bridge(files(9));val r=rig(bridge,store)
+   val home=r.facade.inspectHome();val writes=store.writes
+   if(cancel)store.afterReadObject={throw java.util.concurrent.CancellationException()} else store.objects[chosen.snapshot.id]=byteArrayOf(1)
+   assertFails {r.facade.upload(home)}
+   assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
+  }
+ }
+ @Test fun uploadDeltaKeepsConcurrentBranchAndDetectsCorruptReadback() {
+  for(corrupt in listOf(false,true)) {
+   val store=Store();publish(store);val parent=store.latest();val bridge=Bridge(files(9));val r=rig(bridge,store)
+   val home=r.facade.inspectHome();val listed=store.listings
+   var branch:AppendCommit?=null
+   store.afterCommit={if(corrupt)store.objects[store.latest().snapshot.id]=byteArrayOf(1) else branch=store.child(parent)}
+   if(corrupt) {
+    assertFails {r.facade.upload(home)};assertNotNull(repository(r).pending(),"failed readback preserves frozen pending")
+   } else {
+    val result=r.facade.upload(home);assertTrue(result.isConflict);val receipt=assertNotNull(result.refreshedInspection)
+    assertEquals(2,store.listings-listed);assertTrue(receipt.history!!.cloud.any {it.id==branch!!.id})
+    assertTrue(store.commits.containsKey(parent.id));assertEquals(3,store.commits.size)
+   }
+   assertEquals(0,bridge.restores)
+  }
+ }
+
+ @Test fun uploadDeltaRejectsChangedOrDeletedPreviouslyKnownCommit() {
+  for(deleted in listOf(false,true)) {
+   val store=Store();publish(store);val parent=store.latest();val r=rig(Bridge(files(9)),store);val home=r.facade.inspectHome()
+   store.afterCommit={if(deleted)store.commits.remove(parent.id) else store.commits[parent.id]=json.encodeToString(parent.copy(kind="restore")).encodeToByteArray()}
+   assertFails {r.facade.upload(home)}
+   assertNotNull(repository(r).pending(),"metadata inconsistency cannot clear frozen pending")
+  }
+ }
+
 }
