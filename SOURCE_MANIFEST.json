@@ -1,9 +1,9 @@
 {
-  "version_code": 103,
-  "version_name": "0.5.82-test",
+  "version_code": 104,
+  "version_name": "0.5.83-test",
   "reconstruction": true,
   "original_lost_source_exact": false,
-  "release_status": "reconnect103_validation_pending",
+  "release_status": "upload104_validation_pending",
   "baseline_archive_sha256": "334a408b131602728676f5b9babc1add73874a9af0d51d1c8295b2c00ea329e2",
   "shipped92_apk_sha256": "71550ee4005a76d761e473371eb9723b4380cb4448d1f0409e1b71e13e7d5198",
   "scope": "All packaged source/reference/test files excluding this manifest; no build cache, signing keys, credentials or save data. This is reconstructed source, not original lost commit ancestry.",
@@ -26,7 +26,7 @@
     },
     "android-app/AndroidManifest.xml": {
       "size": 3661,
-      "sha256": "57edfd37f93dc7904f92010563a47d5328affd17b8e4921369e8d061476e04bb"
+      "sha256": "e263b8b013904af08e45c02b918c525ea6e9bf4936ca2a88adac7eb00b1a18f4"
     },
     "android-app/additional-java-sources.txt": {
       "size": 424,
