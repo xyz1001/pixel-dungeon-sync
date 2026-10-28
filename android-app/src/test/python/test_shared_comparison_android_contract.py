@@ -102,7 +102,9 @@ class TwoStepConfigurationAndroidContract(unittest.TestCase):
             self.assertIn(guard, prepare)
         self.assertEqual(2, prepare.count('currentOfficialHomeNamespace(owner, account, selection, namespace)'))
         self.assertIn('owner.connect()', prepare)
-        self.assertIn('if (!preparedNamespace.isSuccess()) throw', prepare)
+        # The throwing guard preserves the closed transport failure category since 111.
+        self.assertIn('preparedNamespace.requireSuccess(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text())', prepare)
+        self.assertLess(prepare.index('preparedNamespace.requireSuccess('), prepare.index('this.preparedOfficialNamespace.succeeded(key)'))
         for forbidden in ('.upload(', '.restore', '.adopt', 'completeOnboarding', 'setOnboardingProgress'):
             self.assertNotIn(forbidden, prepare)
         check = body(MAIN, 'private boolean currentOfficialHomeNamespace(')

@@ -217,9 +217,12 @@ final class ManagedAccountClient {
     /** Package-private injection seam uses the same production Call/diagnostic path in host tests. */
     static Transport httpTransport(OkHttpClient client) {
         final long id = transportIds.incrementAndGet();
+        final OkHttpClient observed = pdsync.ConnectionDiagnostics.attach(client, pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT);
         return new Transport() {
             @Override public Response execute(Request request) throws IOException {
-                okhttp3.Call call = client.newCall(request);
+                okhttp3.Call call = observed.newCall(request.newBuilder().tag(pdsync.DiagnosticDetails.NetworkTarget.class,
+                        ENTITLEMENT_URL.equals(request.url().toString()) ? pdsync.DiagnosticDetails.NetworkTarget.ENTITLEMENT
+                                : pdsync.DiagnosticDetails.NetworkTarget.ASSET).build());
                 long started = System.nanoTime();
                 try {
                     Response response = call.execute();

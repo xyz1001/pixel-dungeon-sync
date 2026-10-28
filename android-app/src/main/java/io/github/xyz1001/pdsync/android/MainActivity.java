@@ -1727,7 +1727,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             final String namespace = SyncRuntime.currentNamespace(this);
             // An explicit read also fulfils an unconsumed renewal read for this same identity.
             this.renewalArchiveRead.take(account, selection, namespace);
-            readHomeArchives(account, selection, namespace);
+            startDetachedHomeRead(account, false, false, null, true);
         } catch (Exception unavailable) { reportError(unavailable); render(); }
     }
 
@@ -3212,6 +3212,10 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,
                                          boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic) {
+        return startDetachedHomeRead(account,prepareNamespace,checkReadiness,automatic,false);
+    }
+    private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,
+                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory) {
         if (!isForegroundHome() || this.busy || this.installer.hasActiveRequest() || account == null) return false;
         final OfficialOperationLease.Binding binding;
         try { binding = officialOperationBinding(account); }
@@ -3256,7 +3260,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                             requireDetachedHomeRead(read);
                             if (prepareNamespace && isOfficialAccount(account) && !this.preparedOfficialNamespace.contains(binding)) {
                                 AndroidSyncFacade.ConnectionStatus prepared = owner.connect();
-                                if (!prepared.isSuccess()) throw new IOException(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
+                                prepared.requireSuccess(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
                                 requireDetachedHomeRead(read);
                                 this.preparedOfficialNamespace.succeeded(binding);
                             }
@@ -3267,7 +3271,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                             // Unsupported helpers/recovery retain the serialized legacy boundary.
                             synchronized (SyncRuntime.OPERATION_LOCK) {
                                 requireDetachedHomeRead(read);
-                                outcome.inspection = owner.inspectHome();
+                                outcome.inspection = fullHistory ? owner.inspectHomeHistory() : owner.inspectHome();
                                 outcome.history = "BLOCKED".equals(outcome.inspection.getKind()) ? null : owner.historyPresentation(outcome.inspection);
                                 outcome.observationGeneration = owner.observationGeneration();
                             }
@@ -3668,7 +3672,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
             if (this.preparedOfficialNamespace.contains(key)) return;
             AndroidSyncFacade.ConnectionStatus preparedNamespace = owner.connect();
-            if (!preparedNamespace.isSuccess()) throw new IOException(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
+            preparedNamespace.requireSuccess(THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145.text());
             if (!currentOfficialHomeNamespace(owner, account, selection, namespace)
                     || generation != SyncRuntime.connectionGeneration())
                 throw new IOException(SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137.text());
@@ -4438,7 +4442,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (onboardingProgress == OnboardingProgress.COMPLETE) {
             this.onboardingActive = false;
         }
-        if (operationOutcome.result.isConflict() || kind() == OnboardingKind.BRANCHED) {
+        // A historical restore can be branched without requesting a cloud overwrite.
+        if (operationOutcome.result.isConflict()
+                || (this.activeWorkAction == DiagnosticAction.PUSH && kind() == OnboardingKind.BRANCHED)) {
             this.notice = A_SAVE_CONFLICT_WAS_FOUND_BRANCHES_173.text();
             this.page = SyncPage.CONFLICT;
         } else if (operationOutcome.result.isPending()) {

@@ -14,6 +14,13 @@ import kotlin.io.path.*
 
 /** Conservative filesystem checks. These do not prevent a hostile concurrent path replacement. */
 object SafePaths {
+ private val buffered=ThreadLocal<Boolean>()
+ internal fun forceWrites()=buffered.get()!=true
+ internal fun <T> bufferedUploadWrites(action:()->T):T {
+  val old=buffered.get();buffered.set(true)
+  try{return action()}finally{if(old==null)buffered.remove() else buffered.set(old)}
+ }
+
  fun checked(path: Path): Path {
   val absolute = path.toAbsolutePath().normalize()
   var cursor: Path? = absolute
@@ -41,7 +48,7 @@ object SafePaths {
   val temp = Files.createTempFile(target.parent, ".write-", ".tmp")
   try {
    FileChannel.open(temp,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS).use { channel ->
-    val buffer=java.nio.ByteBuffer.wrap(bytes);while(buffer.hasRemaining())channel.write(buffer);channel.force(true)
+    val buffer=java.nio.ByteBuffer.wrap(bytes);while(buffer.hasRemaining())channel.write(buffer);if(forceWrites())channel.force(true)
    }
    replace(temp,checked(target))
   } finally { Files.deleteIfExists(temp) }
@@ -231,6 +238,16 @@ class ProfileSession(
   manifest.metadata?.validated(manifest.files.keys)
   manifest.directoryMetadata?.validated(manifest.files)
  }
+ internal fun captureVerified(stopped:()->Boolean):VerifiedSnapshot {
+  validateRootStructure()
+  stopped();if(Thread.currentThread().isInterrupted)throw InterruptedException()
+  val context=metadata.captureContext();val read=Snapshots.readLocal(root,adapter)
+  val raw=Snapshots.capture(read,adapter,config.profile,"自动识别",null,context)
+  val verified=VerifiedSnapshot.captured(raw,read.entries)
+  require(raw.manifest.files.isNotEmpty()) { CoreSessionMessages.AN_EMPTY_FOLDER_CAN_ONLY_BE_USED_FOR_RESTORING_EMPTY.text() }
+  val annotated=versions.annotate(verified)
+  return verified.withManifest(annotated.manifest.copy(directoryMetadata=directoryMetadata.observe(raw.manifest.files,initialImport=!historyRoot.exists(),persist=true)))
+ }
  internal fun capture(stopped: () -> Boolean, parent: String? = head(), persistDirectoryMetadata: Boolean = true): Snapshot {
   validateRootStructure()
   val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
@@ -262,7 +279,7 @@ class ProfileSession(
    if (validContentHashId(id)) {
     // A content address may have several valid ZIP encodings or capture metadata. Keep the
     // first local archive, but never turn an unverified existing file into a trusted winner.
-    Snapshots.verify(old, adapter)
+    if(verified==null || old.manifest!=snapshot.manifest || !old.zip.contentEquals(snapshot.zip))Snapshots.verify(old, adapter)
     require(old.manifest.id == id && old.manifest.files == snapshot.manifest.files) {
      CoreSessionMessages.A_HISTORY_SNAPSHOT_WITH_THE_SAME_NAME_HAS_DIFFERENT_CONTENTS.text()
     }
@@ -298,6 +315,12 @@ class ProfileSession(
   SafePaths.checked(historyRoot.resolve("$id.zip")).deleteIfExists()
  }
  fun loadSnapshot(id: String): Snapshot = loadVerifiedSnapshot(id).snapshot
+ internal fun loadKnownUploadArchive(id:String):VerifiedSnapshot {
+  require(validRecordId(id))
+  val entry=json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(historyRoot.resolve("$id.entry.json"),MAX_MANIFEST_BYTES).decodeToString())
+  checkedManifest(entry.manifest);require(entry.manifest.id==id)
+  return VerifiedSnapshot.knownArchive(Snapshot(entry.manifest,SafePaths.boundedRead(historyRoot.resolve("$id.zip"),MAX_SNAPSHOT_BYTES)),adapter)
+ }
  internal fun loadVerifiedSnapshot(id:String):VerifiedSnapshot {
   require(validRecordId(id))
   val entry = json.decodeFromString<HistoryEntry>(SafePaths.boundedRead(historyRoot.resolve("$id.entry.json"), MAX_MANIFEST_BYTES).decodeToString())

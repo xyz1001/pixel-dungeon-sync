@@ -31,6 +31,38 @@ public final class RootTargetResolver {
             throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
         return selected;
     }
+    /** One export only. Root independently hashes/binds the package at its RPC boundary. */
+    public AutoCloseable exportScope(SelectedRootGame selected)throws Exception {
+        String before=installationStamp(selected);
+        pdsync.DiagnosticTiming.measure(pdsync.DiagnosticPhase.ROOT_CLIENT_IDENTITY,()->{requireUnchanged(selected);return null;});
+        if(!before.equals(installationStamp(selected)))throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
+        return ()->{if(!before.equals(installationStamp(selected)))throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());};
+    }
+    private String installationStamp(SelectedRootGame selected)throws Exception {
+        return pdsync.DiagnosticTiming.measure(pdsync.DiagnosticPhase.ROOT_CLIENT_METADATA,()->installationStampValue(selected));
+    }
+    private String installationStampValue(SelectedRootGame selected)throws Exception {
+        PackageManager pm=context.getPackageManager();
+        PackageInfo info=pm.getPackageInfo(selected.gamePackage,PackageTrust.signingFlags());
+        if(info.applicationInfo==null || !info.applicationInfo.enabled || !selected.gamePackage.equals(info.packageName)
+                || !selected.gamePackage.equals(info.applicationInfo.packageName) || info.applicationInfo.uid!=selected.uid
+                || !selected.dataDir.equals(info.applicationInfo.dataDir) || Process.myUid()/100000!=selected.userId)
+            throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
+        String[] members=pm.getPackagesForUid(selected.uid);
+        if(members==null || !Arrays.asList(members).contains(selected.gamePackage))throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
+        List<String> parts=new ArrayList<>();
+        parts.add(Long.toString(PackageTrust.versionCode(info)));parts.add(Long.toString(info.firstInstallTime));parts.add(Long.toString(info.lastUpdateTime));
+        List<String> signers=new ArrayList<>();
+        for(Signature signer:PackageTrust.currentSigners(info))signers.add(PackageTrust.hex(MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())));
+        Collections.sort(signers);parts.addAll(signers);
+        Map<String,String> files=new TreeMap<>();
+        for(File apk:PackageTrust.installedApks(info)) {
+            if(!apk.isFile() || !apk.getAbsoluteFile().equals(apk.getCanonicalFile()))throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
+            files.put(apk.getPath(),apk.length()+":"+apk.lastModified());
+        }
+        if(!files.keySet().equals(selected.apkHashes.keySet()))throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_02.text());
+        parts.add(files.toString());return parts.toString();
+    }
     private SelectedRootGame snapshot(String packageName) throws Exception {
         if(packageName==null || packageName.equals(context.getPackageName())) throw new IOException(AndroidMessages.ROOT_TARGET_RESOLVER_03.text());
         PackageManager pm=context.getPackageManager();

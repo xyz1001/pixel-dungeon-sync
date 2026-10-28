@@ -9,7 +9,7 @@ SRC = Path(__file__).resolve().parents[2] / 'main/java/io/github/xyz1001/pdsync/
 MAIN = (SRC / 'MainActivity.java').read_text()
 SIGNATURES = ('private static final class DetachedHomeRead {', 'private static final class DetachedHomeOutcome {',
  'private void cancelDetachedHomeRead(', 'private void requireDetachedHomeRead(', 'private boolean startDetachedHomeRead(',
- 'private void finishDetachedHomeRead(')
+ 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)', 'private void finishDetachedHomeRead(')
 
 class DetachedHomeQueueExecution(unittest.TestCase):
  def test_real_queue_network_lock_lifetime_cancellation_identity_and_live_access(self):
@@ -42,7 +42,7 @@ public class MainActivity {
  static class SyncHistory {List<AppendCommit> getCloud(){return List.of(new AppendCommit());}String getDefaultSnapshot(){return "tip";}}
  static class AndroidSyncFacade {
   static class Inspection {String getKind(){return "IDENTICAL";}String getMessage(){return "fresh";}}
-  static class ConnectionStatus{boolean isSuccess(){return true;}}
+  static class ConnectionStatus{boolean isSuccess(){return true;} void requireSuccess(String message) throws IOException {}}
   static class HomeReadContext implements AutoCloseable {volatile boolean closed;final CountDownLatch release;HomeReadContext(CountDownLatch r){release=r;}public void close(){closed=true;release.countDown();}}
   static class HomeReadResult{}
   final Inspection inspection=new Inspection();final SyncHistory history=new SyncHistory();long epoch;long observationGeneration(){return epoch;}
@@ -57,6 +57,7 @@ public class MainActivity {
   }
   Inspection acceptHomeObservation(HomeReadResult r){check(Thread.holdsLock(SyncRuntime.OPERATION_LOCK),"accept lost serial lock");accepts++;return inspection;}
   Inspection inspectHome(){check(Thread.holdsLock(SyncRuntime.OPERATION_LOCK),"unsupported fallback escaped lock");legacy++;return inspection;}
+  Inspection inspectHomeHistory(){return inspectHome();}
   SyncHistory historyPresentation(Inspection i){check(i==inspection,"unpaired observation");return history;}
  }
  static class AutoSyncHistoryRefresh {static class Ticket{}static class Refresh {int deferred;void deferBeforeRead(Ticket t){deferred++;}}}

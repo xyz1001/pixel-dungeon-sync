@@ -31,8 +31,8 @@ fun contentSha256(files: Map<String, String>): String {
   require(safePath(path) && !isDirectoryMetadata(path) && names.add(path.lowercase(java.util.Locale.ROOT))) { CoreMessages.VALIDATION_INVALID_CONTENT_PATH.text() }
   require(digestPattern.matches(digest)) { CoreMessages.VALIDATION_INVALID_FILE_DIGEST.text() }
  }
- val sorted = files.keys.sortedWith { a, b ->
-  val left=a.encodeToByteArray(); val right=b.encodeToByteArray()
+ val sorted = files.keys.map {it to it.encodeToByteArray()}.sortedWith { a, b ->
+  val left=a.second; val right=b.second
   var result=0
   for(i in 0 until minOf(left.size,right.size)) { result=(left[i].toInt() and 255)-(right[i].toInt() and 255); if(result!=0) break }
   if(result==0) left.size-right.size else result
@@ -40,8 +40,9 @@ fun contentSha256(files: Map<String, String>): String {
  val bytes=ByteArrayOutputStream()
  DataOutputStream(bytes).use { out ->
   out.write(CONTENT_HASH_ALGORITHM.encodeToByteArray()); out.writeInt(sorted.size)
-  sorted.forEach { name -> val path=name.encodeToByteArray(); out.writeInt(path.size); out.write(path)
-   out.write(files.getValue(name).chunked(2).map { it.toInt(16).toByte() }.toByteArray()) }
+  sorted.forEach { (name,path) -> out.writeInt(path.size); out.write(path)
+   val digest=files.getValue(name)
+   for(i in digest.indices step 2)out.writeByte((digest[i].digitToInt(16) shl 4) or digest[i+1].digitToInt(16)) }
  }
  return hash(bytes.toByteArray())
 }
@@ -130,7 +131,7 @@ class DirectoryMetadataStore(private val root: Path,
   val bytes=json.encodeToString(value).encodeToByteArray(); require(bytes.size<=MAX_MANIFEST_BYTES)
   try {
    FileChannel.open(temp,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS).use { channel ->
-    val buffer=java.nio.ByteBuffer.wrap(bytes); while(buffer.hasRemaining())channel.write(buffer); channel.force(true)
+    val buffer=java.nio.ByteBuffer.wrap(bytes); while(buffer.hasRemaining())channel.write(buffer); if(SafePaths.forceWrites())channel.force(true)
    }
    replace(temp,target)
   } finally { Files.deleteIfExists(temp) }
@@ -150,7 +151,7 @@ class DirectoryMetadataStore(private val root: Path,
   }
   val value=DirectorySidecar(displayName=old?.displayName ?: "",currentContentSha256=contentSha256(files),lastSynced=old?.lastSynced,runs=runs)
   // Damaged metadata remains available for diagnosis; never silently replace lost identities.
-  if(persist && read !is SidecarRead.Damaged)write(value)
+  if(persist && read !is SidecarRead.Damaged && value!=old)write(value)
   return DirectorySnapshotMetadata(displayName=value.displayName,contentSha256=value.currentContentSha256,runs=runs).validated(files)
  }
 

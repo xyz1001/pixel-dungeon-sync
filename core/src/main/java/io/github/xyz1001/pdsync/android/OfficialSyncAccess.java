@@ -4,7 +4,7 @@ import java.io.IOException;
 import pdsync.WebDavRequestCheck;
 import pdsync.i18n.CoreSessionMessages;
 
-/** Fresh per-operation authorization. No persisted entitlement can create an access lease. */
+/** Account access retains the authenticated service deadline when using a valid same-boot cache. */
 public final class OfficialSyncAccess {
     private OfficialSyncAccess() { }
 
@@ -62,8 +62,20 @@ public final class OfficialSyncAccess {
         public boolean isExpired() { return expired; }
     }
 
+    static Lease fromCached(TrustedEntitlementCache.Record record, String endpoint, String username,
+                            int bootCount, Clock clock) throws IOException {
+        long now = clock.nanoTime();
+        if (!TrustedEntitlementCache.currentAccessAvailable(record, endpoint, username, now / 1_000_000L, bootCount))
+            throw new AccessException(false, CoreSessionMessages.THE_SERVICE_RETURNED_AN_INVALID_RESPONSE.text());
+        Lease lease = new Lease(record.username, record.expiresMs, record.serverTimeMs,
+                Math.multiplyExact(record.elapsedMs, 1_000_000L), clock);
+        lease.check();
+        return lease;
+    }
+
     public static final class Lease implements WebDavRequestCheck {
-        private final ManagedAccountClient.Entitlement entitlement;
+        private final String username;
+        private final Long expiresMs, serverTimeMs;
         private final long started;
         private final Clock clock;
         private final long wallStarted;
@@ -72,12 +84,17 @@ public final class OfficialSyncAccess {
         private boolean expired;
         private long lastElapsed;
         private Lease(ManagedAccountClient.Entitlement entitlement, long started, Clock clock, long wallStarted, boolean checkWall) {
-            this.entitlement = entitlement; this.started = started; this.clock = clock;
+            this.username = entitlement.username; this.expiresMs = entitlement.expiresMs;
+            this.serverTimeMs = entitlement.serverTimeMs; this.started = started; this.clock = clock;
             this.wallStarted = wallStarted; this.checkWall = checkWall;
         }
-        public String getUsername() { return entitlement.username; }
-        public Long getExpiresMs() { return entitlement.expiresMs; }
-        public Long getServerTimeMs() { return entitlement.serverTimeMs; }
+        private Lease(String username, Long expiresMs, Long serverTimeMs, long started, Clock clock) {
+            this.username=username; this.expiresMs=expiresMs; this.serverTimeMs=serverTimeMs;
+            this.started=started; this.clock=clock; this.wallStarted=0; this.checkWall=false;
+        }
+        public String getUsername() { return username; }
+        public Long getExpiresMs() { return expiresMs; }
+        public Long getServerTimeMs() { return serverTimeMs; }
         public synchronized boolean isActive() { observe(); return !denied; }
         public synchronized boolean isExpired() { observe(); return expired; }
         private void observe() {
@@ -91,13 +108,13 @@ public final class OfficialSyncAccess {
                 if (delta < -2_000 || delta > 2_000) { denied = true; return; }
                 // Even a short suspend can cross a near deadline. Wall time may only deny,
                 // never prove service expiry; a new operation obtains fresh server evidence.
-                if (entitlement.expiresMs != null && wallElapsed >= entitlement.expiresMs - entitlement.serverTimeMs
-                        && elapsed / 1_000_000L < entitlement.expiresMs - entitlement.serverTimeMs) {
+                if (expiresMs != null && wallElapsed >= expiresMs - serverTimeMs
+                        && elapsed / 1_000_000L < expiresMs - serverTimeMs) {
                     denied = true; return;
                 }
             }
-            if (entitlement.expiresMs != null
-                    && elapsed / 1_000_000L >= entitlement.expiresMs - entitlement.serverTimeMs) {
+            if (expiresMs != null
+                    && elapsed / 1_000_000L >= expiresMs - serverTimeMs) {
                 denied = true; expired = true;
             }
         }

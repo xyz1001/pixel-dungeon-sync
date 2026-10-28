@@ -46,6 +46,7 @@ data class SharedHomeContent(
                 history.graph.pending.isNotEmpty() || history.graph.tips.size > 1 ||
                 history.currentFiles.isEmpty()) return SharedHomeContent()
 
+            history.simple?.let {simple->return SharedHomeContent(simple.currentId==simple.latest,simple.currentId==(selectedId ?: simple.latest),simple.currentId==simple.latest)}
             val tip = history.graph.tips.singleOrNull()?.let(history.graph.commits::get)
             val targetId = selectedId ?: history.defaultSnapshot
             val target = history.graph.commits.values.singleOrNull { it.snapshot.id == targetId }

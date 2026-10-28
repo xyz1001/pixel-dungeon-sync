@@ -35,10 +35,13 @@ final class AndroidRootRuntime implements RootRuntime {
                 Object activityThread = type.getMethod("systemMain").invoke(null);
                 systemContext = (Context) type.getMethod("getSystemContext").invoke(activityThread);
             }
-            Method create = Context.class.getMethod("createContextAsUser", UserHandle.class, int.class);
-            return (Context) create.invoke(systemContext, UserHandle.getUserHandleForUid(requested.uid), 0);
+            // API 26 has createPackageContextAsUser, but not createContextAsUser.
+            // Copy the framework context for the requested user without loading game code.
+            Method create = Context.class.getMethod("createPackageContextAsUser", String.class, int.class, UserHandle.class);
+            return (Context) create.invoke(systemContext, "android", 0, UserHandle.getUserHandleForUid(requested.uid));
         } catch (ReflectiveOperationException | RuntimeException denied) {
-            throw new RootFailure(RootProtocol.Status.UNRELIABLE, denied);
+            // Context/PM setup failed; this is not evidence that the game is running.
+            throw new RootFailure(RootProtocol.Status.IO_ERROR, denied);
         }
     }
     private PackageInfo packageInfo(RootBinding requested) throws IOException {

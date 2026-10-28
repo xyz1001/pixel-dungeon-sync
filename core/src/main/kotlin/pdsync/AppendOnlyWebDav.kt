@@ -28,7 +28,8 @@ enum class NamespaceFailureReason {
 }
 
 class NamespaceProvisioningException(
- val reason: NamespaceFailureReason, val statusCode: Int? = null
+ val reason: NamespaceFailureReason, val statusCode: Int? = null,
+ val diagnosticFailure: DiagnosticFailure = DiagnosticFailure.NETWORK_IO
 ): IOException("WebDAV namespace setup failed: $reason" + (statusCode?.let { " (HTTP $it)" } ?: ""))
 
 /**
@@ -49,7 +50,7 @@ class AppendOnlyWebDav(
  private val beforeRequest: WebDavRequestCheck = WebDavRequestCheck {}
 ): AppendStore {
  private val diagnosticClientId = nextDiagnosticClientId.incrementAndGet()
- private val client = client.newBuilder().retryOnConnectionFailure(false).followRedirects(false)
+ private val client = ConnectionDiagnostics.attach(client,DiagnosticDetails.NetworkTarget.DAV).newBuilder().retryOnConnectionFailure(false).followRedirects(false)
   .followSslRedirects(false).callTimeout(30, TimeUnit.SECONDS)
   .addNetworkInterceptor { chain -> beforeRequest.check(); chain.proceed(chain.request()) }.build()
  // OkHttp can repeat HTTP 503 + Retry-After:0 even with retryOnConnectionFailure(false).
@@ -79,7 +80,13 @@ class AppendOnlyWebDav(
  private val gameCollection: HttpUrl
  private val collection: HttpUrl
  private val auth: String
- private val readScopes = ThreadLocal<OperationObjectReadCache>()
+ private class ReadScope(private val directory:Path?):AutoCloseable {
+  private var opened:OperationObjectReadCache?=null
+  fun cache():OperationObjectReadCache = opened ?: OperationObjectReadCache.open(directory).also {opened=it}
+  fun remove(key:String) {opened?.remove(key)}
+  override fun close() {opened?.close()}
+ }
+ private val readScopes = ThreadLocal<ReadScope>()
  private val freshReadDepth = ThreadLocal<Int>()
 
  init {
@@ -101,7 +108,7 @@ class AppendOnlyWebDav(
 
  override fun <T> withReadScope(cacheDirectory: Path?, block: () -> T): T {
   if (readScopes.get() != null) return block()
-  val cache = OperationObjectReadCache.open(cacheDirectory)
+  val cache = ReadScope(cacheDirectory)
   readScopes.set(cache)
   return try { block() } finally {
    readScopes.remove()
@@ -164,7 +171,7 @@ class AppendOnlyWebDav(
  } catch (e: NamespaceProvisioningException) { throw e }
  catch (_: IllegalArgumentException) { throw NamespaceProvisioningException(NamespaceFailureReason.UNSAFE_RESPONSE) }
  catch (e: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw e }
- catch (_: IOException) { throw NamespaceProvisioningException(NamespaceFailureReason.NETWORK) }
+ catch (e: IOException) { throw NamespaceProvisioningException(NamespaceFailureReason.NETWORK, diagnosticFailure=DiagnosticLog.classify(e)) }
 
  private fun createAndVerifyCollection(url: HttpUrl, shouldContinue: () -> Boolean) {
   // A connection loss may follow an accepted write. Never retry MKCOL blindly; read once.
@@ -232,13 +239,52 @@ class AppendOnlyWebDav(
  }
 
  override fun readCommit(id: String): ByteArray? = get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES)
+ /** Explicit setup for the current three-field layout; never migrates or deletes other files. */
+ fun ensureSimpleNamespace() {
+  ensureNamespace()
+  val saves=collection.newBuilder().addPathSegment("saves").addPathSegment("").build()
+  when(inspectCollection(saves){true}) {
+   CollectionState.COLLECTION -> Unit
+   CollectionState.MISSING -> createAndVerifyCollection(saves){true}
+   CollectionState.NOT_COLLECTION -> throw NamespaceProvisioningException(NamespaceFailureReason.NOT_COLLECTION)
+  }
+ }
+ fun simpleStore():SimpleSaveStore = object:SimpleSaveStore {
+  private fun saveUrl(id:String,extension:String):HttpUrl {
+   require(validContentHashId(id))
+   return collection.newBuilder().addPathSegment("saves").addPathSegment("$id.$extension").build()
+  }
+  override fun latest():String?=get(fileUrl("latest"),64)?.decodeToString()?.also {require(validContentHashId(it))}
+  override fun node(hashId:String):SaveNode?=get(saveUrl(hashId,"json"),MAX_MANIFEST_BYTES)?.let(SimpleSaveSync::decode)?.also {require(it.hashId==hashId)}
+  private fun create(url:HttpUrl,bytes:ByteArray,limit:Int,type:String):Boolean = try {
+   put(url,bytes,limit,type);true
+  } catch(error:WebDavException) {
+   if(error.statusCode==412)false else throw error
+  }
+  override fun createObject(hashId:String,bytes:ByteArray)=create(saveUrl(hashId,"zip"),bytes,MAX_SNAPSHOT_BYTES,"application/zip")
+  override fun createNode(node:SaveNode)=create(saveUrl(node.hashId,"json"),SimpleSaveSync.encode(node),MAX_MANIFEST_BYTES,"application/json")
+  override fun setLatest(hashId:String) {
+   require(validContentHashId(hashId))
+   execute(request(fileUrl("latest")).put(hashId.toByteArray().toRequestBody("text/plain".toMediaType())).build(),writeClient) {response ->
+    if(response.code !in setOf(200,201,204))throw WebDavException(response.code)
+    readBounded(response,MAX_MANIFEST_BYTES)
+   }
+  }
+  override fun rename(node:SaveNode) {
+   execute(request(saveUrl(node.hashId,"json")).put(SimpleSaveSync.encode(node).toRequestBody("application/json".toMediaType())).build(),writeClient) {response->
+    if(response.code !in setOf(200,201,204))throw WebDavException(response.code)
+    readBounded(response,MAX_MANIFEST_BYTES)
+   }
+  }
+  override fun objectBytes(hashId:String)=get(saveUrl(hashId,"zip"),MAX_SNAPSHOT_BYTES) ?: throw java.io.FileNotFoundException("Save object is missing")
+ }
  override fun readCommit(id: String, cancellation: MetadataReadCancellation): ByteArray? =
   get(fileUrl(commitName(id)), MAX_MANIFEST_BYTES, cancellation)
  override val historyReadParallelism:Int get()=4
  override fun readHistoryObjects(ids:List<String>,cancellation:MetadataReadCancellation,limits:Map<String,Int>):Map<String,ByteArray?> {
   require(ids.size<=4)
   cancellation.checkActive()
-  val cache=readScopes.get()
+  val cache=readScopes.get()?.cache()
   val reuse=cache!=null && (freshReadDepth.get()?:0)==0
   val result=linkedMapOf<String,ByteArray?>()
   val missing=mutableListOf<String>()
@@ -270,9 +316,6 @@ class AppendOnlyWebDav(
   return ids.associateWith {result[it]}
  }
  override fun readObject(id: String): ByteArray? = getObject(fileUrl(objectName(id)))
- override fun legacyPresent(): Boolean = get(fileUrl("head.json"), MAX_MANIFEST_BYTES) != null
- override fun legacyPresent(cancellation:MetadataReadCancellation):Boolean =
-  get(fileUrl("head.json"),MAX_MANIFEST_BYTES,cancellation)!=null
  override fun writeCommit(id: String, bytes: ByteArray) {
   validateWritableId(id)
   put(fileUrl(commitName(id)), bytes, MAX_MANIFEST_BYTES, "application/json")
@@ -320,7 +363,7 @@ class AppendOnlyWebDav(
  }
 
  private fun getObject(url: HttpUrl): ByteArray? {
-  val cache = readScopes.get()
+  val cache = readScopes.get()?.cache()
   val key = url.toString()
   val reuse = cache != null && (freshReadDepth.get() ?: 0) == 0
   if (reuse && cache!!.contains(key)) {
@@ -357,6 +400,8 @@ class AppendOnlyWebDav(
   cancellation?.checkActive()
   beforeRequest.check()
   val requestStarted = System.nanoTime()
+  val requestId = nextDiagnosticRequestId.incrementAndGet()
+  var responseHeadersReceived = false
   val transferTrace=DiagnosticLog.currentTrace()
   val kind=when {
    historyObject -> DiagnosticTransferKind.HISTORY_OBJECT_GET
@@ -383,16 +428,22 @@ class AppendOnlyWebDav(
    }
   }}
   val call = requestClient.newCall(request.newBuilder().method(request.method,measuredBody).build())
-  // Elapsed until response headers (or the observed transport failure), never request data.
+  // Elapsed at this event: headers on success, or the observed header/body failure; never request data.
   fun context(error:IOException? = null) = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
    .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0))
    .number(DiagnosticDetails.Field.TRANSPORT_CLIENT_ID,diagnosticClientId)
+   .number(DiagnosticDetails.Field.TRANSPORT_REQUEST_ID,requestId)
+   // Headers time includes connection, TLS, request sending and waiting; it is NOT handshake time.
+   .transportStage(responseHeadersReceived)
+   .number(DiagnosticDetails.Field.TRANSPORT_HEADERS_MS,headersNanos/1_000_000)
+   .number(DiagnosticDetails.Field.TRANSPORT_BODY_READ_MS,bodyNanos/1_000_000)
    .apply { if(error!=null) transportFailure(error,call.isCanceled(),Thread.currentThread().isInterrupted) }.build()
   val registration = cancellation?.register { call.cancel() }
   return try {
   cancellation?.checkActive()
   val headersStarted=System.nanoTime()
   val raw=try {call.execute()} finally {headersNanos=System.nanoTime()-headersStarted}
+  responseHeadersReceived = true
   raw.use {
    val response=raw.body?.let { original -> raw.newBuilder().body(object:okhttp3.ResponseBody() {
     private val counted=object:okio.ForwardingSource(original.source()) {
@@ -426,7 +477,7 @@ class AppendOnlyWebDav(
   // This catch also covers response-body reads. Never treat cancellation, interruption,
   // timeouts, DNS, TLS or HTTP/business failures as evidence of stale pooled sockets.
   if (!call.isCanceled() && !Thread.currentThread().isInterrupted
-   && (error is java.net.SocketException || error is java.io.EOFException)) {
+   && staleSocketFailure(error)) {
    requestClient.connectionPool.evictAll()
   }
   DiagnosticLog.networkFailure(error, context(error))
@@ -449,6 +500,24 @@ class AppendOnlyWebDav(
   transferTrace?.transfers?.add(kind,headersNanos,bodyNanos,System.nanoTime()-requestStarted,sent,received,transferResult)
   registration?.close()
  }
+ }
+
+ // OkHttp may wrap a peer-closed EOF in a plain IOException. Inspect only causes,
+ // never messages; bounded/cyclic or excluded failure chains fail closed.
+ private fun staleSocketFailure(error: IOException): Boolean {
+  val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable,Boolean>())
+  var cause: Throwable? = error
+  var stale = false
+  while (cause != null) {
+   if (seen.size >= 16 || !seen.add(cause)) return false
+   if (cause is javax.net.ssl.SSLException || cause is java.io.InterruptedIOException ||
+       cause is java.net.UnknownHostException || cause is java.util.concurrent.CancellationException ||
+       cause is InterruptedException) return false
+   if (cause is java.net.SocketException || cause is java.io.EOFException) stale = true
+   else if (cause.javaClass != IOException::class.java) return false
+   cause = cause.cause
+  }
+  return stale
  }
 
  private fun diagnosticMethod(method: String): DiagnosticHttpMethod = when (method) {
@@ -612,6 +681,7 @@ class AppendOnlyWebDav(
  private fun Element.elements(): List<Element> = (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }
 
  companion object {
+  private val nextDiagnosticRequestId = java.util.concurrent.atomic.AtomicLong()
   private val nextDiagnosticClientId = java.util.concurrent.atomic.AtomicLong()
   private const val DAV = "DAV:"
   private const val LEGACY_COMMIT_PREFIX = "pdsync-v2-commit-"

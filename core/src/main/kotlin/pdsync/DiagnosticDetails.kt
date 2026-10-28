@@ -51,6 +51,26 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @SerialName("networkTarget") NETWORK_TARGET,
   @SerialName("requestDurationMs") REQUEST_DURATION_MS,
   @SerialName("transportClientId") TRANSPORT_CLIENT_ID,
+  @SerialName("connectionCallId") CONNECTION_CALL_ID,
+  @SerialName("connectionStage") CONNECTION_STAGE,
+  @SerialName("connectionRoute") CONNECTION_ROUTE,
+  @SerialName("connectionProtocol") CONNECTION_PROTOCOL,
+  @SerialName("connectionAttempts") CONNECTION_ATTEMPTS,
+  @SerialName("secureStarts") SECURE_STARTS,
+  @SerialName("secureEnds") SECURE_ENDS,
+  @SerialName("secureElapsedMs") SECURE_ELAPSED_MS,
+  @SerialName("connectionAcquisitions") CONNECTION_ACQUISITIONS,
+  @SerialName("responseHeaderEvents") RESPONSE_HEADER_EVENTS,
+  @SerialName("transportMessagePattern") TRANSPORT_MESSAGE_PATTERN,
+  @SerialName("transportRequestId") TRANSPORT_REQUEST_ID,
+  @SerialName("transportStage") TRANSPORT_STAGE,
+  @SerialName("transportHeadersMs") TRANSPORT_HEADERS_MS,
+  @SerialName("transportBodyReadMs") TRANSPORT_BODY_READ_MS,
+  @SerialName("transportCause0") TRANSPORT_CAUSE_0,
+  @SerialName("transportCause1") TRANSPORT_CAUSE_1,
+  @SerialName("transportCause2") TRANSPORT_CAUSE_2,
+  @SerialName("transportCause3") TRANSPORT_CAUSE_3,
+  @SerialName("transportChainTruncated") TRANSPORT_CHAIN_TRUNCATED,
   @SerialName("transportFailureKind") TRANSPORT_FAILURE_KIND,
   @SerialName("transportCauseKind") TRANSPORT_CAUSE_KIND,
   @SerialName("transportCanceled") TRANSPORT_CANCELED,
@@ -147,9 +167,21 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   fun failureSource(value: String?): Builder = token(Field.FAILURE_SOURCE, value)
   fun observationState(value: String?): Builder = token(Field.OBSERVATION_STATE, value)
   fun observationReliable(value: Boolean): Builder = flag(Field.OBSERVATION_RELIABLE, value)
+  fun transportStage(headersReceived:Boolean):Builder = token(Field.TRANSPORT_STAGE,if(headersReceived) "RESPONSE_BODY" else "AWAITING_HEADERS")
+  fun connectionStage(value:String):Builder = token(Field.CONNECTION_STAGE,value)
+  fun connectionRoute(value:String):Builder = token(Field.CONNECTION_ROUTE,value)
+  fun connectionProtocol(value:String):Builder = token(Field.CONNECTION_PROTOCOL,value)
+  fun messagePattern(value:TransportFailureKind.MessagePattern):Builder = token(Field.TRANSPORT_MESSAGE_PATTERN,value.name)
   fun transportFailure(error:Throwable,canceled:Boolean,interrupted:Boolean):Builder = apply {
    token(Field.TRANSPORT_FAILURE_KIND,TransportFailureKind.of(error).name)
    token(Field.TRANSPORT_CAUSE_KIND,TransportFailureKind.deepest(error).name)
+   var current:Throwable?=error
+   for (field in listOf(Field.TRANSPORT_CAUSE_0,Field.TRANSPORT_CAUSE_1,Field.TRANSPORT_CAUSE_2,Field.TRANSPORT_CAUSE_3)) {
+    val cause=current ?: break
+    token(field,TransportFailureKind.detail(cause).name)
+    current=cause.cause
+   }
+   flag(Field.TRANSPORT_CHAIN_TRUNCATED,current!=null)
    flag(Field.TRANSPORT_CANCELED,canceled)
    flag(Field.TRANSPORT_THREAD_INTERRUPTED,interrupted)
   }
@@ -216,7 +248,7 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
   @JvmStatic fun builder(): Builder = Builder()
   private val layoutCounts = setOf(Field.SAVE_LAYOUT_INCLUDED, Field.SAVE_LAYOUT_EXCLUDED, Field.SAVE_LAYOUT_UNRECOGNIZED)
   private val booleanFields = setOf(Field.IDENTITY_VERIFIED, Field.SYSTEM_REQUEST_ACTIVE,
-   Field.TRANSPORT_CANCELED, Field.TRANSPORT_THREAD_INTERRUPTED, Field.RESTORE_PENDING, Field.SAVE_LAYOUT_TRUNCATED, Field.SAVE_LAYOUT_VALID, Field.OBSERVATION_RELIABLE)
+   Field.TRANSPORT_CHAIN_TRUNCATED, Field.TRANSPORT_CANCELED, Field.TRANSPORT_THREAD_INTERRUPTED, Field.RESTORE_PENDING, Field.SAVE_LAYOUT_TRUNCATED, Field.SAVE_LAYOUT_VALID, Field.OBSERVATION_RELIABLE)
   // BridgeDiagnostics.CODES plus MainActivity's real READY/NOT_CHECKED observations.
   // A parity test requires changes to the protocol allowlist to be reviewed here too.
   private val readinessCodes = setOf(
@@ -277,6 +309,12 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    Field.BRIDGE_STAGE -> bridgeStages
    Field.OBSERVATION_STATE -> setOf("FOREGROUND", "BACKGROUND", "CACHED", "ABSENT", "UNKNOWN")
    Field.TRANSPORT_FAILURE_KIND, Field.TRANSPORT_CAUSE_KIND -> TransportFailureKind.values().map { it.name }.toSet()
+   Field.TRANSPORT_CAUSE_0, Field.TRANSPORT_CAUSE_1, Field.TRANSPORT_CAUSE_2, Field.TRANSPORT_CAUSE_3 -> TransportFailureKind.Detail.values().map { it.name }.toSet()
+   Field.TRANSPORT_STAGE -> setOf("AWAITING_HEADERS", "RESPONSE_BODY")
+   Field.CONNECTION_STAGE -> setOf("CALL_START","CONNECT","SECURE_CONNECT","ACQUIRED","REQUEST_HEADERS","RESPONSE_HEADERS","RESPONSE_BODY","UNKNOWN")
+   Field.CONNECTION_ROUTE -> setOf("NO_CONNECTION","REUSED","CONNECT_ATTEMPTED","MIXED","UNKNOWN")
+   Field.CONNECTION_PROTOCOL -> setOf("HTTP_1_0","HTTP_1_1","H2","H2_PRIOR_KNOWLEDGE","QUIC","SPDY_3","UNKNOWN")
+   Field.TRANSPORT_MESSAGE_PATTERN -> TransportFailureKind.MessagePattern.values().map {it.name}.toSet()
    Field.NETWORK_TARGET -> NetworkTarget.entries.map { it.name }.toSet()
    Field.FAILURE_SOURCE -> FailureSource.entries.map { it.name }.toSet()
    Field.SYNC_COMPARE, Field.SYNC_DECISION -> compareStates
@@ -284,13 +322,16 @@ class DiagnosticDetails private constructor(values: Map<Field, String>) {
    else -> emptySet()
   }
   private fun numberRange(field: Field): LongRange? = when (field) {
+   Field.CONNECTION_ATTEMPTS,Field.SECURE_STARTS,Field.SECURE_ENDS,Field.CONNECTION_ACQUISITIONS,Field.RESPONSE_HEADER_EVENTS -> 0L..Int.MAX_VALUE.toLong()
+   Field.SECURE_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
+   Field.CONNECTION_CALL_ID -> 1L..Long.MAX_VALUE
    Field.ERRNO -> 0L..4095L
    Field.UID_STATE -> 0L..20L
    Field.SAVE_LAYOUT_INCLUDED, Field.SAVE_LAYOUT_EXCLUDED, Field.SAVE_LAYOUT_UNRECOGNIZED,
    Field.FILE_COUNT, Field.LOCAL_FILE_COUNT, Field.REMOTE_FILE_COUNT -> 0L..MAX_FILE_COUNT
    Field.CONTENT_BYTES -> 0L..MAX_CONTENT_BYTES
-   Field.REQUEST_DURATION_MS, Field.INSTALLATION_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
-   Field.TRANSPORT_CLIENT_ID -> 1L..Long.MAX_VALUE
+   Field.TRANSPORT_HEADERS_MS, Field.TRANSPORT_BODY_READ_MS, Field.REQUEST_DURATION_MS, Field.INSTALLATION_ELAPSED_MS -> 0L..MAX_REQUEST_DURATION_MS
+   Field.TRANSPORT_REQUEST_ID, Field.TRANSPORT_CLIENT_ID -> 1L..Long.MAX_VALUE
    Field.GAME_VERSION_CODE -> 0L..Long.MAX_VALUE
    Field.SAVE_VERSION, Field.HELPER_ACCESS_PROTOCOL_VERSION, Field.HELPER_SINGLE_PASS_READ_VERSION,
    Field.HELPER_READ_SNAPSHOT_VERSION, Field.HELPER_RESTORE_RESULT_VERSION -> 0L..Int.MAX_VALUE.toLong()

@@ -267,12 +267,29 @@ final class SyncRuntime {
         void refresh(Context context) throws Exception {
             lease = null; // Failed refresh must never retain a previously active authorization.
             final long generation = connectionGeneration();
+            int boot = -1;
+            try { boot = android.provider.Settings.Global.getInt(context.getContentResolver(), "boot_count", -1); }
+            catch (RuntimeException unavailable) { /* Missing boot identity requires an online refresh. */ }
+            TrustedEntitlementCache.Record cached = new TrustedEntitlementCache(
+                    new File(context.getFilesDir(), "managed-account-expiry-v1").toPath()).read(account.endpoint, account.username);
+            if (TrustedEntitlementCache.currentAccessAvailable(cached, account.endpoint, account.username,
+                    android.os.SystemClock.elapsedRealtime(), boot)) {
+                OfficialSyncAccess.Lease candidate = OfficialSyncAccess.fromCached(cached, account.endpoint,
+                        account.username, boot, android.os.SystemClock::elapsedRealtimeNanos);
+                if (generation != connectionGeneration()) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
+                authorizedGeneration = generation;
+                lease = candidate;
+                check();
+                return;
+            }
+            TrustedEntitlementCache.beginRefresh(account.endpoint, account.username);
             long requestStartedNanos = android.os.SystemClock.elapsedRealtimeNanos();
             ManagedAccountClient.Entitlement entitlement = new ManagedAccountClient(
                     OfficialServiceRegistrationClient.DAV_URL, account.username, account.password).entitlement();
             if (generation != connectionGeneration()) throw new IOException(AndroidMessages.SYNC_RUNTIME_09.text());
             rememberEntitlement(context, account, entitlement);
             entitlement.requireSyncAccess();
+            TrustedEntitlementCache.confirmedRefresh(account.endpoint, account.username);
             authorizedGeneration = generation;
             lease = OfficialSyncAccess.fromEntitlement(entitlement, requestStartedNanos,
                     android.os.SystemClock::elapsedRealtimeNanos);

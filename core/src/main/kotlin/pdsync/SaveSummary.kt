@@ -9,6 +9,7 @@ data class SaveSummary(val slots: Map<String,String?>, val plays: Int?, val file
  companion object {
   fun from(snapshot: Snapshot): SaveSummary = fromVerifiedEntries(Snapshots.verify(snapshot,Shattered)) { name -> snapshot.manifest.metadata?.fileModifiedAt?.get(name) }
   internal fun fromVerified(verified:VerifiedSnapshot):SaveSummary = fromVerifiedEntries(verified.entries,verified.saveVersions) { null }
+  internal fun fromArchiveEntries(bytes:Map<String,ByteArray>,modified:Map<String,Long>,versions:SaveVersions):SaveSummary = fromVerifiedEntries(bytes,versions) { name -> modified[name]?.let { java.time.Instant.ofEpochMilli(it).toString() } }
   internal fun readVerified(root: Path, bytes: Map<String,ByteArray>): SaveSummary = fromVerifiedEntries(bytes) { name -> Files.getLastModifiedTime(SafePaths.checked(root.resolve(name))).toInstant().toString() }
   /** Inventory supplies the complete names and real mtimes; bytes contain summary inputs only. */
   internal fun fromObservation(files:Set<String>, summaryBytes:Map<String,ByteArray>, modifiedMillis:(String)->Long):SaveSummary {

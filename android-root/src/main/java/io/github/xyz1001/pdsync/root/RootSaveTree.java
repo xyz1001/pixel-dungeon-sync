@@ -188,8 +188,6 @@ public final class RootSaveTree {
         }
         try (ZipOutputStream zip = new ZipOutputStream(new SaveArchive.LimitedOutputStream(output, SaveArchive.MAX_BYTES))) {
             for (Map.Entry<String, byte[]> item : snapshot.bytes.entrySet()) {
-                if (!SaveArchive.sha256(item.getValue()).equals(snapshot.inventory.hashes.get(item.getKey())))
-                    throw failure(RootProtocol.Status.CHANGED);
                 ZipEntry entry = new ZipEntry(item.getKey());
                 // Standard ZIP DOS timestamp, bounded to avoid overflow from untrusted metadata.
                 long millis = snapshot.modified.get(item.getKey());

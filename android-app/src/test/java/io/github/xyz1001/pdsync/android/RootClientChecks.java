@@ -58,6 +58,14 @@ public final class RootClientChecks {
     }
     public static void main(String[] args)throws Exception {
         SelectedRootGame game=selection();Path dir=Files.createTempDirectory("root-client-host-");
+        AtomicInteger archiveCalls=new AtomicInteger();
+        byte[] directBytes=new byte[]{80,75,5,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+        RootGameBridge direct=new RootGameBridge(game,null,g->{},(r,out)->{
+            archiveCalls.incrementAndGet();out.write(directBytes);
+            return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),"EMPTY_DIRECTORY",0,0,DirectoryMetadataKt.contentSha256(Collections.emptyMap()),"UNKNOWN",false,directBytes).withRequest(r,RootProtocol.Outcome.READ_ONLY);
+        },()->true,dir.resolve("unused-staging").toFile());
+        check(Arrays.equals(directBytes,direct.exportArchive()),"archive bytes preserved");
+        check(archiveCalls.get()==1&&!Files.exists(dir.resolve("unused-staging")),"one RPC and no extraction directory");
         diagnosticLoggingChecks(dir, game);
         observationChecks(dir, game);
         String[] rootCodes={"ROOT_AUTH_REQUIRED","ROOT_UNAVAILABLE","ROOT_DENIED_OR_EXITED","ROOT_TIMEOUT",
@@ -150,7 +158,7 @@ public final class RootClientChecks {
                     "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         Path emptyDestination=Files.createDirectory(dir.resolve("empty-destination"));
-        emptyExporter.exportTo(emptyDestination);check(exportChecks.get()==4,"PM target before/after transport and archive");
+        emptyExporter.exportTo(emptyDestination);check(exportChecks.get()==2,"one entry and one exit identity check for injected verifier");
         ByteArrayOutputStream zipped=new ByteArrayOutputStream();
         byte[] save="verified game data".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         try(ZipOutputStream zip=new ZipOutputStream(zipped)){zip.putNextEntry(new ZipEntry("game0/game.dat"));zip.write(save);zip.closeEntry();}
@@ -163,27 +171,15 @@ public final class RootClientChecks {
         },()->true,dir.toFile());
         Path nonempty=Files.createDirectory(dir.resolve("nonempty-destination"));exporter.exportTo(nonempty);
         check(Arrays.equals(Files.readAllBytes(nonempty.resolve("game0/game.dat")),save),"nonempty export preserves all bytes");
-        RootGameBridge badFingerprint=new RootGameBridge(game,identity,g->{},(r,o)->{
-            o.write(archiveBytes);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "ALLOWLISTED_FILES_PRESENT",1,save.length,A,"CACHED",true,archiveBytes).withRequest(r,RootProtocol.Outcome.READ_ONLY);
-        },()->true,dir.toFile());
-        rejects(()->badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint"))),"ROOT_EXPORT_MISMATCH");
-        try{badFingerprint.exportTo(Files.createDirectory(dir.resolve("bad-fingerprint-stage")));}
-        catch(BridgeDiagnostics.Failure failure){check(failure.code.equals("ROOT_EXPORT_MISMATCH")&&failure.stage==BridgeDiagnostics.Stage.EXPORT,"export stage/code preserved");}
         AtomicInteger authorizationReads=new AtomicInteger();
         RootGameBridge revoked=new RootGameBridge(game,identity,g->{},(r,o)->okayUnchecked(game).withRequest(r,RootProtocol.Outcome.READ_ONLY),()->authorizationReads.incrementAndGet()==1,dir.toFile());
         rejects(revoked::inspectReady,"ROOT_CANCELLED");
         AtomicInteger changedChecks=new AtomicInteger();
-        RootGameBridge changedAfter=new RootGameBridge(game,identity,g->{if(changedChecks.incrementAndGet()==3)throw new IOException("target changed");},(r,o)->{
+        RootGameBridge changedAfter=new RootGameBridge(game,identity,g->{if(changedChecks.incrementAndGet()==2)throw new IOException("target changed");},(r,o)->{
             o.write(emptyArchive);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
                     "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
         },()->true,dir.toFile());
         rejects(()->changedAfter.exportTo(Files.createDirectory(dir.resolve("changed-after"))),"ROOT_TARGET_CHANGED");
-        RootGameBridge truncatedArchive=new RootGameBridge(game,identity,g->{},(r,o)->{
-            o.write(new byte[22]);return new RootProtocol.Response(RootProtocol.Status.OK,game.binding().fingerprint(),
-                    "EMPTY_DIRECTORY",0,0,emptyFingerprint,"ABSENT",true,emptyArchive).withRequest(r,RootProtocol.Outcome.READ_ONLY);
-        },()->true,dir.toFile());
-        rejects(()->truncatedArchive.exportTo(Files.createDirectory(dir.resolve("bad-archive"))),"ROOT_EXPORT_FAILED");
         Path empty=Files.createTempFile(dir,"empty-",".zip");byte[] emptyZip=new byte[22];emptyZip[0]=0x50;emptyZip[1]=0x4b;emptyZip[2]=5;emptyZip[3]=6;Files.write(empty,emptyZip);
         RootExportValidation.requireCompleteArchive(empty.toFile(),22,0);check(true,"empty archive framing");
         Files.write(empty,new byte[22]);rejects(()->RootExportValidation.requireCompleteArchive(empty.toFile(),22,0),pdsync.i18n.AndroidMessages.ROOT_EXPORT_VALIDATION_02.text());

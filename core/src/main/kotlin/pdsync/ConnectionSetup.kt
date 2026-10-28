@@ -22,8 +22,11 @@ class AppliedConnection(val config: AppConfig, val password: String) {
 
 sealed interface ConnectionTestResult {
  data class Success(val hasRemote: Boolean): ConnectionTestResult
- data class Failure(val message: String, val status: Int? = null): ConnectionTestResult
+ data class Failure(val message: String, val status: Int? = null, val diagnosticFailure:DiagnosticFailure = DiagnosticFailure.OTHER): ConnectionTestResult
 }
+
+/** Carries only a closed diagnostic category; no original transport exception or text. */
+class ConnectionDiagnosticException(message:String,val diagnosticFailure:DiagnosticFailure):IOException(message)
 
 /**
  * Transactional connection model: testConnection is read-only; connect explicitly provisions only the app namespace.
@@ -84,7 +87,6 @@ class ConnectionSetup(
     val store = AppendOnlyWebDav(validated.config.endpoint, game, validated.config.profile, validated.config.username, validated.password, beforeRequest = beforeRequest)
     if (createNamespace) store.ensureNamespace(stillCurrent)
     check(stillCurrent()) { CoreMessages.CONNECTION_CANCELED.text() }
-    if (store.legacyPresent()) throw LegacyProtocolException()
     val cursors = mutableSetOf<String>(); val ids = mutableSetOf<String>()
     var cursor: String? = null; var pages = 0; var listed = 0
     do {
@@ -111,9 +113,7 @@ class ConnectionSetup(
     NamespaceFailureReason.VERIFICATION_FAILED -> CoreMessages.THE_SYNC_FOLDER_COULD_NOT_YET_BE_CONFIRMED_RETRY_EXISTING_FILES_WILL_NOT_BE_OVERWRITT.text()
     NamespaceFailureReason.NETWORK -> CoreMessages.CONNECTION_INTERRUPTED_THE_SYNC_DIRECTORY_S_STATE_COULD_NOT_BE_CONFIRMED_CHECK_YOUR_N.text()
     NamespaceFailureReason.CANCELLED -> CoreMessages.CONNECTION_CANCELED_ANY_EMPTY_SYNC_FOLDERS_ALREADY_CREATED_ARE_RETAINED.text()
-   }, e.statusCode)
-  } catch (_: LegacyProtocolException) {
-   ConnectionTestResult.Failure(CoreMessages.LEGACY_HEAD_JSON_DETECTED_STOP_USING_THE_OLD_CLIENT_AND_EXPLICITLY_ARRANGE_MIGRATION.text())
+   }, e.statusCode, DiagnosticLog.classify(e))
   } catch (e: WebDavException) {
    ConnectionTestResult.Failure(when (e.statusCode) {
     401 -> CoreMessages.AUTHENTICATION_FAILED_HTTP_401_CHECK_YOUR_USERNAME_AND_PASSWORD.text()
@@ -122,8 +122,8 @@ class ConnectionSetup(
    }, e.statusCode)
   } catch (e: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) {
    ConnectionTestResult.Failure(e.message ?: CoreMessages.CANNOT_CONNECT_TO_WEBDAV_CHECK_YOUR_NETWORK_ADDRESS_CERTIFICATE_AND_SERVICE_STATUS_TH.text())
-  } catch (_: IOException) {
-   ConnectionTestResult.Failure(CoreMessages.CANNOT_CONNECT_TO_WEBDAV_CHECK_YOUR_NETWORK_ADDRESS_CERTIFICATE_AND_SERVICE_STATUS_TH.text())
+  } catch (e: IOException) {
+   ConnectionTestResult.Failure(CoreMessages.CANNOT_CONNECT_TO_WEBDAV_CHECK_YOUR_NETWORK_ADDRESS_CERTIFICATE_AND_SERVICE_STATUS_TH.text(), diagnosticFailure=DiagnosticLog.classify(e))
   } catch (_: Exception) {
    // Do not echo arbitrary URL/parser/transport exceptions that might contain entered secrets.
    ConnectionTestResult.Failure(CoreMessages.INVALID_SERVICE_ADDRESS_ACCOUNT_OR_CLOUD_DIRECTORY_LISTING_CHECK_THE_WEBDAV_ADDRESS_A.text())

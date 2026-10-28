@@ -12,6 +12,18 @@ class DirectoryMetadataTest {
  @TempDir lateinit var temp: Path
  private fun files() = mapOf("game1/game.dat" to hash("run".encodeToByteArray()),"game1/depth1.dat" to hash("floor".encodeToByteArray()),"rankings.dat" to hash("records".encodeToByteArray()))
  private fun root()=temp.resolve(UUID.randomUUID().toString()).createDirectory().also { r -> files().forEach { (p,v) -> r.resolve(p).parent.createDirectories();r.resolve(p).writeText(v) } }
+ @Test fun unchangedObservationSkipsReplaceButChangedObservationPersistsAndReportsFailure() {
+  val r=root();var writes=0
+  val store=DirectoryMetadataStore(r) {a,b->writes++;Files.move(a,b,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);Unit}
+  val f=files();val first=store.observe(f);assertEquals(1,writes)
+  repeat(3) {assertEquals(first,store.observe(f))};assertEquals(1,writes)
+  val changed=f+("game1/depth1.dat" to hash(byteArrayOf(9)))
+  store.observe(changed);assertEquals(2,writes)
+  val broken=DirectoryMetadataStore(r) {_,_->throw java.io.IOException("test write failure")}
+  broken.observe(changed)
+  assertFailsWith<java.io.IOException> {broken.observe(f)}
+  assertEquals(contentSha256(changed),(store.read() as SidecarRead.Valid).value.currentContentSha256)
+ }
  @Test fun canonicalDigestUsesPathsAndActualBytesButNotEnumerationOrder() {
   val original=files(); assertEquals(contentSha256(original),contentSha256(original.entries.reversed().associate { it.toPair() }))
   assertNotEquals(contentSha256(original),contentSha256(original-"rankings.dat"))

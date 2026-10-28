@@ -35,7 +35,6 @@ fun main() {
   check(repository.discover(store).tips == setOf(second.id, sibling.id))
   val resolution = publish(listOf(second.id, sibling.id), "resolution")
   check(repository.discover(store).tips == setOf(resolution.id))
-  check(!store.legacyPresent())
   println("PDSYNC_E2E_OK immutable-upload/readback/parent-DAG/restore/no-backup/retained-branches/resolution/no-head")
  } finally {
   listOf(root, backup, state).forEach { path -> Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } } }

@@ -21,7 +21,13 @@ import io.github.xyz1001.pdsync.bridge.SaveArchive;
 
 /** Short-lived root access adapter. Core comparison, DAV and UUID logic remain unchanged. */
 public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
-    public interface TargetVerifier { void requireUnchanged(SelectedRootGame selected) throws Exception; }
+    public interface TargetVerifier {
+        void requireUnchanged(SelectedRootGame selected) throws Exception;
+        default AutoCloseable exportScope(SelectedRootGame selected)throws Exception {
+            requireUnchanged(selected);return ()->requireUnchanged(selected);
+        }
+    }
+    private final ThreadLocal<Boolean> exportIdentity=new ThreadLocal<>();
     private static final boolean MUTATION_IMPLEMENTED=true; // Concrete RootRestoreJob revalidates every write capability.
     private final Capabilities supported;
     private final SelectedRootGame selected;
@@ -38,7 +44,11 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     }
     private RootGameBridge(Context context, SelectedRootGame selected, AndroidGameIdentity identity,
             RootProcessTransport transport) {
-        this(selected,identity,new RootTargetResolver(context)::requireUnchanged,
+        this(selected,identity,new TargetVerifier() {
+            final RootTargetResolver resolver=new RootTargetResolver(context);
+            public void requireUnchanged(SelectedRootGame game)throws Exception {resolver.requireUnchanged(game);}
+            public AutoCloseable exportScope(SelectedRootGame game)throws Exception {return resolver.exportScope(game);}
+        },
                 new RootProcessTransport.Exchange() {
                     @Override public RootProtocol.Response exchange(RootProtocol.Request request,OutputStream archive)throws IOException {
                         return transport.exchange(request,archive);
@@ -95,27 +105,31 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
     @Override public Observation observeLifecycle() {
         return Observation.unknown();
     }
+    @Override public byte[] exportArchive() {
+        try(AutoCloseable scope=beginExportIdentity()) {
+            ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+            call(RootProtocol.Command.EXPORT,new SaveArchive.LimitedOutputStream(bytes,SaveArchive.MAX_BYTES),false);
+            return bytes.toByteArray();
+        } catch(BridgeDiagnostics.Failure failure) {throw atStage(BridgeDiagnostics.Stage.EXPORT,failure);}
+        catch(Exception failure) {throw failure("ROOT_EXPORT_FAILED",failure);}
+        finally {exportIdentity.remove();}
+    }
     @Override public void exportTo(Path destination) {
         Path archive=null;
-        try {
-            targetGame();
+        try(AutoCloseable scope=beginExportIdentity()) {
             archive=Files.createTempFile(stagingDirectory.toPath(),"root-export-",".zip");
             RootProtocol.Response reply;
             try(OutputStream output=Files.newOutputStream(archive,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS)) {
                 reply=call(RootProtocol.Command.EXPORT,output,false);
             }
-            RootExportValidation.requireCompleteArchive(archive.toFile(),reply.archiveLength,reply.fileCount);
             SaveArchiveCodec.Inventory inventory;
             try(InputStream input=Files.newInputStream(archive,LinkOption.NOFOLLOW_LINKS)) {
                 inventory=SaveArchiveCodec.readExportArchive(input,destination);
             }
-            if(!DirectoryMetadataKt.contentSha256(inventory.hashes).equals(reply.contentFingerprint)
-                    || inventory.hashes.size()!=reply.fileCount || inventory.bytes!=reply.contentBytes)
-                throw failure("ROOT_EXPORT_MISMATCH",null);
-            targetGame();
+
         }catch(BridgeDiagnostics.Failure failure){throw atStage(BridgeDiagnostics.Stage.EXPORT,failure);}
         catch(Exception failure){throw failure("ROOT_EXPORT_FAILED",failure);}
-        finally {if(archive!=null)try{Files.deleteIfExists(archive);}catch(IOException ignored){}}
+        finally {exportIdentity.remove();if(archive!=null)try{Files.deleteIfExists(archive);}catch(IOException ignored){}}
     }
     /** Sends the already verified snapshot archive unchanged; the runner owns its sole extraction. */
     @Override public AndroidSaveObservation readSnapshot() {
@@ -244,7 +258,14 @@ public final class RootGameBridge implements GameAccessBackend, AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }catch(IOException ignored){}
     }
+    private AutoCloseable beginExportIdentity() {
+        try {
+            AutoCloseable scope=verifier.exportScope(selected);exportIdentity.set(true);
+            return ()->{try {scope.close();}catch(Exception changed){throw failure("ROOT_TARGET_CHANGED",changed);}};
+        }catch(Exception changed){throw failure("ROOT_TARGET_CHANGED",changed);}
+    }
     private void verifyTarget() {
+        if(Boolean.TRUE.equals(exportIdentity.get()))return;
         try {verifier.requireUnchanged(selected);}
         catch(Exception changed){throw failure("ROOT_TARGET_CHANGED",changed);}
     }

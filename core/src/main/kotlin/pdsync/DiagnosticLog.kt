@@ -37,7 +37,7 @@ import javax.net.ssl.SSLException
 
 /** Only closed diagnostic labels are accepted. None of these fields carry business identifiers. */
 @Serializable enum class DiagnosticAction { APP_START, CONFIGURE, CONNECT, INSPECT, HISTORY, PREPARE, INSTALL, ACCESS_CHECK, LAUNCH, CAPTURE, PUSH, RESTORE, RECOVERY, RESOLVE, MERGE, ARCHIVE, EXPORT_LOGS, AUTOMATIC_SYNC, OTHER }
-@Serializable enum class DiagnosticStage { QUEUED, STARTED, CONFIRMATION, GUARD, WORK, REFRESH, FINISHED, RUNTIME, CONNECTION, NAMESPACE, HTTP, PREPARATION, INSTALLATION, BRIDGE, READINESS, GAME_LAUNCH, BACKUP, RESTORE, RECOVERY, VERIFY, EXPORT }
+@Serializable enum class DiagnosticStage { QUEUED, STARTED, CONFIRMATION, GUARD, WORK, REFRESH, FINISHED, RUNTIME, CONNECTION, NAMESPACE, HTTP, TRANSPORT, PREPARATION, INSTALLATION, BRIDGE, READINESS, GAME_LAUNCH, BACKUP, RESTORE, RECOVERY, VERIFY, EXPORT }
 @Serializable enum class DiagnosticResult { STARTED, SUCCEEDED, FAILED, CANCELED, REJECTED, SKIPPED, PENDING, CONFLICT }
 @Serializable enum class DiagnosticFailure { NONE, GAME_NOT_SELECTED, NOT_CHECKED, FIRST_LAUNCH_NEEDED, UNRECOGNIZED_LAYOUT, SYSTEM_REQUEST_PENDING, CAPABILITY_UNAVAILABLE, BUSY, NOT_READY, RECOVERY_REQUIRED, IDENTITY_MISMATCH, UNAVAILABLE, CANCELED, AUTHENTICATION, AUTHORIZATION, HTTP, TIMEOUT, DNS, CONNECT, TLS, EOF, CONNECTION, INTERRUPTED, NETWORK_IO, STORAGE, VALIDATION, OTHER }
 @Serializable enum class DiagnosticHttpMethod { GET, PUT, PROPFIND, MKCOL, HEAD, POST, OTHER }
@@ -82,11 +82,16 @@ object DiagnosticLog {
  private var pendingRecords = 0
  private var pendingBytes = 0
  internal var forceForTests: ((FileChannel) -> Unit)? = null
+ private var writer:FileChannel?=null
+ private var writerPath:Path?=null
+ private fun closeWriter() {try {writer?.close()} finally {writer=null;writerPath=null}}
  private fun flushPending() {
   for (file in dirtyFiles) {
    if (!Files.exists(file, NOFOLLOW_LINKS)) continue
    requireRegularOrAbsent(file)
-   FileChannel.open(SafePaths.checked(file), WRITE, NOFOLLOW_LINKS).use { channel ->
+   val active=writer.takeIf {writerPath==file && it?.isOpen==true}
+   if(active!=null) {forceForTests?.invoke(active) ?: active.force(true)}
+   else FileChannel.open(SafePaths.checked(file), WRITE, NOFOLLOW_LINKS).use { channel ->
     forceForTests?.invoke(channel) ?: channel.force(true)
    }
   }
@@ -126,6 +131,7 @@ object DiagnosticLog {
  }
  internal fun configureForTests(directory: Path, version: String, platform: String, clock: Clock) = preservingInterrupt { synchronized(lock) {
   try { flushPending() } catch (_: Exception) { /* Previous configuration is best effort. */ }
+  closeWriter()
   dirtyFiles.clear(); pendingRecords=0; pendingBytes=0
   configuration = Configuration(directory.resolve("diagnostics-v1"), safeVersion(version), safePlatform(platform), clock)
   try { val config = configuration!!; prepare(config); prune(config) } catch (_: Exception) { /* Best effort only. */ }
@@ -184,7 +190,6 @@ object DiagnosticLog {
                     method: DiagnosticHttpMethod? = null, status: Int? = null, details: DiagnosticDetails? = null): Boolean = preservingInterrupt { synchronized(lock) {
   try {
    val config = configuration ?: return@synchronized false
-   prepare(config); prune(config)
    val now = config.clock.instant(); val zone = safeZone(config.clock.zone)
    val phaseTotals = if (stage == DiagnosticStage.FINISHED) trace.timings.snapshot() else emptyMap()
    var finishedDetails = details
@@ -203,16 +208,19 @@ object DiagnosticLog {
    var line = (codec.encodeToString(record) + "\n").toByteArray(Charsets.UTF_8)
    require(line.size <= MAX_LINE_BYTES)
    val file = SafePaths.checked(config.directory.resolve("events-${utcDate(now)}.jsonl"))
+   val opening=writerPath!=file || writer?.isOpen!=true
+   if(opening) {flushPending();closeWriter();prepare(config);prune(config)}
    requireRegularOrAbsent(file)
    val size = if (Files.exists(file, NOFOLLOW_LINKS)) Files.size(file) else 0L
    require(size <= MAX_FILE_BYTES)
-   if (size > 0) FileChannel.open(file, READ, NOFOLLOW_LINKS).use { channel ->
+   if (opening && size > 0) FileChannel.open(file, READ, NOFOLLOW_LINKS).use { channel ->
     val tail = ByteBuffer.allocate(1); channel.position(size - 1); channel.read(tail)
     // Preserve a crash-truncated record as rejected input; do not concatenate a new valid record.
     if (tail.array()[0] != '\n'.code.toByte()) line = byteArrayOf('\n'.code.toByte()) + line
    }
    if (pendingBytes + line.size > FORCE_BYTE_LIMIT) flushPending()
    if (size + line.size > MAX_FILE_BYTES) {
+    flushPending();closeWriter()
     val lines = readRecords(file, config).map { codec.encodeToString(it) + "\n" }
     var keptBytes = line.size
     val kept = ArrayDeque<String>()
@@ -225,14 +233,14 @@ object DiagnosticLog {
     // still stay below 1 MiB: seven 128 KiB buckets plus at most one 64 KiB replacement.
     replaceBucket(config, file, (kept.joinToString("") + line.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
    } else {
-    FileChannel.open(SafePaths.checked(file), CREATE, WRITE, APPEND, NOFOLLOW_LINKS).use { channel ->
-     val bytes = ByteBuffer.wrap(line); while (bytes.hasRemaining()) channel.write(bytes)
-    }
+    val channel=writer ?: FileChannel.open(SafePaths.checked(file), CREATE, WRITE, APPEND, NOFOLLOW_LINKS).also {writer=it;writerPath=file}
+    val bytes = ByteBuffer.wrap(line); while (bytes.hasRemaining()) channel.write(bytes)
    }
    dirtyFiles.add(file); pendingRecords++; pendingBytes+=line.size
    if (stage == DiagnosticStage.FINISHED || pendingRecords >= FORCE_RECORD_LIMIT || pendingBytes >= FORCE_BYTE_LIMIT) flushPending()
+   if(stage==DiagnosticStage.FINISHED)closeWriter()
    true
-  } catch (_: Exception) { false }
+  } catch (_: Exception) { runCatching {closeWriter()};false }
  }}
 
  /** Immutable ZIP of validated records, taken under the same lock as append/rotation. No legacy files. */
@@ -244,7 +252,7 @@ object DiagnosticLog {
   val records = ArrayList<Record>()
   if (config != null) {
    try {
-    prepare(config); prune(config); flushPending()
+    flushPending();closeWriter();prepare(config);prune(config)
     logFiles(config).forEach { file ->
      try { records.addAll(readRecords(file, config)) } catch (_: Exception) { available = false }
     }
@@ -321,7 +329,8 @@ object DiagnosticLog {
   DiagnosticStage.WORK -> CoreMessages.EXECUTION.text(); DiagnosticStage.REFRESH -> CoreMessages.REFRESH.text()
   DiagnosticStage.FINISHED -> CoreMessages.FINISHED.text(); DiagnosticStage.RUNTIME -> CoreMessages.RUNTIME_STATUS.text()
   DiagnosticStage.CONNECTION -> CoreMessages.CONNECTION_CHECK.text(); DiagnosticStage.NAMESPACE -> CoreMessages.SYNC_DIRECTORY.text()
-  DiagnosticStage.HTTP -> "HTTP"; DiagnosticStage.PREPARATION -> CoreMessages.INSTALLATION_PREPARATION.text()
+  DiagnosticStage.HTTP -> "HTTP"; DiagnosticStage.TRANSPORT -> "TRANSPORT"
+  DiagnosticStage.PREPARATION -> CoreMessages.INSTALLATION_PREPARATION.text()
   DiagnosticStage.INSTALLATION -> CoreMessages.SYSTEM_INSTALLATION.text(); DiagnosticStage.BRIDGE -> CoreMessages.SAVE_ACCESS.text()
   DiagnosticStage.READINESS -> CoreMessages.SAVE_READINESS_CHECK.text(); DiagnosticStage.GAME_LAUNCH -> CoreMessages.GAME_LAUNCH.text()
   DiagnosticStage.BACKUP -> CoreMessages.BACKUP.text(); DiagnosticStage.RESTORE -> CoreMessages.RESTORE_WRITE.text()
@@ -380,12 +389,13 @@ object DiagnosticLog {
  @JvmStatic fun classify(error: Throwable): DiagnosticFailure = try {
   when (val cause = unwrap(error)) {
    is CancellationException, is InterruptedException, is ClosedByInterruptException -> DiagnosticFailure.CANCELED
+   is ConnectionDiagnosticException -> cause.diagnosticFailure
    is WebDavException -> classifyStatus(cause.statusCode)
    is NamespaceProvisioningException -> when (cause.reason) {
     NamespaceFailureReason.AUTHENTICATION -> DiagnosticFailure.AUTHENTICATION
     NamespaceFailureReason.FORBIDDEN -> DiagnosticFailure.AUTHORIZATION
     NamespaceFailureReason.CANCELLED -> DiagnosticFailure.CANCELED
-    NamespaceFailureReason.NETWORK -> DiagnosticFailure.NETWORK_IO
+    NamespaceFailureReason.NETWORK -> cause.diagnosticFailure
     NamespaceFailureReason.HTTP_ERROR -> DiagnosticFailure.HTTP
     else -> DiagnosticFailure.VALIDATION
    }

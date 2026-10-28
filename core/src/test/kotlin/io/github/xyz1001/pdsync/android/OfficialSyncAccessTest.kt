@@ -122,7 +122,7 @@ class OfficialSyncAccessTest {
                 .message("Not found").body("".toResponseBody()).build()
         }.build()
         val dav=AppendOnlyWebDav("https://example.com/","shattered","hero","alice","secret",client,lease)
-        assertFalse(dav.legacyPresent())
+        assertNull(dav.readCommit("ab".repeat(32)))
         assertTrue(assertFailsWith<OfficialSyncAccess.AccessException>{dav.listCommits(null)}.isExpired)
         assertEquals(1,calls)
     }
@@ -131,7 +131,7 @@ class OfficialSyncAccessTest {
         val client=OkHttpClient.Builder().addInterceptor { error("Transport must not run") }.build()
         val dav=AppendOnlyWebDav("https://example.com/","shattered","hero","alice","secret",client,lease)
         val id="ab".repeat(32)
-        val actions=listOf<()->Any?>({dav.legacyPresent()},{dav.listCommits(null)},{dav.readCommit(id)},
+        val actions=listOf<()->Any?>({dav.listCommits(null)},{dav.readCommit(id)},
             {dav.readObject(id)},{dav.writeCommit(id,byteArrayOf())},{dav.writeObject(id,byteArrayOf())},{dav.ensureNamespace()})
         actions.forEach{action-> assertTrue(assertFailsWith<OfficialSyncAccess.AccessException>{action()}.isExpired)}
     }

@@ -22,6 +22,25 @@ public final class RootTargetResolverChecks {
     interface Action { void run() throws Exception; }
     public static void main(String[] args)throws Exception {
         test("ordinary installed package",()->new Fixture().select());
+        test("export scope hashes once and does not cache across operations",()-> {
+            Fixture f=new Fixture();SelectedRootGame selected=f.select();int before=PackageTrust.hashCalls;
+            try(AutoCloseable scope=f.resolver.exportScope(selected)) { }
+            check(PackageTrust.hashCalls-before==1,"one complete application-side APK verification");
+            try(AutoCloseable scope=f.resolver.exportScope(selected)) { }
+            check(PackageTrust.hashCalls-before==2,"new operation rehashes");
+        });
+        test("export exit rejects package replacement timestamp",()-> {
+            Fixture f=new Fixture();AutoCloseable scope=f.resolver.exportScope(f.select());
+            f.info.lastUpdateTime++;reject(scope::close);
+        });
+        test("export exit rejects UID and installed path changes",()-> {
+            Fixture f=new Fixture();AutoCloseable scope=f.resolver.exportScope(f.select());
+            f.info.applicationInfo.uid++;reject(scope::close);
+            Fixture other=new Fixture();AutoCloseable next=other.resolver.exportScope(other.select());
+            other.info.applicationInfo.sourceDir=SPLIT;PackageTrust.contents.put(SPLIT,new byte[]{1});reject(next::close);
+        });
+
+        if(args.length==1 && args[0].equals("export-scope-only")){System.out.println("Root export scope checks passed: "+checks);return;}
         test("declared shared UID with one installed member",()-> {
             Fixture f=new Fixture();f.info.sharedUserId="io.github.xyz1001.pdsync.shared.gdc5b5819";
             check(f.select().uid==10042,"Selected actual shared UID");

@@ -152,6 +152,15 @@ data class HistoryPresentation(
    * Off-page endpoints are omitted. Content equality alone never creates a cloud ancestry edge.
    */
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
+   state.simple?.let {simple->
+    val ordered=simple.nodes.distinctBy {it.hashId}
+    val all=ordered.mapIndexed {row,node->HistoryNode(node.hashId,node.hashId,node.name.ifBlank {CoreMessages.SAVE_1_S.text(node.hashId.take(6))},"","",if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),0,row,selectable=true,cloudHead=node.hashId==simple.latest)}.toMutableList()
+    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(simple.currentId==simple.latest)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,ordered.indexOfFirst {it.hashId==simple.currentId}.coerceAtLeast(0),dirty=simple.currentId!=simple.latest)
+    val pages=maxOf(1,(maxOf(1,ordered.size)+PAGE_SIZE-1)/PAGE_SIZE);val page=requestedPage.coerceIn(0,pages-1)
+    val shown=all.filter {it.row/PAGE_SIZE==page}.map {it.copy(row=it.row%PAGE_SIZE)};val ids=shown.map {it.id}.toSet()
+    val edges=ordered.mapNotNull {n->n.parentId?.takeIf {it in ids && n.hashId in ids}?.let {HistoryEdge(it,n.hashId)}}
+    return HistoryPresentation(shown,edges,page,pages,maxOf(1,shown.maxOfOrNull {it.row+1}?:1),ordered.size,simple.currentId==null)
+   }
    data class TimedNode(val node: HistoryNode, val instant: Instant?)
    val groups = cloudGroups(state)
    val allCloud = groups.map { it.representative }

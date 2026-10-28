@@ -12,7 +12,12 @@ import kotlin.io.path.*
 
 @Serializable data class Manifest(val schema: Int = 1, val game: String, val profile: String, val version: String, val id: String, val parent: String?, val sha256: String, val files: Map<String,String>, val saveVersions: SaveVersions? = null, val metadata: SnapshotMetadata? = null, val directoryMetadata: DirectorySnapshotMetadata? = null, val gameSource: GameSaveSource? = null, val gamePackage: String? = null)
 val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
-fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+fun hash(bytes: ByteArray):String {
+ val digest=MessageDigest.getInstance("SHA-256").digest(bytes)
+ val digits="0123456789abcdef";val encoded=CharArray(digest.size*2)
+ for(i in digest.indices) {val n=digest[i].toInt() and 255;encoded[i*2]=digits[n ushr 4];encoded[i*2+1]=digits[n and 15]}
+ return String(encoded)
+}
 interface GameAdapter {
  val id: String
  /** The actual game package is shared by desktop and Android; provenance does not name a family. */
@@ -47,15 +52,20 @@ data class Snapshot(val manifest: Manifest, val zip: ByteArray)
 class VerifiedSnapshot private constructor(
  val snapshot: Snapshot,
  internal val entries: Map<String, ByteArray>,
- private val source:VerifiedSnapshot?=null
+ private val source:VerifiedSnapshot?=null, private val knownVersions:SaveVersions?=null
 ) {
  val byteCount: Long = entries.values.sumOf { it.size.toLong() }
- internal val saveVersions: SaveVersions by lazy { source?.saveVersions ?: ShatteredVersions.detect(entries) }
+ internal val saveVersions: SaveVersions by lazy { source?.saveVersions ?: knownVersions ?: ShatteredVersions.detect(entries) }
  internal fun withManifest(manifest:Manifest):VerifiedSnapshot {
   require(manifest.files==snapshot.manifest.files && manifest.sha256==snapshot.manifest.sha256)
   return VerifiedSnapshot(snapshot.copy(manifest=manifest),entries,this)
  }
  companion object {
+  /** Upload assumes intact save bytes; retain known metadata, parse only when needed. */
+  internal fun knownArchive(snapshot:Snapshot,adapter:GameAdapter):VerifiedSnapshot =
+   if(snapshot.manifest.saveVersions!=null)VerifiedSnapshot(snapshot,emptyMap(),knownVersions=snapshot.manifest.saveVersions)
+   else VerifiedSnapshot(snapshot,Snapshots.readArchive(snapshot,adapter,false))
+  internal fun captured(snapshot:Snapshot,entries:Map<String,ByteArray>)=VerifiedSnapshot(snapshot,entries)
   internal fun read(snapshot: Snapshot, adapter: GameAdapter): VerifiedSnapshot =
    VerifiedSnapshot(snapshot, Snapshots.verify(snapshot, adapter))
  }
@@ -160,14 +170,15 @@ object Snapshots {
   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { require("$it/game.dat" in files) { CoreValidationMessages.INCOMPLETE_RUN.text(it) } }
   return files
  }
- fun verify(snapshot: Snapshot, adapter: GameAdapter): Map<String, ByteArray> {
+ fun verify(snapshot: Snapshot, adapter: GameAdapter): Map<String, ByteArray> = DiagnosticTiming.measure(DiagnosticPhase.SNAPSHOT_VERIFY) {readArchive(snapshot,adapter,true)}
+ internal fun readArchive(snapshot:Snapshot,adapter:GameAdapter,verifyContent:Boolean):Map<String,ByteArray> {
   require(snapshot.zip.size <= MAX_SNAPSHOT_BYTES && snapshot.manifest.files.size <= MAX_SNAPSHOT_FILES)
   require(snapshot.manifest.schema == 1 && adapter.acceptsManifest(snapshot.manifest))
   snapshot.manifest.gameSource?.validated()
   snapshot.manifest.gamePackage?.let(::requireGamePackage)
   snapshot.manifest.metadata?.validated(snapshot.manifest.files.keys)
   snapshot.manifest.directoryMetadata?.validated(snapshot.manifest.files)
-  require(hash(snapshot.zip) == snapshot.manifest.sha256) { CoreValidationMessages.ARCHIVE_CHECKSUM_MISMATCH.text() }
+  if(verifyContent)require(hash(snapshot.zip) == snapshot.manifest.sha256) { CoreValidationMessages.ARCHIVE_CHECKSUM_MISMATCH.text() }
   val files = mutableMapOf<String, ByteArray>(); var total = 0L; val portableNames = mutableSetOf<String>()
   ZipInputStream(snapshot.zip.inputStream()).use { zip -> while(true) {
    val entry = zip.nextEntry ?: break; val name = entry.name
@@ -178,7 +189,7 @@ object Snapshots {
    while(true) { val n = zip.read(buffer); if(n < 0) break; total += n; require(total <= MAX_SNAPSHOT_BYTES); out.write(buffer,0,n) }
    files[name] = out.toByteArray()
   } }
-  require(files.mapValues { hash(it.value) } == snapshot.manifest.files) { CoreValidationMessages.FILE_CHECKSUM_MISMATCH.text() }
+  if(verifyContent)require(files.mapValues { hash(it.value) } == snapshot.manifest.files) { CoreValidationMessages.FILE_CHECKSUM_MISMATCH.text() }
   files.keys.filter { it.startsWith("game") }.map { it.substringBefore('/') }.distinct().forEach { require("$it/game.dat" in files) }
   return files
  }

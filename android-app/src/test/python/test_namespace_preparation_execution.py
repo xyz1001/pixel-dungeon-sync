@@ -46,6 +46,7 @@ public class MainActivity {
         static class ConnectionStatus {
             final boolean success; ConnectionStatus(boolean value) { success = value; }
             boolean isSuccess() { return success; }
+            void requireSuccess(String message) throws IOException { if(!success)throw new IOException(message); }
         }
         int connects; boolean success = true; Action hook = () -> {};
         ConnectionStatus connect() throws Exception { connects++; hook.run(); return new ConnectionStatus(success); }

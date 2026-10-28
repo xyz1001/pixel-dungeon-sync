@@ -20,7 +20,8 @@ class AndroidSyncFacade internal constructor(
  workspaceRoot: Path, private val connection: AndroidConnection, private val bridge: AndroidGameBridge,
  val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?, private val quietMillis: Long,
  private val controlledSessions:AndroidControlledSessions=sharedControlledSessions,
- private val beforeRequest:WebDavRequestCheck=WebDavRequestCheck {}
+ private val beforeRequest:WebDavRequestCheck=WebDavRequestCheck {},
+ private val suppliedSimpleStore:SimpleSaveStore?=null
 ) {
  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
   this(root,connection,bridge,identity,null,0)
@@ -52,26 +53,34 @@ class AndroidSyncFacade internal constructor(
    override fun writeDeletion(id:String,bytes:ByteArray) {verifiedTarget();delegate.writeDeletion(id,bytes)}
   }
  }
+ private var simpleCurrentName:String?=null
+ private val simpleEnabled get()=suppliedStore==null || suppliedSimpleStore!=null
+ private val simpleTransport by lazy {AppendOnlyWebDav(validatedConnection.endpoint,adapter.id,config.profile,connection.username,connection.password,beforeRequest=beforeRequest)}
+ private val simpleStore by lazy {suppliedSimpleStore ?: simpleTransport.simpleStore()}
+ private val simpleSync by lazy {SimpleSaveSync(simpleStore,workspace.resolve("baseline-hash"))}
+ internal data class SimpleObservation(val files:Map<String,String>,val latest:String?,val nodes:List<SaveNode>)
  private val session by lazy { AppendProfileSession(config,state,adapter,versions,quietMillis) { "Android" } }
  private val mirrorStopped:()->Boolean={verifiedTarget();true}
 
- class ConnectionStatus(val isSuccess:Boolean,val message:String,val hasRemote:Boolean)
+ class ConnectionStatus(val isSuccess:Boolean,val message:String,val hasRemote:Boolean,private val diagnosticFailure:DiagnosticFailure=DiagnosticFailure.OTHER) {
+  fun requireSuccess(failureMessage:String) {if(!isSuccess)throw ConnectionDiagnosticException(failureMessage,diagnosticFailure)}
+ }
  class Version(val snapshotId:String,val commitId:String?,val displayName:String,val versionSummary:String,val fileCount:Int,val capturedAt:String?,val deviceLabel:String?,val isTip:Boolean,val reason:String) {
   override fun toString()=CoreMessages.ANDROID_1_S_2_S_FILES_3_S.text(displayName, fileCount, versionSummary)
  }
- class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null,internal val homeObservation:HomeReadContext?=null) {
+ class Inspection internal constructor(internal val owner:Any,internal val comparison:OnboardingComparison?,val kind:String,val message:String,val localFileCount:Int,remoteVersions:List<Version>,val isRetryablePending:Boolean,val canAdoptRemote:Boolean,val needsRestoreRecovery:Boolean,internal val blockReason:SyncBlockReason?=comparison?.blockReason,internal val history:SyncHistory?=null,internal val homeObservation:HomeReadContext?=null,internal val simpleObservation:SimpleObservation?=null) {
   val remoteVersions=immutable(remoteVersions)
   /** Bind overwrite to the sole non-local cloud tip; never choose an arbitrary sibling. */
-  val overwriteTargetSnapshotId:String? get()=comparison?.let { c ->
+  val overwriteTargetSnapshotId:String? get()=simpleObservation?.latest ?: comparison?.let { c ->
    c.graph?.let { g -> cloudOverwriteSelection(g,c.baselineId,c.localFiles)?.let {g.commits.getValue(it.target).snapshot.id} }
   }
-  val isOverwriteConflict:Boolean get()=comparison?.let { c -> c.graph?.let {uploadNeedsOverwrite(it,c.baselineId,c.localFiles)} }==true
+  val isOverwriteConflict:Boolean get()=if(simpleObservation!=null) kind=="BRANCHED" else comparison?.let { c -> c.graph?.let {uploadNeedsOverwrite(it,c.baselineId,c.localFiles)} }==true
   /** Closed, non-identifying reason for diagnostic adapters; never expose the comparison payload. */
   fun diagnosticBlockReason():String? = blockReason?.name
-  val isObjectVerified get()=comparison?.graph!=null && comparison.verification==RemoteVerification.OBJECTS_VERIFIED
+  val isObjectVerified get()=simpleObservation!=null || comparison?.graph!=null && comparison.verification==RemoteVerification.OBJECTS_VERIFIED
   val canAutoUpload get()=isObjectVerified && !needsRestoreRecovery && comparison?.let(AutomaticUploadEligibility::allows)==true
-  val canCompleteWithoutTransfer get()=isObjectVerified && !needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.BOTH_EMPTY || it.kind==OnboardingKind.IDENTICAL && it.baselineLineage==OnboardingLineage.SAME_TIP }==true
-  val canKeepLocalProgress get()=isObjectVerified && !needsRestoreRecovery && comparison?.let(::keepsLocalProgress)==true
+  val canCompleteWithoutTransfer get()=if(simpleObservation!=null)kind in setOf("IDENTICAL","BOTH_EMPTY") else isObjectVerified && !needsRestoreRecovery && comparison?.let { it.kind==OnboardingKind.BOTH_EMPTY || it.kind==OnboardingKind.IDENTICAL && it.baselineLineage==OnboardingLineage.SAME_TIP }==true
+  val canKeepLocalProgress get()=if(simpleObservation!=null)kind=="DIFFERENT" else isObjectVerified && !needsRestoreRecovery && comparison?.let(::keepsLocalProgress)==true
  }
  class OperationResult @JvmOverloads constructor(val message:String,val isConflict:Boolean,val isPending:Boolean,val snapshotId:String?,
   val refreshedInspection:Inspection?=null,val configurationComplete:Boolean=false)
@@ -87,6 +96,7 @@ class AndroidSyncFacade internal constructor(
  fun testConnection()=connectionCheck(false)
  fun connect()=connectionCheck(true)
  private fun connectionCheck(create:Boolean)=locked {
+  if(simpleEnabled) {if(create && suppliedSimpleStore==null)simpleTransport.ensureSimpleNamespace();return@locked ConnectionStatus(true,CoreMessages.ANDROID_CONNECTION_VERIFIED.text(),simpleStore.latest()!=null)}
   if(suppliedStore!=null) {
    require(!create){CoreMessages.ANDROID_NAMESPACE_CREATION_REQUIRES_THE_WEBDAV_TRANSPORT.text()}
    val graph=AppendRepository(state.resolve("connection-probe"),adapter,config.profile).discover(store).also {it.requireSettled()}
@@ -96,7 +106,7 @@ class AndroidSyncFacade internal constructor(
    val setup=ConnectionSetup(transportConfig,adapter.id,beforeRequest=beforeRequest);setup.update(transportConfig,connection.password)
    when(val result=if(create)setup.connect() else setup.testConnection()) {
     is ConnectionTestResult.Success -> ConnectionStatus(true,if(create)CoreMessages.ANDROID_WEBDAV_CONNECTED_THE_SYNC_FOLDERS_ARE_READY.text() else CoreMessages.ANDROID_WEBDAV_CONNECTION_VERIFIED.text(),result.hasRemote)
-    is ConnectionTestResult.Failure -> ConnectionStatus(false,result.message,false)
+    is ConnectionTestResult.Failure -> ConnectionStatus(false,result.message,false,result.diagnosticFailure)
    }
   }
  }
@@ -135,6 +145,7 @@ class AndroidSyncFacade internal constructor(
  class HomeReadResult internal constructor(internal val context:HomeReadContext,internal val remote:pdsync.HomeReadResult)
  /** Short serialized capture; unsupported backends explicitly retain the old serialized path. */
  fun captureHomeReadContext():HomeReadContext?=locked(mutation=false) {
+  if(simpleEnabled)return@locked null
   if(anyUnresolvedRestore())return@locked null
   val proof=controlledSessions.beginExport(base,workspace)
   try {
@@ -181,9 +192,96 @@ class AndroidSyncFacade internal constructor(
   context.use { return requireNotNull(acceptHomeObservation(readHomeRemote(it))) { CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text() } }
  }
  /** Memory-only publication stamp; any completed serialized operation invalidates older reads. */
+ fun inspectHomeHistory():Inspection=locked {
+  val current=if(simpleEnabled)inspectSimple() else inspectLocked(metadataOnly=true)
+  if(!simpleEnabled)return@locked current
+  val observed=requireNotNull(current.simpleObservation)
+  simpleInspection(observed.files,observed.latest,simpleNodes(observed.latest,observed.nodes))
+ }
  fun observationGeneration():Long=mutationEpoch.get()
  fun beginHomeReadIdentityScope():AutoCloseable=bridge.beginHomeReadIdentityScope()
+ private fun simpleNodes(latest:String?,known:List<SaveNode> = emptyList()):List<SaveNode> {
+  val result=mutableListOf<SaveNode>();val seen=hashSetOf<String>();var next=latest
+  while(next!=null) {
+   require(seen.add(next) && seen.size<=MAX_COMMITS)
+   val node=known.firstOrNull {it.hashId==next} ?: requireNotNull(simpleStore.node(next)){"Save metadata is missing"}
+   result+=node;next=node.parentId
+  };return result
+ }
+ private fun simpleInspection(files:Map<String,String>,latest:String?,nodes:List<SaveNode>,summary:SaveSummary?=null):Inspection {
+  val id=files.takeIf {it.isNotEmpty()}?.let(::contentSha256);val baseline=simpleSync.baseline()
+  val kind=when {id==null && latest==null->"BOTH_EMPTY";id==null->"REMOTE_ONLY";latest==null->"LOCAL_ONLY";id==latest->"IDENTICAL";baseline==latest->"DIFFERENT";else->"BRANCHED"}
+  val message=when(kind){"IDENTICAL"->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVE_BYTES_MATCH.text();"BOTH_EMPTY"->CoreMessages.ANDROID_NO_LOCAL_OR_CLOUD_SAVES_WERE_FOUND.text();"LOCAL_ONLY"->CoreMessages.ANDROID_ONLY_THIS_DEVICE_HAS_SAVES_UPLOAD_PRESERVES_THEM_IN_THE_CLOUD.text();else->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVES_DIFFER_REVIEW_VERSIONS_BEFORE_RESTORING_OR_MERGING.text()}
+  val history=SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline,files,simpleCurrentName.orEmpty(),summary,nodes.associate {it.hashId to it.name},simple=SimpleHistory(nodes,latest,id))
+  val remote=nodes.filter {it.hashId==latest}.map {Version(it.hashId,it.hashId,it.name,"",0,null,null,true,CoreMessages.CLOUD_HISTORY.text())}
+  return Inspection(owner,null,kind,message,files.size,remote,false,latest!=null,false,history=history,simpleObservation=SimpleObservation(files,latest,nodes))
+ }
+ private fun inspectSimple():Inspection {
+  requireNoRecovery();val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget())
+  try {
+   val observation=bridge.readSnapshot()
+   val files=observation?.files ?: freshVerifiedExport {it.snapshot.manifest.files}
+   val latest=simpleStore.latest();return simpleInspection(files,latest,latest?.let {listOf(requireNotNull(simpleStore.node(it)))} ?: emptyList())
+  }finally{if(own)uploadTarget.remove()}
+ }
+ private fun uploadSimple(inspection:Inspection?,confirmed:String?=null):OperationResult {
+  requireNoRecovery();if(inspection!=null)require(inspection.owner===owner)
+  val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget())
+  try {
+   var files=emptyMap<String,String>();var summary:SaveSummary?=null
+   val result=simpleSync.upload({beforeRequest.check()},{
+    verifiedTarget()
+    val archive=DiagnosticTiming.measure(DiagnosticPhase.SAVE_EXPORT) {bridge.exportArchive()}
+    verifiedTarget()
+    val payload=if(archive!=null) DiagnosticTiming.measure(DiagnosticPhase.LOCAL_EXPORT_VERIFY) {
+     val parsed=AndroidArchiveSnapshot.read(archive,adapter)
+     val detected=versions.detectVerifiedEntries(parsed.entries)
+     summary=SaveSummary.fromArchiveEntries(parsed.entries,parsed.modified,detected)
+     SaveUpload(parsed.files,archive,"")
+    } else freshVerifiedExport {exported->
+     summary=SaveSummary.readVerified(exported.root,exported.entries)
+     SaveUpload(exported.snapshot.manifest.files,exported.snapshot.zip,"")
+    }
+    files=payload.files;require(files.isNotEmpty())
+    val name=simpleCurrentName ?: inspection?.simpleObservation?.nodes?.firstOrNull {it.hashId==simpleSync.baseline()}?.name ?: CoreMessages.SAVE_1_S.text(contentSha256(files).take(6))
+    payload.copy(name=name)
+   },confirmed,{if(Thread.currentThread().isInterrupted)throw InterruptedException()})
+   return when(result) {
+    is SaveUploadResult.Conflict -> {
+     val node=requireNotNull(simpleStore.node(result.latest));val view=simpleInspection(files,result.latest,listOf(node),summary)
+     OperationResult(view.message,true,false,null,view,false)
+    }
+    is SaveUploadResult.Complete -> {
+     val nodes=listOf(result.node)+inspection?.simpleObservation?.nodes.orEmpty().filter {it.hashId!=result.node.hashId}
+     val view=simpleInspection(files,result.node.hashId,nodes,summary)
+     OperationResult(if(result.uploaded)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text() else CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,result.node.hashId,view,true)
+    }
+   }
+  }finally{if(own)uploadTarget.remove()}
+ }
+ private fun restoreSimple(inspection:Inspection,id:String):OperationResult {
+  requireNoRecovery();require(inspection.owner===owner);val observed=requireNotNull(inspection.simpleObservation)
+  require(observed.nodes.any {it.hashId==id})
+  val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget())
+  try {
+   val zip=simpleStore.objectBytes(id);val entries=linkedMapOf<String,ByteArray>()
+   java.util.zip.ZipInputStream(zip.inputStream()).use {input->while(true){
+    val entry=input.nextEntry ?: break;if(entry.isDirectory)continue
+    require(safePath(entry.name) && adapter.includes(entry.name) && !isDirectoryMetadata(entry.name) && entry.name !in entries)
+    val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192);while(true){val count=input.read(buffer);if(count<0)break;require(output.size()+count<=MAX_SNAPSHOT_BYTES);output.write(buffer,0,count)};val bytes=output.toByteArray()
+    entries[entry.name]=bytes;require(entries.size<=MAX_SNAPSHOT_FILES && entries.values.sumOf {it.size.toLong()}<=MAX_SNAPSHOT_BYTES)
+   }}
+   versions.detectVerifiedEntries(entries);val files=entries.mapValues {hash(it.value)}
+   val snapshot=Snapshot(Manifest(game=adapter.id,profile=config.profile,version=CoreMessages.ANDROID_ANDROID_SAVE_EXPORT.text(),id=id,parent=null,sha256=hash(zip),files=files),zip)
+   val before=freshVerifiedExport {it.snapshot.manifest.files}
+   requireNotNull(bridge.restoreVerified(snapshot,before)){"Verified restore is unsupported"};simpleSync.acceptBaseline(id)
+   val view=simpleInspection(files,observed.latest,observed.nodes)
+   return OperationResult(CoreMessages.ANDROID_GAME_RESTORE_VERIFIED_ANY_FROZEN_UPLOAD_REMAINS_AVAILABLE_FOR_EXPLICIT_RETRY.text(),false,false,id,view,true)
+  }finally{if(own)uploadTarget.remove()}
+ }
+
  private fun inspectLocked(metadataOnly:Boolean=false):Inspection {
+  if(simpleEnabled)return inspectSimple()
   if(anyUnresolvedRestore()) return Inspection(owner,null,"BLOCKED",CoreMessages.ANDROID_A_GAME_RESTORE_NEEDS_VERIFICATION_OR_RECOVERY_UPLOAD_IS_BLOCKED_UNTIL_IT_IS_RESOLVED.text(),currentFiles().size,emptyList(),false,false,true,SyncBlockReason.RESTORE_RECOVERY_REQUIRED)
   // DEX order: refresh first, then compare the same mirror observation.
   val homeLocal=refreshMirror(metadataOnly)
@@ -198,13 +296,14 @@ class AndroidSyncFacade internal constructor(
   return try {
    if(comparison.verification==RemoteVerification.OBJECTS_VERIFIED)comparison.remoteEntries.forEach { versions.detect(session.loadSnapshot(it.commit.snapshot.id)) }
    val history=if(comparison.kind==OnboardingKind.BLOCKED)null else if(homeLocal!=null)session.syncHistory(comparison,homeLocal.files,homeLocal.summary) else session.syncHistory(comparison)
-   Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: if(comparison.verification==RemoteVerification.METADATA_ONLY)CoreMessages.CLOUD_HISTORY.text() else description(comparison),currentFiles().size,remote,comparison.retryablePending || session.hasOverwritePending(),comparison.canAdoptRemote,false,history=history)
+   Inspection(owner,comparison,comparison.kind.name,comparison.blocker ?: if(comparison.verification==RemoteVerification.METADATA_ONLY)CoreMessages.CLOUD_HISTORY.text() else description(comparison),(session.uploadReceiptFiles() ?: currentFiles()).size,remote,comparison.retryablePending || session.hasOverwritePending(),comparison.canAdoptRemote,false,history=history)
   } catch(e:UnsupportedAndroidSaveFormatException) {
    Inspection(owner,null,"BLOCKED",e.message ?: CoreMessages.ANDROID_UNSUPPORTED_CLOUD_SAVE_FORMAT.text(),currentFiles().size,remote,false,false,false,SyncBlockReason.UNSUPPORTED_SAVE_FORMAT)
   }
  }
 
  fun autoUpload():AutoUploadResult=locked {
+  if(simpleEnabled) {val result=uploadSimple(null);return@locked AutoUploadResult(if(result.isConflict)"SKIPPED_CONFLICT" else "UPLOADED",result.message,result.snapshotId,result.isConflict)}
   if(session.hasOverwritePending())return@locked autoBlocked("SKIPPED_PENDING",SyncBlockReason.PENDING_UPLOAD,true)
   try {
    var inspection=inspectLocked()
@@ -243,24 +342,28 @@ class AndroidSyncFacade internal constructor(
  }
  private fun autoBlocked(status:String,reason:SyncBlockReason,needsChoice:Boolean)=AutoUploadResult(status,reason.safeMessage,null,needsChoice,reason)
  fun upload(inspection:Inspection):OperationResult=uploadReadLocked {
+  if(simpleEnabled)return@uploadReadLocked uploadSimple(inspection)
   if(session.hasOverwritePending())return@uploadReadLocked overwriteCloudSuccessorsLocked(inspection,"")
+  val ownTarget=uploadTarget.get()==null
+  if(ownTarget)uploadTarget.set(verifiedTarget())
+  try {
   val comparison=presentationChecked(inspection)
-  val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {fresh->
-   // Restore the metadata-home format gate using snapshots already verified by this preflight.
-   fresh.remoteEntries.forEach {versions.detect(session.loadSnapshot(it.commit.snapshot.id))}
-   checkActualUnchanged(comparison.localFiles)
+  val (result,completed)=session.uploadFresh(comparison,store,mirrorStopped) {fresh,proofs->
+   fresh.remoteEntries.forEach {entry->
+    val proof=proofs[entry.commit.id]
+    if(proof!=null)versions.detect(proof) else versions.detect(session.loadSnapshot(entry.commit.snapshot.id))
+   }
   }
-  // A fresh game read after remote completion preserves the existing post-upload safety check.
-  val rendered=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_REFRESH) {
-   checkActualUnchanged(completed.localFiles)
-   inspectionFromComparison(completed)
-  }
+  // The user-selected optimistic upload uses its fixed export receipt; no second device read.
+  val rendered=inspectionFromComparison(completed)
   val outcome=pushResult(result)
   OperationResult(outcome.message,outcome.isConflict,outcome.isPending,outcome.snapshotId,rendered,
    !outcome.isConflict && !outcome.isPending && completed.kind==OnboardingKind.IDENTICAL && completed.baselineLineage==OnboardingLineage.SAME_TIP)
+  } finally { if(ownTarget)uploadTarget.remove() }
  }
 
  fun listVersions():List<Version> = locked {
+  if(simpleEnabled){val latest=simpleStore.latest();return@locked simpleNodes(latest).map {Version(it.hashId,it.hashId,it.name,"",0,null,null,it.hashId==latest,CoreMessages.CLOUD_HISTORY.text())}}
   requireNoRecovery();verifiedTarget();session.readRemote(store)
   val history=session.syncHistory();val cloud=history.cloud.map {version(it,it.id in history.graph.tips,CoreMessages.ANDROID_VERIFIED_CLOUD_HISTORY.text())};val ids=cloud.map {it.snapshotId}.toSet()
   immutable(cloud+session.history().filter {it.manifest.id !in ids}.map {version(it.manifest,null,false,it.reason)})
@@ -273,6 +376,7 @@ class AndroidSyncFacade internal constructor(
   restoreOtherSelection(inspection,snapshotId,allowUniqueReplacement,true)
  }
  private fun restoreOtherSelection(inspection:Inspection,snapshotId:String,allowUniqueReplacement:Boolean,readOnly:Boolean):OperationResult {
+  if(simpleEnabled)return restoreSimple(inspection,snapshotId)
   val observed=presentationChecked(inspection)
   val before=inspection.homeObservation?.materializedReceipt ?: checkActualUnchanged(observed.localFiles)
   val selection=session.prepareSelectedRestore(observed,snapshotId,store,allowUniqueReplacement,readOnly,mirrorStopped)
@@ -325,6 +429,7 @@ class AndroidSyncFacade internal constructor(
  }
  fun overwriteCloudSuccessors(inspection:Inspection,snapshotId:String)=uploadReadLocked {overwriteCloudSuccessorsLocked(inspection,snapshotId)}
  private fun overwriteCloudSuccessorsLocked(inspection:Inspection,snapshotId:String):OperationResult {
+  if(simpleEnabled) {require(snapshotId==inspection.simpleObservation?.latest);return uploadSimple(inspection,snapshotId)}
   val observed=presentationChecked(inspection)
   val completed=session.overwriteCloudSuccessors(observed,snapshotId,store,mirrorStopped) {fresh->
    fresh.remoteEntries.forEach {versions.detect(session.loadSnapshot(it.commit.snapshot.id))}
@@ -361,21 +466,25 @@ class AndroidSyncFacade internal constructor(
  /** Standalone refresh explicitly creates a new observation. Use overload for an existing UI. */
  fun historyPresentation():SyncHistory=locked {val inspection=inspectLocked(metadataOnly=true);requireNotNull(inspection.history){inspection.message}}
  fun historyPresentation(inspection:Inspection):SyncHistory=locked(mutation=false) {
+  if(simpleEnabled){require(inspection.owner===owner);return@locked requireNotNull(inspection.history)}
   if(inspection.homeObservation!=null)validateHomePresentation(inspection) else presentationChecked(inspection)
   requireNotNull(inspection.history){inspection.message}
  }
  fun verifyHomeInspection(inspection:Inspection):Inspection=locked {
+  if(simpleEnabled){require(inspection.owner===owner);return@locked inspection}
   val c=checked(inspection);checkActualUnchanged(c.localFiles)
   val verified=inspectionFromComparison(c)
   require(verified.isObjectVerified && verified.kind!="BLOCKED"){verified.message};verified
  }
- fun completeOnboarding(inspection:Inspection)=locked {val c=checked(inspection);checkActualUnchanged(c.localFiles);if(keepsLocalProgress(c))session.confirmLocalProgressReady(c,store,mirrorStopped) else session.confirmOnboardingReady(c,store,mirrorStopped)}
- fun renameCurrent(inspection:Inspection,name:String)=locked {checkActualUnchanged(checked(inspection).localFiles);session.renameCurrent(name,mirrorStopped)}
- fun renameHistory(snapshotId:String,name:String)=locked {requireNoRecovery();verifiedTarget();session.renameHistory(snapshotId,name)}
+ fun completeOnboarding(inspection:Inspection)=locked {if(simpleEnabled){require(inspection.owner===owner);return@locked Unit};val c=checked(inspection);checkActualUnchanged(c.localFiles);if(keepsLocalProgress(c))session.confirmLocalProgressReady(c,store,mirrorStopped) else session.confirmOnboardingReady(c,store,mirrorStopped)}
+ fun renameCurrent(inspection:Inspection,name:String)=locked {if(simpleEnabled){require(inspection.owner===owner);simpleCurrentName=sanitizeSnapshotName(name);val observed=requireNotNull(inspection.simpleObservation);val id=contentSha256(observed.files);observed.nodes.find {it.hashId==id}?.let {simpleStore.rename(it.copy(name=requireNotNull(simpleCurrentName)))};return@locked Unit};checkActualUnchanged(checked(inspection).localFiles);session.renameCurrent(name,mirrorStopped)}
+ fun renameHistory(snapshotId:String,name:String)=locked {if(simpleEnabled){val node=requireNotNull(simpleStore.node(snapshotId));simpleStore.rename(node.copy(name=sanitizeSnapshotName(name)));return@locked Unit};requireNoRecovery();verifiedTarget();session.renameHistory(snapshotId,name)}
 
- fun renameHistory(inspection:Inspection,snapshotId:String,name:String)=locked {presentationChecked(inspection);session.renameHistory(snapshotId,name,requireNotNull(inspection.history){inspection.message})}
+ fun renameHistory(inspection:Inspection,snapshotId:String,name:String)=locked {if(simpleEnabled){require(inspection.owner===owner);val node=requireNotNull(inspection.simpleObservation?.nodes?.find {it.hashId==snapshotId});simpleStore.rename(node.copy(name=sanitizeSnapshotName(name)));return@locked Unit};presentationChecked(inspection);session.renameHistory(snapshotId,name,requireNotNull(inspection.history){inspection.message})}
 
- private fun verifiedTarget():AndroidGameTarget=DiagnosticTiming.measure(DiagnosticPhase.IDENTITY_VERIFICATION) {
+ // Scoped to this synchronous locked upload. Root RPC still validates package/user/path.
+ private val uploadTarget=ThreadLocal<AndroidGameTarget>()
+ private fun verifiedTarget():AndroidGameTarget=uploadTarget.get() ?: DiagnosticTiming.measure(DiagnosticPhase.IDENTITY_VERIFICATION) {
   val target=bridge.targetGame()
   if(target.identity!=identity){controlledSessions.cancel(base);throw AndroidTargetChangedException(CoreMessages.ANDROID_SELECTED_GAME_IDENTITY_OR_CLOUD_BINDING_CHANGED_REOPEN_THAT_GAME_AND_COMPARE_AGAIN.text())}
   if(pinnedTarget!=null && pinnedTarget!=target){controlledSessions.cancel(base);throw AndroidTargetChangedException(CoreMessages.ANDROID_THE_SELECTED_INSTALLED_APK_CHANGED_DURING_THIS_SYNC_SESSION_REOPEN_THE_GAME_SELECTION_AND.text())}
@@ -419,7 +528,7 @@ class AndroidSyncFacade internal constructor(
   val c=requireNotNull(inspection.comparison){CoreMessages.ANDROID_COMPLETE_A_SAFE_COMPARISON_FIRST.text()}
   materializeHome(inspection)
   verifiedTarget()
-  require(currentFiles()==c.localFiles){CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text()};return c
+  require((session.uploadReceiptFiles() ?: currentFiles())==c.localFiles){CoreMessages.ANDROID_THE_LOCAL_MIRROR_CHANGED_COMPARE_AGAIN.text()};return c
  }
  private fun checked(inspection:Inspection,allowPending:Boolean=false):OnboardingComparison {
   val observed=presentationChecked(inspection)
@@ -501,7 +610,7 @@ class AndroidSyncFacade internal constructor(
    verifiedTarget();DiagnosticTiming.measure(DiagnosticPhase.SAVE_EXPORT) {bridge.exportTo(temp)};verifiedTarget()
    val exported=DiagnosticTiming.measure(DiagnosticPhase.LOCAL_EXPORT_VERIFY) {
     validateExport(temp)
-    val snapshot=capture(temp);val entries=immutableMap(Snapshots.verify(snapshot,adapter))
+    val read=Snapshots.readLocal(temp,adapter);val snapshot=Snapshots.capture(read,adapter,config.profile,CoreMessages.ANDROID_ANDROID_SAVE_EXPORT.text(),null);val entries=immutableMap(read.entries)
     versions.detectVerifiedEntries(entries);VerifiedExport(temp,snapshot,entries)
    }
    return block(exported)
@@ -550,7 +659,7 @@ class AndroidSyncFacade internal constructor(
  }
  private fun requireExportUnchanged(exported:VerifiedExport) {
   validateExport(exported.root)
-  if(Snapshots.fileHashes(exported.root,adapter)!=exported.snapshot.manifest.files)
+  if(uploadTarget.get()==null && Snapshots.fileHashes(exported.root,adapter)!=exported.snapshot.manifest.files)
    throw AndroidSaveChangedException(CoreMessages.ANDROID_ACTUAL_GAME_PROGRESS_CHANGED_SINCE_COMPARISON_COMPARE_AGAIN_NO_GAME_FILES_WERE_REPLACED.text())
  }
  private fun copySaveFiles(source:VerifiedExport,destination:Path) {
@@ -559,12 +668,19 @@ class AndroidSyncFacade internal constructor(
    Files.write(path,bytes,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE)
    Files.setLastModifiedTime(path,Files.getLastModifiedTime(source.root.resolve(name),LinkOption.NOFOLLOW_LINKS))
   }
-  require(Snapshots.fileHashes(destination,adapter)==source.snapshot.manifest.files){CoreMessages.ANDROID_STAGING_COPY_FAILED_CONTENT_VERIFICATION.text()}
+  if(uploadTarget.get()==null)require(Snapshots.fileHashes(destination,adapter)==source.snapshot.manifest.files){CoreMessages.ANDROID_STAGING_COPY_FAILED_CONTENT_VERIFICATION.text()}
  }
  fun <T> withRestoreReadScope(action:Callable<T>):T=store.withReadScope(scratch.resolve("read-cache")) {action.call()}
  /** Freeze object bytes only for this operation; publication still forces fresh reads. */
- fun <T> withUploadReadScope(action:Callable<T>):T=store.withReadScope(scratch.resolve("read-cache")) {action.call()}
- private fun <T> uploadReadLocked(action:()->T):T=locked {store.withReadScope(scratch.resolve("read-cache"),action)}
+ fun <T> withUploadReadScope(action:Callable<T>):T {
+  if(simpleEnabled) {val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget());try{return action.call()}finally{if(own)uploadTarget.remove()}}
+  return store.withReadScope(scratch.resolve("read-cache")) {
+  val ownTarget=uploadTarget.get()==null
+  if(ownTarget)uploadTarget.set(verifiedTarget())
+  try {session.withUploadReceiptScope {action.call()}} finally {if(ownTarget)uploadTarget.remove()}
+ }
+ }
+ private fun <T> uploadReadLocked(action:()->T):T=locked {if(simpleEnabled)action() else session.withUploadReceiptScope {store.withReadScope(scratch.resolve("read-cache"),action)}}
  private fun <T> restoreReadLocked(action:()->T):T=locked {store.withReadScope(scratch.resolve("read-cache"),action)}
  private fun <T> locked(mutation:Boolean=true,action:()->T):T {
   DiagnosticTiming.start(DiagnosticPhase.OPERATION_LOCK_WAIT).use {timing->

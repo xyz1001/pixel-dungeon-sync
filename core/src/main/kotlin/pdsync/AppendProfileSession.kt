@@ -100,6 +100,14 @@ class AppendProfileSession(
   require(observedHistory.graph.commits.values.any {it.snapshot.id==snapshotId}) { CoreSessionMessages.HISTORY_ENTRY_NOT_FOUND.text() }
   SafePaths.atomicWrite(aliasesPath,json.encodeToString(aliases()+(snapshotId to sanitizeSnapshotName(name))).encodeToByteArray())
  }
+ private class UploadReceiptScope(var snapshot:VerifiedSnapshot?=null)
+ private val uploadReceipt=ThreadLocal<UploadReceiptScope>()
+ internal fun <T> withUploadReceiptScope(action:()->T):T {
+  if(uploadReceipt.get()!=null)return action()
+  uploadReceipt.set(UploadReceiptScope())
+  try {return action()} finally {uploadReceipt.remove()}
+ }
+ internal fun uploadReceiptFiles():Map<String,String>?=uploadReceipt.get()?.snapshot?.snapshot?.manifest?.files
  fun syncHistory(): SyncHistory = local.locked { historyView(repository.cachedGraph()) }
  fun syncHistory(observed:SyncHistory):SyncHistory = local.locked {
   require(observed.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
@@ -110,7 +118,7 @@ class AppendProfileSession(
  private fun comparisonHistory(comparison:OnboardingComparison,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory = local.locked {
   require(comparison.owner === comparisonOwner) { CoreSessionMessages.THIS_COMPARISON_BELONGS_TO_A_DIFFERENT_PROFILE_COMPARE_AGAIN.text() }
   require(comparison.kind != OnboardingKind.BLOCKED) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
-  require(repository.baseline()==comparison.baselineId && currentFiles()==comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
+  require(repository.baseline()==comparison.baselineId && (uploadReceiptFiles() ?: currentFiles())==comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   historyView(requireNotNull(comparison.graph),summary)
  }
  fun readHomeHistory(store:AppendStore):SyncHistory = readLocked(store) { historyView(discoverMetadata(store).displayGraph) }
@@ -195,13 +203,14 @@ class AppendProfileSession(
   val commit=graph.commits[old[0]] ?: return null
   return commit.id.takeIf {stamp(commit)==old.joinToString(" ")}
  }
- private fun historyView(graph:CommitGraph,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory {
-  val files=currentFiles();val baseline=repository.baseline()
+ private fun historyView(graph:CommitGraph,summary:Pair<Map<String,String>,SaveSummary?>?=null):SyncHistory = DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_HISTORY_PRESENTATION) {
+  val receipt=uploadReceipt.get()?.snapshot
+  val files=receipt?.snapshot?.manifest?.files ?: currentFiles();val baseline=repository.baseline()
   require(summary==null || summary.first==files) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val transfer=directory.resolve("baseline-transfer.txt")
   val direction=if(SafePaths.checked(transfer).exists())SafePaths.boundedRead(transfer,128).decodeToString().split(' ').takeIf { it.size==2&&it[0]==baseline&&it[1] in setOf("upload","restore") }?.get(1) else null
   val verifiedIds=if(graph.verification==RemoteVerification.OBJECTS_VERIFIED)graph.commits.keys.toSet() else repository.verifiedCommitIds(graph)
-  return SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary==null)runCatching { SaveSummary.read(root) }.getOrNull() else summary.second,aliases(),direction,verifiedIds,comparisonOwner,displayAnchor(graph,files,baseline))
+  SyncHistory(graph,baseline,files,(local.directoryMetadata.read() as? SidecarRead.Valid)?.value?.displayName.orEmpty(),if(summary!=null)summary.second else if(receipt!=null)SaveSummary.fromVerified(receipt) else runCatching { SaveSummary.read(root) }.getOrNull(),aliases(),direction,verifiedIds,comparisonOwner,displayAnchor(graph,files,baseline))
  }
  /** User-selected historical cloud content is downloaded only on an explicit restore action. */
  fun restoreCloudHistory(snapshotId:String,store:AppendStore,allowUniqueReplacement:Boolean,expectedBefore:Map<String,String>?=null,stopped:()->Boolean):RestoreResult {
@@ -306,7 +315,12 @@ class AppendProfileSession(
  private fun noLegacyPending() {
   require(local.legacyPending() == null) { CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_BEFORE.text() }
  }
- private fun discover(store: AppendStore): CommitGraph = repository.discover(store).also {
+ private fun discover(store: AppendStore,retain:Set<String> = emptySet(),proofs:MutableMap<String,VerifiedSnapshot>?=null): CommitGraph = (if(proofs==null)repository.discover(store) else repository.discoverRetaining(store,retain,proofs) {commit->
+  try {local.loadKnownUploadArchive(commit.snapshot.id)}
+  catch(e:java.util.concurrent.CancellationException){throw e}
+  catch(e:java.io.InterruptedIOException){throw e}
+  catch(e:java.nio.file.NoSuchFileException){null}
+ }).also {
   it.requireSettled()
   it.commits.values.snapshotRepresentatives(it.tips)
   repository.baseline()?.let { baseline -> require(baseline in it.commits) { CoreSessionMessages.THE_SYNC_BASELINE_IS_MISSING_OR_UNVERIFIABLE_NO_NEW_ROOT.text() } }
@@ -474,35 +488,39 @@ class AppendProfileSession(
   require(currentFiles() == current) { CoreSessionMessages.SAVES_CHANGED_WHILE_READING_CONFLICTS_EXIT_THE_GAME_AND_TRY.text() }
   return AppendConflict(graph.tips, branches, current, repository.baseline(),cloudOverwriteSelection(graph,repository.baseline(),current)?.let {graph.commits.getValue(it.target).snapshot.id})
  }
- private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean, expected:CommitGraph?=null,uploadDelta:Boolean=false): AppendPushResult {
-  preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
-  val publication=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PUBLISH) {repository.publishResult(store,plan,expected)}
+ private fun publish(plan: UploadPlan, store: AppendStore, stopped: () -> Boolean, expected:CommitGraph?=null,uploadDelta:Boolean=false,optimistic:Boolean=false,acknowledgeNew:Boolean=false,verifiedPlan:VerifiedUploadPlan?=null): AppendPushResult {
+  // A new acknowledged upload already has a durable pending ZIP/manifest/marker.
+  // Archive it once after publication; failures retain that exact pending source.
+  if(!acknowledgeNew)preserve(plan, CoreSessionMessages.APPEND_ONLY_SYNC.text(plan.commit.kind))
+  val publication=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PUBLISH) {if(verifiedPlan!=null)repository.publishAcknowledged(store,verifiedPlan,requireNotNull(expected)) else repository.publishResult(store,plan,expected,acknowledgeNew)}
   val commit=publication.commit
   if(publication.reused) {
    // Publication verified the winning object. Its real record (including legacy ID) is returned;
    // reusing content never moves ancestry, adds a parent, or recaptures the current directory.
-   val graph=if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else repository.cachedGraph()
+   val graph=if(optimistic)CommitGraph(requireNotNull(expected).commits+(commit.id to commit),emptyMap(),expected.verification) else if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else repository.cachedGraph()
    graph.requireSettled()
    finishReusedPending(commit,graph,plan)
    return AppendPushResult.Success(commit,currentFiles()!=commit.snapshot.files,graph.tips.singleOrNull()!=commit.id,reused=true)
   }
-  val graph = if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else discover(store)
+  val graph = if(optimistic)CommitGraph(requireNotNull(expected).commits+(commit.id to commit),emptyMap(),expected.verification) else if(uploadDelta)DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DELTA) {repository.discoverUploadDelta(store,requireNotNull(expected),commit)} else discover(store)
   graph.requireSettled()
   require(graph.commits[commit.id]==commit) { CoreSessionMessages.THE_PUBLISHED_COMMIT_IS_NOT_FULLY_VISIBLE_YET_THE_ORIGINAL.text() }
-  val actual=if(hash(plan.zip)==commit.snapshot.sha256)Snapshot(commit.snapshot,plan.zip) else repository.download(store,commit)
-  local.remember(actual, CoreSessionMessages.APPEND_ONLY_SYNC.text(commit.kind), repository.observedAt(commit.id))
-  repository.setBaseline(commit.id, graph)
-  markDirectorySynced(commit,"upload")
+  DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_ARCHIVE) {if(verifiedPlan!=null && commit==verifiedPlan.plan.commit)local.remember(verifiedPlan.verified,CoreSessionMessages.APPEND_ONLY_SYNC.text(commit.kind),repository.observedAt(commit.id))
+  else local.remember(if(hash(plan.zip)==commit.snapshot.sha256)Snapshot(commit.snapshot,plan.zip) else repository.download(store,commit), CoreSessionMessages.APPEND_ONLY_SYNC.text(commit.kind), repository.observedAt(commit.id))
+  }
+  DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_BASELINE) {repository.setBaseline(commit.id, graph)}
+  DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_DIRECTORY_MARK) {markDirectorySynced(commit,"upload")}
   repository.clearPending()
+  if(acknowledgeNew && verifiedPlan!=null)uploadReceipt.get()?.snapshot=verifiedPlan.verified
   return if (graph.tips.size > 1) AppendPushResult.Diverged(preserveConflict(graph, store, stopped))
-   else AppendPushResult.Success(commit, runCatching { currentFiles() != commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != commit.id)
+   else AppendPushResult.Success(commit, if(acknowledgeNew)false else runCatching { currentFiles() != commit.snapshot.files }.getOrDefault(true), graph.tips.singleOrNull() != commit.id)
  }
  /** Content identity is the complete normalized game-file map, never capture/portable metadata.
   * This helper consumes existing object evidence and performs no discovery or object reads. */
  private fun matchingUpload(graph:CommitGraph,files:Map<String,String>):AppendCommit? {
-  if(files.isEmpty() || graph.verification!=RemoteVerification.OBJECTS_VERIFIED || graph.pending.isNotEmpty())return null
+  if(files.isEmpty() || graph.verification==RemoteVerification.METADATA_ONLY || graph.pending.isNotEmpty())return null
   val baseline=repository.baseline()
-  return graph.commits.values.filter {it.snapshot.files==files}
+  return graph.commits.values.filter {it.snapshot.files==files && (graph.verification==RemoteVerification.OBJECTS_VERIFIED || it.id in graph.tips)}
    .sortedWith(compareBy<AppendCommit> {it.id!=baseline}.thenBy {it.id !in graph.tips}.thenBy {it.id}).firstOrNull()
  }
  internal fun hasVerifiedUploadContent(comparison:OnboardingComparison):Boolean {
@@ -788,7 +806,7 @@ class AppendProfileSession(
  private fun compareObservation(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean):OnboardingComparison = try {
   readLocked(store) { compareLocked(store,stopped,metadataOnly) }
  } catch(failure:Exception) { comparisonFailure(failure) }
- private fun compareLocked(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean):OnboardingComparison {
+ private fun compareLocked(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean,retain:Set<String> = emptySet(),proofs:MutableMap<String,VerifiedSnapshot>?=null,uploadMetadata:Boolean=false):OnboardingComparison {
    local.guard(stopped); local.validateRoot()
    val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
    val fingerprint = if(metadataOnly) stability.fingerprint() else stability.awaitStable()
@@ -797,10 +815,12 @@ class AppendProfileSession(
    if (local.legacyPending() != null) return blockedComparison(SyncBlockReason.LEGACY_PENDING_UPLOAD, CoreSessionMessages.A_LEGACY_PENDING_SNAPSHOT_IS_PRESERVED_EXPLICITLY_ARCHIVE_IT_FIRST.text(), fingerprint, baseline)
    val pending = repository.pending()
    // A failed/missing page or object must not become an apparently empty cloud.
-   val graph = if(metadataOnly) DiagnosticTiming.measure(DiagnosticPhase.REMOTE_METADATA) { discoverMetadata(store).displayGraph } else discover(store)
-   val entries = if(metadataOnly) emptyList() else graph.tips.sorted().map { id ->
+   val graph = if(uploadMetadata)repository.discoverUploadMetadata(store) else if(metadataOnly) DiagnosticTiming.measure(DiagnosticPhase.REMOTE_METADATA) { discoverMetadata(store).displayGraph } else discover(store,retain,proofs)
+   val entries = if(metadataOnly || uploadMetadata) emptyList() else graph.tips.sorted().map { id ->
     val commit = graph.commits.getValue(id)
-    AppendRemoteEntry(commit, local.remember(repository.download(store, commit), CoreSessionMessages.INITIAL_COMPARISON_CLOUD_BRANCH_VERIFIED.text(id.take(8)), repository.observedAt(id)))
+    val proof=proofs?.get(id)
+    AppendRemoteEntry(commit,if(proof!=null)HistoryEntry(proof.snapshot.manifest,java.time.Instant.now().toString(),CoreSessionMessages.INITIAL_COMPARISON_CLOUD_BRANCH_VERIFIED.text(id.take(8)),repository.observedAt(id))
+     else local.remember(repository.download(store,commit),CoreSessionMessages.INITIAL_COMPARISON_CLOUD_BRANCH_VERIFIED.text(id.take(8)),repository.observedAt(id)))
    }.distinctBy { it.entry.manifest.id }
    stability.requireUnchanged(fingerprint)
    val lineage = when {
@@ -937,14 +957,28 @@ class AppendProfileSession(
   return AutomaticPushResult.Published(onboardingUpload(comparison, store, stopped))
  }
 
- /** Explicit destructive cloud overwrite; ordinary restore never calls this path. */
+ /** Confirmed keep-local choice appends a successor; it never deletes cloud history. */
  internal fun overwriteCloudSuccessors(comparison:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison = readLocked(store) {
-  overwriteCloudFresh(comparison,compareLocked(store,stopped,false),selectedSnapshot,store,stopped,validate)
+  require(comparison.owner===comparisonOwner)
+  require(!hasOverwritePending() && repository.pending()==null) {CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text()}
+  val fresh=compareLocked(store,stopped,false,uploadMetadata=true)
+  val graph=requireNotNull(fresh.graph);graph.requireSettled()
+  require(fresh.localFiles==comparison.localFiles && graph.tips==comparison.observedTips) {"Conflict changed after confirmation"}
+  val selection=requireNotNull(cloudOverwriteSelection(graph,fresh.baselineId,fresh.localFiles))
+  require(graph.commits.getValue(selection.target).snapshot.id==selectedSnapshot)
+  validate(fresh)
+  val captured=SafePaths.bufferedUploadWrites {local.captureVerified(stopped)}
+  val plan=repository.prepareVerified(captured,graph.tips.sorted(),if(graph.tips.size>1)"resolution" else "snapshot",local.operationMetadata(),persist=false)
+  try {SafePaths.bufferedUploadWrites {publish(plan.plan,store,stopped,graph,optimistic=true,acknowledgeNew=true,verifiedPlan=plan)}}
+  catch(error:Exception) {try {repository.preserveFailedUpload(plan.plan)}catch(save:Exception){error.addSuppressed(save)};throw error}
+  val after=graph.copy(commits=graph.commits+(plan.plan.commit.id to plan.plan.commit))
+  OnboardingComparison(OnboardingKind.IDENTICAL,fresh.localFiles,plan.plan.commit.id,OnboardingLineage.SAME_TIP,
+   emptyList(),after.tips,owner=comparisonOwner,graph=after.copy(verification=RemoteVerification.METADATA_ONLY),localSource=LocalObservationSource.RESTORE_RECEIPT)
  }
  fun overwriteCloudConflict(conflict:AppendConflict,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
-  val fresh=compareLocked(store,stopped,false)
+  val fresh=compareLocked(store,stopped,false,uploadMetadata=true)
   require(fresh.observedTips==conflict.observedTips && fresh.localFiles==conflict.observedLocalFiles) {"Conflict changed after confirmation"}
-  overwriteCloudFresh(fresh,fresh,selectedSnapshot,store,stopped,{})
+  overwriteCloudSuccessors(fresh,selectedSnapshot,store,stopped,{})
  }
  private fun overwriteCloudFresh(comparison:OnboardingComparison,fresh:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison {
   val deletion=ConfirmedBranchOverwrite(repository.overwriteDirectory(),adapter,config.profile)
@@ -985,38 +1019,60 @@ class AppendProfileSession(
   uploadWithGraph(comparison,graph,store,stopped,false)
  }
  /** Fresh proof is acquired and consumed under one physical-root lock, never supplied by UI. */
- internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:(OnboardingComparison)->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {
+ internal fun uploadFresh(comparison:OnboardingComparison,store:AppendStore,stopped:()->Boolean,beforePublish:(OnboardingComparison,Map<String,VerifiedSnapshot>)->Unit):Pair<AppendPushResult,OnboardingComparison> = readLocked(store) {
   require(comparison.owner===comparisonOwner)
-  val fresh=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PREFLIGHT) {compareLocked(store,stopped,false)}
-  val graph=requireNotNull(fresh.graph);graph.requireObjectsVerified();graph.requireSettled()
-  require(graph.commits==comparison.graph?.commits && graph.pending==comparison.graph?.pending && fresh.observedTips==comparison.observedTips) {CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text()}
-  require(fresh.localFiles==comparison.localFiles && (comparison.localSource!=LocalObservationSource.FILESYSTEM || fresh.fingerprint==comparison.fingerprint)) {CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()}
-  require(fresh.baselineId==comparison.baselineId && fresh.pendingCommit==comparison.pendingCommit)
-  beforePublish(fresh)
+  val proofs=linkedMapOf<String,VerifiedSnapshot>()
+  // Normal append has one tip. Bound retention; branch/conflict paths keep ordinary validation.
+  val retain=comparison.observedTips.takeIf {it.size==1}.orEmpty()
+  val normal=repository.pending()==null
+  val fresh=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PREFLIGHT) {compareLocked(store,stopped,false,retain,proofs,uploadMetadata=normal)}
+  val graph=requireNotNull(fresh.graph);graph.requireUploadVerified();graph.requireSettled()
+  beforePublish(fresh,proofs)
   val pending=repository.pending()
   val pendingCoversTips=pending!=null && (pending.commit.parents.toSet()==graph.tips || matchingUpload(graph,pending.commit.snapshot.files)!=null)
-  if(!pendingCoversTips && uploadNeedsOverwrite(graph,fresh.baselineId,fresh.localFiles))return@readLocked AppendPushResult.Diverged(preserveConflict(graph,store,stopped)) to fresh
-  val result=uploadWithGraph(fresh,graph,store,stopped,true)
-  val after=repository.cachedGraph();after.requireObjectsVerified();after.requireSettled()
-  val files=currentFiles();val baseline=repository.baseline()
+  if(!pendingCoversTips && uploadNeedsOverwrite(graph,fresh.baselineId,fresh.localFiles)) {
+   val conflict=if(normal)AppendConflict(graph.tips,emptyList(),fresh.localFiles,fresh.baselineId,
+    cloudOverwriteSelection(graph,fresh.baselineId,fresh.localFiles)?.let {graph.commits.getValue(it.target).snapshot.id})
+    else preserveConflict(graph,store,stopped)
+   return@readLocked AppendPushResult.Diverged(conflict) to fresh
+  }
+  val result=uploadWithGraph(fresh,graph,store,stopped,false,optimistic=true)
+  val after=if(result is AppendPushResult.Success)graph.copy(commits=graph.commits+(result.commit.id to result.commit)) else graph
+  after.requireUploadVerified();after.requireSettled()
+  val files=uploadReceiptFiles() ?: currentFiles();val baseline=repository.baseline()
   val lineage=when {baseline==null->OnboardingLineage.NONE;after.tips.size>1->OnboardingLineage.BRANCHED;after.tips.singleOrNull()==baseline->OnboardingLineage.SAME_TIP;after.tips.singleOrNull()?.let {after.descendsFrom(it,baseline)}==true->OnboardingLineage.ANCESTOR_OF_TIP;else->OnboardingLineage.BLOCKED}
   val kind=when {after.tips.size>1->OnboardingKind.BRANCHED;after.tips.isEmpty()->if(files.isEmpty())OnboardingKind.BOTH_EMPTY else OnboardingKind.LOCAL_ONLY;files.isEmpty()->OnboardingKind.REMOTE_ONLY;files==after.commits.getValue(after.tips.single()).snapshot.files->OnboardingKind.IDENTICAL;else->OnboardingKind.DIFFERENT}
   // Presentation uses a metadata view of fully verified operation evidence, not another network scan.
   result to OnboardingComparison(kind,files,baseline,lineage,emptyList(),after.tips,owner=comparisonOwner,
    graph=after.copy(verification=RemoteVerification.METADATA_ONLY),localSource=LocalObservationSource.RESTORE_RECEIPT)
  }
- private fun uploadWithGraph(comparison:OnboardingComparison,graph:CommitGraph,store:AppendStore,stopped:()->Boolean,uploadDelta:Boolean):AppendPushResult {
+ private fun uploadWithGraph(comparison:OnboardingComparison,graph:CommitGraph,store:AppendStore,stopped:()->Boolean,uploadDelta:Boolean,optimistic:Boolean=false):AppendPushResult {
   val pending=repository.pending()
   val files=pending?.commit?.snapshot?.files ?: comparison.localFiles
   matchingUpload(graph,files)?.let {return reuseUpload(it,graph,pending)}
+  var verifiedPlan:VerifiedUploadPlan?=null
   val plan = pending ?: run {
    require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }
+   if(optimistic) {
+    val captured=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_CAPTURE) {SafePaths.bufferedUploadWrites {local.captureVerified(stopped)}}
+    require(captured.snapshot.manifest.files==comparison.localFiles) {CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()}
+    verifiedPlan=DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_PREPARE_PLAN) {repository.prepareVerified(captured,listOfNotNull(comparison.baselineId),operation=local.operationMetadata(),persist=false)}
+    return@run requireNotNull(verifiedPlan).plan
+   }
    val captured = DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_CAPTURE) {captureContent(stopped)}
    require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
-   SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+   if(!optimistic)SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
   }
-  return publish(plan, store, stopped,graph,uploadDelta)
+  try {
+   return if(optimistic && pending==null)SafePaths.bufferedUploadWrites {
+    publish(plan,store,stopped,graph,uploadDelta,true,acknowledgeNew=true,verifiedPlan=verifiedPlan)
+   } else publish(plan,store,stopped,graph,uploadDelta,optimistic,acknowledgeNew=false,verifiedPlan=verifiedPlan)
+  }catch(error:Exception) {
+   // Slow failure path preserves uncertain publication for explicit reconciliation only.
+   if(verifiedPlan?.persisted==false)try{repository.preserveFailedUpload(plan)}catch(save:Exception){error.addSuppressed(save)}
+   throw error
+  }
  }
 
  /** Applies the selected cloud branch without publishing overwritten local bytes. */

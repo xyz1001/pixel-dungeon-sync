@@ -43,7 +43,7 @@ interface AppendStore {
  fun deleteObject(id:String):Unit = error("Store does not support confirmed deletion")
  fun readDeletion(id:String):ByteArray? = null
  fun writeDeletion(id:String,bytes:ByteArray):Unit = error("Store does not support confirmed deletion")
- fun legacyPresent(): Boolean
+ fun legacyPresent(): Boolean = false
  fun legacyPresent(cancellation:MetadataReadCancellation):Boolean {
   cancellation.checkActive();return legacyPresent()
  }
@@ -69,18 +69,21 @@ const val MAX_REMOTE_SCAN_BYTES = 256L * 1024 * 1024
 /** Frozen exact publication bytes. Retry never recaptures a ZIP or rewrites ancestry. */
 data class UploadPlan(val commit: AppendCommit, val manifestBytes: ByteArray, val zip: ByteArray)
 data class AppendPublication(val commit: AppendCommit, val reused: Boolean)
-internal class VerifiedUploadPlan(val plan:UploadPlan,val verified:VerifiedSnapshot)
+internal class VerifiedUploadPlan(val plan:UploadPlan,val verified:VerifiedSnapshot,val persisted:Boolean=true)
 class RemoteIntegrityException(message: String): IllegalStateException(message)
 class UnsettledRemoteException(message: String): IllegalStateException(message)
 class LegacyProtocolException: IllegalStateException(CoreSessionMessages.A_LEGACY_HEAD_JSON_WAS_FOUND_NOTHING_WAS_MIGRATED_OR.text())
 
-enum class RemoteVerification { METADATA_ONLY, OBJECTS_VERIFIED }
+enum class RemoteVerification { METADATA_ONLY, UPLOAD_METADATA, TIPS_VERIFIED, OBJECTS_VERIFIED }
 
 data class CommitGraph(
  val commits: Map<String, AppendCommit>,
  val pending: Map<String, String>,
  val verification: RemoteVerification = RemoteVerification.OBJECTS_VERIFIED
 ) {
+ fun requireUploadVerified() {
+  require(verification!=RemoteVerification.METADATA_ONLY) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
+ }
  fun requireObjectsVerified() {
   require(verification == RemoteVerification.OBJECTS_VERIFIED) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
  }
@@ -230,10 +233,11 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   return CommitGraph(complete,emptyMap())
  }
  fun setBaseline(id: String, graph: CommitGraph) {
-  graph.requireObjectsVerified()
+  graph.requireUploadVerified()
+  require(graph.verification==RemoteVerification.OBJECTS_VERIFIED || id in graph.tips)
   graph.requireSettled(); val verified = requireNotNull(graph.commits[id]) { CoreValidationMessages.CANNOT_BASELINE_AN_INCOMPLETE_COMMIT.text() }
   val bytes = requireNotNull(known(id)); require(decode(bytes, id) == verified)
-  SafePaths.atomicWrite(baselineMarker, "established".encodeToByteArray())
+  if (!SafePaths.checked(baselineMarker).exists()) SafePaths.atomicWrite(baselineMarker, "established".encodeToByteArray())
   SafePaths.atomicWrite(baselinePath, id.encodeToByteArray())
  }
  /** Selected-object evidence never upgrades the rest of a metadata graph. */
@@ -242,7 +246,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(graph.commits[commit.id] == commit && verified.snapshot.manifest == commit.snapshot)
   require(verified.snapshot.zip.size == commit.objectBytes && observedAt(commit.id) != null)
   require(decode(requireNotNull(known(commit.id)),commit.id) == commit)
-  SafePaths.atomicWrite(baselineMarker,"established".encodeToByteArray())
+  if (!SafePaths.checked(baselineMarker).exists()) SafePaths.atomicWrite(baselineMarker,"established".encodeToByteArray())
   SafePaths.atomicWrite(baselinePath,commit.id.encodeToByteArray())
  }
  internal fun verifiedCommitIds(graph: CommitGraph): Set<String> =
@@ -250,6 +254,30 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
 
  /** Missing later listings never erase remembered IDs. Parents are fetched even when omitted. */
  fun discover(store: AppendStore): CommitGraph = discoverGraph(store, verifyObjects = true)
+ internal fun discoverRetaining(store:AppendStore,ids:Set<String>,verified:MutableMap<String,VerifiedSnapshot>,localBaseline:(AppendCommit)->VerifiedSnapshot? = {null}):CommitGraph {
+  // Pending recovery remains the complete object-validation path.
+  if(pending()!=null)return discoverGraph(store,true,retained=verified,retainIds=ids)
+  val graph=discoverGraph(store,false,store.historyReadParallelism.coerceIn(1,4),reuseListedKnown=true)
+  graph.requireSettled()
+  graph.tips.forEach {id->
+   val commit=graph.commits.getValue(id)
+   val cached=if(graph.tips.size==1 && id==baseline()) {
+    val timing=DiagnosticTiming.start(DiagnosticPhase.BASELINE_ARCHIVE_REUSE)
+    try {
+     val candidate=localBaseline(commit)
+     if(candidate!=null && candidate.snapshot.manifest==commit.snapshot)candidate
+     else {timing.skipped();null}
+    }finally {timing.close()}
+   }else null
+   val proof=cached ?: run {
+    val zip=store.readObject(commit.snapshot.id) ?: throw UnsettledRemoteException(CoreSessionMessages.THE_SNAPSHOT_IS_NOT_VISIBLE_YET_TRY_AGAIN.text())
+    VerifiedSnapshot.knownArchive(Snapshot(commit.snapshot,zip),adapter)
+   }
+   observeVerified(id)
+   if(id in ids)verified[id]=proof
+  }
+  return graph.copy(verification=RemoteVerification.TIPS_VERIFIED)
+ }
 
  /** Only called with this upload's freshly verified graph and a server-read-back commit.
   * Re-list IDs and re-read every manifest to detect mutation/deletion and new branches.
@@ -263,6 +291,9 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   require(parallelism in 1..4)
   return CommitMetadataGraph(discoverGraph(store, verifyObjects = false, metadataParallelism = parallelism))
  }
+ internal fun discoverUploadMetadata(store:AppendStore):CommitGraph =
+  discoverGraph(store,false,store.historyReadParallelism.coerceIn(1,4),reuseListedKnown=true)
+   .copy(verification=RemoteVerification.UPLOAD_METADATA)
  internal fun metadataReadSeed():MetadataReadSeed {
   var total=0L
   val known=idsIn(knownRoot).associateWith {
@@ -291,22 +322,30 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
  }
 
  private fun discoverGraph(store: AppendStore, verifyObjects: Boolean, metadataParallelism: Int = 1,
-  evidence:MetadataEvidence?=null,externalCancellation:MetadataReadCancellation?=null,operationSeed:Map<String,AppendCommit> = emptyMap()): CommitGraph {
+  evidence:MetadataEvidence?=null,externalCancellation:MetadataReadCancellation?=null,operationSeed:Map<String,AppendCommit> = emptyMap(),retained:MutableMap<String,VerifiedSnapshot>?=null,retainIds:Set<String> = emptySet(),reuseListedKnown:Boolean=false): CommitGraph {
   val cancellation = externalCancellation ?: MetadataReadCancellation()
   val parallelism=if(verifyObjects)store.historyReadParallelism.coerceIn(1,4) else metadataParallelism
   fun observed(id:String) { if(evidence==null)observe(id) else evidence.observed.add(id) }
-  fun knownBytes(id:String):ByteArray? = if(evidence==null)known(id) else evidence.known[id]
-  fun rememberBytes(id:String,bytes:ByteArray) { if(evidence==null)remember(id,bytes) else evidence.known[id]=bytes }
-  if (if(verifyObjects && parallelism==1)store.legacyPresent() else store.legacyPresent(cancellation)) throw LegacyProtocolException()
+  val operationKnown=mutableMapOf<String,ByteArray?>()
+  fun knownBytes(id:String):ByteArray? {
+   if(evidence!=null)return evidence.known[id]
+   if(!operationKnown.containsKey(id))operationKnown[id]=known(id)
+   return operationKnown[id]
+  }
+  fun rememberBytes(id:String,bytes:ByteArray) {
+   if(evidence!=null)evidence.known[id]=bytes
+   else if(knownBytes(id)==null) {remember(id,bytes);operationKnown[id]=bytes}
+  }
   val ids = (if(evidence==null)idsIn(knownRoot)+idsIn(observedRoot) else evidence.expected.keys+evidence.observed).toMutableSet()
   (if(evidence==null)baseline() else evidence.baseline)?.let { ids.add(it) }; require(ids.size <= MAX_COMMITS)
+  val listedIds=mutableSetOf<String>()
   val cursors = mutableSetOf<String>(); var cursor: String? = null; var pages = 0; var listed = 0L
   do {
    require(++pages <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_LISTING_PAGES_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
    val page = if(verifyObjects && parallelism==1)store.listCommits(cursor) else store.listCommits(cursor,cancellation)
    listed += page.ids.size; require(listed <= MAX_COMMITS) { CoreValidationMessages.LISTING_ENTRY_WORK_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
    require(page.ids.all(::validRecordId)) { CoreValidationMessages.INVALID_COMMIT_FILENAME.text() }
-   ids.addAll(page.ids); require(ids.size <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_COMMITS_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
+   listedIds.addAll(page.ids); ids.addAll(page.ids); require(ids.size <= MAX_COMMITS) { CoreValidationMessages.TOO_MANY_COMMITS_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
    page.ids.forEach(::observed)
    cursor = page.next
    if (cursor != null) require(cursors.add(cursor)) { CoreValidationMessages.REPEATED_LISTING_CONTINUATION_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
@@ -335,14 +374,19 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
     val fetched = linkedMapOf<String, ByteArray?>()
     if (executor != null) {
      val completed = ExecutorCompletionService<Pair<String, ByteArray?>>(executor)
-     batch.forEach { id ->
+     val remoteBatch=batch.filter {id->
+      val cached=if(reuseListedKnown && id in listedIds)knownBytes(id) else null
+      if(cached!=null)fetched[id]=cached
+      cached==null
+     }
+     remoteBatch.forEach { id ->
       futures += completed.submit(Callable {
        val binding = trace?.let(DiagnosticLog::bind)
        try { id to store.readCommit(id, requireNotNull(cancellation)) }
        finally { binding?.close() }
       })
      }
-     repeat(batch.size) {
+     repeat(remoteBatch.size) {
       val result = try { completed.take().get() } catch (error: ExecutionException) { throw (error.cause ?: error) }
       fetched[result.first] = result.second
      }
@@ -398,7 +442,12 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
       if (zip == null) { pending[id] = "missing object"; continue }
       scanBytes += maxOf(0, zip.size - commit.objectBytes)
       require(scanBytes <= MAX_REMOTE_SCAN_BYTES) { CoreValidationMessages.REMOTE_SCAN_BYTE_BUDGET_EXCEEDED_NO_PARTIAL_DISCOVERY_ACCEPTED.text() }
-      try { require(zip.size == commit.objectBytes); Snapshots.verify(Snapshot(commit.snapshot, zip), adapter) }
+      try {
+       require(zip.size == commit.objectBytes)
+       val snapshot=Snapshot(commit.snapshot,zip)
+       if(id in retainIds && retained!=null)retained[id]=VerifiedSnapshot.read(snapshot,adapter)
+       else Snapshots.verify(snapshot,adapter)
+      }
       catch (_: Exception) { pending[id] = "invalid object"; continue }
       }
       observeVerified(id)
@@ -482,7 +531,7 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   return requireNotNull(pending())
  }
  /** Freeze a fully verified request while retaining its selected-object proof, not an entire DAG. */
- internal fun prepareVerified(verified:VerifiedSnapshot,parents:List<String>,kind:String="snapshot",operation:CommitOperationMetadata?=null):VerifiedUploadPlan {
+ internal fun prepareVerified(verified:VerifiedSnapshot,parents:List<String>,kind:String="snapshot",operation:CommitOperationMetadata?=null,persist:Boolean=true):VerifiedUploadPlan {
   require(pending()==null) { CoreValidationMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_OPERATION_FIRST.text() }
   validateRequestedParents(parents,kind)
   val snapshot=verified.snapshot
@@ -492,10 +541,18 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   checkCommit(commit)
   val bytes=json.encodeToString(commit).encodeToByteArray();require(bytes.size<=MAX_MANIFEST_BYTES)
   val plan=UploadPlan(commit,bytes,frozen.snapshot.zip)
-  SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.zip"),plan.zip)
-  SafePaths.atomicWrite(pendingRoot.resolve("${commit.id}.json"),bytes)
-  SafePaths.atomicWrite(marker,commit.id.encodeToByteArray())
-  return VerifiedUploadPlan(plan,frozen).also(::requireFrozen)
+  if(persist)preserveFailedUpload(plan)
+  return VerifiedUploadPlan(plan,frozen,persist).also(::requirePreparedUpload)
+ }
+ internal fun preserveFailedUpload(plan:UploadPlan) {
+  SafePaths.atomicWrite(pendingRoot.resolve("${plan.commit.id}.zip"),plan.zip)
+  SafePaths.atomicWrite(pendingRoot.resolve("${plan.commit.id}.json"),plan.manifestBytes)
+  SafePaths.atomicWrite(marker,plan.commit.id.encodeToByteArray())
+ }
+ private fun requirePreparedUpload(verified:VerifiedUploadPlan) {
+  val plan=verified.plan
+  if(verified.persisted)require(SafePaths.boundedRead(marker,128).decodeToString().trim()==plan.commit.id)
+  require(verified.verified.snapshot.manifest==plan.commit.snapshot)
  }
  private fun requireFrozen(verified:VerifiedUploadPlan) {
   val plan=verified.plan
@@ -562,14 +619,39 @@ class AppendRepository(private val directory: Path, private val adapter: GameAda
   AppendPublication(readWinner(store,id,plan.commit.snapshot.files)
    ?: throw UnsettledRemoteException(CoreSessionMessages.THE_COMMIT_IS_NOT_VISIBLE_YET_TRY_AGAIN.text()),false)
  }
+ internal fun publishAcknowledged(store:AppendStore,verified:VerifiedUploadPlan,graph:CommitGraph):AppendPublication {
+  requirePreparedUpload(verified) // This operation owns the fixed bytes; no disk corruption audit.
+  graph.requireUploadVerified();graph.requireSettled()
+  val plan=verified.plan
+  require(plan.commit.schema==3 && graph.findByContent(plan.commit.snapshot.files)==null)
+  require(plan.commit.parents.all {graph.resolveParentIds(it).isNotEmpty()})
+  if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException()
+  store.writeObject(plan.commit.id,plan.zip)
+  if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException()
+  store.writeCommit(plan.commit.id,plan.manifestBytes)
+  remember(plan.commit.id,plan.manifestBytes);observeVerified(plan.commit.id)
+  return AppendPublication(plan.commit,false)
+ }
  fun publish(store: AppendStore, plan: UploadPlan): AppendCommit = publishResult(store,plan).commit
- fun publishResult(store: AppendStore, plan: UploadPlan, expected: CommitGraph? = null): AppendPublication {
+ fun publishResult(store: AppendStore, plan: UploadPlan, expected: CommitGraph? = null, acknowledgeNew: Boolean = false): AppendPublication {
   val frozen=requireNotNull(pending())
   require(frozen.commit==plan.commit && frozen.manifestBytes.contentEquals(plan.manifestBytes) && frozen.zip.contentEquals(plan.zip))
   val graph=expected ?: discover(store);graph.requireObjectsVerified();graph.requireSettled()
   graph.findByContent(plan.commit.snapshot.files)?.let { return AppendPublication(it,true) }
   val converted=hashPlan(plan)
   require(converted.commit.parents.all {graph.resolveParentIds(it).isNotEmpty()}) { CoreSessionMessages.PARENT_COMMITS_HAVE_NOT_BEEN_FULLY_VERIFIED_NOTHING_WAS_PUBLISHED.text() }
+  if(acknowledgeNew) {
+   // Only a newly prepared manual upload may use acknowledgements. Existing pending
+   // operations retain the reconciliation path below; an uncertain write is never replayed here.
+   require(converted.commit.schema==3)
+   if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException()
+   store.writeObject(converted.commit.id,converted.zip)
+   if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException()
+   store.writeCommit(converted.commit.id,converted.manifestBytes)
+   remember(converted.commit.id,converted.manifestBytes)
+   observeVerified(converted.commit.id)
+   return AppendPublication(converted.commit,false)
+  }
   return publishHashPlan(store,converted)
  }
  /** Reuse the already-read graph; verify any metadata-only candidate's object before adopting it. */

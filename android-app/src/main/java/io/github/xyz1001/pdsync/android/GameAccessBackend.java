@@ -14,6 +14,8 @@ public interface GameAccessBackend extends AndroidGameBridge {
         ROOT_DIRECT
     }
 
+    @Override default byte[] exportArchive() { return null; }
+
     Mode mode();
     Capabilities capabilities();
 

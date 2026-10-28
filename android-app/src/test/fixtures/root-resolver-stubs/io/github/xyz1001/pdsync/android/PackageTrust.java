@@ -22,12 +22,15 @@ public final class PackageTrust {
   return files;
  }
  public static File apk(String path) { return new File(path) {
+  @Override public String getPath(){return path;}
   @Override public long length(){return contents.containsKey(getPath())?contents.get(getPath()).length:0;}
   @Override public boolean isFile(){return contents.containsKey(getPath());}
   @Override public File getAbsoluteFile(){return this;}
   @Override public File getCanonicalFile(){return this;}
  }; }
+ public static int hashCalls;
  public static String sha256(File file) throws Exception {
+  hashCalls++;
   byte[] bytes=contents.get(file.getPath());if(bytes==null)throw new IOException("Missing virtual APK");
   return hex(MessageDigest.getInstance("SHA-256").digest(bytes));
  }

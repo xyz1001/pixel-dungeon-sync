@@ -6,6 +6,8 @@ import java.util.Collections
 import pdsync.Snapshot
 
 interface AndroidGameBridge {
+ /** Operation-local archive; null means unsupported and no export has occurred. */
+ fun exportArchive(): ByteArray? = null
  fun exportTo(emptyDestination: Path)
  fun restoreFrom(preparedDirectory: Path, expectedCurrentFiles: Map<String, String>)
  fun targetGame(): AndroidGameTarget

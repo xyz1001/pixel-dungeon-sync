@@ -105,7 +105,7 @@ public final class DavIdleConnectionRecoveryTest {
  }
 
  @Test void cancellationInterruptionTimeoutDnsTlsAndHttpErrorsPreserveIdlePool()throws Exception{
-  for(String kind:new String[]{"cancel","interrupt","timeout","dns","tls","io","http"}){
+  for(String kind:new String[]{"cancel","interrupt","timeout","dns","tls","io","wrappedTls","wrappedTimeout","wrappedDns","wrappedCancel","http"}){
    AtomicBoolean fail=new AtomicBoolean();OkHttpClient c=null;
    try(MockWebServer s=new MockWebServer()){
     s.enqueue(new MockResponse().setBody("ok"));s.start(InetAddress.getByName("127.0.0.1"),0);
@@ -118,6 +118,10 @@ public final class DavIdleConnectionRecoveryTest {
       case "dns":throw new UnknownHostException("synthetic");
       case "tls":throw new javax.net.ssl.SSLException("synthetic");
       case "io":throw new IOException("synthetic");
+      case "wrappedTls":throw new IOException("synthetic",new javax.net.ssl.SSLException(new EOFException("synthetic")));
+      case "wrappedTimeout":{IOException e=new SocketTimeoutException("synthetic");e.initCause(new EOFException("synthetic"));throw new IOException("synthetic",e);}
+      case "wrappedDns":{IOException e=new UnknownHostException("synthetic");e.initCause(new EOFException("synthetic"));throw new IOException("synthetic",e);}
+      case "wrappedCancel":chain.call().cancel();throw new IOException("synthetic",new EOFException("synthetic"));
       default:return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(403).message("synthetic").body(ResponseBody.create(new byte[0],null)).build();
      }
     }).build();
@@ -127,4 +131,23 @@ public final class DavIdleConnectionRecoveryTest {
    }finally{Thread.interrupted();if(c!=null)stop(c);}
   }
  }
+ @Test void wrappedEofClearsIdlePoolWithoutReplayingRequest() throws Exception {
+  AtomicBoolean fail=new AtomicBoolean(); AtomicInteger attempts=new AtomicInteger();
+  OkHttpClient c=null;
+  try(MockWebServer server=new MockWebServer()) {
+   server.enqueue(new MockResponse().setBody("ok")); server.enqueue(new MockResponse().setBody("ok"));
+   server.start(InetAddress.getByName("127.0.0.1"),0);
+   c=new OkHttpClient.Builder().addInterceptor(chain->{
+    attempts.incrementAndGet();
+    if(fail.get())throw new IOException("synthetic wrapper",new EOFException("synthetic"));
+    return chain.proceed(chain.request());
+   }).build();
+   AppendOnlyWebDav dav=store(server,c);read(dav);
+   assertEquals(1,c.connectionPool().idleConnectionCount());
+   fail.set(true);assertThrows(IOException.class,()->read(dav));
+   assertEquals(2,attempts.get());assertEquals(0,c.connectionPool().connectionCount());
+   fail.set(false);read(dav);assertEquals(3,attempts.get());assertEquals(2,server.getRequestCount());
+  } finally {if(c!=null)stop(c);}
+ }
+
 }

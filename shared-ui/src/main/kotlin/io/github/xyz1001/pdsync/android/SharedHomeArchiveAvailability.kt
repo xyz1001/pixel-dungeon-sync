@@ -17,6 +17,7 @@ data class SharedHomeArchiveAvailability(
                 return SharedHomeArchiveAvailability()
             }
 
+            history.simple?.let {simple->return SharedHomeArchiveAvailability(history.currentFiles.isNotEmpty(),simple.nodes.any {it.hashId==(selectedId ?: simple.latest)})}
             val targetId = selectedId ?: history.defaultSnapshot
             val restoreAvailable = if (targetId != null) {
                 history.graph.commits.values.any { it.snapshot.id == targetId && it.snapshot.files.isNotEmpty() }
