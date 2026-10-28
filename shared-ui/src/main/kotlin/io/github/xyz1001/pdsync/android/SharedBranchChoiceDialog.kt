@@ -75,7 +75,7 @@ internal fun SharedBranchChoiceDialogBody(
     var expanded by remember(state.observation, state.details) { mutableStateOf(false) }
     val confirmation = interactions.presentation
     if (confirmation != null) {
-        SharedConfirmationDialogBody(confirmation, interactions::confirm, interactions::merge,
+        SharedConfirmationDialogBody(confirmation, interactions::confirm, {},
             interactions::cancel, modifier)
     } else {
         SharedConfirmationDialogBody(

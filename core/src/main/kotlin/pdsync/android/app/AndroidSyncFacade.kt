@@ -87,7 +87,6 @@ class AndroidSyncFacade internal constructor(
  class AutoUploadResult(val status:String,val message:String,val snapshotId:String?,val needsUserChoice:Boolean,reason:SyncBlockReason?=null) {
   val reasonCode=reason?.name
  }
- class MergePreview(val isAllowed:Boolean,val message:String,val slotCount:Int,decisions:List<String>) { val decisions=immutable(decisions) }
  class LocalPreview(val fileCount:Int,val summary:SaveSummary?,val message:String)
  class ControlledObservation internal constructor(internal val proof:AndroidControlledSessions.ObservationProof?)
  @Serializable private data class RestoreJournal(val schema:Int=2,val profileScope:String,val gameSourceIdentity:String,val gamePackage:String,val installedApkSha256:String,val sourceApkSha256:String,val expectedBefore:Map<String,String>,val expectedAfter:Map<String,String>,val action:String,val ready:Boolean=false)
@@ -323,7 +322,6 @@ class AndroidSyncFacade internal constructor(
    }
    checkActualUnchanged(comparison.localFiles)
    when(val result=session.onboardingUpload(comparison,store,mirrorStopped)) {
-    is AppendPushResult.Prepared -> autoBlocked("SKIPPED_UNCERTAIN",SyncBlockReason.HISTORY_CONFLICT,true)
     is AppendPushResult.Success -> AutoUploadResult(if(result.reused)"UNCHANGED" else "UPLOADED",if(result.reused)CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text() else if(result.remoteAhead)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_BUT_THE_CLOUD_ADVANCED_REVIEW_BEFORE_RESTORING.text() else CoreMessages.ANDROID_BACKGROUND_SNAPSHOT_UPLOADED_AND_VERIFIED.text(),result.commit.snapshot.id,result.remoteAhead)
     is AppendPushResult.Diverged -> AutoUploadResult("SKIPPED_CONFLICT",CoreMessages.ANDROID_A_REMOTE_BRANCH_ARRIVED_DURING_UPLOAD_BOTH_IMMUTABLE_BRANCHES_ARE_PRESERVED_CHOOSE_EXPLICI.text(),result.conflict.branches.find {it.commit.id==result.conflict.publishedLocalCommit}?.snapshot?.manifest?.id,true,SyncBlockReason.HISTORY_CONFLICT)
    }
@@ -446,17 +444,6 @@ class AndroidSyncFacade internal constructor(
   prepareGameRestore(comparison.localFiles,branch.snapshot.manifest.files,"resolution") {result=session.resolve(conflict,snapshotId,store,mirrorStopped)}
   pushResult(requireNotNull(result),CoreMessages.ANDROID_BRANCH_CHOICE_APPLIED_TO_THE_GAME_AND_PUBLISHED.text())
  }
- fun previewMerge(inspection:Inspection)=locked {
-  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles)
-  try {versions.requireMerge();val result=session.previewOnboardingMerge(comparison,store,mirrorStopped);MergePreview(true,CoreMessages.ANDROID_SAFE_MERGE_IS_AVAILABLE_REVIEW_THE_DECISIONS_BEFORE_APPLYING.text(),result.slots,result.decisions)}
-  catch(e:RunMergeException){MergePreview(false,e.message ?: CoreMessages.ANDROID_THIS_CONFLICT_CANNOT_BE_SAFELY_MERGED.text(),0,emptyList())}
- }
- fun mergeConflict(inspection:Inspection)=locked {
-  val comparison=checked(inspection);checkActualUnchanged(comparison.localFiles);versions.requireMerge()
-  val preview=session.previewOnboardingMerge(comparison,store,mirrorStopped);var result:AppendPushResult?=null
-  prepareGameRestore(comparison.localFiles,preview.snapshot.manifest.files,"merge") {result=session.mergeCurrent(comparison,store,mirrorStopped)}
-  pushResult(requireNotNull(result),CoreMessages.ANDROID_MERGED_GAME_SAVES_APPLIED_VERIFIED_AND_PUBLISHED.text())
- }
  fun adoptIdentical(inspection:Inspection)=locked {val c=checked(inspection);checkActualUnchanged(c.localFiles);OperationResult(CoreMessages.ANDROID_IDENTICAL_LOCAL_AND_CLOUD_SAVES_LINKED_NO_GAME_FILES_WERE_REPLACED.text(),false,false,session.adoptOnboardingRemote(c,store,mirrorStopped).snapshot.id)}
  fun confirmRunIdentity(inspection:Inspection,slot:String,sameRun:Boolean)=locked {val c=checked(inspection);checkActualUnchanged(c.localFiles);session.confirmRunIdentity(slot,c.localFiles,sameRun,mirrorStopped);OperationResult(CoreMessages.ANDROID_RUN_IDENTITY_RECORDED_COMPARE_AGAIN_BEFORE_MERGING.text(),false,session.hasPending(),null)}
  fun recoverRestore()=locked {val journal=readJournal();require(journal.ready){CoreMessages.ANDROID_RESTORE_PREPARATION_WAS_INTERRUPTED_ORIGINALS_AND_BACKUPS_ARE_RETAINED_EXPLICITLY_DISCARD.text()};require(currentFiles()==journal.expectedAfter){CoreMessages.ANDROID_THE_PREPARED_RESTORE_CHANGED_RECOVERY_IS_BLOCKED_BACKUPS_ARE_RETAINED.text()};applyPrepared(journal);OperationResult(CoreMessages.ANDROID_GAME_RESTORE_VERIFIED_ANY_FROZEN_UPLOAD_REMAINS_AVAILABLE_FOR_EXPLICIT_RETRY.text(),false,session.hasPending(),null)}
@@ -542,7 +529,6 @@ class AndroidSyncFacade internal constructor(
   require(conflict.observedTips==c.observedTips && conflict.observedLocalFiles==c.localFiles){CoreMessages.ANDROID_CLOUD_BRANCHES_OR_CURRENT_GAME_FILES_CHANGED_COMPARE_AGAIN_BEFORE_SELECTING_A_BRANCH.text()};return conflict
  }
  private fun pushResult(result:AppendPushResult,success:String=CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text())=when(result) {
-  is AppendPushResult.Prepared -> OperationResult(CoreMessages.ANDROID_GAME_RESTORE_VERIFIED_ANY_FROZEN_UPLOAD_REMAINS_AVAILABLE_FOR_EXPLICIT_RETRY.text(),false,true,result.commit.snapshot.id)
   is AppendPushResult.Diverged -> OperationResult(CoreMessages.ANDROID_BOTH_BRANCHES_ARE_PRESERVED_COMPARE_AGAIN_AND_EXPLICITLY_CHOOSE_A_BRANCH_OR_PREVIEW_A_SAFE.text(),true,session.hasPending(),null)
   is AppendPushResult.Success -> OperationResult(when {result.reused->CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text();result.remoteAhead->CoreMessages.ANDROID_SNAPSHOT_IS_PRESERVED_BUT_ANOTHER_CLOUD_BRANCH_ADVANCED_COMPARE_AGAIN.text();result.localDirty->CoreMessages.ANDROID_SNAPSHOT_UPLOADED_NEWER_LOCAL_CHANGES_REMAIN_COMPARE_AGAIN.text();else->success},false,session.hasPending(),result.commit.snapshot.id)
  }

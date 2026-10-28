@@ -20,7 +20,6 @@ public final class DesktopMessages {
     public static final UiText SAVE_MODIFIED_1_S = new UiText("desktop.save_modified_1_s", "存档修改 %1$s", "Save modified %1$s");
     public static final UiText UNKNOWN_DEVICE = new UiText("desktop.unknown_device", "设备未知", "Unknown device");
     public static final UiText CLOUD_1_S = new UiText("desktop.cloud_1_s", "云端 · %1$s", "Cloud · %1$s");
-    public static final UiText MERGED_SAVE_COUNTS = new UiText("desktop.1_s_saves_after_merge_2_s_additional_slots_used", "合并后存档 %1$s 个 · 新增占用 %2$s 个", "Saves after merge: %1$s · Additional slots used: %2$s");
     public static final UiText PLEASE_CHECK_THE_LAUNCH_RESULT = new UiText("desktop.please_check_the_launch_result", "请查看启动结果。", "Please check the launch result.");
     public static final UiText CANNOT_READ_SAVES_CHECK_AGAIN_IN_SETTINGS = new UiText("desktop.cannot_read_saves_check_again_in_settings", "无法读取存档，请在设置中重新检查。", "Cannot read saves. Check again in Settings.");
     public static final UiText THE_CONNECTION_NEEDS_ATTENTION_OPEN_SETTINGS = new UiText("desktop.the_connection_needs_attention_open_settings", "连接需要处理，请打开设置。", "The connection needs attention. Open Settings.");
@@ -29,7 +28,6 @@ public final class DesktopMessages {
     public static final UiText STARTING_GAME = new UiText("desktop.starting_game", "正在启动游戏…", "Starting game…");
     public static final UiText UPLOADING_SAVES = new UiText("desktop.uploading_saves", "正在上传存档…", "Uploading saves…");
     public static final UiText BACKING_UP_AND_RESTORING_SAVES = new UiText("desktop.backing_up_and_restoring_saves", "正在恢复存档…", "Restoring saves…");
-    public static final UiText CHECKING_AND_MERGING_SAVES = new UiText("desktop.checking_and_merging_saves", "正在检查并合并存档…", "Checking and merging saves…");
     public static final UiText PROCESSING_PLEASE_WAIT = new UiText("desktop.processing_please_wait", "正在处理，请稍候…", "Processing. Please wait…");
     public static final UiText THE_GAME_IS_RUNNING_EXIT_IT_BEFORE_SYNCING = new UiText("desktop.the_game_is_running_exit_it_before_syncing", "游戏运行中，请退出后再同步。", "The game is running. Exit it before syncing.");
     public static final UiText NOT_CONNECTED_TO_THE_CLOUD_CLICK_UPLOAD_TO_SIGN_IN = new UiText("desktop.not_connected_to_the_cloud_click_upload_to_sign_in", "尚未连接云端，点击上传登录。", "Not connected to the cloud. Click Upload to sign in.");
@@ -174,7 +172,6 @@ public final class DesktopMessages {
     public static final UiText PENDING_SNAPSHOT_ARCHIVED_THE_NEXT_SYNC_WILL_CAPTURE_THE_CURRENT_SAVES_AGAI = new UiText("desktop.pending_snapshot_archived_the_next_sync_will_capture_the_current_saves_agai", "待上传快照已归档。下次同步将重新采集当前存档。", "Pending snapshot archived. The next sync will capture the current saves again.");
     public static final UiText MULTIPLE_SAVE_BRANCHES_EXIST_AUTOMATIC_UPLOAD_PAUSED_CLICK_RESTORE_TO_CHOOS = new UiText("desktop.multiple_save_branches_exist_automatic_upload_paused_click_restore_to_choos", "存在多个存档分支，自动上传已暂停，点击恢复选择。", "Multiple save branches exist. Automatic upload paused. Click Restore to choose.");
     public static final UiText OPERATION_INTERRUPTED_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED_CHECK_PENDING = new UiText("desktop.operation_interrupted_saved_history_and_backups_are_preserved_check_pending", "本次操作已中断，已保存的历史保留。请核对待上传状态后重试。", "Operation interrupted. Saved history is preserved. Check pending uploads before retrying.");
-    public static final UiText LOCAL_MERGE_COMPLETE_BUT_CLOUD_UPLOAD_IS_INCOMPLETE_CLICK_UPLOAD_TO_RETRY_T = new UiText("desktop.local_merge_complete_but_cloud_upload_is_incomplete_click_upload_to_retry_t", "本机合并已完成，等待上传。可点击上传发送合并结果；原始云端历史保留。", "Local merge complete and awaiting upload. Click Upload to send the merged result. Original cloud history is preserved.");
     public static final UiText OPERATION_INCOMPLETE_1_S_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED = new UiText("desktop.operation_incomplete_1_s_saved_history_and_backups_are_preserved", "操作未完成：%1$s。已保存的历史保留。", "Operation incomplete: %1$s. Saved history is preserved.");
     public static final UiText HISTORY_REFRESH_FAILED_1_S = new UiText("desktop.history_refresh_failed_1_s", " 历史刷新失败：%1$s", " History refresh failed: %1$s");
     public static final UiText SAVED_CLICK_UPLOAD_TO_SYNC_THE_NAME_AND_CONFIRMED_IDENTITIES = new UiText("desktop.saved_click_upload_to_sync_the_name_and_confirmed_identities", "已保存。点击上传可同步名称和已确认身份。", "Saved. Click Upload to sync the name and confirmed identities.");
@@ -241,7 +238,6 @@ public final class DesktopMessages {
     public static final UiText CONFIRM_OPERATION = new UiText("desktop.confirm_operation", "操作前确认", "Confirm operation");
     public static final UiText OVERWRITE_LOCAL = new UiText("desktop.overwrite_local", "覆盖本机", "Overwrite local");
     public static final UiText CONTINUE = new UiText("desktop.continue", "确认继续", "Continue");
-    public static final UiText SMART_MERGE_BOTH_SIDES = new UiText("desktop.smart_merge_both_sides", "智能合并双方进度", "Smart merge both sides");
     public static final UiText NO_GAME_DETECTED_FOR_THE_CURRENT_ACCOUNT_WAITING_FOR_SAVES_TO_STABILIZE = new UiText("desktop.no_game_detected_for_the_current_account_waiting_for_saves_to_stabilize", "当前账户未检测到游戏，等待存档稳定。", "No game detected for the current account. Waiting for saves to stabilize.");
     public static final UiText THE_GAME_IS_RUNNING_AUTOMATIC_UPLOAD_WILL_START_AFTER_IT_EXITS = new UiText("desktop.the_game_is_running_automatic_upload_will_start_after_it_exits", "检测到游戏正在运行，退出后自动上传。", "The game is running. Automatic upload will start after it exits.");
     public static final UiText CANNOT_CONFIRM_THE_GAME_HAS_EXITED = new UiText("desktop.cannot_confirm_the_game_has_exited", "无法确认游戏已退出", "Cannot confirm the game has exited");

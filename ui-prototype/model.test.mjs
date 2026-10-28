@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud, snapshotName, localUnchangedSinceSync, planMerge} from './model.mjs';
-const act=(s,type,extra={})=>{if(type==='uploadAndOverwrite'){const n=reduce(s,{type:'upload'});return n.restoreConfirm?reduce(n,{type:'restore',confirmationToken:n.restoreConfirm.token}):n;}return reduce(s,{type,...(['restore','merge'].includes(type)?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});};
+import {createState, reduce, kind, canFinish, games, gameLabel, defaultSavePaths, saveFixture, saveStatus, localIsEmpty, deviceLabel, isSynced, canRestore, latestCloud, selectedTarget, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, matchingCloud, snapshotName, localUnchangedSinceSync} from './model.mjs';
+const act=(s,type,extra={})=>{if(type==='uploadAndOverwrite'){const n=reduce(s,{type:'upload'});return n.restoreConfirm?reduce(n,{type:'restore',confirmationToken:n.restoreConfirm.token}):n;}return reduce(s,{type,...(['restore'].includes(type)?{confirmationToken:s.restoreConfirm?.token}:{}),...extra});};
 const settle=s=>act(s,'settled',{token:s.token});
 const pathStep=(scene='empty',id='shattered')=>act(createState(scene,id),'next');
 const read=(scene='empty',id='shattered')=>settle(pathStep(scene,id));
@@ -353,38 +353,14 @@ test('confirm only possible loss: historical content proof permits rollback and 
 });
 
 
-test('conflict prompts overwrite, merge or cancel on setup, upload and restore',()=>{
- let s=connected('conflict');assert.equal(canFinish(s),true);s=act(s,'finish');assert.ok(s.restoreConfirm);assert.equal(s.restoreConfirm.direction,'restore');assert.equal(s.busy,false);
- for(const action of ['askRestore','upload']){const before=createState('splitUpdates'),prompt=reduce(before,{type:action});assert.ok(prompt.restoreConfirm);assert.equal(prompt.history,before.history);const cancelled=act(prompt,'cancelRestore');assert.deepEqual(cancelled.localSnapshot,before.localSnapshot);assert.deepEqual(cancelled.history,before.history);assert.equal(cancelled.merges,0);}
-});
-test('three-way A1 B0 plus A0 B1 becomes A1 B1 without increasing slot use',()=>{
- let s=createState('splitUpdates'),plan=planMerge(s);assert.equal(plan.ok,true);assert.equal(plan.slots,2);assert.equal(plan.addedSlots,0);assert.deepEqual(plan.profile.runs.map(r=>[r.runUUID,r.contentHash,r.slot]),[['run-A','A1',1],['run-B','B1',2]]);
- const originals=s.history;s=act(act(s,'askRestore'),'merge');assert.equal(s.pending,'merge');assert.deepEqual(s.history,originals);assert.equal(act(s,'merge'),s);const token=s.token;s=settle(s);
- assert.equal(s.merges,1);assert.equal(s.localSnapshot.slots,2);assert.deepEqual(s.localSnapshot.profile,plan.profile);assert.deepEqual(s.history.slice(0,originals.length),originals);assert.equal(act(s,'settled',{token}),s);assert.equal(act(s,'askRestore'),s);assert.equal(reduce(s,{type:'upload'}),s);
- const merged=latestCloud(s);assert.equal(merged.cloudParentIds.length,2);assert.ok(merged.cloudParentIds.includes('save-4'));assert.ok(merged.cloudParentIds.every(id=>s.history.some(n=>n.id===id)));assert.deepEqual(s.localSnapshot.parentIds,[merged.id]);
-});
-test('same-run divergent edits allocate two complete branches with new IDs and shared origin',()=>{
- let s=createState('sameRun'),plan=planMerge(s);assert.equal(plan.ok,true);assert.equal(plan.slots,2);assert.equal(plan.addedSlots,1);assert.equal(new Set(plan.profile.runs.map(r=>r.runUUID)).size,2);assert.ok(plan.profile.runs.every(r=>r.sourceRunUUID==='run-1'&&r.parentRunUUIDs[0]==='run-1'));assert.deepEqual(new Set(plan.profile.runs.map(r=>r.contentHash)),new Set(['local-change','remote-change']));assert.deepEqual(planMerge(s),plan);
- s=settle(act(act(s,'askRestore'),'merge'));assert.equal(s.merges,1);assert.equal(s.localSnapshot.profile.runs.length,2);assert.equal(s.localSnapshot.slots,2);assert.equal(s.history.filter(n=>n.storage==='cloud').length,6);
-});
-test('same run with matching content deduplicates while different run identities remain distinct',()=>{
- let s=createState('sameChanges'),plan=planMerge(s);assert.equal(plan.slots,2);assert.equal(plan.addedSlots,0);assert.equal(plan.profile.runs.filter(r=>r.runUUID==='run-A').length,1);
- s=createState('splitUpdates');s={...s,localSnapshot:{...s.localSnapshot,profile:{...s.localSnapshot.profile,runs:[...s.localSnapshot.profile.runs,{runUUID:'new-local',contentHash:'same-bytes',slot:3,name:'C'}]}},history:s.history.map(n=>n.id==='save-4'?{...n,profile:{...n.profile,runs:[...n.profile.runs,{runUUID:'new-remote',contentHash:'same-bytes',slot:3,name:'D'}]}}:n)};
- plan=planMerge(s);assert.equal(plan.ok,true);assert.equal(plan.slots,4);assert.equal(new Set(plan.profile.runs.map(r=>r.slot)).size,4);assert.equal(plan.profile.runs.filter(r=>r.contentHash==='same-bytes').length,2);
-});
-test('capacity failure is all-or-nothing; it never substitutes cloud-only retention',()=>{
- let s=createState('mergeFull'),before=s.history,local=s.localSnapshot;const plan=planMerge(s);assert.equal(plan.ok,false);assert.match(plan.error,/需要 7.*只有 6/);
- s=act(act(s,'askRestore'),'merge');assert.equal(s.busy,false);assert.equal(s.pending,'');assert.deepEqual(s.history,before);assert.deepEqual(s.localSnapshot,local);assert.equal(s.uploads+s.restores+s.merges,0);assert.match(s.message,/合并失败/);
-});
-test('unknown identity, missing common base, global conflict and unsupported format fail conservatively',()=>{
- for(const scene of ['missingBase','missingIdentity','globalConflict']){const original=createState(scene);assert.equal(planMerge(original).ok,false);const s=act(act(original,'askRestore'),'merge');assert.deepEqual(s.history,original.history);assert.deepEqual(s.localSnapshot,original.localSnapshot);assert.equal(s.merges,0);}
- const s=createState('splitUpdates');assert.equal(planMerge({...s,gameId:'cruel'}).ok,false);assert.equal(planMerge(s,s.history.find(n=>n.id==='save-3')).ok,false);
- assert.equal(planMerge({...s,mergeBase:{...s.mergeBase,profile:{...s.mergeBase.profile,globals:{records:'tampered'}}}}).ok,false);
-});
-test('failed mock commit and changes during planning leave both sides untouched',()=>{
- let s=createState('mergeFailure'),before=s.history,local=s.localSnapshot;s=settle(act(act(s,'askRestore'),'merge'));assert.deepEqual(s.history,before);assert.deepEqual(s.localSnapshot,local);assert.equal(s.merges+s.uploads+s.restores,0);assert.match(s.message,/写入未成功/);
- let pending=act(act(createState('splitUpdates'),'askRestore'),'merge');for(const changed of [{...pending,mergeBase:null},{...pending,connected:false},{...pending,localSnapshot:{...pending.localSnapshot,contentId:'changed'}}]){s=settle(changed);assert.equal(s.merges,0);assert.deepEqual(s.history,changed.history);assert.deepEqual(s.localSnapshot,changed.localSnapshot);}
-});
-test('explicit overwrite preserves its direction and does not pretend to merge',()=>{
- for(const action of ['upload','askRestore']){let s=createState('sameRun');const local=s.localSnapshot,remote=s.cloudSnapshot;s=reduce(s,{type:action});assert.equal(s.restoreConfirm.direction,action==='upload'?'upload':'restore');s=settle(act(s,'restore'));assert.equal(s.merges,0);assert.equal(s.localSnapshot.contentId,action==='upload'?local.contentId:remote.contentId);assert.equal(s.cloudSnapshot.contentId,action==='upload'?local.contentId:remote.contentId);}
+test('conflict supports overwrite and cancel, with no merge action',()=>{
+ for(const type of ['askRestore','upload']) {
+  const before=createState('history'), prompt=reduce(before,{type});
+  assert.ok(prompt.restoreConfirm);
+  const canceled=act(prompt,'cancelRestore');
+  assert.deepEqual(canceled.localSnapshot,before.localSnapshot);
+  assert.deepEqual(canceled.history,before.history);
+  const changed=settle(act(prompt,'restore'));
+  assert.equal(changed.localSnapshot.contentId,type==='upload'?before.localSnapshot.contentId:before.cloudSnapshot.contentId);
+ }
 });

@@ -103,7 +103,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private HomeActionContext homeObservationOwner;
     private String confirmationButton;
     private boolean confirmationDestructive;
-    private Runnable confirmationMerge;
     private SyncPage confirmationReturn;
     private String confirmationText;
     private String confirmationTitle;
@@ -1116,7 +1115,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.selected = null;
         this.explicitHomeSelection = null;
         this.confirmedAction = null;
-        this.confirmationMerge = null;
         this.progress = OnboardingProgress.PENDING;
         this.onboardingActive = true;
         this.page = SyncPage.DISCOVERY;
@@ -1822,7 +1820,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         switch (this.activeWorkAction) {
             case PUSH: return SharedHomeOperation.UPLOAD;
             case RESTORE: return SharedHomeOperation.RESTORE;
-            case MERGE: return SharedHomeOperation.MERGE;
             case LAUNCH: return SharedHomeOperation.LAUNCH;
             default: return SharedHomeOperation.NONE;
         }
@@ -3978,7 +3975,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             final AndroidSyncFacade.Inspection observed = this.inspection;
             showDestructiveConfirmation(RESTORE_SAVE_154.text(),
                     SELECTED_SAVE_155.text() + selectedName() + N_NLOCAL_SAVES_WILL_BE_BACKED_156.text(),
-                    OVERWRITE_LOCAL_SAVES_157.text(), () -> m143x7dd3dfcf(observed, target), null);
+                    OVERWRITE_LOCAL_SAVES_157.text(), () -> m143x7dd3dfcf(observed, target));
             return;
         }
         if (kind() == OnboardingKind.BRANCHED) {
@@ -4008,7 +4005,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m143x7dd3dfcf(inspection, str);
             }
-        }, this::previewMerge);
+        });
     }
 
     /* renamed from: lambda$requestRestore$73$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4075,7 +4072,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 || !homeArchiveAvailability().getRestoreSourceAvailable()) return;
         ++this.settingsConfirmationToken;
         this.confirmedAction = null;
-        this.confirmationMerge = null;
         operation(DiagnosticAction.RESTORE, VALIDATING_BACKING_UP_AND_RESTORING_THE_152.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda91
             @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
             public final Object run() throws Exception {
@@ -4116,7 +4112,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 if (canResolve() && hasBranch(snapshotId) && snapshotId.equals(selected))
                     m86xfa720d6a(observed, snapshotId);
             }
-            @Override public void merge() { }
             @Override public void preserveLocal() { }
         };
         // render() supplies a legacy root for this route. Replace all of its chrome, rather than
@@ -4154,7 +4149,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m86xfa720d6a(inspection, str);
             }
-        }, this::previewMerge);
+        });
     }
 
     /* renamed from: lambda$renderConflict$78$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4173,69 +4168,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                     m55x8211a061(LOCAL_SAVES_UPLOADED_AND_VERIFIED_148.text(), outcome);
                     this.page = SyncPage.HOME;
                 });
-    }
-
-    /* JADX INFO: Access modifiers changed from: private */
-    public void previewMerge() {
-        if (!allowRestoreAction()) return;
-        final AndroidSyncFacade.Inspection inspection = this.inspection;
-        if (inspection == null) {
-            refreshComparison(SyncPage.HOME);
-        } else {
-            work(DiagnosticAction.MERGE, CHECKING_THE_COMMON_BASELINE_RUN_IDENTITY_162.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda40
-                @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-                public final Object run() throws Exception {
-                    return MainActivity.this.m60x842ac139(inspection);
-                }
-            }, new Done() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda41
-                @Override // io.github.xyz1001.pdsync.android.MainActivity.Done
-                public final void accept(Object obj) throws Exception {
-                    MainActivity.this.m63xe49933fc(inspection, (AndroidSyncFacade.MergePreview) obj);
-                }
-            });
-        }
-    }
-
-    /* renamed from: lambda$previewMerge$81$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ AndroidSyncFacade.MergePreview m60x842ac139(AndroidSyncFacade.Inspection inspection) throws Exception {
-        return sync().previewMerge(inspection);
-    }
-
-    /* renamed from: lambda$previewMerge$84$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m63xe49933fc(final AndroidSyncFacade.Inspection inspection, AndroidSyncFacade.MergePreview mergePreview) throws Exception {
-        if (!mergePreview.isAllowed()) {
-            this.notice = A_SAFE_MERGE_IS_NOT_POSSIBLE_163.text();
-            this.details = safeText(mergePreview.getMessage());
-            return;
-        }
-        StringBuilder sb = new StringBuilder(THE_MERGE_WILL_USE_164.text(mergePreview.getSlotCount()));
-        for (String str : mergePreview.getDecisions()) {
-            sb.append("\n• ");
-            sb.append(safeText(str));
-        }
-        sb.append(N_NLOCAL_SAVES_WILL_BE_BACKED_166.text());
-        showConfirmation(MERGE_SAVES_167.text(), sb.toString(), MERGE_AND_UPLOAD_168.text(), new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda10
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m62x6f1f0dbb(inspection);
-            }
-        }, null);
-    }
-
-    /* renamed from: lambda$previewMerge$82$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ AndroidSyncFacade.OperationResult m61xf9a4e77a(AndroidSyncFacade.Inspection inspection) throws Exception {
-        requireRestoreSupport();
-        return sync().mergeConflict(inspection);
-    }
-
-    /* renamed from: lambda$previewMerge$83$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m62x6f1f0dbb(final AndroidSyncFacade.Inspection inspection) {
-        operation(DiagnosticAction.MERGE, APPLYING_AND_VERIFYING_THE_SAFE_MERGE_169.text(), new Task() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda118
-            @Override // io.github.xyz1001.pdsync.android.MainActivity.Task
-            public final Object run() throws Exception {
-                return MainActivity.this.m61xf9a4e77a(inspection);
-            }
-        }, THE_MERGED_VERSION_WAS_WRITTEN_TO_170.text());
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -4335,7 +4267,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void operation(DiagnosticAction action, String str, final Task<AndroidSyncFacade.OperationResult> task, final String str2) {
         if (this.busy || isDestroyed()) return;
         this.confirmedAction = null;
-        this.confirmationMerge = null;
         if (this.page == SyncPage.CONFIRM) {
             // Leave the modal before queuing I/O. work() sets busy and renders the existing
             // destination loading state in the same UI turn; navigate() would start a read
@@ -4460,15 +4391,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
     }
 
-    private void showDestructiveConfirmation(String title, String message, String label, Runnable action, Runnable merge) {
-        showConfirmation(title, message, label, action, merge, true);
+    private void showDestructiveConfirmation(String title, String message, String label, Runnable action) {
+        showConfirmation(title, message, label, action, true);
     }
 
-    private void showConfirmation(String title, String message, String label, Runnable action, Runnable merge) {
-        showConfirmation(title, message, label, action, merge, false);
+    private void showConfirmation(String title, String message, String label, Runnable action) {
+        showConfirmation(title, message, label, action, false);
     }
 
-    private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2, boolean destructive) {
+    private void showConfirmation(String str, String str2, String str3, Runnable runnable, boolean destructive) {
         this.confirmationDestructive = destructive;
         boolean fromSettings = this.page == SyncPage.SETTINGS
                 || this.page == SyncPage.CONFIRM && this.confirmationReturn == SyncPage.SETTINGS;
@@ -4479,7 +4410,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.confirmationText = str2;
         this.confirmationButton = str3;
         this.confirmedAction = fromSettings ? guardSettingsConfirmation(settingsOwner, settingsTicket, runnable) : runnable;
-        this.confirmationMerge = fromSettings ? guardSettingsConfirmation(settingsOwner, settingsTicket, runnable2) : runnable2;
         navigate(SyncPage.CONFIRM);
     }
 
@@ -4502,13 +4432,11 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     private void renderConfirmation() {
         final int token = this.settingsConfirmationToken;
         final Runnable confirm = this.confirmedAction;
-        final Runnable merge = this.confirmationMerge;
         String title = this.confirmationTitle == null ? CONFIRM_ACTION_177.text() : this.confirmationTitle;
-        if (merge != null) title = HOW_SHOULD_THE_PROGRESS_CONFLICT_BE_178.text();
         SharedConfirmationState state = new SharedConfirmationState(token, title,
                 this.confirmationText == null ? THIS_CONFIRMATION_HAS_EXPIRED_PLEASE_SELECT_179.text() : this.confirmationText,
                 this.confirmationButton == null ? CONFIRM_AND_CONTINUE_180.text() : this.confirmationButton,
-                confirm != null, merge == null ? null : SMART_MERGE_BOTH_SETS_OF_PROGRESS_181.text(), merge != null, this.busy,
+                confirm != null, null, false, this.busy,
                 this.feedbackError ? visibleNotice() : "", this.confirmationDestructive);
         // Replace the legacy header/body/footer with the same inactive shared page behind the modal.
         final SharedHomeContent observedContent = homeContent();
@@ -4523,8 +4451,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 this.confirmationReturn == SyncPage.SETTINGS ? this.confirmationSettingsBackdrop : null,
                 () -> {
                     if (isCurrentConfirmation(token) && this.confirmedAction == confirm && confirm != null) confirm.run();
-                }, merge == null ? null : () -> {
-                    if (isCurrentConfirmation(token) && this.confirmationMerge == merge) merge.run();
                 }, () -> {
                     if (isCurrentConfirmation(token)) cancelConfirmation();
                 }), new LinearLayout.LayoutParams(-1, -1));
@@ -4539,7 +4465,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     public void cancelConfirmation() {
         ++this.settingsConfirmationToken;
         this.confirmedAction = null;
-        this.confirmationMerge = null;
         this.notice = SELECTION_CANCELED_BOTH_SAVES_ARE_UNCHANGED_182.text();
         SyncPage syncPage = this.confirmationReturn;
         if (syncPage == null) {
@@ -4834,7 +4759,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m137x7ab150f7();
             }
-        }, null);
+        });
     }
 
     /* renamed from: lambda$renderSettings$98$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4863,7 +4788,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m115x29209d6f();
             }
-        }, null);
+        });
     }
 
     /* renamed from: lambda$renderSettings$103$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4909,7 +4834,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m119xff093673();
             }
-        }, null);
+        });
     }
 
     /* renamed from: lambda$renderSettings$105$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
@@ -4948,7 +4873,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             public final void run() {
                 MainActivity.this.m123x77f6f2cc();
             }
-        }, null);
+        });
     }
 
     /* renamed from: lambda$renderSettings$109$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */

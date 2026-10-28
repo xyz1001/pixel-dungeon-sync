@@ -124,7 +124,7 @@ public final class ComparisonProofStateChecks {
         check(claim(state, first) == null, "A dismissed dialog can never be claimed");
         ComparisonProofState.Ticket newer = state.openConflict();
         check(newer.token > first.token, "Cancelled token cannot be recycled");
-        check(state.review(first, GAME, true, false, true) == null, "Delayed preview cannot resurrect cancellation");
+
         check(state.dialog() == newer, "Delayed cancelled preview preserves the new dialog");
 
         for (String cause : new String[]{"pause", "leave", "Back", "destroy", "rotation", "game reset"}) {
@@ -135,7 +135,7 @@ public final class ComparisonProofStateChecks {
             empty(state, cause);
             check(!state.matches(GAME), cause + " clears the observation");
             check(!current(state, first) && claim(state, first) == null, cause + " rejects stale callbacks");
-            check(state.review(first, GAME, true, false, true) == null, cause + " rejects delayed merge review");
+
             check(state.bind(GAME), cause + " requires a fresh binding even for the same object identity");
             newer = state.openConflict();
             check(newer.token > first.token, cause + " cannot recycle an earlier epoch");
@@ -170,12 +170,12 @@ public final class ComparisonProofStateChecks {
             state.selectProgress(ComparisonProofState.Progress.CLOUD, "selected");
             ComparisonProofState.Ticket first = state.openConflict();
             check(!state.current(first.token, changed, true, false, first.stage), cause + " rejects mismatched callback context");
-            check(state.review(first, changed, true, false, true) == null, cause + " cannot approve an old preview");
+
             check(state.dialog() == first && current(state, first), cause + " rejected callback cannot mutate current proof");
             check(state.bind(changed), cause + " is a new observation");
             empty(state, cause);
             check(!current(state, first), cause + " invalidates the previous token");
-            check(state.review(first, GAME, true, false, true) == null, cause + " cannot resurrect prior review");
+
             state.bind(GAME);
             check(!current(state, first), cause + " cannot revive proof by switching back");
             state.selectProgress(ComparisonProofState.Progress.CLOUD, "selected");
@@ -188,44 +188,7 @@ public final class ComparisonProofStateChecks {
         }
     }
 
-    private static void mergeReview() {
-        ComparisonProofState state = state();
-        state.selectProgress(ComparisonProofState.Progress.CLOUD, "head-a");
-        ComparisonProofState.Ticket original = state.openConflict();
-        check(state.review(null, GAME, true, false, true) == null, "Missing preview ticket is rejected");
-        ComparisonProofState.Ticket reviewed = state.review(original, GAME, true, false, true);
-        check(reviewed != null && reviewed.stage == ComparisonProofState.Stage.MERGE_REVIEW,
-                "An allowed current preview creates review proof");
-        check(reviewed.token > original.token && reviewed != original, "Merge review requires a fresh ticket");
-        check("head-a".equals(reviewed.snapshotId) && reviewed.context.equals(GAME), "Review retains captured observation and selection");
-        check(!current(state, original) && current(state, reviewed), "Conflict confirmation cannot bypass merge review");
-        check(state.claim(reviewed.token, GAME, true, false, ComparisonProofState.Stage.CONFLICT) == null,
-                "Review ticket cannot be claimed through the conflict action");
-        check(state.selectRemote("head-b") == null && "head-a".equals(state.selectedId()),
-                "Remote selection is not allowed in merge review");
-        check(state.review(original, GAME, true, false, true) == null, "Duplicate preview cannot replace review proof");
-        check(state.review(reviewed, GAME, true, false, true) == null, "Review cannot recursively authorize another review");
-        check(state.dialog() == reviewed, "Rejected callbacks leave the review intact");
-        check(state.cancel(reviewed.token, GAME, true, false), "Merge review supports cancellation");
-        check(state.review(original, GAME, true, false, true) == null && state.dialog() == null,
-                "Delayed preview cannot reopen a cancelled review");
 
-        original = state.openConflict();
-        check(state.review(original, GAME, true, false, false) == null, "Denied preview does not return merge proof");
-        ComparisonProofState.Ticket denied = state.dialog();
-        check(denied != null && denied.stage == ComparisonProofState.Stage.CONFLICT, "Denied preview reissues a conflict modal");
-        check(denied.token > original.token && !current(state, original), "Denied preview revokes the original token");
-        check("head-a".equals(denied.snapshotId) && state.progress() == ComparisonProofState.Progress.CLOUD,
-                "Denied preview preserves explicit choice");
-        check(state.review(original, GAME, true, false, true) == null && state.dialog() == denied,
-                "A late allowed result cannot override a denied preview");
-        ComparisonProofState.Ticket chosen = state.selectRemote("head-b");
-        check(state.review(denied, GAME, true, false, true) == null && state.dialog() == chosen,
-                "A delayed preview cannot replace a newer remote choice");
-        state.selectProgress(ComparisonProofState.Progress.LOCAL, "head-b");
-        check(state.review(chosen, GAME, true, false, true) == null && state.dialog() == null,
-                "A delayed preview cannot revive a modal after a new progress choice");
-    }
 
     private static void claimAndFinish() {
         ComparisonProofState state = state();
@@ -238,7 +201,7 @@ public final class ComparisonProofStateChecks {
         check(claim(state, original) == null, "A token cannot be claimed twice");
         check(state.capture(GAME, true, false) == null, "Finish cannot issue another claim while work is claimed");
         check(!state.cancel(original.token, GAME, true, false), "A late dismiss callback cannot cancel transferred proof");
-        check(state.review(original, GAME, true, false, true) == null, "Delayed preview cannot replace a claim");
+
         check(state.claimedCurrent(claimed, GAME, true), "Claim remains valid for worker revalidation");
         check(state.claimedCurrent(claimed, context(), true), "Rereading the same observation preserves claimed proof");
         check(!state.bind(context()) && state.claimedCurrent(claimed, GAME, true), "Rerender preserves the claimed epoch");
@@ -276,8 +239,8 @@ public final class ComparisonProofStateChecks {
                 check(!state.current(original.token, GAME, foreground, busy, original.stage), cause + " blocks modal actions");
                 check(state.claim(original.token, GAME, foreground, busy, original.stage) == null, cause + " cannot claim");
                 check(!state.cancel(original.token, GAME, foreground, busy), cause + " cannot cancel current proof");
-                check(state.review(original, GAME, foreground, busy, true) == null, cause + " cannot accept a preview");
-                check(state.review(original, GAME, foreground, busy, false) == null, cause + " cannot apply a denied preview");
+
+
                 check(state.dialog() == original && current(state, original), cause + " rejected callbacks do not mutate proof");
                 check(state.cancel(original.token, GAME, true, false), cause + " still permits a current foreground cancellation");
                 check(state.capture(GAME, foreground, busy) == null, cause + " cannot capture Finish");
@@ -289,7 +252,6 @@ public final class ComparisonProofStateChecks {
         ComparisonProofState state = state();
         ComparisonProofState.Ticket original = state.openConflict();
         check(!state.current(original.token + 1, GAME, true, false, original.stage), "Wrong epoch is not current");
-        check(!state.current(original.token, GAME, true, false, ComparisonProofState.Stage.MERGE_REVIEW), "Wrong stage is not current");
         check(!state.current(original.token, null, true, false, original.stage), "Missing context is not current");
         check(!state.cancel(original.token + 1, GAME, true, false), "A stale dismissal cannot close a newer modal");
         check(state.dialog() == original, "Invalid proof checks leave the visible modal intact");
@@ -506,8 +468,7 @@ public final class ComparisonProofStateChecks {
         check(!state.current(original.token, refreshed, true, false, original.stage), "Original token cannot become a new modal token");
         check(state.claim(original.token, refreshed, true, false, original.stage) == null,
                 "Original ticket cannot claim an action against reinspection");
-        check(state.review(original, refreshed, true, false, true) == null,
-                "Original ticket cannot preview or authorize a new merge review");
+
         check(!state.finishReinspection(original, refreshedContext(), true), "Duplicate finish cannot replace its completed context");
         check(!state.beginReinspection(original, refreshed, true), "Completed failure owner cannot start a new action read");
         ComparisonProofState.Context sameRefresh = new ComparisonProofState.Context(
@@ -737,7 +698,6 @@ public final class ComparisonProofStateChecks {
         explicitChoiceAndRerender();
         cancellationAndLifecycle();
         changedObservations();
-        mergeReview();
         claimAndFinish();
         foregroundAndBusy();
         releaseAndRetry();

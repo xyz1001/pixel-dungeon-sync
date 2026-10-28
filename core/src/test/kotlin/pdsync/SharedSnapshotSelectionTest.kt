@@ -161,7 +161,7 @@ class SharedSnapshotSelectionTest {
  }
 
  private val androidIdentity = AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon", "Synthetic game",
-  "a".repeat(64), AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896))
+  "a".repeat(64), AndroidSaveCapabilities(802, 896))
  private val connection = AndroidConnection("https://dav.example.test/synthetic/", "synthetic", "test-only", profile)
  private inner class Bridge: AndroidGameBridge {
   var content = emptyMap<String, ByteArray>()

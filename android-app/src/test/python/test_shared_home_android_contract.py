@@ -160,7 +160,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('this.busy, canUpload, canRestore, canLaunch, homeOperation()', home)
         pending = body(MAIN, 'private SharedHomeOperation homeOperation()')
         self.assertIn('if (!this.busy) return SharedHomeOperation.NONE', pending)
-        for action in ('PUSH', 'RESTORE', 'MERGE', 'LAUNCH'):
+        for action in ('PUSH', 'RESTORE', 'LAUNCH'):
             self.assertIn('case ' + action + ':', pending)
 
     def test_platform_gate_and_real_operations_remain_without_new_process_rules(self):
@@ -283,8 +283,8 @@ class SharedHomeAndroidContract(unittest.TestCase):
         restore = body(MAIN, 'public void requestRestore()')
         self.assertIn('showDestructiveConfirmation(', restore)
         destructive = body(MAIN, 'private void showDestructiveConfirmation(')
-        self.assertIn('showConfirmation(title, message, label, action, merge, true)', destructive)
-        confirmation = body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2, boolean destructive)')
+        self.assertIn('showConfirmation(title, message, label, action, true)', destructive)
+        confirmation = body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, boolean destructive)')
         self.assertIn('this.confirmationDestructive = destructive', confirmation)
         self.assertIn('this.confirmationDestructive', body(MAIN, 'private void renderConfirmation()'))
         self.assertNotIn('navigate(SyncPage.CONFLICT)', restore)
@@ -321,7 +321,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('AndroidHomeDialogComposition.confirmationView(', confirmation)
         self.assertIn('isCurrentConfirmation(token)', confirmation)
         self.assertIn('this.confirmedAction == confirm', confirmation)
-        self.assertIn('this.confirmationMerge == merge', confirmation)
+        self.assertNotIn('confirmationMerge', confirmation)
         adapter = (REPO / 'android-app/src/main/kotlin/io/github/xyz1001/pdsync/android/AndroidHomeDialogComposition.kt').read_text()
         self.assertIn('SharedNamingDialog(SharedNamingState(', adapter)
         self.assertIn('SharedConfirmationDialog(state,', adapter)

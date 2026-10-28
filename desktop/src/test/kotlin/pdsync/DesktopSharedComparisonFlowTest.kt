@@ -183,9 +183,6 @@ class DesktopSharedComparisonFlowTest {
 
  @Test fun failedOrDivergedReturnValuesCannotAuthorizeAutomaticCompletion() {
   val diverged = AppendPushResult.Diverged(AppendConflict(emptySet(), emptyList(), emptyMap()))
-  val prepared = AppendPushResult.Prepared(publish(session("prepared"), Memory()).commit)
-  assertFalse(desktopOnboardingOperationSucceeded(prepared))
-  assertFalse(desktopOnboardingOperationSucceeded(OnboardingRestoreResult.Published(prepared)))
   assertFalse(desktopOnboardingOperationSucceeded(diverged))
   assertFalse(desktopOnboardingOperationSucceeded(OnboardingRestoreResult.Published(diverged)))
   assertFalse(desktopOnboardingOperationSucceeded(null))
@@ -206,64 +203,7 @@ class DesktopSharedComparisonFlowTest {
   assertFails { proof.session.onboardingRestore(proof.observed, assertNotNull(proof.selectedId), store) { true } }
   assertEquals("changed after opening dialog", manager.root.resolve("game1/game.dat").readText())
  }
- @Test fun realMergePreviewChangesTokenAndConfirmedApplyUsesTheExactObservedProof() {
-  val target = TargetGame("fixture.jar", "3.3.8", 896, "a".repeat(64), true, 802, "test")
-  val versions = object : ProfileVersions {
-   override fun annotate(snapshot: Snapshot) = snapshot.copy(manifest = snapshot.manifest.copy(
-    saveVersions = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))))
-   override fun target(path: String) = target
-   override fun checkRestore(snapshot: Snapshot, targetPath: String) {
-    ShatteredVersions.requireCompatible(ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered)), target)
-   }
-  }
-  fun mergeSession(populated: Boolean): AppendProfileSession {
-   val id = serial++
-   val root = temp.resolve("merge-$id").createDirectory()
-   if (populated) (1..2).forEach { slot ->
-    root.resolve("game$slot").createDirectory()
-    root.resolve("game$slot/game.dat").writeText("""{"version":896,"hero":{"name":"hero-$slot"}}""")
-    root.resolve("game$slot/depth1.dat").writeText("base-$slot")
-   }
-   return AppendProfileSession(AppConfig(saveRoot = root.toString()), temp.resolve("merge-state-$id"),
-    versions = versions, captureQuietMillis = 0)
-  }
-  val store = Memory(); val remote = mergeSession(true); val manager = mergeSession(false)
-  val base = publish(remote, store).commit
-  manager.restoreRemote(base.snapshot.id, store) { true }
-  remote.root.resolve("game1/depth1.dat").writeText("remote-progress")
-  remote.confirmRunIdentity("game1", remote.observedFiles(), true) { true }
-  publish(remote, store)
-  manager.root.resolve("game2/depth1.dat").writeText("local-progress")
-  manager.confirmRunIdentity("game2", manager.observedFiles(), true) { true }
-  val observed = manager.compareOnboarding(store) { true }
-  val adapter = DesktopSharedComparisonAdapter().apply { observed(observed) }
-  val current = context(manager, observed)
-  val initial = assertNotNull(adapter.openConflict(current))
-  assertTrue(adapter.dialog!!.presentation.canPreviewMerge)
-  val commitsBefore = store.commits.size
-  val result = manager.previewOnboardingMerge(initial.observed, store) { true }
-  assertEquals(commitsBefore, store.commits.size, "preview cannot publish")
-  assertTrue(adapter.acceptMergePreview(current.copy(busy = true), initial, result))
-  val reviewed = assertNotNull(adapter.dialog)
-  assertEquals(SharedComparisonConfirmationStage.MERGE_REVIEW, reviewed.presentation.stage)
-  assertTrue(reviewed.presentation.canApplyMerge)
-  assertSame(observed, reviewed.proof.observed)
-  assertTrue(reviewed.proof.token > initial.token)
-  assertNull(adapter.confirmation(current, initial.token, SharedComparisonConfirmationStage.CONFLICT))
-  val confirmed = assertNotNull(adapter.confirmation(current, reviewed.proof.token, SharedComparisonConfirmationStage.MERGE_REVIEW))
-  val applied = manager.mergeCurrent(confirmed.observed, store) { true }
-  assertIs<AppendPushResult.Prepared>(applied)
-  assertFalse(desktopOnboardingOperationSucceeded(applied))
-  assertEquals(commitsBefore, store.commits.size, "local merge cannot publish")
-  val pending = manager.compareOnboarding(store) { true }
-  assertFalse(desktopCanFinishAfterOperation(false, true, pending))
-  assertTrue(desktopOnboardingOperationSucceeded(manager.push(store) { true }))
-  val fresh = manager.compareOnboarding(store) { true }
-  assertTrue(desktopCanFinishAfterOperation(true, true, fresh))
-  manager.confirmOnboardingReady(fresh, store) { true }
-  adapter.observed(fresh)
-  assertNull(adapter.confirmation(current, reviewed.proof.token, SharedComparisonConfirmationStage.MERGE_REVIEW))
- }
+
 
  @Test fun staleLocalFinishDropsOldIdenticalProofAndCanCompareAgain() {
   val store = Memory(); val manager = session(); publish(manager, store)

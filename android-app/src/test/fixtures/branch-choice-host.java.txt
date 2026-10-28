@@ -14,7 +14,7 @@ public final class MainActivity {
     interface Task { Object run() throws Exception; }
     interface SharedBranchChoiceActions {
         void select(String id); void back(); void refresh();
-        void overwrite(String id); void merge(); void preserveLocal();
+        void overwrite(String id); void preserveLocal();
     }
     static final class SecureConnectionStore { static final class Connection {} }
     static final class AndroidSyncFacade {
@@ -153,7 +153,7 @@ public final class MainActivity {
         return a;
     }
     static void invokeAll(SharedBranchChoiceActions actions) {
-        actions.overwrite("branch-a"); actions.merge(); actions.preserveLocal();
+        actions.overwrite("branch-a"); actions.preserveLocal();
         actions.select("branch-b"); actions.refresh(); actions.back();
     }
     static void blocked(Consumer<MainActivity> change, String label) {
@@ -169,7 +169,7 @@ public final class MainActivity {
     static void resolutionBlocked(Consumer<MainActivity> change, String label) {
         MainActivity a = fresh(); change.accept(a);
         // Render current evidence, so each gate is exercised independently of stale-owner checks.
-        a.render(); a.actions.overwrite("branch-a"); a.actions.merge();
+        a.render(); a.actions.overwrite("branch-a");
         check(a.operations == 0 && a.merges == 0, label + ": resolution dispatched");
     }
     static void preserveBlocked(Consumer<MainActivity> change, String label) {
@@ -206,7 +206,7 @@ public final class MainActivity {
         a.actions.overwrite("branch-b"); a.actions.overwrite("unknown-branch");
         check(a.operations == 0, "overwrite must match selected observed branch");
         SharedBranchChoiceActions selected = a.actions;
-        selected.overwrite("branch-a"); selected.overwrite("branch-a"); selected.merge(); selected.preserveLocal();
+        selected.overwrite("branch-a"); selected.overwrite("branch-a"); selected.preserveLocal();
         check(a.operations == 1 && a.facade.resolutions == 1 && a.facade.uploads == 0 && a.merges == 0,
                 "busy repeated confirmation is dispatched once");
         check(a.facade.dispatchedObservation == a.inspection && a.facade.resolvedId.equals("branch-a"),
@@ -232,7 +232,7 @@ public final class MainActivity {
 
         resolutionBlocked(a -> a.recovery = true, "unfinished restore");
         resolutionBlocked(a -> a.inspection.pending = true, "pending upload");
-        MainActivity a = fresh(); a.actions.merge(); a.actions.merge();
+        MainActivity a = fresh();
         check(a.merges == 0 && a.operations == 0, "removed merge never dispatches");
         preserveBlocked(b -> b.inspection = null, "preserve missing observation");
         preserveBlocked(b -> b.observedKind = OnboardingKind.READY, "preserve unbranched observation");

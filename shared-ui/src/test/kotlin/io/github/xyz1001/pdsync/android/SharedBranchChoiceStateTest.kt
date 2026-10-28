@@ -12,7 +12,7 @@ class SharedBranchChoiceStateTest {
         SharedBranchChoice("real-a", "手机", "10-15 09:30"),
         SharedBranchChoice("real-b", "电脑", "10-14 20:00")),
         pageActive = true, connected = true, observationCurrent = true,
-        overwriteSupported = true, mergeSupported = true)
+        overwriteSupported = true)
 
     private class Host(initial: SharedBranchChoiceState) : SharedBranchChoiceActions {
         var state = initial
@@ -22,7 +22,6 @@ class SharedBranchChoiceStateTest {
         override fun back() { calls += "back"; state = state.copy(pageActive = false) }
         override fun refresh() { calls += "refresh"; state = state.copy(busy = true) }
         override fun overwrite(snapshotId: String) { calls += "overwrite:$snapshotId"; state = state.copy(busy = true) }
-        override fun merge() { calls += "merge"; state = state.copy(busy = true) }
         override fun preserveLocal() { calls += "preserve"; state = state.copy(busy = true) }
     }
 
@@ -31,7 +30,7 @@ class SharedBranchChoiceStateTest {
         host.interactions.preserveLocal();assertTrue(host.calls.isEmpty())
         host.interactions.primary();val dialog=host.interactions.presentation!!
         assertNull(dialog.secondaryLabel);assertFalse(dialog.secondaryEnabled)
-        host.interactions.merge(dialog.token);assertTrue(host.calls.isEmpty())
+        assertTrue(host.calls.isEmpty())
         host.interactions.confirm(dialog.token);host.interactions.confirm(dialog.token)
         assertEquals(listOf("overwrite:real-b"),host.calls);assertNull(host.interactions.presentation)
     }
@@ -65,10 +64,10 @@ class SharedBranchChoiceStateTest {
         assertEquals(listOf("select:real-b"), host.calls)
     }
 
-    @Test fun overwriteAndMergeRequireOneShotCurrentConfirmation() {
+    @Test fun overwriteRequiresOneShotCurrentConfirmation() {
         val host = Host(ready().copy(selectedId = "real-b"))
         host.interactions.confirm(1)
-        host.interactions.merge(1)
+
         assertTrue(host.calls.isEmpty())
         host.interactions.primary()
         val token = host.interactions.presentation!!.token
@@ -76,14 +75,9 @@ class SharedBranchChoiceStateTest {
         assertTrue(host.calls.isEmpty())
         host.interactions.confirm(token)
         host.interactions.confirm(token)
-        host.interactions.merge(token)
+
         assertEquals(listOf("overwrite:real-b"), host.calls)
-        val merge = Host(ready())
-        merge.interactions.primary()
-        val mergeToken = merge.interactions.presentation!!.token
-        merge.interactions.merge(mergeToken)
-        merge.interactions.merge(mergeToken)
-        assertEquals(listOf("merge"), merge.calls)
+
     }
 
     @Test fun missingOrUnknownSelectionDisablesOnlyOverwriteWithoutChoosingAnId() {
@@ -92,7 +86,7 @@ class SharedBranchChoiceStateTest {
             host.interactions.primary()
             val dialog = host.interactions.presentation!!
             assertFalse(dialog.confirmEnabled)
-            assertTrue(dialog.secondaryEnabled)
+            assertFalse(dialog.secondaryEnabled)
             host.interactions.confirm(dialog.token)
             assertTrue(host.calls.isEmpty())
             assertEquals(id, host.state.selectedId)
@@ -124,7 +118,7 @@ class SharedBranchChoiceStateTest {
             { it.copy(observation = Any()) }, { it.copy(selectedId = "real-b") },
             { it.copy(branches = it.branches.take(1)) }, { it.copy(connected = false) },
             { it.copy(observationCurrent = false) }, { it.copy(resolutionBlocked = true) },
-            { it.copy(overwriteSupported = false) }, { it.copy(mergeSupported = false) },
+            { it.copy(overwriteSupported = false) },
             { it.copy(pageActive = false) }, { it.copy(game = SharedGameIdentity("另一个游戏")) },
         )
         for (change in changes) {
@@ -136,7 +130,7 @@ class SharedBranchChoiceStateTest {
             assertNull(host.interactions.presentation)
             host.state = original
             host.interactions.confirm(token)
-            host.interactions.merge(token)
+
             assertTrue(host.calls.isEmpty())
         }
     }
@@ -144,7 +138,7 @@ class SharedBranchChoiceStateTest {
     @Test fun busyInactiveDisconnectedBlockedAndUnsupportedCannotResolve() {
         val base = ready().copy(selectedId = "real-a")
         for (state in listOf(base.copy(busy = true), base.copy(pageActive = false), base.copy(connected = false),
-            base.copy(resolutionBlocked = true), base.copy(overwriteSupported = false, mergeSupported = false))) {
+            base.copy(resolutionBlocked = true), base.copy(overwriteSupported = false))) {
             val host = Host(state)
             host.interactions.primary()
             assertNull(host.interactions.presentation)
@@ -154,7 +148,7 @@ class SharedBranchChoiceStateTest {
         host.interactions.primary()
         val token = host.interactions.presentation!!.token
         host.state = base.copy(busy = true)
-        host.interactions.confirm(token); host.interactions.merge(token); host.interactions.cancel(token)
+        host.interactions.confirm(token); host.interactions.cancel(token)
         host.interactions.back(); host.interactions.select("real-b")
         assertTrue(host.calls.isEmpty())
         assertNotNull(host.interactions.presentation, "busy locks the current confirmation")
@@ -182,7 +176,7 @@ class SharedBranchChoiceStateTest {
         host.interactions.primary()
         val token = host.interactions.presentation!!.token
         host.interactions.dispose()
-        host.interactions.confirm(token); host.interactions.merge(token); host.interactions.cancel(token)
+        host.interactions.confirm(token); host.interactions.cancel(token)
         host.interactions.back(); host.interactions.select("real-b"); host.interactions.primary()
         assertTrue(host.calls.isEmpty())
     }

@@ -433,8 +433,6 @@ class DesktopSharedHomeAdapterTest {
   assertEquals(SharedHomeOperation.UPLOAD, desktopHomeOperation(OperationAction.PUSH))
   for (action in listOf(OperationAction.RESTORE, OperationAction.RESOLVE, OperationAction.CLOUD_HISTORY, OperationAction.REMOTE_TIP))
    assertEquals(SharedHomeOperation.RESTORE, desktopHomeOperation(action))
-  for (action in listOf(OperationAction.MERGE, OperationAction.MERGE_CURRENT))
-   assertEquals(SharedHomeOperation.MERGE, desktopHomeOperation(action))
   assertEquals(SharedHomeOperation.LAUNCH, DesktopSharedHomeAdapter.state(ready().copy(launchingGame = true)).pending)
   assertEquals(SharedHomeOperation.NONE, DesktopSharedHomeAdapter.state(ready()).pending)
  }

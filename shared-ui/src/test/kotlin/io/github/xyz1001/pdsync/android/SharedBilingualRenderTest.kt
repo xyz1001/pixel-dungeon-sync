@@ -178,13 +178,12 @@ class SharedBilingualRenderTest {
                 SharedBranchChoice("snapshot-a", longName, "Desktop · 2 slots · 28 games played"),
                 SharedBranchChoice("snapshot-b", "Another cloud expedition", "Android · 3 slots · 30 games played")),
                 selectedId = "snapshot-a", game = game, pageActive = true, connected = true,
-                observationCurrent = true, overwriteSupported = true, mergeSupported = true),
+                observationCurrent = true, overwriteSupported = true),
                 object : SharedBranchChoiceActions {
                     override fun select(snapshotId: String) = Unit
                     override fun back() = Unit
                     override fun refresh() = Unit
                     override fun overwrite(snapshotId: String) = Unit
-                    override fun merge() = Unit
                     override fun preserveLocal() = Unit
                 })
             "home", "home-loading" -> SharedHomeScreen(SharedHomeState(game, SharedMessages.PROGRESS_SYNCED.text(), pageActive = true,
@@ -225,7 +224,7 @@ class SharedBilingualRenderTest {
             "confirmation" -> SharedConfirmationDialogBody(SharedConfirmationState(1,
                 SharedMessages.CONFLICT_TITLE.text(), SharedMessages.USE_SELECTED_WARNING.text(),
                 SharedMessages.USE_SELECTED.text(), confirmEnabled = true,
-                secondaryLabel = SharedMessages.MERGE.text(), secondaryEnabled = true), {}, onDismiss = {}, modifier = Modifier.fillMaxWidth())
+                secondaryLabel = null, secondaryEnabled = false), {}, onDismiss = {}, modifier = Modifier.fillMaxWidth())
             "naming" -> SharedNamingDialogBody(SharedNamingState(1, ""), {}, {}, {}, Modifier.fillMaxWidth())
             "appreciation" -> SharedAppShell(SharedMessages.SUPPORT_RENEW_YEAR.text()) {
                 SharedAppreciationContent(SharedAppreciationState("layout-user", true, "2027-10-19", "", "", null, false, true), {},

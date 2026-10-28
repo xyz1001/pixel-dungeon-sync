@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-/** Host-owned evidence token; presentation never invents overwrite or merge permission. */
+/** Host-owned evidence token; presentation never invents overwrite permission. */
 data class SharedConfirmationState @JvmOverloads constructor(
     val token: Long,
     val title: String,
@@ -68,7 +68,7 @@ internal class SharedConfirmationInteractions(
     }
 }
 
-/** Reusable modal for Step 4 and home actions; its host owns confirmation and merge plans. */
+/** Reusable modal for Step 4 and home actions; its host owns confirmation plans. */
 @Composable
 fun SharedConfirmationDialog(
     state: SharedConfirmationState,

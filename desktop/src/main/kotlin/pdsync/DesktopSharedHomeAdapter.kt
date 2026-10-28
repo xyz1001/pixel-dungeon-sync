@@ -104,7 +104,6 @@ internal object DesktopSharedHomeAdapter {
     current.busy -> when (current.operation) {
      SharedHomeOperation.UPLOAD -> DesktopMessages.UPLOADING_SAVES.text()
      SharedHomeOperation.RESTORE -> DesktopMessages.BACKING_UP_AND_RESTORING_SAVES.text()
-     SharedHomeOperation.MERGE -> DesktopMessages.CHECKING_AND_MERGING_SAVES.text()
      else -> DesktopMessages.PROCESSING_PLEASE_WAIT.text()
     }
     !current.connected -> DesktopMessages.NOT_CONNECTED_TO_THE_CLOUD_CLICK_UPLOAD_TO_SIGN_IN.text()
@@ -200,6 +199,5 @@ private fun desktopHomeFeedback(raw: String, fallback: String, allowPlainText: B
 internal fun desktopHomeOperation(action: OperationAction): SharedHomeOperation = when (action) {
  OperationAction.PUSH -> SharedHomeOperation.UPLOAD
  OperationAction.RESTORE, OperationAction.RESOLVE, OperationAction.CLOUD_HISTORY, OperationAction.REMOTE_TIP -> SharedHomeOperation.RESTORE
- OperationAction.MERGE, OperationAction.MERGE_CURRENT -> SharedHomeOperation.MERGE
  OperationAction.CAPTURE, OperationAction.ARCHIVE -> SharedHomeOperation.NONE
 }

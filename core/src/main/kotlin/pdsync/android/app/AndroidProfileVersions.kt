@@ -34,8 +34,7 @@ class AndroidProfileVersions(
   return TargetGame("android-package:${installed.packageName}", installed.versionName, capability.maximumRestoreVersion ?: 0,
    installed.apkSha256, true, capability.minimumRestoreVersion,
    if (capability.minimumRestoreVersion == null) CoreMessages.ANDROID_SAME_PACKAGE_RECOGNIZED_SAVES_CAN_BE_RESTORED_WITHOUT_CHANGING_THEIR_BYTES_THIS_PACKAGE_S.text()
-   else CoreMessages.ANDROID_SAME_PACKAGE_RESTORE_USES_THE_KNOWN_SAVE_LOADER_VERSION_RANGE_ORIGINAL_SIGNER_AND_APK_FING.text(),
-   if (capability.mergePolicy == AndroidMergePolicy.SHATTERED_896) "shattered-896" else null)
+   else CoreMessages.ANDROID_SAME_PACKAGE_RESTORE_USES_THE_KNOWN_SAVE_LOADER_VERSION_RANGE_ORIGINAL_SIGNER_AND_APK_FING.text())
  }
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   checkRestore(snapshot,targetPath,detect(snapshot))
@@ -54,14 +53,11 @@ class AndroidProfileVersions(
  private fun capabilities(installed: AndroidGameTarget): AndroidSaveCapabilities {
   if (identity.saveCapabilities.minimumRestoreVersion != null) return identity.saveCapabilities
   if (identity.packageName == "com.shatteredpixel.shatteredpixeldungeon") return when (installed.versionCode) {
-   896L -> AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896)
+   896L -> AndroidSaveCapabilities(802, 896)
    922L -> AndroidSaveCapabilities(850, 922)
    else -> identity.saveCapabilities
   }
   return identity.saveCapabilities
  }
- fun requireMerge() {
-  if (capabilities(installedTarget()).mergePolicy != AndroidMergePolicy.SHATTERED_896)
-   throw RunMergeException(CoreMessages.ANDROID_THIS_GAME_S_SEMANTIC_MERGE_FORMAT_HAS_NOT_BEEN_VERIFIED_ITS_SNAPSHOTS_CAN_BE_KEPT_AS_SEPAR.text())
- }
+
 }

@@ -323,7 +323,6 @@ class SharedM3ReferenceRenderTest {
         override fun back() { calls += "back"; state = state.copy(pageActive = false) }
         override fun refresh() { calls += "refresh"; state = state.copy(busy = true) }
         override fun overwrite(snapshotId: String) { calls += "overwrite:$snapshotId" }
-        override fun merge() { calls += "merge" }
         override fun preserveLocal() { calls += "preserve"; state = state.copy(busy = true) }
     }
 
@@ -332,7 +331,7 @@ class SharedM3ReferenceRenderTest {
             SharedBranchChoice("snapshot-a", "手机进度", "手机 · 10-09 09:00 · 2 个槽位"),
             SharedBranchChoice("snapshot-b", "电脑进度", "电脑 · 10-08 09:00 · 2 个槽位")),
             game = game, pageActive = true, connected = true, observationCurrent = true,
-            overwriteSupported = true, mergeSupported = true)
+            overwriteSupported = true)
         for (width in widths) {
             val host = BranchHost(ready)
             RenderSession(width) { SharedBranchChoiceScreen(host.state, host) }.use { session ->
@@ -356,7 +355,7 @@ class SharedM3ReferenceRenderTest {
             }
             for ((name, state) in linkedMapOf("busy" to ready.copy(busy = true),
                 "blocked" to ready.copy(resolutionBlocked = true),
-                "unsupported" to ready.copy(overwriteSupported = false, mergeSupported = false))) {
+                "unsupported" to ready.copy(overwriteSupported = false))) {
                 val blocked = BranchHost(state)
                 RenderSession(width) { SharedBranchChoiceScreen(blocked.state, blocked) }.use { session ->
                     session.capture("branches-$name")

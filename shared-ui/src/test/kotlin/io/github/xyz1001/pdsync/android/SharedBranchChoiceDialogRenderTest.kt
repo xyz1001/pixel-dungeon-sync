@@ -54,7 +54,7 @@ class SharedBranchChoiceDialogRenderTest {
         SharedBranchChoice("snapshot-a", "Expedition A", "Desktop · 6 files"),
         SharedBranchChoice("snapshot-b", "Expedition B", "Android · 4 files")),
         pageActive = true, connected = true, observationCurrent = true,
-        overwriteSupported = true, mergeSupported = true)
+        overwriteSupported = true)
 
     private class Host(initial: SharedBranchChoiceState) : SharedBranchChoiceActions {
         var state by mutableStateOf(initial)
@@ -71,7 +71,6 @@ class SharedBranchChoiceDialogRenderTest {
         override fun back() { calls += "back"; visible = false; state = state.copy(pageActive = false) }
         override fun refresh() = start("refresh")
         override fun overwrite(snapshotId: String) { start("overwrite:$snapshotId"); overwriteAction?.invoke(snapshotId) }
-        override fun merge() = start("merge")
         override fun preserveLocal() = start("preserve")
         private fun start(action: String) {
             // Hosts retain the synchronous operation lock used by the real platforms.
@@ -81,7 +80,7 @@ class SharedBranchChoiceDialogRenderTest {
     }
 
     @org.junit.jupiter.api.io.TempDir lateinit var flowRoot: Path
-    private val flowIdentity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic", "a".repeat(64),AndroidSaveCapabilities(802,896,AndroidMergePolicy.SHATTERED_896))
+    private val flowIdentity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic", "a".repeat(64),AndroidSaveCapabilities(802,896))
     private val flowConnection=AndroidConnection("https://dav.example.test/synthetic/","synthetic","fixture-only","hero")
     private fun flowFiles(turn:Int)=linkedMapOf("game1/game.dat" to """{"version":896,"init_ver":896,"turn":$turn}""".encodeToByteArray(),"game1/depth1.dat" to byteArrayOf(turn.toByte()))
     private inner class FlowBridge:AndroidGameBridge {
@@ -91,73 +90,59 @@ class SharedBranchChoiceDialogRenderTest {
         override fun readSnapshot()=AndroidSaveObservation(targetGame(),files.mapValues {AndroidSaveFile(hash(it.value),it.value.size.toLong(),1700000000000)},files.filterKeys {it.endsWith("/game.dat")})
         override fun restoreFrom(preparedDirectory:Path,expectedCurrentFiles:Map<String,String>)=error("No game restore allowed")
     }
-    private class FlowStore:AppendStore {
-        val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>();val receipts=linkedMapOf<String,ByteArray>()
-        val writes=mutableListOf<String>();var failDelete=false
-        override fun legacyPresent()=false
-        override fun listCommits(cursor:String?)=CommitPage(commits.keys.toList())
-        override fun readCommit(id:String)=commits[id]?.copyOf()
-        override fun readObject(id:String)=objects[id]?.copyOf()
-        override fun writeCommit(id:String,bytes:ByteArray){writes+="PUT commit";commits[id]=bytes.copyOf()}
-        override fun writeObject(id:String,bytes:ByteArray){writes+="PUT object";objects[id]=bytes.copyOf()}
-        override fun readDeletion(id:String)=receipts[id]?.copyOf()
-        override fun writeDeletion(id:String,bytes:ByteArray){writes+="PUT receipt";receipts[id]=bytes.copyOf()}
-        override fun deleteCommit(id:String){writes+="DELETE commit";if(failDelete)throw java.io.IOException("fixture");commits.remove(id)}
-        override fun deleteObject(id:String){writes+="DELETE object";objects.remove(id)}
+    private class FlowStore:SimpleSaveStore {
+        var tip:String?=null
+        val nodes=linkedMapOf<String,SaveNode>();val objects=linkedMapOf<String,ByteArray>()
+        val writes=mutableListOf<String>()
+        override fun latest()=tip
+        override fun node(hashId:String)=nodes[hashId]
+        override fun createObject(hashId:String,bytes:ByteArray):Boolean {writes+="zip";return objects.putIfAbsent(hashId,bytes)==null}
+        override fun createNode(node:SaveNode):Boolean {writes+="metadata";return nodes.putIfAbsent(node.hashId,node)==null}
+        override fun setLatest(hashId:String){writes+="latest";tip=hashId}
+        override fun objectBytes(hashId:String)=objects.getValue(hashId)
     }
     @Test fun actualHomeUploadCancelRefreshConfirmAndRestartUseRealFacadeAndProductionMapping() {
-        for(legacy in listOf(false,true))for(deleteFailure in listOf(false,true)) {
-            val root=flowRoot.resolve("$legacy-$deleteFailure");val bridge=FlowBridge();val store=FlowStore()
-            var facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0)
-            facade.upload(facade.inspectHome());bridge.files=flowFiles(2);facade.upload(facade.inspectHome())
-            val beforeCloud=facade.historyPresentation(facade.inspectHome());val b=beforeCloud.graph.commits.getValue(requireNotNull(beforeCloud.baseline))
-            if(legacy){bridge.files=flowFiles(9);facade.upload(facade.inspectHome())}
-            val source=root.resolve("fixture-cloud");source.createDirectories();flowFiles(3).forEach {(name,bytes)->source.resolve(name).also {it.parent.createDirectories();it.writeBytes(bytes)}}
-            val snapshot=Snapshots.capture(source,AndroidGameAdapter(flowIdentity),flowConnection.profile,"fixture",null)
-            val id=contentSha256(snapshot.manifest.files);val c=b.copy(id=id,parents=listOf(b.id),snapshot=snapshot.manifest.copy(id=id),objectBytes=snapshot.zip.size)
-            store.commits[id]=json.encodeToString(c).encodeToByteArray();store.objects[id]=snapshot.zip
-            bridge.files=flowFiles(if(legacy)10 else 9)
-            var observed=facade.inspectHome()
-            val host=Host(androidCloudOverwriteState(observed,facade.historyPresentation(observed),null,true,false,true,true,false,"",""))
-            host.visible=false
-            fun refresh(){ observed=facade.inspectHome();host.history=HistoryPresentation.from(facade.historyPresentation(observed),0) }
-            refresh()
-            val originalBaseline=facade.historyPresentation(observed).baseline
-            val writes=store.writes.size;val commitIds=store.commits.keys.toSet()
-            host.uploadAction={
-                val result=facade.upload(observed)
-                if(result.isConflict){observed=requireNotNull(result.refreshedInspection);host.state=androidCloudOverwriteState(observed,facade.historyPresentation(observed),null,true,false,true,true,false,"","");host.visible=true}
-                else {host.visible=false;refresh()}
-            }
-            host.overwriteAction={ target ->
-                try {facade.overwriteCloudSuccessors(observed,target)}catch(expected:java.io.IOException){assertTrue(deleteFailure)}
-                host.visible=false;refresh()
-            }
-            val scene=scene(host)
-            fun clickHomeUpload(){val n=nodes(scene).single {it.config.contains(SemanticsActions.OnClick)&&SharedMessages.UPLOAD_CLOUD.text() in texts(descendants(it))};val at=n.boundsInRoot.center;scene.sendPointerEvent(PointerEventType.Press,at);scene.sendPointerEvent(PointerEventType.Release,at)}
-            try {
-                render(scene,"flow-home-$legacy-$deleteFailure");clickHomeUpload();render(scene,"flow-conflict-$legacy-$deleteFailure")
-                assertEquals(writes,store.writes.size);assertEquals(commitIds,store.commits.keys)
-                assertFalse(button(scene,SharedMessages.OVERWRITE_CLOUD.text()).config.contains(SemanticsProperties.Disabled))
-                assertFalse(SharedMessages.HANDLE_CONFLICT.text() in modalTexts(scene))
-                click(scene,SharedMessages.CANCEL.text());refresh();render(scene,"flow-cancel-$legacy-$deleteFailure")
-                assertEquals(writes,store.writes.size);assertEquals(commitIds,store.commits.keys)
-                facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0);refresh()
-                assertEquals(originalBaseline,facade.historyPresentation(observed).baseline)
-                assertEquals(writes,store.writes.size)
-                clickHomeUpload();render(scene,"flow-reopen-$legacy-$deleteFailure")
-                store.failDelete=deleteFailure;click(scene,SharedMessages.OVERWRITE_CLOUD.text());render(scene,"flow-result-$legacy-$deleteFailure")
-                if(deleteFailure){assertTrue(observed.isRetryablePending);store.failDelete=false;facade=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0);refresh();clickHomeUpload();render(scene,"flow-retry-$legacy")}
-                assertFalse(observed.isRetryablePending);assertFalse(c.id in store.commits)
-                val reopened=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,store,0)
-                val final=reopened.historyPresentation(reopened.inspectHome())
-                assertEquals(1,final.graph.tips.size);assertEquals(bridge.files.mapValues {hash(it.value)},final.graph.commits.getValue(final.graph.tips.single()).snapshot.files)
-                assertEquals((commitIds-c.id)+final.graph.tips.single(),final.graph.commits.keys)
-                assertEquals(listOf(originalBaseline),final.graph.commits.getValue(final.graph.tips.single()).parents)
-                assertEquals(1,HistoryPresentation.from(final,0).nodes.count {it.status==pdsync.i18n.CoreMessages.CURRENT_CLOUD_BRANCH.text()})
-                assertTrue(store.writes.indexOfLast {it=="PUT commit"}<store.writes.indexOfFirst {it=="DELETE commit"})
-            } finally {scene.close()}
+        val root=flowRoot.resolve("current-schema");val bridge=FlowBridge();val store=FlowStore()
+        fun reopen()=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,null,0,suppliedSimpleStore=store)
+        var facade=reopen()
+        facade.upload(facade.inspectHome());bridge.files=flowFiles(2);facade.upload(facade.inspectHome())
+        val b=requireNotNull(store.tip)
+        bridge.files=flowFiles(3);facade.upload(facade.inspectHome());val c=requireNotNull(store.tip)
+        // A second application session holds B as its real accepted parent, then advances to E.
+        val localRoot=flowRoot.resolve("local-branch")
+        val localBridge=FlowBridge().also {it.files=flowFiles(2)}
+        var local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store)
+        // Reusing existing content B changes latest, then the remote session returns to C.
+        local.overwriteCloudSuccessors(local.inspectHome(),c)
+        facade.overwriteCloudSuccessors(facade.inspectHome(),b)
+        assertEquals(c,store.tip)
+        localBridge.files=flowFiles(9)
+        var observed=local.inspectHome()
+        val host=Host(androidCloudOverwriteState(observed,local.historyPresentation(observed),null,true,false,true,true,false,"",""))
+        host.visible=false
+        fun refresh(){observed=local.inspectHome();host.history=HistoryPresentation.from(local.historyPresentation(observed),0)}
+        refresh();val before=store.writes.size
+        host.uploadAction={
+            val result=local.upload(observed)
+            if(result.isConflict){observed=requireNotNull(result.refreshedInspection);host.state=androidCloudOverwriteState(observed,local.historyPresentation(observed),null,true,false,true,true,false,"","");host.visible=true}
         }
+        host.overwriteAction={ target->local.overwriteCloudSuccessors(observed,target);host.visible=false;refresh() }
+        val scene=scene(host)
+        fun upload(){val n=nodes(scene).single {it.config.contains(SemanticsActions.OnClick)&&SharedMessages.UPLOAD_CLOUD.text() in texts(descendants(it))};val at=n.boundsInRoot.center;scene.sendPointerEvent(PointerEventType.Press,at);scene.sendPointerEvent(PointerEventType.Release,at)}
+        try {
+            render(scene,"flow-home");upload();render(scene,"flow-conflict")
+            assertEquals(before,store.writes.size);assertFalse("合并" in modalTexts(scene));assertFalse("Merge" in modalTexts(scene))
+            click(scene,SharedMessages.CANCEL.text());refresh();render(scene,"flow-cancel")
+            assertEquals(c,store.tip);assertEquals(before,store.writes.size)
+            local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store)
+            refresh();upload();render(scene,"flow-reopen");click(scene,SharedMessages.OVERWRITE_CLOUD.text());render(scene,"flow-result")
+            val e=requireNotNull(store.tip);assertEquals(b,store.nodes.getValue(e).parentId)
+            assertTrue(c in store.nodes && c in store.objects)
+            assertEquals(listOf("zip","metadata","latest"),store.writes.drop(before))
+            assertEquals(localBridge.files.mapValues {hash(it.value)},AndroidArchiveSnapshot.read(store.objects.getValue(e),AndroidGameAdapter(flowIdentity)).files)
+            val final=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store).inspectHome()
+            assertEquals("IDENTICAL",final.kind);assertFalse(final.isRetryablePending)
+        } finally {scene.close()}
     }
 
     @Test fun cloudOverwriteRendersOnlyDirectConfirmationAndBindsOneTarget() {
@@ -167,10 +152,12 @@ class SharedBranchChoiceDialogRenderTest {
             render(scene, "cloud-overwrite-direct")
             val text = modalTexts(scene)
             for (old in listOf("Expedition A", "Expedition B", SharedMessages.HANDLE_CONFLICT.text(),
-                    SharedMessages.CHOOSE_PROGRESS.text(), SharedMessages.CHOOSE_CLOUD_SAVE.text(), SharedMessages.MERGE.text()))
+                    SharedMessages.CHOOSE_PROGRESS.text(), SharedMessages.CHOOSE_CLOUD_SAVE.text()))
                 assertFalse(old in text, "old chooser must not render: $old")
             assertTrue(SharedMessages.OVERWRITE_CLOUD_WARNING.text() in text)
             assertTrue(host.calls.isEmpty(), "rendering never writes")
+            assertFalse("合并" in text)
+            assertFalse("Merge" in text)
             click(scene, SharedMessages.OVERWRITE_CLOUD.text())
             assertEquals(listOf("overwrite:snapshot-b"), host.calls)
             render(scene, "cloud-overwrite-busy")
@@ -216,7 +203,7 @@ class SharedBranchChoiceDialogRenderTest {
             val current = host.interactions.presentation!!.token
             assertTrue(current > cancelled)
             click(scene, SharedMessages.USE_SELECTED.text())
-            repeat(3) { host.interactions.confirm(current); host.interactions.merge(current) }
+            repeat(3) { host.interactions.confirm(current); }
             assertEquals(listOf("select:snapshot-b", "overwrite:snapshot-b"), host.calls)
             render(scene, "overwrite-busy")
             for (label in listOf(SharedMessages.CANCEL.text(), SharedMessages.HANDLE_CONFLICT.text())) {
@@ -227,16 +214,6 @@ class SharedBranchChoiceDialogRenderTest {
             assertEquals(2, host.calls.size, "busy chooser cannot dismiss or submit again")
         } finally { scene.close() }
 
-        val merge = Host(ready())
-        val mergeScene = scene(merge)
-        try {
-            render(mergeScene, "merge-chooser")
-            click(mergeScene, SharedMessages.HANDLE_CONFLICT.text())
-            render(mergeScene, "merge-confirmation")
-            assertTrue(button(mergeScene, SharedMessages.USE_SELECTED.text()).config.contains(SemanticsProperties.Disabled))
-            click(mergeScene, SharedMessages.MERGE.text())
-            assertEquals(listOf("merge"), merge.calls, "merge does not invent a selected snapshot")
-        } finally { mergeScene.close() }
     }
 
     @Test fun backOutsideRemovalAndReopenDisposeOldConfirmationAndUseLatestActions() {
@@ -259,7 +236,7 @@ class SharedBranchChoiceDialogRenderTest {
             assertEquals(listOf("back"), host.calls)
             assertTrue(SharedMessages.SAVE_HISTORY.text() in texts(nodes(scene)),
                 "home remains composed after dismissal")
-            old.confirm(oldToken); old.merge(oldToken); old.primary(); old.select("snapshot-b")
+            old.confirm(oldToken); old.primary(); old.select("snapshot-b")
             old.preserveLocal(); old.dismissBranchDialog()
             assertEquals(listOf("back"), host.calls, "removed modal callbacks are inert")
 
@@ -276,7 +253,7 @@ class SharedBranchChoiceDialogRenderTest {
             val liveToken = live.presentation!!.token
             host.visible = false
             render(scene, "external-removal")
-            live.confirm(liveToken); live.merge(liveToken)
+            live.confirm(liveToken);
             assertEquals(listOf("back"), host.calls, "external navigation also disposes write callbacks")
 
             host.visible = true
@@ -302,7 +279,7 @@ class SharedBranchChoiceDialogRenderTest {
             val token = host.interactions.presentation!!.token
             host.state = host.state.copy(busy = true)
             render(scene, "guards-busy")
-            for (label in listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text(), SharedMessages.MERGE.text())) {
+            for (label in listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text())) {
                 assertTrue(button(scene, label).config.contains(SemanticsProperties.Disabled))
                 click(scene, label)
             }
@@ -312,7 +289,7 @@ class SharedBranchChoiceDialogRenderTest {
             host.state = host.state.copy(busy = false, observation = Any())
             render(scene, "guards-new-observation")
             assertNull(host.interactions.presentation)
-            host.interactions.confirm(token); host.interactions.merge(token)
+            host.interactions.confirm(token);
             assertTrue(host.calls.isEmpty())
 
             host.state = host.state.copy(resolutionBlocked = true)
@@ -381,7 +358,7 @@ class SharedBranchChoiceDialogRenderTest {
                         click(scene, SharedMessages.HANDLE_CONFLICT.text())
                         render(scene, "confirmation-$id")
                         assertModalLayout(scene, width, height)
-                        for (label in listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text(), SharedMessages.MERGE.text())) {
+                        for (label in listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text())) {
                             assertFalse(button(scene, label).config.contains(SemanticsProperties.Disabled))
                         }
                         click(scene, SharedMessages.CANCEL.text())
@@ -426,7 +403,7 @@ class SharedBranchChoiceDialogRenderTest {
         assertTrue(modal.left >= 19f && modal.right <= width - 19f && modal.width <= 480f)
         assertTrue(modal.top >= 24f && modal.bottom <= height - 24f)
         val labels = if (SharedMessages.CONFLICT_TITLE.text() in modalTexts(scene))
-            listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text(), SharedMessages.MERGE.text())
+            listOf(SharedMessages.CANCEL.text(), SharedMessages.USE_SELECTED.text())
         else listOf(SharedMessages.CANCEL.text(), SharedMessages.HANDLE_CONFLICT.text())
         val bounds = labels.map { button(scene, it).boundsInRoot }
         bounds.forEach {

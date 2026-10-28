@@ -48,7 +48,7 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
                          'pageActive = pageActive, busy = busy',
                          'connected = connected, observationCurrent = cloudVerified && branched',
                          'resolutionBlocked = recovery || pending',
-                         'overwriteSupported = true, mergeSupported = false, cloudOverwrite = true',
+                         'overwriteSupported = true, cloudOverwrite = true',
                          'canPreserveLocal = false'):
             self.assertIn(required, MODEL)
         self.assertNotIn('capturedAt', MODEL)
@@ -73,7 +73,7 @@ class SharedBranchChoiceAndroidContract(unittest.TestCase):
                          '!busy && !sharedAppreciationOnly', 'inspection == observed',
                          'facade == ownerFacade', 'connection == ownerConnection',
                          'ownerContext.accepts(currentHomeContext(sharedHomeRenderToken), true, busy)',
-                         'm86xfa720d6a(observed, snapshotId)', '@Override public void merge() { }',
+                         'm86xfa720d6a(observed, snapshotId)',
                          '@Override public void preserveLocal() { }'):
             self.assertIn(required, host)
         work = body(MAIN, 'private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)')

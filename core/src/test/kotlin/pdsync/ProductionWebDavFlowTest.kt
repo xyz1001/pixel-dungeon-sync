@@ -89,35 +89,6 @@ class ProductionWebDavFlowTest {
  }
  private fun open(c:AppConfig)=AppendProfileSession(c,temp.resolve(Path.of(c.saveRoot).parent.fileName.toString()).resolve("app-state"),captureQuietMillis=0)
  private fun published(s:AppendProfileSession,dav:Dav)=assertIs<AppendPushResult.Success>(s.push(dav.store()){true}).commit
- private fun <T> readOnlyDav(dav:Dav,action:()->T):T {
-  val before=dav.fingerprint();val folders=dav.folders.toSet();val requestStart=dav.methods.size
-  try {return action()} finally {
-   assertEquals(before,dav.fingerprint(),"Merge preparation must not modify cloud objects or commits")
-   assertEquals(folders,dav.folders.toSet(),"Merge preparation must not create remote directories")
-   assertTrue(dav.methods.drop(requestStart).all {it in setOf("GET","HEAD","PROPFIND")},"Merge preparation attempted a write HTTP method")
-  }
- }
- private fun mergeAndPublish(s:AppendProfileSession,dav:Dav):AppendCommit {
-  val baseline=s.baseline()
-  val prepared=assertIs<AppendPushResult.Prepared>(readOnlyDav(dav){s.mergeCurrent(dav.store()){true}})
-  assertEquals(baseline,s.baseline());assertTrue(s.hasPending());assertTrue(s.retryablePending())
-  assertEquals(prepared.commit.snapshot.files,s.observedFiles())
-  assertFalse(s.directory.resolve("backups").exists(),"Merge must not create old-data backups")
-  val before=dav.fingerprint();val requestStart=dav.methods.size
-  val existing=dav.contents.values.mapNotNull { bytes ->
-   runCatching { json.decodeFromString<AppendCommit>(bytes.decodeToString()) }.getOrNull()
-  }.singleOrNull {it.snapshot.files==prepared.commit.snapshot.files}
-  val published=published(s,dav)
-  if(existing==null) assertEquals(prepared.commit,published)
-  else {
-   assertEquals(existing,published,"Same-content publication must retain the exact first writer record")
-   assertEquals(prepared.commit.id,published.id)
-   assertEquals(before,dav.fingerprint(),"Reusing prepared content must preserve every remote byte")
-   assertTrue(dav.methods.drop(requestStart).all {it in setOf("GET","HEAD","PROPFIND")})
-  }
-  assertFalse(s.hasPending())
-  return published
- }
  private fun restore(s:AppendProfileSession,dav:Dav)=s.restoreRemote(s.readRemote(dav.store()).single().entry.manifest.id,dav.store()){true}
  private fun advance(s:AppendProfileSession,slot:Int,value:String) {
   s.root.resolve("game$slot/depth1.dat").writeBytes(gzip(value));s.confirmRunIdentity("game$slot",s.observedFiles(),true){true}
@@ -128,36 +99,8 @@ class ProductionWebDavFlowTest {
   val loaded=file.load()!!;assertEquals("",loaded.password);assertEquals(c.selectedSaveRoot,loaded.selectedSaveRoot)
   return loaded.copy(saveRoot=loaded.selectedSaveRoot!!)
  }
- @Test fun twoDevicesMergeThroughProductionHttpAndPreserveMetadataOnRestart()=Dav().use{dav->
-  val ca=configured("A",dav);val cb=configured("B",dav);seed(Path.of(ca.saveRoot),2)
-  val a=open(ca);val b=open(cb);val base=published(a,dav);restore(b,dav)
-  assertEquals(base.snapshot.files,b.observedFiles());assertEquals(base.snapshot.directoryMetadata!!.runs,(b.directoryStatus() as SidecarRead.Valid).value.runs)
-  assertEquals(base.id,(b.directoryStatus() as SidecarRead.Valid).value.lastSynced!!.commitId)
-  assertTrue(base.snapshot.files.keys.none(::isDirectoryMetadata));assertEquals(7,SaveSummary.read(b.root).plays)
-  advance(a,1,"A1");published(a,dav);advance(b,2,"B1")
-  val merge=mergeAndPublish(b,dav)
-  assertEquals(2,merge.snapshot.saveVersions!!.runs.size);assertContentEquals(gzip("A1"),b.root.resolve("game1/depth1.dat").readBytes());assertContentEquals(gzip("B1"),b.root.resolve("game2/depth1.dat").readBytes())
-  val files=b.observedFiles();b.renameCurrent("隔离进度"){true};assertEquals(files,b.observedFiles());val renamed=published(b,dav)
-  assertEquals(files,renamed.snapshot.files);assertEquals(merge,renamed,"Rename cannot rewrite immutable cloud metadata")
-  assertEquals("隔离进度",b.syncHistory().currentName)
-  val restarted=open(cb);assertEquals(renamed.id,restarted.baseline());assertEquals("隔离进度",restarted.syncHistory().currentName)
-  restore(a,dav);advance(a,1,"left-fork");published(a,dav);advance(restarted,1,"right-fork")
-  val fork=mergeAndPublish(restarted,dav)
-  assertEquals(3,fork.snapshot.saveVersions!!.runs.size)
-  val children=fork.snapshot.directoryMetadata!!.runs.values.filter{it.parentRunUUIDs.isNotEmpty()};assertEquals(2,children.size);assertEquals(2,children.map{it.runUUID}.distinct().size)
- }
- @Test fun sixSlotAndGlobalRecordPreflightFailuresNeverWriteRemoteOrPartiallyApply()=Dav().use{dav->
-  val ca=configured("full-A",dav);val cb=configured("full-B",dav);seed(Path.of(ca.saveRoot),6)
-  val a=open(ca);val b=open(cb);published(a,dav);restore(b,dav)
-  advance(a,1,"left");published(a,dav);advance(b,1,"right")
-  val local=b.observedFiles();val remote=dav.fingerprint()
-  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"需要 7")
-  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
-  a.root.resolve("rankings.dat").writeBytes(gzip("{\"total\":8}"));published(a,dav)
-  b.root.resolve("rankings.dat").writeBytes(gzip("{\"total\":9}"));val globalBefore=b.observedFiles();val remoteBefore=dav.fingerprint()
-  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"全局记录")
-  assertEquals(globalBefore,b.observedFiles());assertEquals(remoteBefore,dav.fingerprint());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
- }
+
+
  @Test fun acceptedThenFailedUploadRetriesExactKeysAndReadFailureDoesNotRestore()=Dav().use{dav->
   val ca=configured("retry-A",dav);val cb=configured("retry-B",dav);seed(Path.of(ca.saveRoot),1)
   val a=open(ca);val b=open(cb);dav.failCommitAfterAccept.set(true)
@@ -182,124 +125,6 @@ class ProductionWebDavFlowTest {
   meta.resolve("blocked").deleteExisting();meta.deleteExisting();b.archivePending();restore(b,dav)
   val files=b.observedFiles();restore(b,dav);assertEquals(files,b.observedFiles());assertFalse(b.hasPending())
   b.restoreRemote(chosen,dav.store()){false};assertEquals(files,b.observedFiles())
- }
- private fun rankingRecord(id:String,score:Int,win:Boolean=false):kotlinx.serialization.json.JsonObject = json.parseToJsonElement("""{
-  "__className":"com.shatteredpixel.shatteredpixeldungeon.Rankings${'$'}Record",
-  "gameID":"$id","score":$score,"win":$win,"custom_seed":"","daily":false,
-  "class":"WARRIOR","tier":1,"level":1,"depth":1,"ascending":false,
-  "date":"2026-10-11","version":"v3.3.8","gameData":{"opaque":{"keep":9223372036854775807}}
- }""").let { it as kotlinx.serialization.json.JsonObject }
- private fun rankings(vararg records:kotlinx.serialization.json.JsonObject):ByteArray {
-  val wins=records.count { it["win"].toString()=="true" }
-  return gzip("""{"records":[${records.joinToString(",")}],"total":${records.size},"won":$wins,"latest":${if(records.isEmpty())-1 else 0},"daily_history_dates":[],"daily_history_scores":[],"extension":{"preserve":true}}""")
- }
- private fun globals(s:AppendProfileSession,badge:String,record:kotlinx.serialization.json.JsonObject?,item:String) {
-  s.root.resolve("badges.dat").writeBytes(gzip("""{"badges":[$badge]}"""))
-  s.root.resolve("rankings.dat").writeBytes(if(record==null)rankings() else rankings(record))
-  s.root.resolve("journal.dat").writeBytes(gzip(if(item.isEmpty()) """{"documents":{}}""" else """{"catalog_classes":["$item"],"catalog_seen":[true],"catalog_uses":[1],"documents":{}}"""))
- }
- @Test fun globalDomainsMergeThroughProductionHttpAndDuplicateEventsStaySingle()=Dav().use { dav ->
-  val ca=configured("global-A",dav);val cb=configured("global-B",dav);seed(Path.of(ca.saveRoot),1)
-  val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
-  val left=rankingRecord(java.util.UUID.randomUUID().toString(),100,true)
-  val right=rankingRecord(java.util.UUID.randomUUID().toString(),90)
-  globals(a,"\"MONSTERS_SLAIN_1\"",left,"com.shatteredpixel.shatteredpixeldungeon.items.food.Food");published(a,dav)
-  globals(b,"\"GOLD_COLLECTED_1\"",right,"com.shatteredpixel.shatteredpixeldungeon.items.potions.PotionOfHealing")
-  val merged=mergeAndPublish(b,dav)
-  val records=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
-  assertEquals(2,globalInt(records["total"],"total"));assertEquals(1,globalInt(records["won"],"won"))
-  assertEquals(2,(records["records"] as kotlinx.serialization.json.JsonArray).size)
-  assertEquals(setOf("MONSTERS_SLAIN_1","GOLD_COLLECTED_1"),globalStringSet(GlobalBundles.decode(b.root.resolve("badges.dat").readBytes(),"badges.dat")["badges"],"badges"))
-  val journal=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")
-  assertEquals(2,(journal["catalog_classes"] as kotlinx.serialization.json.JsonArray).size)
-  assertEquals(1,merged.parents.size);assertTrue(merged.snapshot.files.keys.none(::isDirectoryMetadata))
-  val content=b.observedFiles();val remote=dav.fingerprint();assertEquals(merged.id,published(b,dav).id)
-  assertEquals(content,b.observedFiles());assertEquals(remote,dav.fingerprint())
-  restore(a,dav);assertEquals(content,a.observedFiles())
-
-  // One genuine completed-game ID copied to both branches must increase totals only once.
-  val common=rankingRecord(java.util.UUID.randomUUID().toString(),110)
-  a.root.resolve("rankings.dat").writeBytes(rankings(common,left,right));published(a,dav)
-  b.root.resolve("rankings.dat").writeBytes(rankings(common,left,right))
-  b.root.resolve("badges.dat").writeBytes(gzip("""{"badges":["MONSTERS_SLAIN_1","GOLD_COLLECTED_1","ITEM_LEVEL_1"]}"""))
-  val dedup=mergeAndPublish(b,dav)
-  assertEquals(3,SaveSummary.read(b.root).plays)
-  val after=b.observedFiles();mergeAndPublish(b,dav)
-  assertEquals(after,b.observedFiles());assertEquals(3,SaveSummary.read(b.root).plays)
- }
- @Test fun highestElevenRankingRowsKeepFullEventCountersThroughProductionHttp()=Dav().use { dav ->
-  val ca=configured("top-A",dav);val cb=configured("top-B",dav);seed(Path.of(ca.saveRoot),1)
-  val a=open(ca);val b=open(cb)
-  val rows=(1..10).map { rankingRecord("00000000-0000-0000-0000-${it.toString().padStart(12,'0')}",it*100) }
-  a.root.resolve("rankings.dat").writeBytes(rankings(*rows.toTypedArray()));published(a,dav);restore(b,dav)
-  val active=b.observedFiles().filterKeys { it.startsWith("game1/") }
-  val high=rankingRecord("00000000-0000-0000-0000-000000000011",10000)
-  val lowWin=rankingRecord("00000000-0000-0000-0000-000000000012",1,true)
-  a.root.resolve("rankings.dat").writeBytes(rankings(*(rows+high).toTypedArray()));published(a,dav)
-  b.root.resolve("rankings.dat").writeBytes(rankings(*(rows+lowWin).toTypedArray()))
-  val merged=mergeAndPublish(b,dav)
-  val output=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
-  val kept=output["records"] as kotlinx.serialization.json.JsonArray
-  assertEquals(11,kept.size);assertEquals(high,kept.first());assertFalse(kept.contains(lowWin))
-  assertEquals(12,globalInt(output["total"],"total"));assertEquals(1,globalInt(output["won"],"won"))
-  assertEquals(active,b.observedFiles().filterKeys { it.startsWith("game1/") });assertEquals(1,merged.parents.size)
-  val before=b.observedFiles();val remote=dav.fingerprint()
-  mergeAndPublish(b,dav)
-  assertEquals(before,b.observedFiles());assertTrue(remote.all { (path,hash) -> dav.fingerprint()[path]==hash })
-  assertEquals(12,SaveSummary.read(b.root).plays)
- }
- @Test fun journalConcurrentCountsKeepMaximumThroughProductionHttp()=Dav().use { dav ->
-  val ca=configured("max-A",dav);val cb=configured("max-B",dav);seed(Path.of(ca.saveRoot),1)
-  val a=open(ca);val b=open(cb)
-  fun counts(n:Int)=gzip("""{"catalog_classes":["com.shatteredpixel.shatteredpixeldungeon.items.food.Food"],"catalog_seen":[true],"catalog_uses":[$n],"documents":{}}""")
-  a.root.resolve("journal.dat").writeBytes(counts(2));published(a,dav);restore(b,dav)
-  a.root.resolve("journal.dat").writeBytes(counts(4));published(a,dav)
-  b.root.resolve("journal.dat").writeBytes(counts(7))
-  mergeAndPublish(b,dav)
-  fun current()=GlobalBundles.decode(b.root.resolve("journal.dat").readBytes(),"journal.dat")["catalog_uses"].toString()
-  assertEquals("[7]",current())
-  val bytes=b.root.resolve("journal.dat").readBytes()
-  mergeAndPublish(b,dav)
-  assertContentEquals(bytes,b.root.resolve("journal.dat").readBytes());assertEquals("[7]",current())
- }
- @Test fun rankingMissingEvidenceAndSoleResetRetainProgressThroughProductionHttp()=Dav().use { dav ->
-  val ca=configured("fallback-A",dav);val cb=configured("fallback-B",dav);seed(Path.of(ca.saveRoot),1)
-  val a=open(ca);val b=open(cb)
-  val old=rankingRecord("00000000-0000-0000-0000-000000000101",100)
-  val left=rankingRecord("00000000-0000-0000-0000-000000000102",300)
-  val right=rankingRecord("00000000-0000-0000-0000-000000000103",200,true)
-  fun counts(rows:List<kotlinx.serialization.json.JsonObject>,total:Int,won:Int):ByteArray {
-   val value=GlobalBundles.decode(rankings(*rows.toTypedArray()),"rankings.dat")
-   return GlobalBundles.encode(kotlinx.serialization.json.JsonObject(value+mapOf("total" to kotlinx.serialization.json.JsonPrimitive(total),"won" to kotlinx.serialization.json.JsonPrimitive(won))))
-  }
-  a.root.resolve("rankings.dat").writeBytes(counts(listOf(old),100,20));published(a,dav);restore(b,dav)
-  a.root.resolve("rankings.dat").writeBytes(counts(listOf(old,left),101,20));published(a,dav)
-  b.root.resolve("rankings.dat").writeBytes(counts(listOf(old,right),106,21)) // Missing five event IDs: do not add this delta.
-  mergeAndPublish(b,dav)
-  fun current()=GlobalBundles.decode(b.root.resolve("rankings.dat").readBytes(),"rankings.dat")
-  assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
-  assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
-  restore(a,dav)
-  a.root.resolve("rankings.dat").writeBytes(counts(emptyList(),0,0));published(a,dav)
-  mergeAndPublish(b,dav) // Only the remote rankings file changed.
-  assertEquals(106,globalInt(current()["total"],"total"));assertEquals(21,globalInt(current()["won"],"won"))
-  assertEquals(3,(current()["records"] as kotlinx.serialization.json.JsonArray).size)
-  val bytes=b.root.resolve("rankings.dat").readBytes()
-  mergeAndPublish(b,dav)
-  assertContentEquals(bytes,b.root.resolve("rankings.dat").readBytes())
- }
- @Test fun malformedGlobalCountersFailPreflightWithoutAnyWrites()=Dav().use { dav ->
-  val ca=configured("ambiguous-A",dav);val cb=configured("ambiguous-B",dav);seed(Path.of(ca.saveRoot),1)
-  val a=open(ca);val b=open(cb);globals(a,"",null,"");published(a,dav);restore(b,dav)
-  val item="com.shatteredpixel.shatteredpixeldungeon.items.food.Food"
-  globals(a,"\"MONSTERS_SLAIN_1\"",null,item);published(a,dav)
-  globals(b,"\"GOLD_COLLECTED_1\"",null,item)
-  b.root.resolve("journal.dat").writeBytes(gzip("""{"catalog_classes":["$item"],"catalog_seen":[true],"catalog_uses":["broken"],"documents":{}}"""))
-  val local=b.observedFiles();val remote=dav.fingerprint();val baseline=b.baseline()
-  val sidecar=b.root.resolve(DIRECTORY_METADATA_FILE);val sidecarBytes=sidecar.readBytes();val sidecarTime=Files.getLastModifiedTime(sidecar)
-  assertContains(assertFailsWith<RunMergeException>{readOnlyDav(dav){b.mergeCurrent(dav.store()){true}}}.message!!,"非负整数")
-  assertEquals(local,b.observedFiles());assertEquals(remote,dav.fingerprint());assertEquals(baseline,b.baseline());assertFalse(b.hasPending());assertFalse(b.directory.resolve("backups").exists())
-  assertContentEquals(sidecarBytes,sidecar.readBytes());assertEquals(sidecarTime,Files.getLastModifiedTime(sidecar))
  }
 
 }

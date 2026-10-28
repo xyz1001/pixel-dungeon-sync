@@ -1,4 +1,4 @@
-import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName, planMerge} from './model.mjs';
+import {scenes, games, gameLabel, saveStatus, createState, reduce, kind, canFinish, localIsEmpty, deviceLabel, isSynced, canRestore, selectedTarget, latestCloud, targetMatchesLocal, historyEdges, historyRows, historyColumnId, visibleHistory, displayEdges, localState, snapshotName} from './model.mjs';
 let state = createState('history');
 let pathTimer;
 let historyObserver;
@@ -60,15 +60,7 @@ function targetView() {
   const localTarget=target && target.storage !== 'cloud';
   return `<div class="restore-target"><strong>${state.selectedSnapshotId ? '已选择存档' : '默认恢复最新云端存档'}</strong><p>${target ? `${escapeText(snapshotName(target))} · ${sourceName(target)} · ${target.time}` : '暂无可恢复的云端存档'}</p>${localTarget ? '<p class="error">本机存档不能作为云端恢复来源，请选择云端存档。</p>' : targetMatchesLocal(state) ? '<p class="hint">本机已是此进度，无需恢复。</p>' : ''}</div>`;
 }
-function mergePlanView() {
-  const target=state.history.find(n=>n.id===state.restoreConfirm.snapshotId),plan=planMerge(state,target);
-  return plan.ok?`<p class="merge-plan">合并后 ${plan.slots} 个槽位 · 新增占用 ${plan.addedSlots} 个</p>`:`<p class="error">${escapeText(plan.error)}</p>`;
-}
-function mergeView() {
-  if(!state.mergeResult)return '';
-  const p=state.localSnapshot.profile;
-  return `<section class="merge-result"><h2>本机单局槽位 · 模拟结果</h2><p>已按单局数据生成 ${p.runs.length} 个槽位。这里只更新页面内存，未读写真实存档。</p><ul>${p.runs.map(r=>`<li><strong>槽位 ${r.slot} · ${escapeText(r.name)}</strong><span>${r.sourceRunUUID?'来自同一局的独立分支':'保留原单局身份'}</span></li>`).join('')}</ul><details><summary>查看逐局比较结果</summary>${state.mergeResult.decisions.map(d=>`<p class="small">${escapeText(d)}</p>`).join('')}</details></section>`;
-}
+
 function render() {
   historyObserver?.disconnect();
   app.setAttribute('aria-busy', String(state.busy));
@@ -105,16 +97,16 @@ function render() {
     let content;
     if (k === 'empty') content = `<section class="content complete"><h1>配置完成</h1></section>`;
     else if (k === 'identical') content = `<section class="content complete"><h1>两边进度相同</h1><p>可以完成配置。</p></section>`;
-    else if(k==='conflict') content = `<section class="content"><h2>本机与云端进度不同</h2><p>可以覆盖本机，或按单局比较共同基线后合并。合并前会检查全部槽位需求，失败不会修改原内容。</p>${notice()}</section>`;
+    else if(k==='conflict') content = `<section class="content"><h2>本机与云端进度不同</h2><p>可以选择覆盖本机，或取消并保留当前进度。</p>${notice()}</section>`;
     else content = `<section class="content"><p>${k === 'conflict' ? '选择要继续的进度' : k === 'local' ? (state.preview?.slots.length === 0 ? '本机有游戏记录' : '本机有存档') : '云端有存档'}</p><div class="choices">${state.local ? choice('local', '使用本机进度', `${sourceName(state.localSnapshot)} · 今天 09:30 · 模拟上传`) : ''}${state.cloud ? choice('cloud', '使用云端进度', `${sourceName(state.cloudSnapshot)} · 昨天 21:15 · 模拟恢复`) : ''}</div>${state.choice === 'local' && state.cloud ? '<p class="small">上传本机进度，保留原云端记录。</p>' : ''}</section>`;
-    app.innerHTML = header(k === 'empty' ? '' : '选择存档', '4 / 4') + content + footer(back(), button(state.busy?'合并中…':k==='conflict'?'处理冲突':'完成', 'finish', !canFinish(state)));
+    app.innerHTML = header(k === 'empty' ? '' : '选择存档', '4 / 4') + content + footer(back(), button(state.busy?'处理中…':k==='conflict'?'处理冲突':'完成', 'finish', !canFinish(state)));
   } else if (state.page === 'home') {
-    app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.pending === 'merge' ? '正在验证并合并示例单局…' : state.scene === 'running' ? '游戏运行中，请退出后再同步。' : isSynced(state) ? '已同步 · 模拟模式' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || isSynced(state) || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', !canRestore(state), 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${targetView()}${notice()}${mergeView()}${historyView()}</section>`;
+    app.innerHTML = header('像素地牢', '存档同步', button('设置', 'settings', state.busy, 'text-button')) + `<section class="content"><div class="status">${state.scene === 'running' ? '游戏运行中，请退出后再同步。' : isSynced(state) ? '已同步 · 模拟模式' : '云端已连接 · 模拟模式'}</div><div class="home-actions">${button(state.pending === 'upload' ? '上传中…' : '上传', 'upload', state.busy || !state.local || isSynced(state) || state.scene === 'running')}${button(state.pending === 'restore' ? '恢复中…' : '恢复', 'askRestore', !canRestore(state), 'secondary')}</div>${!state.local && !state.cloud ? '<p class="small">暂无示例存档</p>' : ''}${targetView()}${notice()}${historyView()}</section>`;
   } else {
     app.innerHTML = header('设置') + `<section class="content"><div class="settings-row"><div><strong>游戏</strong><p class="small">${gameSummary()}</p></div>${button('模拟更换', 'chooseGame', false, 'text-button')}</div><div class="settings-row"><div><strong>云端连接</strong><p class="small">示例账号</p></div>${button('修改', 'connectionSettings', false, 'text-button')}</div>${notice()}</section>` + footer(button('返回', 'back', false, 'text-button'), '');
   }
   if (state.restoreConfirm) {
-    app.insertAdjacentHTML('beforeend', `<dialog id="restore-dialog" aria-labelledby="restore-title" aria-describedby="restore-description"><h2 id="restore-title">如何处理冲突？</h2><p id="restore-description">${restoreWarning()}</p><p class="hint">合并会逐局比较：单边改动直接采用；同一局双方改动不同才占两个槽位。槽位不足则合并失败。</p>${mergePlanView()}<div class="dialog-actions"><button data-action="cancelRestore" class="secondary" autofocus>取消</button><button data-action="restore" data-confirmation-token="${state.restoreConfirm.token}">覆盖${state.restoreConfirm.direction==='upload'?'云端':'本机'}</button><button data-action="merge" data-confirmation-token="${state.restoreConfirm.token}">合并</button></div></dialog>`);
+    app.insertAdjacentHTML('beforeend', `<dialog id="restore-dialog" aria-labelledby="restore-title" aria-describedby="restore-description"><h2 id="restore-title">如何处理冲突？</h2><p id="restore-description">${restoreWarning()}</p><div class="dialog-actions"><button data-action="cancelRestore" class="secondary" autofocus>取消</button><button data-action="restore" data-confirmation-token="${state.restoreConfirm.token}">覆盖${state.restoreConfirm.direction==='upload'?'云端':'本机'}</button></div></dialog>`);
     const dialog = app.querySelector('#restore-dialog');
     dialog.addEventListener('cancel', event => { event.preventDefault(); send({type: 'cancelRestore'}); });
     dialog.addEventListener('keydown', event => {

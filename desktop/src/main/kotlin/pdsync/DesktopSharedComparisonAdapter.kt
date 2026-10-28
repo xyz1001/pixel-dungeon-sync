@@ -139,15 +139,7 @@ internal class DesktopSharedComparisonAdapter {
   return currentDialog.proof
  }
 
- fun acceptMergePreview(current: DesktopComparisonContext, proof: DesktopComparisonProof, result: RunMergeResult): Boolean {
-  if (dialog?.proof !== proof || !matches(current, proof, requireIdle = false)) return false
-  val reviewed = proof.copy(token = ++token)
-  dialog = DesktopComparisonDialog(reviewed, SharedComparisonConfirmation(reviewed.token,
-   stage = SharedComparisonConfirmationStage.MERGE_REVIEW,
-   message = DesktopMessages.MERGED_SAVE_COUNTS.text(result.slots, result.addedSlots),
-   details = result.decisions.joinToString("\n"), canApplyMerge = true))
-  return true
- }
+
 
  /** A rejected no-transfer Finish must no longer display an unrefreshable identical proof. */
  fun invalidateFailedCompletion(current: DesktopComparisonContext, proof: DesktopComparisonProof): Boolean {
@@ -162,8 +154,7 @@ internal class DesktopSharedComparisonAdapter {
  }
 
  private fun conflict(proof: DesktopComparisonProof) = DesktopComparisonDialog(proof,
-  SharedComparisonConfirmation(proof.token,
-   canPreviewMerge = proof.baseline != null && proof.files.isNotEmpty() && proof.tips.isNotEmpty()))
+  SharedComparisonConfirmation(proof.token))
 }
 
 internal fun canConfirmDesktopComparison(value: OnboardingComparison): Boolean =

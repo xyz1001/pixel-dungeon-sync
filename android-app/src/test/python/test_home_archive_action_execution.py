@@ -126,11 +126,9 @@ class HomeArchiveActionExecution(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn('confirmation must be required', result.stderr)
 
-    def test_regression_detects_second_choice_for_explicit_history(self):
-        result = self.execute(('() -> m143x7dd3dfcf(observed, target), null)',
-                               '() -> m143x7dd3dfcf(observed, target), this::previewMerge)'))
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn('explicit history must not ask for another source or merge', result.stderr)
+    def test_explicit_history_has_no_merge_action(self):
+        self.assertNotIn('previewMerge', MAIN)
+        self.assertNotIn('confirmationMerge', MAIN)
 
     def test_regression_detects_stale_confirmation_bypass(self):
         result = self.execute((

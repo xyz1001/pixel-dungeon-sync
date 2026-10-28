@@ -36,7 +36,7 @@ data class SharedComparisonRemoteChoice(val snapshotId: String, val label: Strin
 enum class SharedProgressChoice { LOCAL, CLOUD }
 enum class SharedComparisonPrimary { FINISH, HANDLE_CONFLICT, REFRESH, RETRY_UPLOAD, OPEN_RECOVERY }
 enum class SharedComparisonCompletion { NONE, EMPTY, CONFIRM, ADOPT, KEEP_LOCAL, UPLOAD_LOCAL, RESTORE_REMOTE }
-enum class SharedComparisonConfirmationStage { CONFLICT, MERGE_REVIEW }
+enum class SharedComparisonConfirmationStage { CONFLICT }
 
 /** A new selection, observation, preview or cancellation must change/clear the host's token. */
 data class SharedComparisonConfirmation(
@@ -44,8 +44,6 @@ data class SharedComparisonConfirmation(
     val stage: SharedComparisonConfirmationStage = SharedComparisonConfirmationStage.CONFLICT,
     val message: String = NoviceCopy.restoreWarning,
     val details: String = "",
-    val canPreviewMerge: Boolean = false,
-    val canApplyMerge: Boolean = false,
 )
 
 interface SharedComparisonActions {
@@ -59,8 +57,6 @@ interface SharedComparisonActions {
     fun openRecovery()
     fun copyDiagnostics() {}
     fun confirmConflict(token: Long) {}
-    fun previewMerge(token: Long) {}
-    fun confirmMerge(token: Long) {}
     fun cancelConflict(token: Long) {}
 }
 
@@ -154,19 +150,18 @@ internal val SharedComparisonState.primaryLabel: String
 
 internal val SharedComparisonState.confirmationPresentation: SharedConfirmationState?
     get() = activeConfirmation?.let { confirmation ->
-        val review = confirmation.stage == SharedComparisonConfirmationStage.MERGE_REVIEW
         val writesAllowed = canInteract && configured && restoreSupported && hasUsableObservation
         SharedConfirmationState(
             token = confirmation.token,
-            title = if (review) SharedMessages.CONFIRM_MERGE.text() else SharedMessages.CONFLICT_TITLE.text(),
+            title = SharedMessages.CONFLICT_TITLE.text(),
             message = confirmation.message,
-            confirmLabel = if (review) SharedMessages.MERGE_UPLOAD.text() else SharedMessages.OVERWRITE_LOCAL.text(),
-            confirmEnabled = writesAllowed && if (review) confirmation.canApplyMerge else hasSelectedRemote,
-            secondaryLabel = if (!review && confirmation.canPreviewMerge) SharedMessages.MERGE.text() else null,
-            secondaryEnabled = writesAllowed && confirmation.canPreviewMerge,
+            confirmLabel = SharedMessages.OVERWRITE_LOCAL.text(),
+            confirmEnabled = writesAllowed && hasSelectedRemote,
+            secondaryLabel = null,
+            secondaryEnabled = false,
             busy = busy || !pageActive,
             details = confirmation.details,
-            destructive = !review,
+            destructive = true,
         )
     }
 
@@ -221,17 +216,10 @@ internal class SharedComparisonInteractions(
         val current = state()
         val confirmation = current.activeConfirmation ?: return
         if (confirmation.token != token || current.confirmationPresentation?.confirmEnabled != true) return
-        if (confirmation.stage == SharedComparisonConfirmationStage.MERGE_REVIEW) actions().confirmMerge(token)
-        else actions().confirmConflict(token)
+        actions().confirmConflict(token)
     }
 
-    fun previewMerge(token: Long) {
-        val current = state()
-        val confirmation = current.activeConfirmation ?: return
-        if (confirmation.token != token || confirmation.stage != SharedComparisonConfirmationStage.CONFLICT ||
-            current.confirmationPresentation?.secondaryEnabled != true) return
-        actions().previewMerge(token)
-    }
+
 
     fun cancel(token: Long) {
         val current = state()

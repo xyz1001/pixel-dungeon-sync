@@ -45,7 +45,7 @@ class DesktopSharedSnapshotSelectionTest {
   }
   val state = SharedBranchChoiceState(Any(), branches, first.snapshot.id, null,
    pageActive = true, busy = false, connected = true, observationCurrent = true,
-   resolutionBlocked = false, overwriteSupported = true, mergeSupported = false)
+   resolutionBlocked = false, overwriteSupported = true)
   assertTrue(state.hasBranches); assertTrue(state.canResolve)
   assertEquals(first.id, branches.single().name)
  }

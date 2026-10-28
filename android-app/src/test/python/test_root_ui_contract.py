@@ -85,7 +85,7 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('SyncRuntime.useEmbeddedBackend(this)', switch)
         self.assertIn('cancelControlledLaunch()', switch)
         reset = body(MAIN, 'private void resetAccessSelection()')
-        for field in ('facade', 'history', 'inspection', 'selected', 'confirmedAction', 'confirmationMerge'):
+        for field in ('facade', 'history', 'inspection', 'selected', 'confirmedAction'):
             self.assertIn('this.' + field + ' = null', reset)
 
     def test_root_first_launch_fallback_uses_only_installed_identity(self):
@@ -107,10 +107,9 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private boolean canHomeRestore()'))
         self.assertIn('backupRecoverySupported()', body(MAIN, 'private SettingsCapabilities settingsCapabilities()'))
         self.assertIn('if (capabilities.canRecoverBackup)', body(MAIN, 'private void showSettingsMaintenance('))
-        for signature in ('public void requestRestore()', 'public void previewMerge()', 'void m87x12f15700()'):
+        for signature in ('public void requestRestore()', 'void m87x12f15700()'):
             self.assertIn('if (!allowRestoreAction()) return;', body(MAIN, signature))
-        for signature in ('AndroidSyncFacade.OperationResult m141x92df934d(', 'AndroidSyncFacade.OperationResult m142x859b98e(',
-                          'AndroidSyncFacade.OperationResult m61xf9a4e77a('):
+        for signature in ('AndroidSyncFacade.OperationResult m141x92df934d(', 'AndroidSyncFacade.OperationResult m142x859b98e('):
             self.assertIn('requireRestoreSupport()', body(MAIN, signature))
         recovery = body(MAIN, 'String m113x3e2c50ed()')
         self.assertLess(recovery.index('capabilities().interruptedBackupRecovery'), recovery.index('recoverInterruptedBackup()'))

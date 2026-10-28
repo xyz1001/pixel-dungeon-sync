@@ -94,7 +94,7 @@ class SharedSettingsAndroidContract(unittest.TestCase):
         for signature in ('void m112xc8b22aac()', 'void m116x9e9ac3b0()', 'void m120x74835cb4()', 'void m124xed71190d()'):
             expected = 'showDestructiveConfirmation(' if signature == 'void m116x9e9ac3b0()' else 'showConfirmation('
             self.assertIn(expected, body(MAIN, signature))
-        self.assertIn('guardSettingsConfirmation(settingsOwner, settingsTicket, runnable)', body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, Runnable runnable2, boolean destructive)'))
+        self.assertIn('guardSettingsConfirmation(settingsOwner, settingsTicket, runnable)', body(MAIN, 'private void showConfirmation(String str, String str2, String str3, Runnable runnable, boolean destructive)'))
         guard = body(MAIN, 'private Runnable guardSettingsConfirmation(')
         for value in ('!this.resumed', 'isDestroyed()', 'this.busy', 'this.page != SyncPage.CONFIRM',
                       'this.confirmationReturn != SyncPage.SETTINGS', 'ticket != this.settingsConfirmationToken',

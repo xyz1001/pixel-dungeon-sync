@@ -16,7 +16,6 @@ public final class SharedMessages {
     public static final UiText SELECTED_SAVE = new UiText("shared.selected_save", "所选存档：%1$s", "Selected save: %1$s");
     public static final UiText USE_SELECTED_WARNING = new UiText("shared.use_selected_warning", "将直接采用所选存档，不创建备份。所选存档中没有的进度会移除。请退出游戏，并暂停其他存档同步。", "The selected save will be used without creating a backup. Progress missing from this save will be removed. Close the game and pause other save syncing first.");
     public static final UiText USE_SELECTED = new UiText("shared.use_selected", "使用所选进度", "Use selected progress");
-    public static final UiText MERGE = new UiText("shared.merge", "合并", "Merge");
     public static final UiText READ_FAILED = new UiText("shared.read_failed", "无法读取存档，请重试。", "Unable to read saves. Please try again.");
     public static final UiText SAVE_LOCATION = new UiText("shared.save_location", "存档位置", "Save location");
     public static final UiText BACK_STEP = new UiText("shared.back_step", "上一步", "Back");
@@ -64,8 +63,6 @@ public final class SharedMessages {
     public static final UiText RECHECK = new UiText("shared.recheck", "重新检查", "Check again");
     public static final UiText RETRY_UPLOAD = new UiText("shared.retry_upload", "重试上传", "Retry upload");
     public static final UiText CHECK_RECOVERY = new UiText("shared.check_recovery", "检查恢复", "Check recovery");
-    public static final UiText CONFIRM_MERGE = new UiText("shared.confirm_merge", "确认合并", "Confirm merge");
-    public static final UiText MERGE_UPLOAD = new UiText("shared.merge_upload", "合并并上传", "Merge and upload");
     public static final UiText OVERWRITE_LOCAL = new UiText("shared.overwrite_local", "覆盖本机", "Overwrite local saves");
     public static final UiText CHOOSE_GAME = new UiText("shared.choose_game", "选择游戏", "Choose game");
     public static final UiText STEP_ONE = new UiText("shared.step_one", "第 1 步，共 2 步", "Step 1 of 2");

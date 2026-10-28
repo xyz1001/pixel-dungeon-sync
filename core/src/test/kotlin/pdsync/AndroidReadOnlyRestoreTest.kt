@@ -16,7 +16,7 @@ class AndroidReadOnlyRestoreTest {
     @TempDir lateinit var temp: Path
     private var sequence = 0
     private val identity = AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon", "Synthetic Shattered",
-        "a".repeat(64), AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896))
+        "a".repeat(64), AndroidSaveCapabilities(802, 896))
     private val connection = AndroidConnection("https://dav.example.test/synthetic/", "synthetic", "test-only", "hero")
     private fun fixture(turn: Int) = linkedMapOf(
         "game1/game.dat" to """{"version":896,"init_ver":896,"turn":$turn,"hero":{"name":"synthetic","lvl":1}}""".encodeToByteArray(),

@@ -21,7 +21,7 @@ import kotlin.test.*
 class ProductionRestoreReadOnly97Test {
  @TempDir lateinit var temp:Path
  private var sequence=0
- private val identity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic Shattered","a".repeat(64),AndroidSaveCapabilities(802,896,AndroidMergePolicy.SHATTERED_896))
+ private val identity=AndroidGameIdentity("com.shatteredpixel.shatteredpixeldungeon","Synthetic Shattered","a".repeat(64),AndroidSaveCapabilities(802,896))
  private val connection=AndroidConnection("https://dav.example.test/synthetic/","synthetic","test-only","hero")
  private fun files(turn:Int=1)=linkedMapOf("game1/game.dat" to """{"version":896,"init_ver":896,"turn":$turn}""".encodeToByteArray(),"game1/depth1.dat" to byteArrayOf(turn.toByte()))
  private inner class Bridge(initial:Map<String,ByteArray> = files()):AndroidGameBridge {
@@ -159,34 +159,5 @@ class ProductionRestoreReadOnly97Test {
    }
   }
  }
- @Test fun independentMergeOnlyPreparesLocallyAndSeparateUploadPublishesExactPreparedParents() {
-  Dav().use {dav->
-   val initial=(1..2).flatMap {slot->files(1).map {(name,bytes)->name.replaceFirst("game1/","game$slot/") to bytes}}.toMap()
-   val remoteBridge=Bridge(initial);val remote=dav.rig(remoteBridge)
-   assertEquals("UPLOADED",remote.facade.autoUpload().status);val base=dav.onlyTip()
-   val bridge=Bridge(emptyMap());val local=dav.rig(bridge)
-   dav.readOnly("merge setup restore") {local.facade.restoreSelected(local.facade.inspectHome(),base.snapshot.id,true)}
-   remoteBridge.content["game1/depth1.dat"]=byteArrayOf(2)
-   remote.facade.confirmRunIdentity(remote.facade.inspect(),"game1",true)
-   assertEquals("UPLOADED",remote.facade.autoUpload().status);val tip=dav.onlyTip()
-   bridge.content["game2/depth1.dat"]=byteArrayOf(3)
-   local.facade.confirmRunIdentity(local.facade.inspect(),"game2",true)
-   val expected=(bridge.content+("game1/depth1.dat" to remoteBridge.content.getValue("game1/depth1.dat"))).mapValues {hash(it.value)}
-   val prepared=dav.readOnly("independent merge") {
-    val inspection=local.facade.inspect();assertTrue(local.facade.previewMerge(inspection).isAllowed)
-    val result=local.facade.mergeConflict(inspection)
-    assertTrue(result.isPending);assertEquals(expected,bridge.content.mapValues {hash(it.value)})
-    assertNotNull(repository(local).pending()).commit
-   }
-   assertEquals(listOf(tip.id),prepared.parents)
-   assertEquals(expected,prepared.snapshot.files)
-   assertTrue(dav.commits().none {it.id==prepared.id})
-   dav.requests.clear()
-   val uploaded=local.facade.upload(local.facade.inspect())
-   assertFalse(uploaded.isPending);assertFalse(uploaded.isConflict)
-   assertTrue(dav.requests.any {it.startsWith("PUT ")},"separate explicit upload publishes")
-   assertEquals(prepared,dav.commits().single {it.id==prepared.id})
-   assertEquals(prepared.id,dav.onlyTip().id)
-  }
- }
+
 }

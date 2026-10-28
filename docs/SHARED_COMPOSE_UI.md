@@ -86,9 +86,7 @@ remain explicitly selectable. Both hosts bind callbacks to the current account,
 page, observation and selection. A failed/expired observation becomes recheckable;
 it cannot strand the user with a repeatedly failing Finish or hide a frozen upload.
 Successful mutations require fresh core confirmation before completing setup.
-Observed merge preview/apply checks remain inside the physical-root lock, and a
-new branch arriving during publication requires a new preview rather than being
-silently included. Android retains its separate game-file restoration journal.
+Android retains its separate game-file restoration journal.
 
 The shared home/history slice uses `SharedHomeScreen` and `SharedHistorySection`
 on both platforms. Upload, restore, launch and settings retain their existing host
@@ -109,9 +107,9 @@ recheck the current page, account and capabilities before invoking those operati
 The remaining ordinary multi-head chooser now uses `SharedBranchChoiceScreen` on
 both platforms. It displays real observed branch IDs and summaries, leaves selection
 non-mutating, and exposes one Handle Conflict action with the common Cancel/
-Overwrite/Merge dialog. Confirmation is bound to its observation, selection and
+Overwrite/Cancel dialog. Confirmation is bound to its observation, selection and
 capabilities; stale or consumed callbacks cannot resolve a new selection. Desktop
-retains `checkResolution`; Android retains its actual restore/merge capability and
+retains `checkResolution`; Android retains its actual restore capability and
 preview flow. Both retain the core pending/recovery guards. Android's separately
 supported local-preservation upload is not turned into an implicit branch choice.
 
@@ -145,3 +143,5 @@ footer. These are not claims of actual Android device or 320-pixel desktop-windo
 testing. Android lifecycle, installation/authorization and SAF interaction have not
 been verified on a device in this pass; final build/test results must be reported
 separately from the shared-source and offscreen evidence.
+
+131 removes save-merge actions and previews from shared confirmation components. Secondary merge actions no longer exist; overwrite/cancel retain their observation and selection guards.

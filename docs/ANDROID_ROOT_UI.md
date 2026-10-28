@@ -40,7 +40,7 @@ The Root transaction recovery action checks the retained journal: a committed
 operation is verified/cleaned, while an unfinished replacement is rolled back.
 The separate core recovery record must still be resolved explicitly.
 
-Restore, conflict replacement, merge writing, and interrupted-transaction recovery
+Restore, conflict replacement, and interrupted-transaction recovery
 are controlled by backend capabilities, both in the UI and at operation entry
 points. A native-library, atomic-rename, or file-attribute support failure is an
 explicit capability error, never an authorization or successful-restore claim.
@@ -62,7 +62,7 @@ quiet-ready CACHED or ABSENT state permits a later upload attempt. An active or
 unknown process state does not qualify, and prolonged unknown evidence stops the
 watch. Process absence is not required and no force-stop action exists. Export
 and publication still recheck stable saves and conflicts; automatic upload never
-selects a conflict winner or performs a restore/merge.
+selects a conflict winner or performs a restore.
 
 ## Host checks
 

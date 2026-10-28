@@ -36,7 +36,7 @@ import java.util.zip.ZipOutputStream
 import javax.net.ssl.SSLException
 
 /** Only closed diagnostic labels are accepted. None of these fields carry business identifiers. */
-@Serializable enum class DiagnosticAction { APP_START, CONFIGURE, CONNECT, INSPECT, HISTORY, PREPARE, INSTALL, ACCESS_CHECK, LAUNCH, CAPTURE, PUSH, RESTORE, RECOVERY, RESOLVE, MERGE, ARCHIVE, EXPORT_LOGS, AUTOMATIC_SYNC, OTHER }
+@Serializable enum class DiagnosticAction { APP_START, CONFIGURE, CONNECT, INSPECT, HISTORY, PREPARE, INSTALL, ACCESS_CHECK, LAUNCH, CAPTURE, PUSH, RESTORE, RECOVERY, RESOLVE, ARCHIVE, EXPORT_LOGS, AUTOMATIC_SYNC, OTHER }
 @Serializable enum class DiagnosticStage { QUEUED, STARTED, CONFIRMATION, GUARD, WORK, REFRESH, FINISHED, RUNTIME, CONNECTION, NAMESPACE, HTTP, TRANSPORT, PREPARATION, INSTALLATION, BRIDGE, READINESS, GAME_LAUNCH, BACKUP, RESTORE, RECOVERY, VERIFY, EXPORT }
 @Serializable enum class DiagnosticResult { STARTED, SUCCEEDED, FAILED, CANCELED, REJECTED, SKIPPED, PENDING, CONFLICT }
 @Serializable enum class DiagnosticFailure { NONE, GAME_NOT_SELECTED, NOT_CHECKED, FIRST_LAUNCH_NEEDED, UNRECOGNIZED_LAYOUT, SYSTEM_REQUEST_PENDING, CAPABILITY_UNAVAILABLE, BUSY, NOT_READY, RECOVERY_REQUIRED, IDENTITY_MISMATCH, UNAVAILABLE, CANCELED, AUTHENTICATION, AUTHORIZATION, HTTP, TIMEOUT, DNS, CONNECT, TLS, EOF, CONNECTION, INTERRUPTED, NETWORK_IO, STORAGE, VALIDATION, OTHER }
@@ -319,7 +319,7 @@ object DiagnosticLog {
   DiagnosticAction.LAUNCH -> CoreMessages.LAUNCH_GAME.text(); DiagnosticAction.CAPTURE -> CoreMessages.CREATE_SNAPSHOT.text()
   DiagnosticAction.PUSH -> CoreMessages.UPLOAD_SAVES.text(); DiagnosticAction.RESTORE -> CoreMessages.RESTORE_SAVES.text()
   DiagnosticAction.RECOVERY -> CoreMessages.HANDLE_INTERRUPTED_OPERATION.text(); DiagnosticAction.RESOLVE -> CoreMessages.RESOLVE_CONFLICT.text()
-  DiagnosticAction.MERGE -> CoreMessages.MERGE_SAVES.text(); DiagnosticAction.ARCHIVE -> CoreMessages.ARCHIVE_OPERATION.text()
+  DiagnosticAction.ARCHIVE -> CoreMessages.ARCHIVE_OPERATION.text()
   DiagnosticAction.EXPORT_LOGS -> CoreMessages.EXPORT_LOGS.text(); DiagnosticAction.AUTOMATIC_SYNC -> CoreMessages.AUTOMATIC_SYNC.text()
   DiagnosticAction.OTHER -> CoreMessages.OTHER_OPERATION.text()
  }

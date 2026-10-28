@@ -23,7 +23,7 @@ fun androidCloudOverwriteState(observed: AndroidSyncFacade.Inspection?, history:
             selectedId = observed?.overwriteTargetSnapshotId, game = game, pageActive = pageActive, busy = busy,
             connected = connected, observationCurrent = cloudVerified && branched,
             resolutionBlocked = recovery || pending,
-            overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
+            overwriteSupported = true, cloudOverwrite = true,
             canPreserveLocal = false,
             notice = listOf(notice, when {
                 recovery -> AN_UNFINISHED_RESTORE_EXISTS_RETURN_TO_SETTINGS.text()

@@ -41,13 +41,11 @@ class SharedComparisonStateTest {
         override fun openRecovery() { calls += "recovery" }
         override fun copyDiagnostics() { calls += "copy" }
         override fun confirmConflict(token: Long) = operation("overwrite:$token")
-        override fun previewMerge(token: Long) = operation("preview:$token")
-        override fun confirmMerge(token: Long) = operation("merge:$token")
         override fun cancelConflict(token: Long) { calls += "cancel:$token"; state = state.copy(confirmation = null) }
     }
 
     private fun dialogState(kind: OnboardingKind = OnboardingKind.DIFFERENT) = observed(kind).copy(
-        confirmation = SharedComparisonConfirmation(token = 7, canPreviewMerge = true))
+        confirmation = SharedComparisonConfirmation(token = 7))
 
     @Test fun allKindsHaveExactlyOnePrimaryAndUnknownIsRefresh() {
         val expected = mapOf(
@@ -67,7 +65,7 @@ class SharedComparisonStateTest {
         listOf(false, true).forEach { canConfirm ->
             val state = observed(OnboardingKind.IDENTICAL).copy(
                 canCompleteWithoutTransfer = canConfirm, canAdoptRemote = !canConfirm,
-                confirmation = SharedComparisonConfirmation(7, canPreviewMerge = true),
+                confirmation = SharedComparisonConfirmation(7),
             )
             val expected = if (canConfirm) SharedComparisonCompletion.CONFIRM else SharedComparisonCompletion.ADOPT
             assertEquals(expected, state.completion)
@@ -81,7 +79,7 @@ class SharedComparisonStateTest {
             SharedProgressChoice.entries.forEach(host.interactions::selectProgress)
             host.interactions.selectRemote("snapshot-a")
             host.interactions.confirm(7)
-            host.interactions.previewMerge(7)
+
             assertEquals(listOf("finish:$expected"), host.calls)
         }
     }
@@ -207,7 +205,7 @@ class SharedComparisonStateTest {
             host.interactions.selectRemote("snapshot-a")
             host.interactions.copyDiagnostics()
             host.interactions.confirm(7)
-            host.interactions.previewMerge(7)
+
             host.interactions.cancel(7)
             assertTrue(host.calls.isEmpty())
         }
@@ -268,7 +266,7 @@ class SharedComparisonStateTest {
         assertTrue(host.calls.isEmpty())
         host.interactions.selectRemote("snapshot-b")
         staleOverwrite()
-        host.interactions.previewMerge(7)
+
         host.interactions.cancel(7)
         assertEquals(listOf("select:snapshot-b"), host.calls)
         assertEquals("snapshot-b", host.state.selectedId)
@@ -279,44 +277,15 @@ class SharedComparisonStateTest {
         assertEquals(2, host.calls.size)
     }
 
-    @Test fun mergePreviewDoesNotNeedSingleSelectedHeadButDoesNeedRealCapabilityAndWriteSupport() {
-        val host = Host(dialogState(OnboardingKind.BRANCHED).copy(selectedId = null))
-        host.interactions.previewMerge(7)
-        assertEquals(listOf("preview:7"), host.calls)
-        host.calls.clear()
-        listOf(host.state.copy(restoreSupported = false), host.state.copy(cloudVerified = false),
-            host.state.copy(confirmation = SharedComparisonConfirmation(7))).forEach { blocked ->
-            host.state = blocked
-            host.interactions.previewMerge(7)
-        }
-        assertTrue(host.calls.isEmpty())
-        assertFalse(SharedComparisonConfirmation(1).canPreviewMerge)
-        assertFalse(SharedComparisonConfirmation(1).canApplyMerge)
-    }
 
-    @Test fun mergeReviewOnlyAppliesCurrentRealPlanAndDoesNotReturnToOverwrite() {
-        val host = Host(dialogState(OnboardingKind.BRANCHED).copy(selectedId = null,
-            confirmation = SharedComparisonConfirmation(9, SharedComparisonConfirmationStage.MERGE_REVIEW,
-                canPreviewMerge = true, canApplyMerge = true)))
-        assertEquals("合并并上传", host.state.confirmationPresentation?.confirmLabel)
-        assertNull(host.state.confirmationPresentation?.secondaryLabel)
-        host.interactions.confirm(7)
-        host.interactions.previewMerge(9)
-        host.interactions.selectRemote("snapshot-a")
-        assertTrue(host.calls.isEmpty())
-        host.interactions.confirm(9)
-        assertEquals(listOf("merge:9"), host.calls)
-        host.state = host.state.copy(confirmation = host.state.confirmation?.copy(token = 10, canApplyMerge = false))
-        host.interactions.confirm(9)
-        host.interactions.confirm(10)
-        assertEquals(listOf("merge:9"), host.calls)
-    }
+
+
 
     @Test fun cancellationClearsTokenAndLateActionsCannotUseIt() {
         val host = Host(dialogState())
         host.interactions.cancel(7)
         host.interactions.confirm(7)
-        host.interactions.previewMerge(7)
+
         host.interactions.cancel(7)
         assertEquals(listOf("cancel:7"), host.calls)
     }

@@ -101,7 +101,7 @@ private fun SharedComparisonContent(
         }
     }
     state.confirmationPresentation?.let { presentation ->
-        SharedConfirmationDialog(presentation, interactions::confirm, interactions::previewMerge, interactions::cancel) {
+        SharedConfirmationDialog(presentation, interactions::confirm, {}, interactions::cancel) {
             if (state.activeConfirmation?.stage == SharedComparisonConfirmationStage.CONFLICT && (state.remoteChoices.size > 1 || !state.hasSelectedRemote)) {
                 Text(SharedMessages.CHOOSE_CLOUD_SAVE.text(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 state.remoteChoices.forEach { choice ->

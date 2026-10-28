@@ -460,7 +460,6 @@ internal fun runSyncApplication(
    if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> DesktopMessages.VERIFYING_AND_BACKING_UP_THE_CURRENT_PROFILE_BEFORE_RESTORING.text()
-    Action.MERGE -> DesktopMessages.CHECKING_RUN_IDENTITIES_BADGES_HISTORY_AND_THE_CATALOG.text()
     Action.PUSH -> DesktopMessages.PRESERVING_THE_SNAPSHOT_AND_VERIFYING_THE_CLOUD.text()
     else -> DesktopMessages.PROCESSING.text()
    }
@@ -492,7 +491,6 @@ internal fun runSyncApplication(
       }
       fun store(): AppendStore = uploadStore
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
-       is AppendPushResult.Prepared -> OperationResult(DesktopMessages.LOCAL_MERGE_COMPLETE_BUT_CLOUD_UPLOAD_IS_INCOMPLETE_CLICK_UPLOAD_TO_RETRY_T.text())
        is AppendPushResult.Success -> OperationResult((if (result.reused) DesktopMessages.PROGRESS_SYNCED_LOCAL_AND_CLOUD_PROFILES_ARE_IDENTICAL.text() else DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text()) + (if (result.localDirty) DesktopMessages.LOCAL_CHANGES_REMAIN_UNUPLOADED_THE_NEXT_SYNC_WILL_CREATE_A_SEPARATE_COMMIT.text() else if (!result.reused) DesktopMessages.THE_SELECTED_PROGRESS_IS_NOW_THIS_DEVICE_S_SYNC_BASELINE.text() else "") + (if (result.remoteAhead) DesktopMessages.ADDITIONAL_LATER_BRANCHES_HAVE_BEEN_OBSERVED_AND_CAN_BE_VIEWED.text() else ""))
        is AppendPushResult.Diverged -> OperationResult(DesktopMessages.FOUND_1_S_PROGRESS_BRANCHES_ALL_SNAPSHOTS_HAVE_BEEN_PRESERVED_PLEASE_CHOOSE.text(result.conflict.branches.size), result.conflict)
       }
@@ -512,10 +510,7 @@ internal fun runSyncApplication(
        Action.RESTORE -> manager.restoreHistory(requireNotNull(chosen), stopped).let { OperationResult(DesktopMessages.RESTORE_COMPLETE_A_BACKUP_WAS_ADDED_TO_HISTORY_THE_RESTORE_COMMIT_IS_FROZEN.text(), appliedFiles = it.restored.files) }
        Action.CLOUD_HISTORY -> manager.restoreCloudHistory(requireNotNull(chosen),store(),allowUniqueReplacement,expectedBefore,stopped).let {OperationResult(DesktopMessages.SELECTED_CLOUD_HISTORY_RESTORED_ORIGINAL_HISTORY_PRESERVED_THE_RESULT_IS_AW.text(),appliedFiles=it.restored.files)}
        Action.RESOLVE -> {manager.overwriteCloudConflict(requireNotNull(divergence), requireNotNull(branchChoice), store(), stopped);OperationResult(DesktopMessages.THE_APPENDED_COMMIT_WAS_READ_BACK_AND_VERIFIED.text())}
-       Action.MERGE -> pushed(manager.merge(requireNotNull(divergence),store(),stopped)).let { result ->
-        if(result.conflict==null) result.copy(appliedFiles=manager.observedFiles()) else result
-       }
-       Action.MERGE_CURRENT -> pushed(manager.mergeCurrent(store(),stopped)).let {result->if(result.conflict==null)result.copy(appliedFiles=manager.observedFiles()) else result}
+
        Action.ARCHIVE -> { manager.archivePending(); OperationResult(DesktopMessages.PENDING_SNAPSHOT_ARCHIVED_THE_NEXT_SYNC_WILL_CAPTURE_THE_CURRENT_SAVES_AGAI.text()) }
       }
       trace.outcome(when { completed.automaticSkipped -> DiagnosticResult.SKIPPED; completed.conflict != null -> DiagnosticResult.CONFLICT; else -> DiagnosticResult.SUCCEEDED })
@@ -530,7 +525,7 @@ internal fun runSyncApplication(
      }
      conflictSelection=if(action==Action.PUSH)result.conflict?.let {value->value.branches.firstOrNull {it.snapshot.manifest.files==value.observedLocalFiles}?.snapshot?.manifest?.id} else null
      remoteReadAt = 0L
-     if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE,Action.MERGE,Action.MERGE_CURRENT)){selectedByUser=false;selected=null}
+     if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
      if (result.verifiedHistory != null) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
@@ -558,9 +553,7 @@ internal fun runSyncApplication(
      terminalFailure = operationFailure(e)
      if (action == Action.PUSH) automatic.failed(monotonicMillis(), terminalFailure == OperationFailure.NETWORK || e is SaveNotStableException)
      trace.record(OperationEvent.WORK_FAILED, failure = terminalFailure)
-     status = if(action==Action.MERGE && withContext(Dispatchers.IO) { manager.retryablePending() })
-      DesktopMessages.LOCAL_MERGE_COMPLETE_BUT_CLOUD_UPLOAD_IS_INCOMPLETE_CLICK_UPLOAD_TO_RETRY_T.text()
-     else DesktopMessages.OPERATION_INCOMPLETE_1_S_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED.text(e.message)
+     status = DesktopMessages.OPERATION_INCOMPLETE_1_S_SAVED_HISTORY_AND_BACKUPS_ARE_PRESERVED.text(e.message)
      authenticationFailed(e)
     }
     finally {
@@ -578,7 +571,7 @@ internal fun runSyncApplication(
       if (!appClosed && page == Page.HOME && pageGeneration == generation && config == operationConfig && session === manager) {
        history = data.first; pending = data.second; saveInfo = data.third; graphHistory = loadedGraph
        localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource
-       if (terminalFailure == null && action in setOf(Action.PUSH, Action.CLOUD_HISTORY, Action.REMOTE_TIP, Action.RESOLVE, Action.MERGE, Action.MERGE_CURRENT)
+       if (terminalFailure == null && action in setOf(Action.PUSH, Action.CLOUD_HISTORY, Action.REMOTE_TIP, Action.RESOLVE)
            && loadedGraph.graph.verification == RemoteVerification.OBJECTS_VERIFIED) {
         remoteTips = loadedGraph.graph.tips.map { loadedGraph.graph.commits.getValue(it).snapshot.id }.toSet()
         remoteInspectionReady = true; remoteReadAt = monotonicMillis()
@@ -1327,8 +1320,7 @@ internal fun runSyncApplication(
            conflictSelection = id
            execute(operationEvents.begin(Action.RESOLVE))
           }
-         },
-         onMerge = { })
+         })
        } }
        Page.CONFIRM -> confirm?.let { trace ->
         SharedHomeScreen(homeState().copy(pageActive = false), object : SharedHomeActions {
@@ -1340,8 +1332,7 @@ internal fun runSyncApplication(
          onBack = { if (confirm === trace && page == Page.CONFIRM) cancelConfirmation(trace) },
          onConfirm = {
           if (confirm === trace && page == Page.CONFIRM && confirmationOwner?.isCurrent(session, config, graphHistory, selected, selectedByUser) != false) execute(trace)
-         },
-         onMerge = if(trace.action==Action.CLOUD_HISTORY && confirmationSelected == null)({execute(operationEvents.begin(Action.MERGE_CURRENT))}) else null)
+         })
        }
       }
      }
@@ -1447,7 +1438,7 @@ private fun DesktopSharedConnectionPage(
 @Composable
 private fun ConflictDialog(value: AppendConflict, selected: String?, busy: Boolean, connected: Boolean,
  game: SharedGameIdentity?, pending: Boolean, onSelect: (String) -> Unit, onBack: () -> Unit,
- onConfirm: (String) -> Unit, onMerge: () -> Unit) {
+ onConfirm: (String) -> Unit) {
  val state = SharedBranchChoiceState(
   observation = value,
   branches = value.branches.sortedBy { it.commit.id }.distinctBy { it.snapshot.manifest.id }.map { branch ->
@@ -1461,7 +1452,7 @@ private fun ConflictDialog(value: AppendConflict, selected: String?, busy: Boole
   },
   selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
   observationCurrent = true, resolutionBlocked = pending,
-  overwriteSupported = true, mergeSupported = false, cloudOverwrite = true,
+  overwriteSupported = true, cloudOverwrite = true,
   notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else "",
  )
  SharedBranchChoiceDialog(state, object : SharedBranchChoiceActions {
@@ -1469,13 +1460,12 @@ private fun ConflictDialog(value: AppendConflict, selected: String?, busy: Boole
   override fun back() = onBack()
   override fun refresh() = onBack()
   override fun overwrite(snapshotId: String) { if (snapshotId == selected) onConfirm(snapshotId) }
-  override fun merge() = onMerge()
   override fun preserveLocal() = Unit
  })
 }
 
 @Composable
-private fun ConfirmationPage(token: Long, action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit,onMerge:(()->Unit)?=null) {
+private fun ConfirmationPage(token: Long, action: Action, root: String?, pending: Boolean, branch: String?, snapshot: Manifest?, busy: Boolean, notice: String?, onBack: () -> Unit, onConfirm: () -> Unit) {
  val restoring = action in setOf(Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP,Action.CLOUD_HISTORY)
  val message = when {
   action == Action.ARCHIVE -> DesktopMessages.ONLY_THE_PENDING_UPLOAD_MARKER_IS_REMOVED_HISTORY_IS_PRESERVED_AND_CLOUD_CO.text()
@@ -1486,11 +1476,11 @@ private fun ConfirmationPage(token: Long, action: Action, root: String?, pending
  }
  SharedConnectionTheme {
   SharedConfirmationDialog(SharedConfirmationState(token,
-   title = if (onMerge != null) DesktopMessages.HOW_SHOULD_THE_PROGRESS_CONFLICT_BE_RESOLVED.text() else if (restoring) DesktopMessages.RESTORE_SAVE.text() else if (action == Action.ARCHIVE) DesktopMessages.END_PENDING_UPLOAD.text() else DesktopMessages.CONFIRM_OPERATION.text(),
+   title = if (restoring) DesktopMessages.RESTORE_SAVE.text() else if (action == Action.ARCHIVE) DesktopMessages.END_PENDING_UPLOAD.text() else DesktopMessages.CONFIRM_OPERATION.text(),
    message = message, confirmLabel = if (restoring) DesktopMessages.OVERWRITE_LOCAL.text() else DesktopMessages.CONTINUE.text(),
-   confirmEnabled = true, secondaryLabel = if (onMerge != null) DesktopMessages.SMART_MERGE_BOTH_SIDES.text() else null,
-   secondaryEnabled = onMerge != null, busy = busy, details = notice.orEmpty(), destructive = restoring),
-   onConfirm = { onConfirm() }, onSecondary = { onMerge?.invoke() }, onDismiss = { onBack() })
+   confirmEnabled = true, secondaryLabel = null,
+   secondaryEnabled = false, busy = busy, details = notice.orEmpty(), destructive = restoring),
+   onConfirm = { onConfirm() }, onSecondary = {}, onDismiss = { onBack() })
  }
 }
 

@@ -54,15 +54,12 @@ class DesktopConflictDialogTest {
    val state = SharedBranchChoiceState(observed,
     listOf(SharedBranchChoice("selected", "fixture", "synthetic")),
     selectedId = "selected", pageActive = true, connected = true, observationCurrent = true,
-    overwriteSupported = true, mergeSupported = true)
+    overwriteSupported = true)
    val actions = object : SharedBranchChoiceActions {
     override fun select(snapshotId: String) = Unit
     override fun back() { active = false }
     override fun refresh() = Unit
     override fun overwrite(snapshotId: String) {
-     if (owner.matches(currentOwner, active)) writes++
-    }
-    override fun merge() {
      if (owner.matches(currentOwner, active)) writes++
     }
     override fun preserveLocal() = Unit
@@ -74,8 +71,7 @@ class DesktopConflictDialogTest {
    interactions.confirm(overwrite)
    assertEquals(0, writes, "host proof must reject a retained callback independently of recomposition")
    interactions.primary()
-   val merge = assertNotNull(interactions.presentation).token
-   interactions.merge(merge)
+   assertNotNull(interactions.presentation)
    assertEquals(0, writes)
    interactions.dispose()
   }
@@ -91,7 +87,7 @@ class DesktopConflictDialogTest {
   val state = SharedBranchChoiceState(observed,
    listOf(SharedBranchChoice("selected", "fixture", "synthetic")),
    selectedId = "selected", pageActive = true, connected = true, observationCurrent = true,
-   overwriteSupported = true, mergeSupported = true)
+   overwriteSupported = true)
   val interactions = SharedBranchChoiceInteractions({ state }, { object : SharedBranchChoiceActions {
    override fun select(snapshotId: String) = Unit
    override fun back() {
@@ -105,7 +101,6 @@ class DesktopConflictDialogTest {
      current = current.copy(generation = current.generation + 1)
     }
    }
-   override fun merge() = overwrite("selected")
    override fun preserveLocal() = Unit
   } })
   interactions.primary()
@@ -118,7 +113,6 @@ class DesktopConflictDialogTest {
   val accepted = assertNotNull(interactions.presentation).token
   interactions.confirm(accepted)
   interactions.confirm(accepted)
-  interactions.merge(accepted)
   interactions.back()
   assertEquals(1, writes)
   assertTrue(home)
@@ -162,7 +156,7 @@ class DesktopConflictDialogTest {
   assertContains(chooser, "if (snapshotId == selected) onConfirm(snapshotId)")
   assertContains(chooser, "selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected")
   assertContains(chooser, "observationCurrent = true, resolutionBlocked = pending")
-  assertContains(chooser, "overwriteSupported = true, mergeSupported = false, cloudOverwrite = true")
+  assertContains(chooser, "overwriteSupported = true, cloudOverwrite = true")
  }
 
  @Test fun cloudOverwriteDoesNotRunReverseRestoreChecksOrReviveDismissedModal() {
@@ -171,7 +165,7 @@ class DesktopConflictDialogTest {
   val modal = main.substringAfter("Page.CONFLICT -> key(pageGeneration)").substringBefore("Page.CONFIRM ->")
   assertContains(modal, "val overwriteTarget = value.overwriteTargetSnapshotId")
   assertContains(modal, "onSelect = { }")
-  assertContains(modal, "onMerge = { }")
+  assertFalse(modal.contains("onMerge"))
   val navigation = main.substringAfter("fun navigate(next: Page)").substringBefore("suspend fun reconnectSaved")
   assertContains(navigation, "pageGeneration++; page = next")
   val refresh = main.substringAfter("fun readRemote(").substringBefore("fun hasRemoteBranches()")

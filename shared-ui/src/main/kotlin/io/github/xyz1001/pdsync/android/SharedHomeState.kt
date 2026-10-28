@@ -34,7 +34,7 @@ data class SharedHomeState @JvmOverloads constructor(
 
 enum class SharedHomeStatusKind { NEUTRAL, SYNCED, WARNING, EXPIRED, RUNNING, CONFLICT }
 
-enum class SharedHomeOperation { NONE, UPLOAD, RESTORE, MERGE, LAUNCH }
+enum class SharedHomeOperation { NONE, UPLOAD, RESTORE, LAUNCH }
 
 /** Real selected/default snapshot metadata, independent of the visible history page. */
 data class SharedHomeRestoreTarget(

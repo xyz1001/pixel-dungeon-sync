@@ -28,7 +28,7 @@ class SharedBranchChoiceRenderTest {
         SharedBranchChoice("snapshot-a", "手机进度", "手机 · 10-15 09:30 · 4 个文件"),
         SharedBranchChoice("snapshot-b", "电脑进度", "电脑 · 10-14 20:00 · 6 个文件")),
         game = SharedGameIdentity("Shattered Pixel Dungeon", "3.3.8"), pageActive = true,
-        connected = true, observationCurrent = true, overwriteSupported = true, mergeSupported = true)
+        connected = true, observationCurrent = true, overwriteSupported = true)
 
     private class Host(initial: SharedBranchChoiceState) : SharedBranchChoiceActions {
         var state by mutableStateOf(initial)
@@ -37,7 +37,6 @@ class SharedBranchChoiceRenderTest {
         override fun back() { calls += "back" }
         override fun refresh() { calls += "refresh" }
         override fun overwrite(snapshotId: String) { calls += "overwrite:$snapshotId" }
-        override fun merge() { calls += "merge" }
         override fun preserveLocal() { calls += "preserve" }
     }
     private class Observation : SharedBranchChoiceLayoutObserver {
@@ -82,9 +81,9 @@ class SharedBranchChoiceRenderTest {
             val variants = listOf(
                 "busy" to base.copy(busy = true),
                 "inactive" to base.copy(pageActive = false),
-                "unsupported" to base.copy(overwriteSupported = false, mergeSupported = false),
+                "unsupported" to base.copy(overwriteSupported = false),
                 "pending" to base.copy(resolutionBlocked = true, notice = "上次上传尚未完成，请先重试上传。"),
-                "unknown-selection" to base.copy(selectedId = "removed", overwriteSupported = false, mergeSupported = false),
+                "unknown-selection" to base.copy(selectedId = "removed", overwriteSupported = false),
             )
             for ((name, current) in variants) {
                 val host = Host(current)

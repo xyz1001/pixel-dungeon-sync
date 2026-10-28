@@ -48,7 +48,7 @@ class DesktopSelectedRestoreConfirmationTest {
   val modal = main.substringAfter("Page.CONFIRM -> confirm?.let { trace ->")
   assertContains(modal, "onBack = { if (confirm === trace && page == Page.CONFIRM) cancelConfirmation(trace) }")
   assertContains(modal, "confirm === trace && page == Page.CONFIRM && confirmationOwner?.isCurrent(session, config, graphHistory, selected, selectedByUser) != false")
-  assertContains(modal, "onMerge = if(trace.action==Action.CLOUD_HISTORY && confirmationSelected == null)")
+  assertFalse(modal.contains("onMerge"))
   assertContains(modal, "else confirmationManifest")
   assertContains(main, "val chosen = if (confirm === trace && confirmationSelected != null) confirmationSelected else selected")
   assertContains(main.substringAfter("fun cancelConfirmation(trace:"), "confirm = null; confirmationNotice = null; navigate(Page.HOME)")

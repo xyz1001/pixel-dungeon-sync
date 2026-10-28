@@ -47,7 +47,6 @@ class MainComparisonContractTest(unittest.TestCase):
     def test_cancel_and_back_clear_action_without_running_it(self):
         body = method("cancelConfirmation")
         self.assertIn("this.confirmedAction = null", body)
-        self.assertIn("this.confirmationMerge = null", body)
         self.assertNotIn(".run()", body)
         self.assertIn("cancelConfirmation();", method("onBackPressed"))
 

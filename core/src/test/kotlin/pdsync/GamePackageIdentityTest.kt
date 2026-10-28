@@ -177,19 +177,7 @@ class GamePackageIdentityTest {
   assertEquals(state.resolve("profiles/$key"), current.directory)
   assertNotEquals(old.directory, current.directory); assertEquals(current.directory, restarted.directory)
  }
- @Test fun mergeRequiresCurrentNamespaceAndProducesExplicitPackageIdentity() {
-  val source = snapshot(); val hashes = source.manifest.files
-  val metadata = DirectorySnapshotMetadata(contentSha256 = contentSha256(hashes),
-   runs = runContentHashes(hashes).mapValues { RunIdentity(id(), it.value) })
-  val base = source.copy(manifest = source.manifest.copy(directoryMetadata = metadata))
-  val context = SnapshotCaptureContext(DeviceIdentity(id(), "isolated test"), "2026-10-16T00:00:00Z")
-  val target = TargetGame("fixture", "3.3.8", 896, "a".repeat(64), true, 802, "test")
-  val merged = RunMergePlanner.plan(base, listOf(base), target, context).snapshot
-  assertEquals(Shattered.id, merged.manifest.game); assertEquals(spd, merged.manifest.gamePackage); assertEquals(base.manifest.files, merged.manifest.files)
-  for (other in listOf(aliased(base), base.copy(manifest = base.manifest.copy(gamePackage = "org.other.game")))) {
-   assertFailsWith<RunMergeException> { RunMergePlanner.plan(base, listOf(other), target, context) }
-  }
- }
+
  @Test fun noopLineageRequiresExactNamespaceAndUnchangedPackageAndProvenance() {
   val original = snapshot(); val base = commit(original.copy(manifest = original.manifest.copy(gamePackage = spd)))
   fun child(manifest: Manifest) = base.copy(id = id(), parents = listOf(base.id), snapshot = manifest.copy(id = id()))

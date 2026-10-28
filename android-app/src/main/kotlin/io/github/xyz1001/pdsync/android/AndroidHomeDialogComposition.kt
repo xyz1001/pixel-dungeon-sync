@@ -32,7 +32,6 @@ object AndroidHomeDialogComposition {
         selectedId: String?,
         settingsBackdrop: SharedSettingsState?,
         confirm: Runnable,
-        merge: Runnable?,
         cancel: Runnable,
     ): View = ComposeView(activity).apply {
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
@@ -60,7 +59,7 @@ object AndroidHomeDialogComposition {
                                     override fun changeHistoryPage(page: Int) = Unit
                                 })
                         }
-                        SharedConfirmationDialog(state, { confirm.run() }, { merge?.run() }, { cancel.run() })
+                        SharedConfirmationDialog(state, { confirm.run() }, {}, { cancel.run() })
                     }
                 }
             }

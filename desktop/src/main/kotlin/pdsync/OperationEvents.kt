@@ -22,7 +22,7 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 import javax.net.ssl.SSLException
 
-internal enum class OperationAction { CAPTURE, PUSH, RESTORE, RESOLVE, MERGE, MERGE_CURRENT, CLOUD_HISTORY, REMOTE_TIP, ARCHIVE }
+internal enum class OperationAction { CAPTURE, PUSH, RESTORE, RESOLVE, CLOUD_HISTORY, REMOTE_TIP, ARCHIVE }
 internal enum class OperationEvent {
  CONFIRMATION_ENTERED, CONFIRMATION_CANCELED, CONFIRMATION_SUBMITTED, GUARD_REJECTED,
  OPERATION_QUEUED, OPERATION_STARTED, WORK_STARTED, WORK_SUCCEEDED, WORK_FAILED,
@@ -105,7 +105,6 @@ internal class OperationTrace internal constructor(
   OperationAction.PUSH -> DiagnosticAction.PUSH
   OperationAction.RESTORE, OperationAction.CLOUD_HISTORY, OperationAction.REMOTE_TIP -> DiagnosticAction.RESTORE
   OperationAction.RESOLVE -> DiagnosticAction.RESOLVE
-  OperationAction.MERGE, OperationAction.MERGE_CURRENT -> DiagnosticAction.MERGE
   OperationAction.ARCHIVE -> DiagnosticAction.ARCHIVE
  }, automatic)
  private var diagnosticOutcome = DiagnosticResult.SUCCEEDED

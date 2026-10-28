@@ -103,7 +103,7 @@ public final class MainActivity {
     static final class AndroidHomeDialogComposition {
         static Object confirmationView(MainActivity a, SharedConfirmationState state, SyncHistory history,
                 int historyPage, Object identity, String status, SharedHomeStatusKind statusKind, String explicit, Object backdrop,
-                Runnable confirm, Runnable merge, Runnable cancel) {
+                Runnable confirm, Runnable cancel) {
             a.confirmClick = confirm; a.cancelClick = cancel;
             a.renderedConfirmationTitle = (String) state.args[1];
             a.renderedSecondaryLabel = (String) state.args[5];
@@ -192,15 +192,15 @@ public final class MainActivity {
         operations++;
         try { work.run(); } catch (Exception failure) { throw new AssertionError(failure); }
     }
-    void showConfirmation(String title, String text, String button, Runnable action, Runnable merge) {
+    void showConfirmation(String title, String text, String button, Runnable action) {
         confirmations++; confirmationReturn = page; page = SyncPage.CONFIRM;
         confirmationTitle = title; confirmationText = text; confirmationButton = button;
-        confirmedAction = action; confirmationMerge = merge; settingsConfirmationToken++;
+        confirmedAction = action; settingsConfirmationToken++;
         root = new LinearLayout();
     }
     void cancelConfirmation() { settingsConfirmationToken++; confirmedAction = null; page = confirmationReturn; }
 
-    void showDestructiveConfirmation(String title, String text, String button, Runnable action, Runnable merge) { confirmationDestructive = true; showConfirmation(title, text, button, action, merge); }
+    void showDestructiveConfirmation(String title, String text, String button, Runnable action) { confirmationDestructive = true; showConfirmation(title, text, button, action); }
     /* PRODUCTION_METHODS */
 
     static int checks;
@@ -438,7 +438,6 @@ public final class MainActivity {
                 a.requestRestore();
                 check(a.page == SyncPage.CONFIRM && a.confirmations == 1 && a.operations == 0,
                         "explicit history always asks once before overwrite");
-                check(a.confirmationMerge == null, "explicit history must not ask for another source or merge");
                 a.renderConfirmation();
                 check(RESTORE_SAVE_154.text().equals(a.renderedConfirmationTitle) && a.renderedSecondaryLabel == null,
                         "rendered selected restore has overwrite warning without another choice");

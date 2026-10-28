@@ -40,30 +40,27 @@ class AndroidProfileVersionsTest {
   assertFails { policy(id).checkRestore(sourceOnly, "") }
   assertFails { policy(identity(source = "d".repeat(64))).checkRestore(sourceOnly, "") }
  }
- @Test fun unknownLoaderAllowsRecognizedWriterButNeverSemanticMerge() {
+ @Test fun unknownLoaderAllowsRecognizedWriter() {
   val id = identity(); val versions = policy(id)
   versions.checkRestore(versions.annotate(snapshot(id, 1234)), "")
   assertNull(versions.target("").minimumSaveVersion)
-  assertFailsWith<RunMergeException> { versions.requireMerge() }
  }
  @Test fun knownPackageUsesLoaderBoundsWithoutSignerGate() {
   val id = identity("com.shatteredpixel.shatteredpixeldungeon")
   val versions = policy(id, 896)
   assertEquals(802, versions.target("").minimumSaveVersion)
-  assertEquals("shattered-896", versions.target("").mergeFormat)
-  versions.requireMerge()
   versions.checkRestore(versions.annotate(snapshot(id, 896)), "")
   assertFails { versions.checkRestore(versions.annotate(snapshot(id, 897)), "") }
   assertFails { versions.checkRestore(versions.annotate(snapshot(id, 801)), "") }
  }
- @Test fun fourPointLoaderIsKnownButMergeIsNot() {
+ @Test fun fourPointLoaderHasKnownRestoreBounds() {
   val id = identity("com.shatteredpixel.shatteredpixeldungeon"); val versions = policy(id, 922)
   assertEquals(850, versions.target("").minimumSaveVersion)
-  assertFailsWith<RunMergeException> { versions.requireMerge() }
  }
  @Test fun explicitCapabilityWorksForAnotherPackage() {
-  val id = identity(capabilities = AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896)); val versions = policy(id)
-  versions.requireMerge(); assertEquals("shattered-896", versions.target("").mergeFormat)
+  val id = identity(capabilities = AndroidSaveCapabilities(802, 896)); val versions = policy(id)
+  assertEquals(802, versions.target("").minimumSaveVersion)
+  versions.checkRestore(versions.annotate(snapshot(id, 896)), "")
  }
  @Test fun malformedAndGlobalOnlySavesNeverProveCompatibility() {
   val id = identity(); val adapter = AndroidGameAdapter(id); val versions = policy(id)
@@ -79,23 +76,10 @@ class AndroidProfileVersionsTest {
  }
  @Test fun capabilityAndPackageValidationAndConnectionRedaction() {
   assertFails { AndroidSaveCapabilities(802, null) }; assertFails { AndroidSaveCapabilities(900, 896) }
-  assertFails { AndroidSaveCapabilities(900, 1000, AndroidMergePolicy.SHATTERED_896) }
   assertFails { identity("../bad") }; assertFails { identity(source = "not-a-digest") }
   assertFails { AndroidGameIdentity("org.example.game", "bad\nlabel", origin) }
   assertFalse(AndroidConnection("https://localhost/", "user", "secret").toString().contains("secret"))
   assertEquals("shattered", identity("com.shatteredpixel.shatteredpixeldungeon").namespace)
  }
- @Test fun adapterMergeUsesPackageIdentityAndRecordsFreshVersions() {
-  val id = identity(capabilities = AndroidSaveCapabilities(802, 896, AndroidMergePolicy.SHATTERED_896)); val adapter = AndroidGameAdapter(id)
-  val versions = policy(id); val original = versions.annotate(snapshot(id))
-  val files = original.manifest.files
-  val metadata = DirectorySnapshotMetadata(contentSha256 = contentSha256(files), runs = runContentHashes(files).mapValues { RunIdentity(UUID.randomUUID().toString(), it.value) })
-  val base = original.copy(manifest = original.manifest.copy(directoryMetadata = metadata))
-  val differentSource = base.copy(manifest = base.manifest.copy(gameSource = GameSaveSource("d".repeat(64), "e".repeat(64))))
-  val context = SnapshotCaptureContext(DeviceIdentity(UUID.randomUUID().toString(), "Test"), "2026-10-12T00:00:00Z")
-  val merged = RunMergePlanner.plan(base, listOf(base, differentSource), versions.target(""), context, adapter).snapshot
-  assertEquals(adapter.id, merged.manifest.game); assertEquals(id.packageName, merged.manifest.gamePackage)
-  assertNull(merged.manifest.gameSource); assertEquals(SaveVersions(mapOf("game1" to 896)), merged.manifest.saveVersions)
-  assertFailsWith<RunMergeException> { RunMergePlanner.plan(base, listOf(differentSource.copy(manifest = differentSource.manifest.copy(gamePackage = "org.other.game"))), versions.target(""), context, adapter) }
- }
+
 }

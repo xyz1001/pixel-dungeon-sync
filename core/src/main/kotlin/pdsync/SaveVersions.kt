@@ -35,8 +35,7 @@ data class TargetGame @JvmOverloads constructor(
  /** Legacy field name: identified game metadata, NOT publisher/checksum authentication. */
  val trusted: Boolean,
  val minimumSaveVersion: Int?,
- val reason: String,
- val mergeFormat: String? = null
+ val reason: String
 )
 
 /** Static inspection only: game classes and Java-serialized objects are never loaded. */

@@ -6,17 +6,14 @@ import pdsync.GameAdapter
 import pdsync.GameCloudIdentity
 import pdsync.Shattered
 
-enum class AndroidMergePolicy { NONE, SHATTERED_896 }
 
 data class AndroidSaveCapabilities @JvmOverloads constructor(
  val minimumRestoreVersion: Int? = null,
- val maximumRestoreVersion: Int? = null,
- val mergePolicy: AndroidMergePolicy = AndroidMergePolicy.NONE
+ val maximumRestoreVersion: Int? = null
 ) {
  init {
   require((minimumRestoreVersion == null) == (maximumRestoreVersion == null)) { CoreMessages.ANDROID_BOTH_SAVE_COMPATIBILITY_BOUNDS_ARE_REQUIRED.text() }
   if (minimumRestoreVersion != null) require(minimumRestoreVersion > 0 && maximumRestoreVersion!! >= minimumRestoreVersion) { CoreMessages.ANDROID_INVALID_SAVE_COMPATIBILITY_RANGE.text() }
-  if (mergePolicy == AndroidMergePolicy.SHATTERED_896) require(minimumRestoreVersion != null && 896 in minimumRestoreVersion..maximumRestoreVersion!!) { CoreMessages.ANDROID_SHATTERED_896_MERGE_REQUIRES_ITS_VERIFIED_RESTORE_CAPABILITY.text() }
  }
 }
 

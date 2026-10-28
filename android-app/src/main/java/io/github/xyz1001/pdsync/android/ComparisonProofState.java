@@ -35,7 +35,7 @@ final class ComparisonProofState {
     }
 
     enum Progress { LOCAL, CLOUD }
-    enum Stage { CONFLICT, MERGE_REVIEW }
+    enum Stage { CONFLICT }
 
     static final class Ticket {
         final long token;
@@ -115,16 +115,7 @@ final class ComparisonProofState {
                 && dialog.context.equals(current);
     }
 
-    /** A delayed preview cannot replace a newer dialog, choice, or observation. */
-    synchronized Ticket review(Ticket original, Context current, boolean foreground, boolean busy,
-            boolean allowed) {
-        if (original == null || original != dialog
-                || !current(original.token, current, foreground, busy, Stage.CONFLICT)) return null;
-        invalidateTickets();
-        dialog = new Ticket(epoch, context, selectedId,
-                allowed ? Stage.MERGE_REVIEW : Stage.CONFLICT);
-        return allowed ? dialog : null;
-    }
+
 
     /** Dismissal removes the modal proof while retaining the user's explicit choice. */
     synchronized boolean cancel(long token, Context current, boolean foreground, boolean busy) {

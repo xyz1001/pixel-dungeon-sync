@@ -10,8 +10,8 @@ public final class AndroidHostMessages {
     public static final UiText THE_SYSTEM_CLIPBOARD_IS_UNAVAILABLE_4 = new UiText("android.host.the_system_clipboard_is_unavailable_4", "系统剪贴板不可用。", "The system clipboard is unavailable.");
     public static final UiText REDACTED_DIAGNOSTIC_INFORMATION_COPIED_5 = new UiText("android.host.redacted_diagnostic_information_copied_5", "已复制脱敏诊断信息。", "Redacted diagnostic information copied.");
     public static final UiText COULD_NOT_WRITE_TO_THE_CLIPBOARD_6 = new UiText("android.host.could_not_write_to_the_clipboard_6", "无法写入系统剪贴板，请导出日志。", "Could not write to the clipboard. Please export logs.");
-    public static final UiText THE_CURRENT_SAVE_BACKEND_DOES_NOT_7 = new UiText("android.host.the_current_save_backend_does_not_7", "当前存档后端不支持安全恢复或合并写入，现有游戏存档保持不变。", "The current save backend does not support safe restoration or merging. Existing game saves are unchanged.");
-    public static final UiText THE_CURRENT_SAVE_ACCESS_METHOD_DOES_8 = new UiText("android.host.the_current_save_access_method_does_8", "当前存档访问方式不支持恢复或合并写入。", "The current save access method does not support restoration or merging.");
+    public static final UiText THE_CURRENT_SAVE_BACKEND_DOES_NOT_7 = new UiText("android.host.the_current_save_backend_does_not_7", "当前存档后端不支持安全恢复，现有游戏存档保持不变。", "The current save backend does not support safe restoration. Existing game saves are unchanged.");
+    public static final UiText THE_CURRENT_SAVE_ACCESS_METHOD_DOES_8 = new UiText("android.host.the_current_save_access_method_does_8", "当前存档访问方式不支持恢复。", "The current save access method does not support restoration.");
     public static final UiText NO_GAME_SELECTED_9 = new UiText("android.host.no_game_selected_9", "尚未选择游戏", "No game selected");
     public static final UiText THE_SELECTED_GAME_HAS_CHANGED_PLEASE_10 = new UiText("android.host.the_selected_game_has_changed_please_10", "所选游戏已变化，请重新选择。", "The selected game has changed. Please select it again.");
     public static final UiText RETURN_TO_THE_APP_BEFORE_CHECKING_11 = new UiText("android.host.return_to_the_app_before_checking_11", "请返回应用前台，再检查 Root 存档访问。", "Return to the app before checking Root save access.");
@@ -43,7 +43,7 @@ public final class AndroidHostMessages {
     public static final UiText AN_UNFINISHED_RESTORE_EXISTS_CHECK_ITS_37 = new UiText("android.host.an_unfinished_restore_exists_check_its_37", "有未完成恢复，请在设置中检查恢复结果。", "An unfinished restore exists. Check its result in Settings.");
     public static final UiText THE_PREVIOUS_UPLOAD_IS_UNFINISHED_PLEASE_38 = new UiText("android.host.the_previous_upload_is_unfinished_please_38", "上次上传尚未完成，请重试上传。", "The previous upload is unfinished. Please retry uploading.");
     public static final UiText CHECK_SAVES_AGAIN_IN_SETTINGS_39 = new UiText("android.host.check_saves_again_in_settings_39", "请在设置中重新检查存档。", "Check saves again in Settings.");
-    public static final UiText THE_CURRENT_ACCESS_METHOD_DOES_NOT_40 = new UiText("android.host.the_current_access_method_does_not_40", "当前访问方式不支持恢复与合并写入。", "The current access method does not support restoration or merging.");
+    public static final UiText THE_CURRENT_ACCESS_METHOD_DOES_NOT_40 = new UiText("android.host.the_current_access_method_does_not_40", "当前访问方式不支持恢复。", "The current access method does not support restoration.");
     public static final UiText SELECT_AN_INSTALLED_APP_41 = new UiText("android.host.select_an_installed_app_41", "选择已安装应用", "Select an installed app");
     public static final UiText SELECT_AN_APK_FILE_42 = new UiText("android.host.select_an_apk_file_42", "选择 APK 文件", "Select an APK file");
     public static final UiText ROOT_MODE_43 = new UiText("android.host.root_mode_43", "Root 模式", "Root mode");
@@ -160,13 +160,6 @@ public final class AndroidHostMessages {
     public static final UiText VERIFYING_AND_PUBLISHING_THE_BRANCH_SELECTION_160 = new UiText("android.host.verifying_and_publishing_the_branch_selection_160", "正在验证并发布分支选择…", "Verifying and publishing the branch selection…");
     public static final UiText THE_SELECTED_BRANCH_WAS_WRITTEN_TO_161 = new UiText("android.host.the_selected_branch_was_written_to_161", "所选分支已写入游戏并发布。", "The selected branch was written to the game and published.");
     public static final UiText CHECKING_THE_COMMON_BASELINE_RUN_IDENTITY_162 = new UiText("android.host.checking_the_common_baseline_run_identity_162", "正在检查共同基线、单局身份与六槽容量…", "Checking the common baseline, run identity, and six-slot capacity…");
-    public static final UiText A_SAFE_MERGE_IS_NOT_POSSIBLE_163 = new UiText("android.host.a_safe_merge_is_not_possible_163", "无法安全合并，请选择要继续的进度。", "A safe merge is not possible. Choose the progress to continue.");
-    public static final UiText THE_MERGE_WILL_USE_164 = new UiText("android.host.merge_slots", "合并后使用 %1$d 个槽位（最多 6 个）。\n", "Slots used after merging: %1$d (maximum 6).\n");
-    public static final UiText N_NLOCAL_SAVES_WILL_BE_BACKED_166 = new UiText("android.host.n_nlocal_saves_will_be_backed_166", "\n\n直接替换本机，不创建备份，合并结果等待上传。原始云端快照保留。", "\n\nLocal saves will be replaced without a backup. The merged result will await upload. Original cloud snapshots are retained.");
-    public static final UiText MERGE_SAVES_167 = new UiText("android.host.merge_saves_167", "合并存档", "Merge saves");
-    public static final UiText MERGE_AND_UPLOAD_168 = new UiText("android.host.merge_and_upload_168", "合并并上传", "Merge and upload");
-    public static final UiText APPLYING_AND_VERIFYING_THE_SAFE_MERGE_169 = new UiText("android.host.applying_and_verifying_the_safe_merge_169", "正在应用并核验安全合并…", "Applying and verifying the safe merge…");
-    public static final UiText THE_MERGED_VERSION_WAS_WRITTEN_TO_170 = new UiText("android.host.the_merged_version_was_written_to_170", "合并版本已写入游戏并发布。", "The merged version was written to the game and published.");
     public static final UiText LEGACY_RESTORE_RECORDS_HANDLED_PREPARE_THE_171 = new UiText("android.host.legacy_restore_records_handled_prepare_the_171", " 旧版恢复记录已处理，请重新准备带内置存档桥的游戏后继续。", " Legacy restore records handled. Prepare the game with the built-in save bridge again to continue.");
     public static final UiText EXISTING_HISTORY_AND_PENDING_UPLOADS_ARE_172 = new UiText("android.host.existing_history_and_pending_uploads_are_172", "已保留原有历史与待上传版本。重新准备会核对原始 APK 与本机签名；若需更改游戏 UID，仍须先警告并由你确认卸载。", "Existing history and pending uploads are retained. Preparing again will verify the original APK and local signature. If the game's UID must change, a warning and your confirmation to uninstall are still required.");
     public static final UiText A_SAVE_CONFLICT_WAS_FOUND_BRANCHES_173 = new UiText("android.host.a_save_conflict_was_found_branches_173", "发现存档冲突，分支已保留，请选择要继续的进度。", "A save conflict was found. Branches are retained. Choose the progress to continue.");
@@ -177,7 +170,6 @@ public final class AndroidHostMessages {
     public static final UiText HOW_SHOULD_THE_PROGRESS_CONFLICT_BE_178 = new UiText("android.host.how_should_the_progress_conflict_be_178", "如何处理进度冲突？", "How should the progress conflict be resolved?");
     public static final UiText THIS_CONFIRMATION_HAS_EXPIRED_PLEASE_SELECT_179 = new UiText("android.host.this_confirmation_has_expired_please_select_179", "确认已失效，请重新选择。", "This confirmation has expired. Please select again.");
     public static final UiText CONFIRM_AND_CONTINUE_180 = new UiText("android.host.confirm_and_continue_180", "确认继续", "Confirm and continue");
-    public static final UiText SMART_MERGE_BOTH_SETS_OF_PROGRESS_181 = new UiText("android.host.smart_merge_both_sets_of_progress_181", "智能合并双方进度", "Smart merge both sets of progress");
     public static final UiText SELECTION_CANCELED_BOTH_SAVES_ARE_UNCHANGED_182 = new UiText("android.host.selection_canceled_both_saves_are_unchanged_182", "已取消选择，双方存档未改变。", "Selection canceled. Both saves are unchanged.");
     public static final UiText NOT_SELECTED_183 = new UiText("android.host.not_selected_183", "尚未选择", "Not selected");
     public static final UiText GAME_184 = new UiText("android.host.game_184", "游戏", "Game");
@@ -478,12 +470,6 @@ public final class AndroidHostMessages {
         VERIFYING_AND_PUBLISHING_THE_BRANCH_SELECTION_160,
         THE_SELECTED_BRANCH_WAS_WRITTEN_TO_161,
         CHECKING_THE_COMMON_BASELINE_RUN_IDENTITY_162,
-        A_SAFE_MERGE_IS_NOT_POSSIBLE_163,
-        N_NLOCAL_SAVES_WILL_BE_BACKED_166,
-        MERGE_SAVES_167,
-        MERGE_AND_UPLOAD_168,
-        APPLYING_AND_VERIFYING_THE_SAFE_MERGE_169,
-        THE_MERGED_VERSION_WAS_WRITTEN_TO_170,
         LEGACY_RESTORE_RECORDS_HANDLED_PREPARE_THE_171,
         A_SAVE_CONFLICT_WAS_FOUND_BRANCHES_173,
         THE_OPERATION_RETAINED_A_PENDING_UPLOAD_174,
@@ -493,7 +479,6 @@ public final class AndroidHostMessages {
         HOW_SHOULD_THE_PROGRESS_CONFLICT_BE_178,
         THIS_CONFIRMATION_HAS_EXPIRED_PLEASE_SELECT_179,
         CONFIRM_AND_CONTINUE_180,
-        SMART_MERGE_BOTH_SETS_OF_PROGRESS_181,
         SELECTION_CANCELED_BOTH_SAVES_ARE_UNCHANGED_182,
         NOT_SELECTED_183,
         GAME_184,

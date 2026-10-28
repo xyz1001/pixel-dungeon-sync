@@ -11,6 +11,7 @@ MAIN = (ROOT / "MainActivity.java").read_text()
 
 class RestoreConfirmationDispatchExecution(unittest.TestCase):
     def test_confirmation_closes_before_slow_io_and_cannot_dispatch_twice(self):
+        self.assertNotIn("confirmationMerge", MAIN)
         methods = []
         for signature in ("private void operation(", "private boolean isCurrentConfirmation(", "public void cancelConfirmation("):
             start = MAIN.index(signature)
@@ -33,7 +34,7 @@ public class MainActivity {
  boolean busy,destroyed,resumed=true;
  SyncPage page=SyncPage.CONFIRM, confirmationReturn=SyncPage.HOME;
  int settingsConfirmationToken=7,queued,writes,renders;
- Runnable confirmedAction=()->{},confirmationMerge=()->{};
+ Runnable confirmedAction=()->{};
  String notice="", actual="A";
  AndroidSyncFacade facade=new AndroidSyncFacade();
  Task queuedTask;
@@ -42,7 +43,7 @@ public class MainActivity {
  void navigate(SyncPage next){page=next;renders++;}
  void work(DiagnosticAction action,String text,Task task,Done done){
   check(page!=SyncPage.CONFIRM,"modal still visible when work begins");
-  check(confirmedAction==null && confirmationMerge==null,"retained modal action");
+  check(confirmedAction==null,"retained modal action");
   busy=true;renders++;queued++;queuedTask=task;queuedDone=done;
  }
  OperationOutcome m54xc977a20(Task task)throws Exception{task.run();return new OperationOutcome();}

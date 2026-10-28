@@ -74,7 +74,7 @@ fun SharedBranchChoiceScreen(state: SharedBranchChoiceState, actions: SharedBran
             }
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
         }
-        confirmation?.let { SharedConfirmationDialog(it, interactions::confirm, interactions::merge, interactions::cancel) }
+        confirmation?.let { SharedConfirmationDialog(it, interactions::confirm, {}, interactions::cancel) }
     }
 }
 
