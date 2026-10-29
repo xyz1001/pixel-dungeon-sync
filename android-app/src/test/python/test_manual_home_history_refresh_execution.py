@@ -74,7 +74,7 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertIn('no previous observation must remain refreshable', result.stderr)
 
     def test_regression_detects_namespace_preparation(self):
-        result = self.execute(('startDetachedHomeRead(account, false, false, null);', 'startDetachedHomeRead(account, true, false, null);'))
+        result = self.execute(('startDetachedHomeRead(account, false, false, null, true);', 'startDetachedHomeRead(account, true, false, null, true);'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('manual read provisioned the remote namespace', result.stderr)
 
@@ -92,7 +92,8 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
     def test_manual_and_renewal_share_only_read_only_inspection_work(self):
         manual = body(MAIN, 'private void refreshHomeHistory()')
         self.assertIn('if (!canRefreshHomeHistory()) return;', manual)
-        self.assertIn('readHomeArchives(account, selection, namespace)', manual)
+        self.assertIn('startDetachedHomeRead(account, false, false, null, true)', manual)
+        self.assertIn('fullHistory ? owner.inspectHomeHistory() : owner.inspectHome()', body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)'))
         helper = body(MAIN, 'private void readHomeArchives(')
         self.assertEqual(1, helper.count('startDetachedHomeRead(account, false, false, null)'))
         self.assertNotIn('work(', helper)
@@ -104,7 +105,7 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         # Mutation scheduling remains independent; the separate reader never sets write-busy.
         work = body(MAIN, 'private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)')
         self.assertLess(work.index('this.busy = true'), work.index('this.f9io.execute'))
-        reader = body(MAIN, 'private boolean startDetachedHomeRead(')
+        reader = body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
         self.assertIn('this.homeReader.submit', reader)
         self.assertNotIn('this.busy = true', reader)
         failure = body(MAIN, 'void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(')

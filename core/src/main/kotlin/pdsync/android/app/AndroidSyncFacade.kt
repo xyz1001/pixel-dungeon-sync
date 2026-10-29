@@ -251,7 +251,15 @@ class AndroidSyncFacade internal constructor(
      OperationResult(view.message,true,false,null,view,false)
     }
     is SaveUploadResult.Complete -> {
-     val nodes=listOf(result.node)+inspection?.simpleObservation?.nodes.orEmpty().filter {it.hashId!=result.node.hashId}
+     // The receipt may only retain known ancestors of the published node, not the replaced tip.
+     val known=inspection?.simpleObservation?.nodes.orEmpty().associateBy {it.hashId}
+     val nodes=mutableListOf(result.node)
+     val seen=mutableSetOf(result.node.hashId)
+     var parent=result.node.parentId
+     while(parent!=null && seen.add(parent)) {
+      val ancestor=known[parent] ?: break
+      nodes+=ancestor;parent=ancestor.parentId
+     }
      val view=simpleInspection(files,result.node.hashId,nodes,summary)
      OperationResult(if(result.uploaded)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text() else CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,result.node.hashId,view,true)
     }

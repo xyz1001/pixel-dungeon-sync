@@ -153,6 +153,11 @@ class MainActivity {
     void runPending() throws Exception { runWorker(); finishWorker(); }
     // Scheduling port only; the real detached scheduler is exercised by test_detached_home_queue_execution.
     boolean startDetachedHomeRead(final SecureConnectionStore.Connection account, boolean prepare, boolean readiness, Object automatic) {
+        return startDetachedHomeRead(account, prepare, readiness, automatic, false);
+    }
+    boolean startDetachedHomeRead(final SecureConnectionStore.Connection account, boolean prepare, boolean readiness, Object automatic, boolean fullHistory) {
+        // Match officialOperationBinding's entry boundary before the port clears old UI state.
+        if (this.connection != account || SyncRuntime.currentConnection() != account) return false;
         final String selection=SyncRuntime.selection, namespace=SyncRuntime.namespace;
         this.cloudVerified=false;this.inspection=null;this.history=null;this.homeObservationOwner=null;this.facade=null;
         final java.util.concurrent.atomic.AtomicReference<Exception> readFailure=new java.util.concurrent.atomic.AtomicReference<>();

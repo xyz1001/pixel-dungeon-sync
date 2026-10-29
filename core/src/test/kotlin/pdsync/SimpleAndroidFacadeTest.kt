@@ -112,5 +112,22 @@ class SimpleAndroidFacadeTest {
   val refreshed=requireNotNull(rejected.refreshedInspection);val old=store.tip
   val accepted=b.overwriteCloudSuccessors(refreshed,requireNotNull(refreshed.overwriteTargetSnapshotId))
   assertFalse(accepted.isConflict);assertNull(store.nodes.getValue(requireNotNull(accepted.snapshotId)).parentId);assertTrue(store.nodes.containsKey(old))
+  assertEquals(listOf(accepted.snapshotId),b.historyPresentation(requireNotNull(accepted.refreshedInspection)).simple!!.nodes.map {it.hashId})
+ }
+ @Test fun overwriteReceiptExcludesReplacedBranchWithoutReadingHistory() {
+  val store=Store();val bridge=Bridge();val facade=facade(bridge,store)
+  val a=facade.upload(facade.inspectHome())
+  bridge.content=files(2).toMutableMap();val b=facade.upload(facade.inspectHome())
+  bridge.content=files(3).toMutableMap();val c=facade.upload(facade.inspectHome())
+  facade.restoreSelected(facade.inspectHomeHistory(),requireNotNull(b.snapshotId),true)
+  bridge.content=files(4).toMutableMap()
+  val conflict=facade.upload(facade.inspectHome())
+  val view=requireNotNull(conflict.refreshedInspection);store.calls.clear()
+  val e=facade.overwriteCloudSuccessors(view,requireNotNull(c.snapshotId))
+  assertEquals(b.snapshotId,store.nodes.getValue(requireNotNull(e.snapshotId)).parentId)
+  assertEquals(listOf(e.snapshotId),facade.historyPresentation(requireNotNull(e.refreshedInspection)).simple!!.nodes.map {it.hashId})
+  assertEquals(listOf("GET latest","PUT zip","PUT metadata","PUT latest"),store.calls)
+  assertTrue(store.nodes.containsKey(c.snapshotId));assertTrue(store.objects.containsKey(c.snapshotId))
+  assertEquals(listOf(e.snapshotId,b.snapshotId,a.snapshotId),facade.historyPresentation(facade.inspectHomeHistory()).simple!!.nodes.map {it.hashId})
  }
 }

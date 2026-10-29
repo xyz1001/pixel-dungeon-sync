@@ -160,7 +160,7 @@ class DiagnosticExportContract(unittest.TestCase):
         self.assertIn('state.refresh.deferBeforeRead(ticket)', refresh)
         self.assertNotIn('work(', refresh)
         self.assertNotIn('DiagnosticLog.failure(', refresh)
-        detached = body(MAIN, 'private boolean startDetachedHomeRead(')
+        detached = body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
         self.assertIn('DiagnosticLog.begin(DiagnosticAction.INSPECT, false)', detached)
         self.assertIn('try (AndroidDiagnosticLogging.Scope diagnostic = AndroidDiagnosticLogging.bind(trace);', detached)
         self.assertIn('OfficialOperationLease lease = new OfficialOperationLease())', detached)
