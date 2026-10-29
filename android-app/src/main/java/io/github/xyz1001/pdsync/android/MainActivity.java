@@ -378,7 +378,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             diagnosticExport.restorePicker(bundle.getBoolean("diagnostics.picker", false));
             diagnosticPickerReturn = bundle.getBoolean("diagnostics.return", false);
         }
-        getWindow().addFlags(8192);
         this.preparation = new GamePreparationService(this);
         this.installer = new InstallCoordinator(this);
         this.secrets = new SecureConnectionStore(this);

@@ -155,10 +155,18 @@ data class HistoryPresentation(
    state.simple?.let {simple->
     val ordered=simple.nodes.distinctBy {it.hashId}
     val all=ordered.mapIndexed {row,node->HistoryNode(node.hashId,node.hashId,node.name.ifBlank {CoreMessages.SAVE_1_S.text(node.hashId.take(6))},"","",if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),0,row,selectable=true,cloudHead=node.hashId==simple.latest)}.toMutableList()
-    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(simple.currentId==simple.latest)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,ordered.indexOfFirst {it.hashId==simple.currentId}.coerceAtLeast(0),dirty=simple.currentId!=simple.latest)
+    val matchingCurrent=ordered.firstOrNull {it.hashId==simple.currentId}
+    val localAnchor=matchingCurrent ?: ordered.firstOrNull {it.hashId==state.baseline}
+    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(matchingCurrent!=null)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,ordered.indexOf(localAnchor).coerceAtLeast(0),dirty=matchingCurrent==null)
     val pages=maxOf(1,(maxOf(1,ordered.size)+PAGE_SIZE-1)/PAGE_SIZE);val page=requestedPage.coerceIn(0,pages-1)
     val shown=all.filter {it.row/PAGE_SIZE==page}.map {it.copy(row=it.row%PAGE_SIZE)};val ids=shown.map {it.id}.toSet()
-    val edges=ordered.mapNotNull {n->n.parentId?.takeIf {it in ids && n.hashId in ids}?.let {HistoryEdge(it,n.hashId)}}
+    val edges=ordered.mapNotNull {n->n.parentId?.takeIf {it in ids && n.hashId in ids}?.let {HistoryEdge(it,n.hashId)}}.toMutableList()
+    // Content equality pairs the lanes; a changed local save continues its actual baseline.
+    // Never substitute latest for an absent baseline or invent a cloud ancestry edge.
+    if("local-current" in ids && localAnchor?.hashId in ids) {
+     edges += if(matchingCurrent!=null) HistoryEdge("local-current",matchingCurrent.hashId,sameContent=true)
+      else HistoryEdge(requireNotNull(localAnchor).hashId,"local-current",dashed=true)
+    }
     return HistoryPresentation(shown,edges,page,pages,maxOf(1,shown.maxOfOrNull {it.row+1}?:1),ordered.size,simple.currentId==null)
    }
    data class TimedNode(val node: HistoryNode, val instant: Instant?)
