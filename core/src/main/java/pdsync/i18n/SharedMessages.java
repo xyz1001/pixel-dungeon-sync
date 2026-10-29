@@ -3,8 +3,9 @@ package pdsync.i18n;
 /** Existing shared-interface copy, resolved using the current system language. */
 public final class SharedMessages {
     private SharedMessages() {}
-    public static final UiText OVERWRITE_CLOUD = new UiText("shared.overwrite_cloud", "覆盖云端后续", "Overwrite cloud successors");
-    public static final UiText OVERWRITE_CLOUD_WARNING = new UiText("shared.overwrite_cloud_warning", "上传当前本地进度，并删除对应的云端后续进度，不保留备份。", "Upload the current local progress and delete the corresponding cloud successors without a backup.");
+    public static final UiText OVERWRITE_CLOUD = new UiText("shared.overwrite_cloud", "覆盖云端当前存档", "Replace current cloud save");
+    public static final UiText OVERWRITE_CLOUD_DESKTOP_WARNING = new UiText("shared.overwrite_cloud_desktop_warning", "将本地进度设为云端当前进度。原有云端历史文件保留。", "Set the local progress as the current cloud progress. Existing cloud history files are retained.");
+    public static final UiText OVERWRITE_CLOUD_WARNING = new UiText("shared.overwrite_cloud_warning", "将云端最新存档改为本地存档，当前历史链沿本地父节点延续。原有云端历史文件保留。", "Set the local save as the latest cloud save and continue its parent history. Existing cloud history files are retained.");
     public static final UiText REFRESH = new UiText("shared.refresh", "刷新", "Refresh");
     public static final UiText SAVE_NAME = new UiText("shared.save_name", "存档名称", "Save name");
     public static final UiText NAME_HINT = new UiText("shared.name_hint", "留空使用默认名，最多40字", "Leave blank for the default name; up to 40 characters");

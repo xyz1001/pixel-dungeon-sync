@@ -23,6 +23,7 @@ data class SharedBranchChoiceState(
     val notice: String = "",
     val details: String = "",
     val cloudOverwrite: Boolean = false,
+    val cloudOverwriteWarning: String = SharedMessages.OVERWRITE_CLOUD_WARNING.text(),
 )
 
 interface SharedBranchChoiceActions {
@@ -89,7 +90,7 @@ internal class SharedBranchChoiceInteractions(
         val selected = current.branches.singleOrNull { it.snapshotId == current.selectedId }
         SharedConfirmationState(proof.token, SharedMessages.CONFLICT_TITLE.text(),
             listOfNotNull(selected?.let { SharedMessages.SELECTED_SAVE.text(it.name) },
-                (if(current.cloudOverwrite) SharedMessages.OVERWRITE_CLOUD_WARNING else SharedMessages.USE_SELECTED_WARNING).text())
+                (if(current.cloudOverwrite) current.cloudOverwriteWarning else SharedMessages.USE_SELECTED_WARNING.text()))
                 .joinToString("\n\n"),
             confirmLabel = (if(current.cloudOverwrite) SharedMessages.OVERWRITE_CLOUD else SharedMessages.USE_SELECTED).text(), confirmEnabled = current.canResolve && current.overwriteSupported && current.hasSelection,
             secondaryLabel = null,

@@ -1453,6 +1453,7 @@ private fun ConflictDialog(value: AppendConflict, selected: String?, busy: Boole
   selectedId = selected, game = game, pageActive = true, busy = busy, connected = connected,
   observationCurrent = true, resolutionBlocked = pending,
   overwriteSupported = true, cloudOverwrite = true,
+  cloudOverwriteWarning = pdsync.i18n.SharedMessages.OVERWRITE_CLOUD_DESKTOP_WARNING.text(),
   notice = if (pending) DesktopMessages.AN_OPERATION_IS_INCOMPLETE_RETURN_TO_HOME_TO_HANDLE_IT.text() else "",
  )
  SharedBranchChoiceDialog(state, object : SharedBranchChoiceActions {

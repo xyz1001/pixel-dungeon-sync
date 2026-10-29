@@ -145,6 +145,20 @@ class SharedBranchChoiceDialogRenderTest {
         } finally {scene.close()}
     }
 
+    @Test fun desktopOverwriteUsesItsAccurateCopyWithoutChangingActions() {
+        val warning = SharedMessages.OVERWRITE_CLOUD_DESKTOP_WARNING.text()
+        val host = Host(ready().copy(selectedId = "snapshot-b", cloudOverwrite = true, cloudOverwriteWarning = warning))
+        val scene = scene(host)
+        try {
+            render(scene, "desktop-overwrite-copy")
+            assertTrue(warning in modalTexts(scene))
+            assertFalse("删除" in warning)
+            assertFalse("本地父节点" in warning)
+            click(scene, SharedMessages.CANCEL.text())
+            assertEquals(listOf("back"), host.calls)
+        } finally { scene.close() }
+    }
+
     @Test fun cloudOverwriteRendersOnlyDirectConfirmationAndBindsOneTarget() {
         val host = Host(ready().copy(selectedId = "snapshot-b", cloudOverwrite = true))
         val scene = scene(host)
@@ -155,6 +169,9 @@ class SharedBranchChoiceDialogRenderTest {
                     SharedMessages.CHOOSE_PROGRESS.text(), SharedMessages.CHOOSE_CLOUD_SAVE.text()))
                 assertFalse(old in text, "old chooser must not render: $old")
             assertTrue(SharedMessages.OVERWRITE_CLOUD_WARNING.text() in text)
+            assertFalse("删除" in SharedMessages.OVERWRITE_CLOUD_WARNING.text())
+            assertTrue("原有云端历史文件保留" in SharedMessages.OVERWRITE_CLOUD_WARNING.text())
+            assertEquals("覆盖云端当前存档", SharedMessages.OVERWRITE_CLOUD.text())
             assertTrue(host.calls.isEmpty(), "rendering never writes")
             assertFalse("合并" in text)
             assertFalse("Merge" in text)
