@@ -128,11 +128,10 @@ class AppendOnlyWebDavTest {
   assertEquals(6, server.requestCount)
  }
 
- @Test fun legacyDetectionDoesNotParseOrWriteOldHead() = MockWebServer().use { server ->
+ @Test fun removedLegacyProbeNeverReadsOrWritesOldHead() = MockWebServer().use { server ->
   server.enqueue(MockResponse().setBody("legacy or corrupt data remains untouched")); server.start()
-  assertTrue(store(server).legacyPresent())
-  val request = server.takeRequest(); assertEquals("GET", request.method); assertEquals(folder + "head.json", request.path)
-  assertEquals(1, server.requestCount)
+  assertFalse(store(server).legacyPresent())
+  assertEquals(0, server.requestCount)
  }
 
  @Test fun depthOneListingFiltersOrdinaryFilesAndObjectsAndSortsCanonicalCommitIds() = MockWebServer().use { server ->
@@ -249,7 +248,7 @@ class AppendOnlyWebDavTest {
 
  @Test fun authenticationAndForbiddenAreNotTreatedAsMissingOnAnyRead() = MockWebServer().use { server ->
   server.start(); val dav = store(server)
-  val reads: List<() -> Any?> = listOf({ dav.readCommit(id) }, { dav.readObject(id) }, { dav.legacyPresent() })
+  val reads: List<() -> Any?> = listOf({ dav.readCommit(id) }, { dav.readObject(id) })
   for (read in reads) for (status in listOf(401, 403, 500)) {
    server.enqueue(MockResponse().setResponseCode(status))
    assertEquals(status, assertFailsWith<WebDavException> { read() }.statusCode)

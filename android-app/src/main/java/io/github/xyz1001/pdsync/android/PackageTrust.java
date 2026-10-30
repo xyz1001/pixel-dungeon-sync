@@ -69,6 +69,7 @@ public final class PackageTrust {
     }
 
     /** Isolate new framework references so API 26 never resolves SigningInfo. */
+    @android.annotation.TargetApi(28)
     private static final class Api28 {
         static Signature[] currentSigners(PackageInfo info) {
             return info.signingInfo == null ? null : info.signingInfo.getApkContentsSigners();

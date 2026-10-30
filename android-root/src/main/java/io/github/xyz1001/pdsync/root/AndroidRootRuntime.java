@@ -70,6 +70,7 @@ final class AndroidRootRuntime implements RootRuntime {
         long version=Build.VERSION.SDK_INT>=28?NewVersion.code(info):(info.versionCode&0xffffffffL);
         return new RootInstalledStamp(requested,version,info.firstInstallTime,info.lastUpdateTime,metadata);
     }
+    @android.annotation.TargetApi(28)
     private static final class NewVersion { static long code(PackageInfo info){return info.getLongVersionCode();} }
     @Override public RootBinding installed(RootBinding requested) throws IOException {
         installedStamp=null;

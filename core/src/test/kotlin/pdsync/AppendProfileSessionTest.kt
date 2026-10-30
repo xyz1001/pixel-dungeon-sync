@@ -81,9 +81,9 @@ class AppendProfileSessionTest {
   val conflict=assertIs<AppendPushResult.Diverged>(assertIs<HomePushResult.Published>(local.pushFromHome(local.syncHistory(),store){true}).result).conflict
   local.overwriteCloudConflict(conflict,requireNotNull(conflict.overwriteTargetSnapshotId),store){true}
   val final=graph(local,store);val d=final.commits.getValue(final.tips.single())
-  assertEquals(setOf(a.id,b.id,d.id),final.commits.keys);assertEquals(listOf(b.id),d.parents)
+  assertEquals(setOf(a.id,b.id,c.id,d.id),final.commits.keys);assertEquals(listOf(c.id),d.parents)
   assertEquals(hash("D".encodeToByteArray()),d.snapshot.files["game1/game.dat"])
-  assertFalse(c.snapshot.id in store.objects);assertEquals("D",content(local))
+  assertTrue(c.snapshot.id in store.objects);assertEquals("D",content(local))
  }
 
  @Test fun cloudHistorySelectionRequiresApprovalForUniqueBytesAndCreatesNoBackup() {
@@ -318,9 +318,9 @@ class AppendProfileSessionTest {
   assertFails { local.restoreRemote(remote.first().entry.manifest.id, store) { true } }
  }
 
- @Test fun legacyRemoteAndLegacyPendingAreNeverSilentlyPublishedAsV2() {
+ @Test fun removedLegacyProbeDoesNotHideExistingLocalPending() {
   val store = Memory(); val local = session(); store.legacy = true
-  assertFailsWith<LegacyProtocolException> { local.push(store) { true } }; assertTrue(store.commits.isEmpty())
+  assertTrue(local.readRemote(store).isEmpty()); assertTrue(store.commits.isEmpty())
   store.legacy = false
   val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions(), captureQuietMillis = 0)
   val oldStore = object: Store {

@@ -369,7 +369,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         // One inset owner on every supported SDK, including before enforced edge-to-edge.
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         this.navigationBack = new OnBackPressedCallback(true) {
-            @Override public void handleOnBackPressed() { MainActivity.this.onBackPressed(); }
+            @Override public void handleOnBackPressed() { MainActivity.this.handleNavigationBack(); }
         };
         getOnBackPressedDispatcher().addCallback(this, this.navigationBack);
         AndroidDiagnosticLogging.configure(this);
@@ -528,8 +528,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         super.onDestroy();
     }
 
-    @Override // android.app.Activity
-    public void onBackPressed() {
+    private void handleNavigationBack() {
         if (this.sharedConnectionSession != null && (this.page == SyncPage.CONNECTION || this.sharedAppreciationOnly)) {
             this.sharedConnectionSession.getController().back();
             return;
@@ -563,7 +562,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             // The AndroidX dispatcher also receives system/predictive Back on modern Android.
             // Disable our forwarding callback only while invoking its ordinary Activity fallback.
             this.navigationBack.setEnabled(false);
-            try { super.onBackPressed(); }
+            try { getOnBackPressedDispatcher().onBackPressed(); }
             finally { this.navigationBack.setEnabled(true); }
         }
     }
@@ -879,9 +878,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         if (this.diagnosticReport.isEmpty()) {
             return;
         }
-        ClipboardManager clipboardManager = (ClipboardManager) getSystemService("clipboard");
+        ClipboardManager clipboardManager = (ClipboardManager) getSystemService(android.content.Context.CLIPBOARD_SERVICE);
         if (clipboardManager == null) {
-            Toast.makeText(this, THE_SYSTEM_CLIPBOARD_IS_UNAVAILABLE_4.text(), 0).show();
+            Toast.makeText(this, THE_SYSTEM_CLIPBOARD_IS_UNAVAILABLE_4.text(), Toast.LENGTH_SHORT).show();
             return;
         }
         ClipData clipDataNewPlainText = ClipData.newPlainText(DIAGNOSTIC_CLIPBOARD_LABEL.text(), this.diagnosticReport);
@@ -890,9 +889,9 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         clipDataNewPlainText.getDescription().setExtras(persistableBundle);
         try {
             clipboardManager.setPrimaryClip(clipDataNewPlainText);
-            Toast.makeText(this, REDACTED_DIAGNOSTIC_INFORMATION_COPIED_5.text(), 0).show();
+            Toast.makeText(this, REDACTED_DIAGNOSTIC_INFORMATION_COPIED_5.text(), Toast.LENGTH_SHORT).show();
         } catch (RuntimeException unused) {
-            Toast.makeText(this, COULD_NOT_WRITE_TO_THE_CLIPBOARD_6.text(), 0).show();
+            Toast.makeText(this, COULD_NOT_WRITE_TO_THE_CLIPBOARD_6.text(), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1315,7 +1314,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             ++this.sharedSettingsRenderToken;
             dismissSettingsDialog();
             if (this.page == SyncPage.CONFIRM) ++this.settingsConfirmationToken;
-                invalidatePathPreview();
+            invalidatePathPreview();
         }
         if (syncPage != SyncPage.CONNECTION) closeSharedConnection();
         if (this.page != syncPage) { this.notice = ""; this.feedbackError = false; this.details = ""; this.diagnosticReport = ""; }
@@ -1489,7 +1488,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     /* JADX INFO: Access modifiers changed from: private */
     public LinearLayout column() {
         LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(1);
+        linearLayout.setOrientation(LinearLayout.VERTICAL);
         return linearLayout;
     }
 
@@ -1516,7 +1515,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     private void heading(String str) {
         TextView textViewLabel = label(str, 20, -14469589);
-        textViewLabel.setTypeface(null, 1);
+        textViewLabel.setTypeface(null, android.graphics.Typeface.BOLD);
         textViewLabel.setPadding(0, dp(12), 0, dp(10));
         this.body.addView(textViewLabel);
     }
@@ -2068,7 +2067,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         Intent type = new Intent("android.intent.action.OPEN_DOCUMENT").addCategory("android.intent.category.OPENABLE").setType("application/vnd.android.package-archive");
         type.putExtra("android.intent.extra.ALLOW_MULTIPLE", true);
-        type.addFlags(1);
+        type.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
             this.gameFilePickerOpen = true;
             render();
@@ -4727,7 +4726,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
 
     /* renamed from: lambda$renderSettings$95$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ void m133xa4c8b7f3() {
-        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != 0) {
+        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 8103);
         } else {
             this.notice = SYNC_NOTIFICATION_PERMISSION_GRANTED_236.text();

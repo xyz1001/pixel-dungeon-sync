@@ -50,7 +50,7 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         self.assertNotIn("disable(", branch)
         self.assertLess(work.index("this.busy = true"), work.index(branch))
         self.assertLess(work.index(branch), work.index("this.f9io.execute"))
-        back = body(MAIN, "public void onBackPressed()")
+        back = body(MAIN, "private void handleNavigationBack()")
         self.assertIn("if (this.page == SyncPage.PATH && !this.sharedAppreciationOnly) renderSharedSavePath()", back)
         self.assertIn("else if (this.status != null)", back)
         fallback = body(work, "else if (this.status == null || this.root == null || this.renderedPage != this.page)")
@@ -133,7 +133,7 @@ class SharedSavePathAndroidContract(unittest.TestCase):
         work = body(MAIN, "private <T> void work(DiagnosticAction action, String str, final Task<T> task, final Done<T> done, boolean preserveAutomaticHistory)")
         self.assertLess(work.index("invalidatePathPreview()"), work.index("this.busy = true"))
         self.assertIn("if (this.busy)", body(MAIN, "private void navigate("))
-        self.assertIn("if (this.busy)", body(MAIN, "public void onBackPressed()"))
+        self.assertIn("if (this.busy)", body(MAIN, "private void handleNavigationBack()"))
 
     def test_request_identity_is_distinct_from_render_and_validated_before_applying(self):
         context = body(MAIN, "private PathPreviewState.Context currentPathPreviewContext()")

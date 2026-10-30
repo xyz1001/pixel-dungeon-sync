@@ -72,7 +72,7 @@ class SavePathNavigationContract(unittest.TestCase):
         self.assertNotIn("navigate(", action)
         self.assertIn("break;", action)
         self.assertIn("navigate(SyncPage.DISCOVERY)", body(ANDROID, "void m109x58567797()"))
-        system_back = body(body(ANDROID, "public void onBackPressed()"), "if (this.page == SyncPage.PATH) {\n            navigate")
+        system_back = body(body(ANDROID, "private void handleNavigationBack()"), "if (this.page == SyncPage.PATH) {\n            navigate")
         self.assertIn("navigate(SyncPage.DISCOVERY)", system_back)
 
 

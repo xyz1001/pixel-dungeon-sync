@@ -72,6 +72,7 @@ final class RuntimePlatformCompat {
         }
     }
 
+    @android.annotation.TargetApi(28)
     private static final class Api28 {
         static void includeDisplayCutout(WindowInsets insets, int[] edges) {
             android.view.DisplayCutout cutout = insets.getDisplayCutout();
@@ -83,12 +84,14 @@ final class RuntimePlatformCompat {
         }
     }
 
+    @android.annotation.TargetApi(29)
     private static final class Api29 {
         static void startDataSyncForeground(Service service, int id, Notification notification) {
             service.startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         }
     }
 
+    @android.annotation.TargetApi(30)
     private static final class Api30 {
         static void applyToolbarInsets(View view, WindowInsets insets, int side, int top, int bottom) {
             android.graphics.Insets edges = insets.getInsets(WindowInsets.Type.systemBars()
@@ -103,17 +106,20 @@ final class RuntimePlatformCompat {
         }
     }
 
+    @android.annotation.TargetApi(31)
     private static final class Api31 {
         static void requireInstallConfirmation(PackageInstaller.SessionParams params) {
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
         }
     }
 
+    @android.annotation.TargetApi(33)
     private static final class Api33 {
         static void registerInternalReceiver(Context context, BroadcastReceiver receiver, IntentFilter filter) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
         }
     }
+    @android.annotation.TargetApi(34)
     private static final class Api34 {
         static Bundle systemConfirmationLaunchOptions() {
             return ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(
@@ -121,6 +127,7 @@ final class RuntimePlatformCompat {
         }
     }
 
+    @android.annotation.TargetApi(36)
     private static final class Api36 {
         static Bundle systemConfirmationLaunchOptions() {
             return ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(

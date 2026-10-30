@@ -2,7 +2,7 @@
 
 [简体中文](README.md)
 
-Manage separate saves for supported Pixel Dungeon games and variants: upload progress to WebDAV, view history, and restore a selected save. PDSync has Android and desktop interfaces. **Synchronizing saves does not convert their format** or make saves from different variants interchangeable.
+Upload Pixel Dungeon progress to WebDAV, view history, and restore a selected save. Android manages separate saves for supported game variants; desktop currently supports only identity-verified Shattered Pixel Dungeon game JARs. **Synchronizing saves does not convert their format** or make saves from different variants interchangeable.
 
 > This is still test software, and the first formal release is not complete. Use only assets actually listed on [Releases](https://github.com/xyz1001/pixel-dungeon-sync/releases), together with their release notes. The table below describes planned packages, not downloads that are already available. Keep an independent copy of your game saves before trying restore or overwrite operations.
 
@@ -42,8 +42,8 @@ Installing a game package may require Android to allow the selected installation
 - **Upload** stores progress for the selected game. Identical content does not create another save; the upload button may also be unavailable when both sides match.
 - **Restore** writes the selected cloud progress back to the current game, replacing the corresponding local progress. Exit the game normally first, then reopen it after completion to check the character, floor, and progress. Do not assume the app keeps an additional recoverable local backup.
 - **Overwrite or cancel:** A conflict dialog asks whether to make local progress the current cloud progress. Cancel does not perform that overwrite. The app does not merge save contents.
-- **The current Android history chain:** If the cloud is `A → B → C → D`, you restore B, play to E, and confirm overwrite, the current chain becomes `A → B → E`. The cloud files for C and D remain, but this does not promise that the old branch remains directly selectable for restore in the current interface.
-- **Desktop differences:** Desktop currently uses a different sync-history implementation. The Android chain example is not a promise of desktop behavior. Android–desktop protocol interoperability has not completed this verification; do not have both manage the same irreplaceable progress.
+- **The current history chain:** If the cloud is `A → B → C → D`, you restore B, play to E, and confirm overwrite, the current chain becomes `A → B → E`. The cloud files for C and D remain, but this does not promise that the old branch remains directly selectable for restore in the current interface.
+- **Using multiple devices:** Android and desktop now use the same save protocol and share history, comparison, and restore parsing. Real desktop UI checks have covered uploads, restores followed by continuing in the official game, conflict cancellation/overwrite, account isolation, and history arrows. This is not an Android-device-to-desktop round-trip test or a guarantee for every platform and game version. Verify cross-device use with replaceable test progress first.
 
 Do not keep playing during synchronization or have another device change the same cloud progress at the same time. After a network failure, check the app's result and current history before retrying; do not repeatedly click restore or overwrite. The local/cloud markers help compare progress, but do not imply compatibility between game variants.
 
@@ -58,6 +58,8 @@ Do not keep playing during synchronization or have another device change the sam
 **What if connection or sync fails?** Check the service URL, network, account access, and WebDAV directory. Fix TLS/certificate issues on the server instead of disabling certificate verification. Settings can export diagnostics; review and remove personal information before sharing. Never send passwords, keys, or complete connection configuration.
 
 **Does the portable package keep all configuration beside the EXE?** No. Desktop configuration defaults to `.pixel-dungeon-sync` in the current user's home directory. “Portable” means no installer or separately installed Java is needed, not that the app never writes user configuration.
+
+**Where is the connection password stored?** The existing design saves connection configuration in plaintext: Android uses the app-private `noBackup/webdav.properties`; desktop uses `.local/config.json` in the application workspace, which defaults to `.pixel-dungeon-sync` in the user's home directory. This is not system-keychain encryption. Do not share these files: anyone with access to the relevant private directory, user account, or backups may be able to read the connection information.
 
 ## Feedback and development
 

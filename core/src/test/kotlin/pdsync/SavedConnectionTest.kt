@@ -26,11 +26,10 @@ class SavedConnectionTest {
    val restarted = ConfigFile(temp.resolve("config.json")).load()!!
    assertEquals(config.targetGame, restarted.targetGame); assertEquals(progress, restarted.onboardingProgress)
    assertEquals(password, restarted.password)
-   server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(listing())
+   server.enqueue(listing())
    val restored = assertIs<SavedConnectionResult.Connected>(restoreSavedConnection(restarted))
    assertEquals(password, restored.connection.password)
    assertFalse(restarted.toString().contains(password)); assertFalse(restored.connection.toString().contains(password))
-   assertEquals("GET", server.takeRequest().method)
    val request = server.takeRequest()
    assertEquals("PROPFIND", request.method)
    assertEquals(Credentials.basic(config.username, password), request.getHeader("Authorization"))
@@ -42,7 +41,7 @@ class SavedConnectionTest {
   server.enqueue(MockResponse().setResponseCode(500))
   val retry = assertIs<SavedConnectionResult.Retry>(restoreSavedConnection(previous))
   assertEquals(previous.password, retry.connection.password)
-  assertEquals(6, server.requestCount)
+  assertEquals(4, server.requestCount)
  }
  @Test fun failedSaveRetainsEditableDraftAndDoesNotClaimSuccess() {
   val parent = temp.resolve("blocked"); parent.writeText("occupied")

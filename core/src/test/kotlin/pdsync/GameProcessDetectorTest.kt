@@ -110,7 +110,8 @@ class GameProcessDetectorTest {
   val processes = listOf(ObservedGameProcess(10, "C:\\Java\\bin\\JAVAW.EXE",
    listOf("-jar", base.replace('\\', '/').uppercase(java.util.Locale.ROOT) + "/child/../spd.JAR")))
   assertIs<GameProcessStatus.Running>(GameProcessDetector(windowsTarget, ProcessInventory { ProcessInventorySnapshot(processes) }, GameProcessPlatform.WINDOWS, -1).status())
-  assertEquals(base.replace('\\', '/').lowercase(java.util.Locale.ROOT) + "/spd.jar", resolveGameProcessPath(".\\SPD.jar", base, GameProcessPlatform.WINDOWS))
+  val expectedBase=if(nativeWindows)root.toRealPath().toString() else base
+  assertEquals(expectedBase.replace('\\', '/').lowercase(java.util.Locale.ROOT) + "/spd.jar", resolveGameProcessPath(".\\SPD.jar", base, GameProcessPlatform.WINDOWS))
   assertNull(resolveGameProcessPath("C:SPD.jar", null, GameProcessPlatform.WINDOWS))
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(windowsTarget, ProcessInventory {
    ProcessInventorySnapshot(listOf(ObservedGameProcess(11, "C:\\Games\\ShatteredPD.exe", null)))

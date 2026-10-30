@@ -275,10 +275,14 @@ class AndroidFacadeReconstructionTest {
         secondBridge.afterExport = { secondBridge.target = secondBridge.target.copy(sourceApkSha256 = "e".repeat(64)) }
         assertFailsWith<AndroidTargetChangedException> { second.inspect() }; assertEquals(0, store.writes)
     }
-    @Test fun remoteAdvanceInvalidatesOldInspectionBeforeNewWrite() {
+    @Test fun remoteAdvanceKeepsExistingContentReuseReadOnly() {
         val store = MemoryAppendStore(); val aBridge = FakeBridge(); val a = publish(aBridge, store).facade
         val old = a.inspect(); store.changedChild(store.latest()); val writes = store.writes
-        assertFails { a.upload(old) }; assertEquals(writes, store.writes); assertEquals(0, aBridge.restores)
+        val tip=store.latest().id
+        val result=a.upload(old)
+        assertFalse(result.isConflict);assertFalse(result.isPending)
+        assertEquals(old.remoteVersions.single().snapshotId,result.snapshotId)
+        assertEquals(tip,store.latest().id);assertEquals(writes,store.writes);assertEquals(0,aBridge.restores)
     }
     @Test fun reusedContentThenRealLocalProgressParentsOriginalHash() {
         val store = MemoryAppendStore(); val bridge = FakeBridge(); val rig = publish(bridge, store)

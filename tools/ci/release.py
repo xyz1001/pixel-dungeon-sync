@@ -25,8 +25,8 @@ def main():
     badging=run(sdk/'aapt2','dump','badging',unsigned,capture=True)
     expected=f"versionCode='{v['code']}' versionName='{v['name']}'"
     if expected not in badging: raise SystemExit('APK version does not match Manifest/tag')
-    pin_source=(ROOT/'android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/MainCallerPolicy.java').read_text()
-    pin=re.search(r'MAIN_SIGNER_SHA256\s*=\s*"([0-9a-f]{64})"',pin_source).group(1)
+    pin=(ROOT/'tools/ci/android-signer.sha256').read_text().strip()
+    if not re.fullmatch('[0-9a-f]{64}',pin): raise SystemExit('Invalid public release certificate fingerprint')
     with tempfile.TemporaryDirectory(prefix='pdsync-sign-') as temporary:
         key=Path(temporary)/'release.keystore'
         key.write_bytes(base64.b64decode(os.environ['PDSYNC_KEYSTORE_BASE64'],validate=True))
@@ -39,7 +39,7 @@ def main():
         verify=run('java','-jar',sdk/'lib/apksigner.jar','verify','--verbose','--print-certs',
                    '--min-sdk-version',api,'--max-sdk-version',api,apk,capture=True)
         certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$',verify,re.M)
-        if certs != [pin]: raise SystemExit('Release signer must match the checked-in bridge certificate pin')
+        if certs != [pin]: raise SystemExit('Release signer must match the retained application certificate fingerprint')
     run(sdk/'zipalign','-c','-P','16','4',apk)
     names=[apk.name,f'PDSync-{v["name"]}-windows-x64.exe',f'PDSync-{v["name"]}-windows-x64-portable.zip',
            f'PDSync-{v["name"]}-linux-x64.deb',f'PDSync-{v["name"]}-linux-x64.pkg.tar.zst',f'PDSync-{v["name"]}-darwin-arm64.dmg']

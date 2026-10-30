@@ -167,7 +167,7 @@ class AndroidHomeReconstruction92Test {
   val store=Store();publish(store);val bridge=Bridge();val rig=rig(bridge,store);val home=rig.facade.inspectHome();val writes=store.writes;val commits=store.commits.keys.toSet();val reads=store.objectReads.get()
   val result=rig.facade.upload(home)
   assertFalse(result.isConflict);assertFalse(result.isPending);assertEquals(store.latest().snapshot.id,result.snapshotId)
-  assertEquals(writes,store.writes);assertEquals(commits,store.commits.keys);assertTrue(store.objectReads.get()>reads)
+  assertEquals(writes,store.writes);assertEquals(commits,store.commits.keys);assertEquals(reads,store.objectReads.get())
   val verified=rig.facade.inspect();assertTrue(verified.isObjectVerified);assertEquals(store.latest().id,verified.comparison?.baselineId)
   assertTrue(verified.canCompleteWithoutTransfer);assertFalse(verified.canAutoUpload)
  }
@@ -180,20 +180,29 @@ class AndroidHomeReconstruction92Test {
   assertNull(rig.facade.historyPresentation(rig.facade.inspectHome()).baseline)
  }
 
- @Test fun changedRemoteGraphRejectsMetadataActionBeforeWrites() {
+ @Test fun changedRemoteGraphReusesKnownContentWithoutWrites() {
   val store=Store();publish(store);val bridge=Bridge();val rig=rig(bridge,store);val home=rig.facade.inspectHome();store.child(store.latest());val writes=store.writes
-  assertFailsWith<IllegalArgumentException> {rig.facade.upload(home)}
-  assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
+  val tip=store.latest().id
+  val result=rig.facade.upload(home)
+  assertFalse(result.isConflict);assertFalse(result.isPending)
+  assertEquals(home.remoteVersions.single().snapshotId,result.snapshotId)
+  assertEquals(tip,store.latest().id);assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
  }
 
- @Test fun anotherFacadeAndChangedActualOrMirrorCannotReuseMetadataObservation() {
+ @Test fun anotherFacadeIsRejectedAndUploadConsumesItsFixedExportUntilFreshInspection() {
   val store=Store();publish(store);val bridge=Bridge();val rig=rig(bridge,store);val home=rig.facade.inspectHome();val writes=store.writes
   assertFailsWith<IllegalArgumentException> {rig(Bridge(),store).facade.upload(home)}
   bridge.content=files(3)
-  assertFailsWith<IllegalArgumentException> {rig.facade.upload(home)}
+  assertFalse(rig.facade.upload(home).isConflict)
+  val fresh=rig.facade.inspectHome()
+  val uploaded=rig.facade.upload(fresh)
+  assertFalse(uploaded.isConflict);assertFalse(uploaded.isPending)
+  assertEquals(files(3).mapValues {hash(it.value)},store.latest().snapshot.files)
+  assertEquals(writes+2,store.writes)
   bridge.content=files();mirror(rig.root).resolve("game1/game.dat").writeBytes(files(4).getValue("game1/game.dat"))
   assertFailsWith<IllegalArgumentException> {rig.facade.upload(home)}
-  assertEquals(writes,store.writes);assertEquals(0,bridge.restores)
+  assertFalse(rig.facade.upload(rig.facade.inspectHome()).isConflict)
+  assertEquals(writes+2,store.writes);assertEquals(0,bridge.restores)
  }
 
  @Test fun explicitVerificationUpgradesFreshObjectsAndEnablesVerifiedHistory() {

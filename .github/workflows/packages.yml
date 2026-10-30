@@ -119,20 +119,28 @@ jobs:
       - name: JVM and shared UI regressions
         shell: bash
         run: |
+          mkdir -p "$RUNNER_TEMP/pdsync-tests"
+          TEST_TEMP=$(python -c 'import os,pathlib;print((pathlib.Path(os.environ["RUNNER_TEMP"])/"pdsync-tests").resolve())')
+          export TMPDIR="$TEST_TEMP"
+          export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=$TEST_TEMP"
           if [[ "$RUNNER_OS" == Linux ]]; then
-            xvfb-run -a bash gradlew --no-daemon :core:test :desktop:test
+            xvfb-run -a bash gradlew --no-daemon --continue :core:test :desktop:test
           else
-            bash gradlew --no-daemon :core:test :desktop:test
+            bash gradlew --no-daemon --continue :core:test :desktop:test
           fi
       - name: Native installers and bundled runtime
+        id: package
+        if: ${{ !cancelled() }}
         shell: bash
         run: bash gradlew --no-daemon :desktop:packageDistributionForCurrentOS
       - name: Native app-image smoke and package inspection
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python tools/ci/desktop-package.py
       - name: Real pacman package and installation smoke
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.package.outcome == 'success' }}
         run: bash tools/ci/pacman.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: desktop-${{ matrix.platform }}
           path: dist/
@@ -167,6 +175,12 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: dist
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned APK verification tools
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0"'
       - name: Sign APK, verify all six artifacts, publish only complete draft
         env:
           GH_TOKEN: ${{ github.token }}

@@ -3,6 +3,7 @@ package android.app;
 import android.content.Context;
 import android.content.Intent;
 public final class PendingIntent {
+ public static final int FLAG_CANCEL_CURRENT=268435456, FLAG_NO_CREATE=536870912, FLAG_IMMUTABLE=67108864;
  public static final int FLAG_UPDATE_CURRENT=134217728, FLAG_MUTABLE=33554432;
  private static final java.util.Map<String,PendingIntent> registry=new java.util.HashMap<>();
  public static int created, sent, lastFlags;

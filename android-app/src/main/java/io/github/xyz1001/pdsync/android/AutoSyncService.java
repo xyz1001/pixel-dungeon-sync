@@ -245,23 +245,23 @@ public final class AutoSyncService extends Service {
     }
 
     private Notification notification(String str) {
-        return new Notification.Builder(this, "game-exit-sync").setSmallIcon(17301628).setContentTitle(AndroidMessages.AUTO_SYNC_SERVICE_11.text()).setContentText(str).setStyle(new Notification.BigTextStyle().bigText(str)).setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), 201326592)).setOngoing(true).addAction(new Notification.Action.Builder((Icon) null, AndroidMessages.AUTO_SYNC_SERVICE_12.text(), PendingIntent.getService(this, 1, new Intent(this, (Class<?>) AutoSyncService.class).setAction("pdsync.STOP"), 201326592)).build()).build();
+        return new Notification.Builder(this, "game-exit-sync").setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(AndroidMessages.AUTO_SYNC_SERVICE_11.text()).setContentText(str).setStyle(new Notification.BigTextStyle().bigText(str)).setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE)).setOngoing(true).addAction(new Notification.Action.Builder((Icon) null, AndroidMessages.AUTO_SYNC_SERVICE_12.text(), PendingIntent.getService(this, 1, new Intent(this, (Class<?>) AutoSyncService.class).setAction("pdsync.STOP"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE)).build()).build();
     }
 
     @Override // android.app.Service
     public int onStartCommand(Intent intent, int i, int i2) {
         if (intent == null) {
             stopSelf();
-            return 2;
+            return START_NOT_STICKY;
         }
         if ("pdsync.STOP".equals(intent.getAction())) {
             finish("CANCELLED", (this.publicationAttemptInProgress ? AndroidMessages.AUTO_STOPPED_PENDING : AndroidMessages.AUTO_STOPPED).text());
-            return 2;
+            return START_NOT_STICKY;
         }
         String stringExtra = intent.getStringExtra("token");
         if (stringExtra == null || !stringExtra.equals(this.prefs.getString("token", "")) || !isActive(this.prefs)) {
             stopSelf();
-            return 2;
+            return START_NOT_STICKY;
         }
         try {
             RuntimePlatformCompat.startDataSyncForeground(this, 7301, notification(AndroidMessages.AUTO_SYNC_SERVICE_16.text()));
@@ -269,7 +269,7 @@ public final class AutoSyncService extends Service {
                 this.returned = true;
             }
             if (stringExtra.equals(this.token)) {
-                return 2;
+                return START_NOT_STICKY;
             }
             this.token = stringExtra;
             this.diagnosticTrace = DiagnosticLog.begin(DiagnosticAction.AUTOMATIC_SYNC, true);
@@ -282,11 +282,11 @@ public final class AutoSyncService extends Service {
                     AutoSyncService.this.m1x57256bb9();
                 }
             });
-            return 2;
+            return START_NOT_STICKY;
         } catch (RuntimeException unused) {
             automaticFailure(DiagnosticStage.RUNTIME, unused);
             finish("BLOCKED", AndroidMessages.AUTO_SYNC_SERVICE_17.text());
-            return 2;
+            return START_NOT_STICKY;
         }
     }
 
@@ -445,7 +445,7 @@ public final class AutoSyncService extends Service {
             published = this.prefs.edit().putString("state", str).putString("result", StoredAndroidText.store(str2)).commit();
         }
         this.executor.shutdownNow();
-        stopForeground(1);
+        stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
         if (published) notifyHistoryChanged(this);
     }

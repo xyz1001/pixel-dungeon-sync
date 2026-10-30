@@ -68,6 +68,16 @@ class ProfileSessionTest {
   assertFails { session(alias) }
   assertFails { session(alias.resolve("game1")) }
  }
+ @Test fun physicalContainmentRejectsMissingDescendantsBeforeCreatingThem() {
+  val save=root();val missing=save.resolve("not-created/nested")
+  assertFalse(Files.exists(missing))
+  assertFailsWith<IllegalArgumentException> {SafePaths.disjoint(save.toRealPath(),missing)}
+  assertFailsWith<IllegalArgumentException> {SafePaths.disjoint(missing,save.toRealPath())}
+  assertFalse(Files.exists(save.resolve("not-created")))
+  val sibling=save.resolveSibling(save.fileName.toString()+"-separate")
+  SafePaths.disjoint(save,sibling)
+  assertFalse(Files.exists(sibling))
+ }
  @Test fun unrecognizedRootRejected() { val path = Files.createTempDirectory("wrong-root"); path.resolve("unrelated.txt").writeText("no saves"); assertFails { session(path) } }
  @Test fun emptyRootCanReceiveButCannotPublish() {
   val target = session(Files.createTempDirectory("empty-save"))

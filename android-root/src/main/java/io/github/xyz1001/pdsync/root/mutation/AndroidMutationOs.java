@@ -55,11 +55,35 @@ public final class AndroidMutationOs implements MutationOs {
         ParcelFileDescriptor result;
         try { result = ParcelFileDescriptor.dup(fd); }
         catch (IOException e) { throw failure(Operation.DUP, e); }
-        try { Os.fcntlInt(result.getFileDescriptor(), OsConstants.F_SETFD, OsConstants.FD_CLOEXEC); return result; }
-        catch (ErrnoException e) {
-            Failure failure = failure(Operation.FCNTL, e);
+        try { setCloseOnExec(result.getFileDescriptor()); return result; }
+        catch (IOException | ErrnoException | SecurityException e) {
+            IOException failure = e instanceof ErrnoException ? failure(Operation.FCNTL, (ErrnoException) e)
+                    : e instanceof IOException ? (IOException) e : new IOException("Close-on-exec operation denied", e);
             try { result.close(); } catch (IOException close) { failure.addSuppressed(close); }
             throw failure;
+        }
+    }
+    /** API 26-29 expose this operation only as a legacy framework method. Never
+     * return a duplicated descriptor unless CLOEXEC was successfully established. */
+    private static void setCloseOnExec(FileDescriptor descriptor) throws IOException, ErrnoException {
+        if (Build.VERSION.SDK_INT >= 30) {
+            Api30.setCloseOnExec(descriptor);
+            return;
+        }
+        try {
+            Os.class.getMethod("fcntlInt", FileDescriptor.class, int.class, int.class)
+                    .invoke(null, descriptor, OsConstants.F_SETFD, OsConstants.FD_CLOEXEC);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            if (e.getCause() instanceof ErrnoException) throw (ErrnoException) e.getCause();
+            throw new IOException("Cannot set close-on-exec on duplicated descriptor", e.getCause());
+        } catch (ReflectiveOperationException | SecurityException e) {
+            throw new IOException("Close-on-exec operation unavailable", e);
+        }
+    }
+    @android.annotation.TargetApi(30)
+    private static final class Api30 {
+        static void setCloseOnExec(FileDescriptor descriptor) throws ErrnoException {
+            Os.fcntlInt(descriptor, OsConstants.F_SETFD, OsConstants.FD_CLOEXEC);
         }
     }
     @Override public int effectiveUid() { return Os.geteuid(); }
@@ -206,6 +230,7 @@ public final class AndroidMutationOs implements MutationOs {
         String times = Build.VERSION.SDK_INT >= 27 ? Times.value(s) : s.st_mtime + ":0:" + s.st_ctime + ":0";
         return new Stat(s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid, s.st_nlink, s.st_size, s.st_mtime, times);
     }
+    @android.annotation.TargetApi(27)
     private static final class Times {
         static String value(StructStat s) { return s.st_mtim.tv_sec + ":" + s.st_mtim.tv_nsec + ":" + s.st_ctim.tv_sec + ":" + s.st_ctim.tv_nsec; }
     }

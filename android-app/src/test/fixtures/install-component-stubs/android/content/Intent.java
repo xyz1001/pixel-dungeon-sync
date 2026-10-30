@@ -1,6 +1,7 @@
 // Host-only isolated install-result fixture. Never package into an APK.
 package android.content;
 public class Intent {
+ public static final int URI_INTENT_SCHEME=1;
  private String action,targetPackage;
  private final java.util.Map<String,Object> extras=new java.util.HashMap<>();
  public Intent() {} public Intent(String action) { this.action=action; } public Intent(Context context,Class<?> target) {}

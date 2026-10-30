@@ -177,6 +177,7 @@ final class AndroidRootFileSystem implements RootFileSystem {
         return new Stat(stat.st_dev, stat.st_ino, stat.st_mode, stat.st_uid, stat.st_gid, stat.st_nlink,
                 stat.st_size, stat.st_mtime, times);
     }
+    @android.annotation.TargetApi(27)
     private static final class NewTimes {
         static String get(StructStat stat) { return stat.st_mtim.tv_sec + ":" + stat.st_mtim.tv_nsec + ":" + stat.st_ctim.tv_sec + ":" + stat.st_ctim.tv_nsec; }
     }

@@ -21,7 +21,7 @@ class ConnectionProvisioningTest {
  private fun config(server: MockWebServer, profile: String = "default") = AppConfig(endpoint = server.url("/dav/").toString(), username = "player", profile = profile)
  private fun success(server: MockWebServer, profile: String = "default") {
   server.enqueue(collection("/dav/")); server.enqueue(collection("/dav/shattered/")); server.enqueue(collection("/dav/shattered/$profile/"))
-  server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(collection("/dav/shattered/$profile/"))
+  server.enqueue(collection("/dav/shattered/$profile/"))
  }
  @Test fun freshConfigUsesAdapterNamespaceAndNeverEnablesPasswordPersistence() {
   val fresh = newConnectionConfig()
@@ -35,14 +35,14 @@ class ConnectionProvisioningTest {
   server.enqueue(collection("/dav/"))
   server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(MockResponse().setResponseCode(201)); server.enqueue(collection("/dav/shattered/"))
   server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(MockResponse().setResponseCode(201)); server.enqueue(collection("/dav/shattered/default/"))
-  server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(collection("/dav/shattered/default/"))
+  server.enqueue(collection("/dav/shattered/default/"))
   val model = ConnectionSetup(config(server)); model.update(config(server), "session-test-password")
   val file = ConfigFile(temp.resolve("config.json"))
   assertEquals(ConnectionTestResult.Success(false), model.connect()); assertTrue(model.canApply); assertFalse(file.exists())
   val applied = model.apply(file); assertEquals("session-test-password", applied.password); assertFalse(applied.config.rememberPassword)
   val requests = List(server.requestCount) { server.takeRequest() }
   assertEquals(listOf("/dav/shattered/", "/dav/shattered/default/"), requests.filter { it.method == "MKCOL" }.map { it.path })
-  assertEquals(9, requests.size); assertTrue(requests.none { it.method in setOf("PUT", "DELETE", "MOVE", "LOCK") })
+  assertEquals(8, requests.size); assertTrue(requests.none { it.method in setOf("PUT", "DELETE", "MOVE", "LOCK", "GET") })
   assertEquals("default", file.load()!!.profile); assertFalse(temp.resolve("config.json").readText().contains("session-test-password"))
   assertFails { model.apply(file) }
  }
@@ -79,10 +79,10 @@ class ConnectionProvisioningTest {
   assertEquals(listOf("PROPFIND", "PROPFIND"), List(server.requestCount) { server.takeRequest().method })
  }
  @Test fun automaticProbeIsReadOnlyEvenWhenNamespaceMissing(): Unit = MockWebServer().use { server ->
-  server.start(); server.enqueue(MockResponse().setResponseCode(404)); server.enqueue(MockResponse().setResponseCode(404))
+  server.start(); server.enqueue(MockResponse().setResponseCode(404))
   val model = ConnectionSetup(config(server)); model.update(config(server), "password-test")
   assertIs<ConnectionTestResult.Failure>(model.testConnection())
-  assertEquals(listOf("GET", "PROPFIND"), List(server.requestCount) { server.takeRequest().method }); assertFalse(model.canApply)
+  assertEquals(listOf("PROPFIND"), List(server.requestCount) { server.takeRequest().method }); assertFalse(model.canApply)
  }
  @Test fun cancellationDuringRootProbeStopsFurtherProvisioningAndCannotSave(): Unit = MockWebServer().use { server ->
   val entered = CountDownLatch(1); val release = CountDownLatch(1)

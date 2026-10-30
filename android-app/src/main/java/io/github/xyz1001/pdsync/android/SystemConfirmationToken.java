@@ -19,11 +19,11 @@ final class SystemConfirmationToken {
 
     static String retain(Context context, String str, Intent intent) throws Exception {
         Intent intentCloneFilter = intent.cloneFilter();
-        String uri = (intentCloneFilter.getAction() == null ? NULL_ACTION : "") + intentCloneFilter.toUri(1);
+        String uri = (intentCloneFilter.getAction() == null ? NULL_ACTION : "") + intentCloneFilter.toUri(Intent.URI_INTENT_SCHEME);
         if (!intentCloneFilter.filterEquals(parseFilter(uri))) {
             throw new IOException(AndroidMessages.SYSTEM_CONFIRMATION_TOKEN_01.text());
         }
-        LIVE.put(str, PendingIntent.getActivity(context, str.hashCode(), intent, 335544320));
+        LIVE.put(str, PendingIntent.getActivity(context, str.hashCode(), intent, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         return uri;
     }
 
@@ -31,7 +31,7 @@ final class SystemConfirmationToken {
         // Android parseUri supplies ACTION_VIEW when the original explicit Intent has no
         // action. Keep that absence separately; never invent an action or serialize extras.
         boolean noAction = value.startsWith(NULL_ACTION);
-        Intent parsed = Intent.parseUri(noAction ? value.substring(NULL_ACTION.length()) : value, 1);
+        Intent parsed = Intent.parseUri(noAction ? value.substring(NULL_ACTION.length()) : value, Intent.URI_INTENT_SCHEME);
         return noAction ? parsed.setAction(null) : parsed;
     }
 
@@ -39,7 +39,7 @@ final class SystemConfirmationToken {
         if (str == null || str.isEmpty() || str2 == null) {
             return null;
         }
-        PendingIntent activity = PendingIntent.getActivity(context, str.hashCode(), parseFilter(str2), 603979776);
+        PendingIntent activity = PendingIntent.getActivity(context, str.hashCode(), parseFilter(str2), PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
         ConcurrentHashMap<String, PendingIntent> concurrentHashMap = LIVE;
         if (activity != null) {
             concurrentHashMap.put(str, activity);
@@ -51,7 +51,7 @@ final class SystemConfirmationToken {
 
     static boolean installerPositivelyDisabled(Context context) throws Exception {
         try {
-            requireEnabledActivity(context, new Intent("android.content.pm.action.CONFIRM_INSTALL").toUri(1));
+            requireEnabledActivity(context, new Intent("android.content.pm.action.CONFIRM_INSTALL").toUri(Intent.URI_INTENT_SCHEME));
             return false;
         } catch (IOException disabled) { return true; }
     }

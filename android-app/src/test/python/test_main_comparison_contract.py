@@ -48,7 +48,7 @@ class MainComparisonContractTest(unittest.TestCase):
         body = method("cancelConfirmation")
         self.assertIn("this.confirmedAction = null", body)
         self.assertNotIn(".run()", body)
-        self.assertIn("cancelConfirmation();", method("onBackPressed"))
+        self.assertIn("cancelConfirmation();", method("handleNavigationBack"))
 
 
 

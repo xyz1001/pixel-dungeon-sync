@@ -370,7 +370,7 @@ class AppendRepositoryTest {
    override fun readObject(id:String):ByteArray {called("object");return source.zip}
   }
   assertEquals(setOf(record.id),repository().discover(store).commits.keys)
-  assertEquals(listOf("legacy","list","commit","object"),calls)
+  assertEquals(listOf("list","commit","object"),calls)
   assertTrue(remote.events.isEmpty(),"delegation must not bypass read overrides")
  }
 
@@ -671,21 +671,20 @@ class AppendRepositoryTest {
   assertTrue(remote.writes().isEmpty()); assertPlanEquals(plan, repo.pending())
  }
 
- @Test fun legacyDetectionBlocksNewProtocolEvenWhenV2CommitsAlsoExist() {
+ @Test fun removedLegacyFlagDoesNotBlockCurrentDiscoveryOrPublish() {
   val remote = Memory(); remote.addSnapshot(); remote.legacy = true
   val path = directory("legacy"); val repo = repository(path); val plan = repo.prepare(snapshot(), emptyList())
-  assertFailsWith<LegacyProtocolException> { repo.discover(remote) }
-  assertFailsWith<LegacyProtocolException> { repo.publish(remote, plan) }
-  assertTrue(remote.events.all { it.operation == "legacy" }); assertTrue(remote.writes().isEmpty())
-  assertPlanEquals(plan, repository(path).pending()); assertNull(repository(path).baseline())
+  assertTrue(repo.discover(remote).commits.isNotEmpty())
+  repo.publish(remote, plan)
+  assertTrue(remote.events.none { it.operation == "legacy" })
+  assertPlanEquals(plan, repository(path).pending())
  }
 
- @Test fun explicitLegacyImportIsRootOnlyAndStillDoesNotAuthorizeMixingAnExistingLegacyRemote() {
+ @Test fun explicitImportIsRootOnlyWithoutProbingOldHead() {
   val repo = repository(); val remote = Memory(); val plan = repo.prepare(snapshot(), emptyList(), "legacy-import")
   assertEquals("legacy-import", plan.commit.kind); assertTrue(plan.commit.parents.isEmpty())
-  remote.legacy = true; assertFailsWith<LegacyProtocolException> { repo.publish(remote, plan) }
-  assertTrue(remote.writes().isEmpty())
-  remote.legacy = false; assertEquals(plan.commit, repo.publish(remote, plan))
+  remote.legacy = true; assertEquals(plan.commit, repo.publish(remote, plan))
+  assertTrue(remote.events.none { it.operation == "legacy" })
  }
 
  @Test fun downloadRevalidatesRemoteManifestObjectLengthHashAndFileContents() {

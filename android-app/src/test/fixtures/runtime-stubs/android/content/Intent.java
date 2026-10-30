@@ -2,6 +2,7 @@
 package android.content;
 import android.os.Parcelable;
 public class Intent implements Parcelable {
+ public static final int URI_INTENT_SCHEME=1;
  private String action, targetPackage;
  private final java.util.Map<String,Object> extras = new java.util.HashMap<>();
  public Intent() {}

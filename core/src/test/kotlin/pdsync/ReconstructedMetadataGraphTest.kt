@@ -342,8 +342,8 @@ class ReconstructedMetadataGraphTest {
   assertEquals(3, count.get())
  }
 
- @Test fun metadataPreservesLegacyAndListingBudgetGuards() {
-  assertFailsWith<LegacyProtocolException> { repository().discoverMetadata(Memory().apply { legacy = true }) }
+ @Test fun metadataIgnoresRemovedLegacyProbeAndPreservesListingBudgetGuards() {
+  assertTrue(repository().discoverMetadata(Memory().apply { legacy = true }).commits.isEmpty())
   val invalidName = Memory().apply { pages = { CommitPage(listOf("../bad.json")) } }
   assertFailsWith<IllegalArgumentException> { repository().discoverMetadata(invalidName) }
   val repeated = Memory().apply { pages = { CommitPage(emptyList(), "again") } }

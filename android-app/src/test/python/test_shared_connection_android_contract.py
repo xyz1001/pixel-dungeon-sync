@@ -192,10 +192,11 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_system_back_dispatches_once_to_existing_navigation_and_shared_controller(self):
         create = body(MAIN, "public void onCreate(")
         self.assertEqual(create.count("getOnBackPressedDispatcher().addCallback(this, this.navigationBack)"), 1)
-        self.assertIn("MainActivity.this.onBackPressed()", create)
-        back = body(MAIN, "public void onBackPressed()")
+        self.assertIn("MainActivity.this.handleNavigationBack()", create)
+        self.assertNotIn("public void onBackPressed()", MAIN)
+        back = body(MAIN, "private void handleNavigationBack()")
         self.assertIn("getController().back()", back)
-        self.assertLess(back.index("this.navigationBack.setEnabled(false)"), back.index("super.onBackPressed()"))
+        self.assertLess(back.index("this.navigationBack.setEnabled(false)"), back.index("getOnBackPressedDispatcher().onBackPressed()"))
         self.assertIn("finally { this.navigationBack.setEnabled(true); }", back)
 
     def test_android_only_insets_keep_status_navigation_bars_and_keyboard_clear(self):

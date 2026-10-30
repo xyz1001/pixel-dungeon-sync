@@ -98,7 +98,7 @@ class SharedGameSelectionAndroidContract(unittest.TestCase):
         self.assertIn('resolveRootSetupSource(selected)', dispatch)
         self.assertIn('chooseApkSetupSource(selected)', dispatch)
         self.assertNotIn('GameModeChoiceDialog.show', MAIN)
-        back = body(MAIN, 'public void onBackPressed()')
+        back = body(MAIN, 'private void handleNavigationBack()')
         self.assertIn('modeChoice.awaiting(this.setupSession.modeChoice.pending())', back)
         self.assertIn('cancelInlineAccessSelection()', back)
         cancel = body(MAIN, 'private void cancelInlineAccessSelection()')

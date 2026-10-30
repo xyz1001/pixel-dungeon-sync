@@ -253,7 +253,7 @@ public final class BridgeClient implements GameAccessBackend {
     
     private BridgeDiagnostics.ProviderSnapshot snapshotProvider() {
         try {
-            boolean permission=context.checkSelfPermission("io.github.xyz1001.pdsync.android.ACCESS_BRIDGE")==0;
+            boolean permission=context.checkSelfPermission("io.github.xyz1001.pdsync.android.ACCESS_BRIDGE")==android.content.pm.PackageManager.PERMISSION_GRANTED;
             String host=providerPackage();
             String process=embedded()?host+":pdsync_bridge":host;
             ProviderInfo provider=context.getPackageManager().resolveContentProvider(authority(),0);

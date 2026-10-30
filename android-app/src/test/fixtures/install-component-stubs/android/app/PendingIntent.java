@@ -2,6 +2,7 @@
 package android.app;
 import android.content.*;
 public final class PendingIntent {
+ public static final int FLAG_CANCEL_CURRENT=268435456, FLAG_NO_CREATE=536870912, FLAG_IMMUTABLE=67108864;
  public static boolean failBroadcastCreation;
  private static final java.util.Map<String,PendingIntent> tokens=new java.util.HashMap<>();
  private final String key; public final Intent intent;

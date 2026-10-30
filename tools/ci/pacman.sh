@@ -8,7 +8,7 @@ VERSION=$(python3 -c 'import sys;sys.path.insert(0,"tools/ci");from version impo
 # pacman pkgver forbids hyphens; the public artifact filename retains versionName.
 sed -i "s/^pkgver=.*/pkgver=${VERSION//-/.}/" "$OUT/PKGBUILD"
 docker run --rm -v "$OUT:/work" archlinux:base-devel bash -euc '
-  pacman -Syu --noconfirm --needed sudo xorg-server-xvfb fontconfig freetype2 libx11 libxext libxi libxrender libxtst alsa-lib libglvnd
+  pacman -Syu --noconfirm --needed sudo xorg-server-xvfb fontconfig freetype2 ttf-dejavu mesa libx11 libxext libxi libxrender libxtst alsa-lib libglvnd
   useradd -m builder
   chown -R builder:builder /work
   cd /work

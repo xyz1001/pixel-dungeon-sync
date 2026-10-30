@@ -863,6 +863,9 @@ class AppendProfileSession(
 
  /** Confirmed keep-local choice appends a successor; it never deletes cloud history. */
  internal fun overwriteCloudSuccessors(comparison:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison = readLocked(store) {
+  overwriteCloudSuccessorsLocked(comparison,selectedSnapshot,store,stopped,validate)
+ }
+ private fun overwriteCloudSuccessorsLocked(comparison:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison {
   require(comparison.owner===comparisonOwner)
   require(!hasOverwritePending() && repository.pending()==null) {CoreSessionMessages.RETRY_OR_EXPLICITLY_ARCHIVE_THE_PENDING_UPLOAD_FIRST.text()}
   val fresh=compareLocked(store,stopped,false,uploadMetadata=true)
@@ -876,13 +879,13 @@ class AppendProfileSession(
   try {SafePaths.bufferedUploadWrites {publish(plan.plan,store,stopped,graph,optimistic=true,acknowledgeNew=true,verifiedPlan=plan)}}
   catch(error:Exception) {try {repository.preserveFailedUpload(plan.plan)}catch(save:Exception){error.addSuppressed(save)};throw error}
   val after=graph.copy(commits=graph.commits+(plan.plan.commit.id to plan.plan.commit))
-  OnboardingComparison(OnboardingKind.IDENTICAL,fresh.localFiles,plan.plan.commit.id,OnboardingLineage.SAME_TIP,
+  return OnboardingComparison(OnboardingKind.IDENTICAL,fresh.localFiles,plan.plan.commit.id,OnboardingLineage.SAME_TIP,
    emptyList(),after.tips,owner=comparisonOwner,graph=after.copy(verification=RemoteVerification.METADATA_ONLY),localSource=LocalObservationSource.RESTORE_RECEIPT)
  }
  fun overwriteCloudConflict(conflict:AppendConflict,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean):OnboardingComparison = readLocked(store) {
   val fresh=compareLocked(store,stopped,false,uploadMetadata=true)
   require(fresh.observedTips==conflict.observedTips && fresh.localFiles==conflict.observedLocalFiles) {"Conflict changed after confirmation"}
-  overwriteCloudSuccessors(fresh,selectedSnapshot,store,stopped,{})
+  overwriteCloudSuccessorsLocked(fresh,selectedSnapshot,store,stopped,{})
  }
  private fun overwriteCloudFresh(comparison:OnboardingComparison,fresh:OnboardingComparison,selectedSnapshot:String,store:AppendStore,stopped:()->Boolean,validate:(OnboardingComparison)->Unit):OnboardingComparison {
   val deletion=ConfirmedBranchOverwrite(repository.overwriteDirectory(),adapter,config.profile)
@@ -954,6 +957,14 @@ class AppendProfileSession(
   val pending=repository.pending()
   val files=pending?.commit?.snapshot?.files ?: comparison.localFiles
   matchingUpload(graph,files)?.let {return reuseUpload(it,graph,pending)}
+  // Historical identical content is adopted, never republished. Selected-object
+  // evidence does not upgrade the rest of the metadata-only graph.
+  if(pending==null) graph.findByContent(files)?.let { existing ->
+   val selected=repository.downloadVerified(store,existing)
+   repository.setSelectedBaseline(existing,CommitMetadataGraph(graph.copy(verification=RemoteVerification.METADATA_ONLY)),selected)
+   markDirectorySynced(existing,"upload")
+   return AppendPushResult.Success(existing,currentFiles()!=existing.snapshot.files,graph.tips.singleOrNull()!=existing.id,reused=true)
+  }
   var verifiedPlan:VerifiedUploadPlan?=null
   val plan = pending ?: run {
    require(comparison.localFiles.isNotEmpty()) { CoreSessionMessages.THERE_ARE_NO_LOCAL_SAVES_AN_EMPTY_SNAPSHOT_CANNOT_BE.text() }

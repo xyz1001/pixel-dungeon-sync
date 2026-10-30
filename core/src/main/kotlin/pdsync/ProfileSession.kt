@@ -36,7 +36,21 @@ object SafePaths {
   return checked.toRealPath()
  }
  fun disjoint(a: Path, b: Path) {
-  require(!a.startsWith(b) && !b.startsWith(a)) { CoreSessionMessages.THE_SAVES_FOLDER_AND_SYNC_DATA_FOLDER_CANNOT_CONTAIN_ONE.text() }
+  fun physical(path:Path):Path {
+   val absolute=checked(path)
+   var existing=absolute
+   while(true) {
+    try {
+     Files.readAttributes(existing,java.nio.file.attribute.BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS)
+     break
+    } catch(_:NoSuchFileException) {
+     existing=existing.parent ?: throw IllegalArgumentException("Path has no existing ancestor")
+    }
+   }
+   return existing.toRealPath().resolve(existing.relativize(absolute)).normalize()
+  }
+  val first=physical(a);val second=physical(b)
+  require(!first.startsWith(second) && !second.startsWith(first)) { CoreSessionMessages.THE_SAVES_FOLDER_AND_SYNC_DATA_FOLDER_CANNOT_CONTAIN_ONE.text() }
  }
  fun atomicWrite(path: Path, bytes: ByteArray) {
   atomicWrite(path,bytes) { from,to -> Files.move(from,to,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);Unit }

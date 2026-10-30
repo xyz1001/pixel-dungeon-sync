@@ -17,8 +17,8 @@ class AutomaticUploadPersistenceTest {
  private class Memory: AppendStore {
   var offline = true
   val commits=mutableMapOf<String,ByteArray>(); val objects=mutableMapOf<String,ByteArray>()
-  override fun legacyPresent(): Boolean { if(offline) throw SocketException("offline"); return false }
-  override fun listCommits(cursor:String?)=CommitPage(commits.keys.toList())
+  override fun legacyPresent(): Boolean = error("Removed legacy probe must not be called")
+  override fun listCommits(cursor:String?):CommitPage { if(offline) throw SocketException("offline"); return CommitPage(commits.keys.toList()) }
   override fun readCommit(id:String)=commits[id]
   override fun readObject(id:String)=objects[id]
   override fun writeCommit(id:String,bytes:ByteArray) { commits[id]=bytes }

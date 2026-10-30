@@ -31,10 +31,39 @@ No phone, retained build outputs or user configuration is required.
 | macOS DMG | macOS 15 / arm64 | JVM/shared UI tests, bundled-runtime window smoke, hdiutil verify |
 
 Desktop smoke uses the existing `PDSYNC_SMOKE=1` and a temporary workspace; it
-checks an actual displayed window, not merely file existence. It does not prove
-every sync/game workflow or Android/Desktop protocol interoperability. Desktop
-currently retains a different sync implementation; do not infer interoperability
-from package success. Linux needs ordinary GUI/system libraries; Java is bundled.
+checks an actual displayed window, not merely file existence. Linux needs ordinary
+GUI/system libraries; Java is bundled. Desktop game configuration currently accepts
+only identity-verified Shattered Pixel Dungeon JARs. Android's support for variants
+does not imply equivalent desktop variant support.
+
+## Product and verification status
+
+Production commit `b943e2c` routes desktop through `DesktopSimpleSession` to the same
+`SimpleSaveSync` protocol as Android. `SimpleSaveProtocol` shares history traversal,
+comparison classification, and restore parsing. Both use `latest` plus
+`saves/<content-hash>.zip` and three-field JSON (`hashId`, `parentId`, `name`), rather
+than two mutually invisible desktop/Android histories.
+
+Real desktop UI verification has covered cloud upload, restoring B with equal file
+contents and continuing in the official game, canceling a conflict without writes,
+confirming E with parent B while retaining the old cloud files, account isolation,
+and history arrows/refresh. New-layout 404, authentication 401, and service 503 are
+distinguished; the branch-conflict wording was also checked. These results are not
+an Android-device round trip or a public-network performance measurement. Package
+smoke tests cannot substitute for either.
+
+The six-artifact CI matrix has not yet completed successfully, and no formal release
+has been created. The table above describes configured checks, not completed results.
+Record the final workflow URL, commit, job conclusions, and artifacts before claiming
+a build is verified. Repository signing Secrets are currently absent; their upload
+requires the explicit approval below. Do not publish unsigned Android output as an
+installable release or call a non-release run an end-to-end release test.
+
+Connection credentials retain their existing plaintext storage behavior:
+Android's app-private `noBackup/webdav.properties` and desktop's workspace
+`.local/config.json` (default workspace: `~/.pixel-dungeon-sync`). Legacy Android
+key migration code is not evidence that the current file is encrypted. Do not put
+these files in build inputs, caches, artifacts, issue attachments, or release assets.
 
 Compose 1.9.3 requires positive macOS major version. Its internal bundle version
 is `1.<versionCode>.0`; public filenames/tag remain `versionName`. Windows/DEB use
@@ -53,9 +82,12 @@ uploading the existing signing material to `xyz1001/pixel-dungeon-sync`**:
 * `PDSYNC_STORE_PASSWORD`: keystore password.
 * `PDSYNC_KEY_PASSWORD`: key password (repeat the store password when identical).
 
-The retained signer must equal the public `MAIN_SIGNER_SHA256` pin in
-`android-helper/.../MainCallerPolicy.java`; changing only the key breaks bridge
-authentication and update compatibility. Secrets grant the tag workflow signing
+The retained signer must equal `tools/ci/android-signer.sha256`, verified from the
+existing signed code135 APK (public certificate only). Current game preparation
+binds the application's actual certificate into each prepared game's metadata;
+the legacy helper test certificate is not the current application release key.
+Changing the signer breaks ordinary updates and existing bridge bindings.
+Secrets grant the tag workflow signing
 capability; anyone able to modify trusted release code can potentially use them.
 Never put values in source, workflow inputs, command-line password arguments or
 logs. The workflow decodes the key in a temporary owner-only file and removes it

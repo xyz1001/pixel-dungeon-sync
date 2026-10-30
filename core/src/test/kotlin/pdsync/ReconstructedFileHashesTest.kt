@@ -46,8 +46,26 @@ class ReconstructedFileHashesTest {
   root.resolve("game1/game.dat").deleteExisting()
   assertFailsWith<IllegalArgumentException> { Snapshots.fileHashes(root, Shattered) }
   root.resolve("game1/game.dat").writeText("save")
-  root.resolve("game1/LEVEL.dat").writeText("alias")
-  assertFailsWith<IllegalArgumentException> { Snapshots.fileHashes(root, Shattered) }
+  val original=root.resolve("game1/level.dat");val alias=root.resolve("game1/LEVEL.dat")
+  alias.writeText("alias")
+  if(Files.isSameFile(original,alias)) {
+   // Windows exposes one file. Exercise the collision guard with two real ZIP entries.
+   assertEquals(hash("alias".encodeToByteArray()),Snapshots.fileHashes(root,Shattered).getValue("game1/level.dat"))
+   val bytes=java.io.ByteArrayOutputStream()
+   java.util.zip.ZipOutputStream(bytes).use {zip->
+    for(name in listOf("game1/game.dat","game1/level.dat","game1/LEVEL.dat")) {
+     zip.putNextEntry(java.util.zip.ZipEntry(name));zip.write("save".encodeToByteArray());zip.closeEntry()
+    }
+   }
+   val payload=bytes.toByteArray()
+   val manifest=Manifest(game="shattered",profile="demo",version="v1",id=java.util.UUID.randomUUID().toString(),parent=null,sha256=hash(payload),
+    files=listOf("game1/game.dat","game1/level.dat","game1/LEVEL.dat").associateWith {hash("save".encodeToByteArray())})
+   val failure=assertFailsWith<IllegalArgumentException> {Snapshots.verify(Snapshot(manifest,payload),Shattered)}
+   assertEquals(pdsync.i18n.CoreValidationMessages.UNSAFE_OR_ALIASED_ARCHIVE_PATH.text(),failure.message)
+  } else {
+   val failure=assertFailsWith<IllegalArgumentException> {Snapshots.fileHashes(root,Shattered)}
+   assertEquals(pdsync.i18n.CoreValidationMessages.UNSAFE_OR_ALIASED_SAVE_PATH.text(),failure.message)
+  }
  }
  @Test fun symlinkAndOversizeAreRejected() {
   valid()
