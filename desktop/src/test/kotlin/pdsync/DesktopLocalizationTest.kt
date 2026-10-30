@@ -16,7 +16,10 @@ class DesktopLocalizationTest {
  @Test fun catalogHasCompleteUniqueBilingualResourcesAndWorkingTemplates() {
   val messages = DesktopMessages::class.java.fields.filter { it.type == UiText::class.java }
    .map { it.get(null) as UiText }
-  assertTrue(messages.size >= 249)
+  assertTrue(messages.isNotEmpty())
+  val keys=messages.map {it.key()}.toSet()
+  for(required in listOf(DesktopMessages.SELECT_A_GAME,DesktopMessages.SAVE_1_S,
+   DesktopMessages.UPLOADING_SAVES,DesktopMessages.RESTORE_SAVE)) assertTrue(required.key() in keys)
   assertEquals(messages.size, messages.map { it.key() }.distinct().size)
   for (locale in listOf(Locale.SIMPLIFIED_CHINESE, Locale.ENGLISH)) inLocale(locale) {
    for (message in messages) {

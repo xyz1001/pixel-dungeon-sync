@@ -127,7 +127,7 @@ class SharedBilingualRenderTest {
                                             "$id glyph line outside text width: '$label'")
                                         assertTrue(layout.getLineTop(line) >= -1f &&
                                             layout.getLineBottom(line) <= layout.size.height + 1f,
-                                            "$id glyph line outside text height: '$label'")
+                                            "$id glyph line outside text height: '$label'; line=$line top=${layout.getLineTop(line)} bottom=${layout.getLineBottom(line)} baseline=${layout.getLineBaseline(line)} size=${layout.size} bounds=${node.boundsInRoot} style=${layout.layoutInput.style}")
                                     }
                                 }
                             }

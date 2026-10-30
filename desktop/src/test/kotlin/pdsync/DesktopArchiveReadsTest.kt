@@ -21,7 +21,7 @@ class DesktopArchiveReadsTest {
   assertTrue(profile.indexOf("if (!current()) return") < profile.indexOf("session = data?.session"))
   val remote = main.substringAfter("fun readRemote(").substringBefore("fun hasRemoteBranches()")
   assertContains(remote, "config == readConfig && session === manager")
-  assertTrue(remote.indexOf("if (!current()) return@launch") < remote.indexOf("remoteTips = loadedGraph.graph.tips"))
+  assertTrue(remote.indexOf("if (!current()) return@launch") < remote.indexOf("remoteTips = setOfNotNull(loadedGraph.simple?.latest)"))
   assertContains(remote, "catch (e: CancellationException) { throw e }")
   assertContains(remote, "finally { archiveReads.end(read); busy = false }")
   assertEquals(1, Regex("manager\\.readHomeHistory\\(").findAll(remote).count())

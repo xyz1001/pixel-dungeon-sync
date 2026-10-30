@@ -185,7 +185,7 @@ class DesktopRenewalHistoryReadsTest {
   assertContains(remote, "config == readConfig && session === manager")
   assertContains(remote, "currentPage() && session === readManager")
   assertTrue(remote.indexOf("refreshProfile(readConfig,") < remote.indexOf("manager.readHomeHistory("))
-  assertTrue(remote.indexOf("if (!current()) return@launch") < remote.indexOf("remoteTips = loadedGraph.graph.tips"))
+  assertTrue(remote.indexOf("if (!current()) return@launch") < remote.indexOf("remoteTips = setOfNotNull(loadedGraph.simple?.latest)"))
   assertEquals(1, Regex("manager\\.readHomeHistory\\(").findAll(remote).count())
   assertContains(remote, "syncAccess.store(manager.config, manager.adapter.id, secret)")
   assertContains(remote, "archiveReads.begin()")

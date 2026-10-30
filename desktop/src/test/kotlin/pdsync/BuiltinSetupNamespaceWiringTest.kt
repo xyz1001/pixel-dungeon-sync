@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 /** Host wiring: app-folder preparation never uploads or establishes sync ancestry. */
 class BuiltinSetupNamespaceWiringTest {
-    @Test fun desktopPreparesBuiltinNamespaceOnlyAfterHomeNavigationOrExplicitUpload() {
+    @Test fun desktopPreparesCurrentLayoutAfterExplicitConfigurationForEveryProvider() {
         val source = Files.readString(Path.of("src/main/kotlin/pdsync/Main.kt"))
         val commit = source.substringAfter("onApplied = { applied, note ->").substringBefore("Page.CONFLICT ->")
         assertTrue(commit.indexOf("navigate(Page.HOME)") < commit.indexOf("loadProfile(applied.config"))
@@ -16,20 +16,19 @@ class BuiltinSetupNamespaceWiringTest {
         val home = source.substringAfter("fun loadProfile(").substringBefore("fun selectTargetGame()")
         assertTrue(home.contains("page == Page.HOME && pageGeneration == generation && config == value"))
         assertTrue(home.contains("prepareOfficialNamespace && current()"))
-        assertTrue(home.contains("value.connectionProvider == \"official\""))
-        assertTrue(home.contains("isDesktopOfficialRoot(value.endpoint)"))
-        assertTrue(home.contains(".ensureNamespace { current() && session === manager }"))
+        assertFalse(home.contains("value.connectionProvider == \"official\""))
+        assertTrue(home.contains("syncAccess.store(value, manager.adapter.id, secret)"))
+        assertTrue(home.contains(".ensureSimpleNamespace()"))
         assertFalse(home.contains("authenticationFailed("))
         for (forbidden in listOf(".push(", ".adopt", "confirmOnboardingReady", "automatic.applied", "configFile.save"))
             assertFalse(home.contains(forbidden), forbidden)
         val execute = source.substringAfter("fun execute(").substringBefore("fun editDirectory(")
-        assertTrue(execute.contains("action == Action.PUSH && !isAutomatic"))
-        assertTrue(execute.contains("remoteStore.ensureNamespace"))
-        assertTrue(execute.contains("override fun writeObject(id: String, bytes: ByteArray) { prepareWrite();"))
-        assertTrue(execute.contains("override fun writeCommit(id: String, bytes: ByteArray) { prepareWrite();"))
-        assertFalse(execute.contains("store().ensureNamespace"))
+        assertTrue(execute.contains("syncAccess.store(manager.config, manager.adapter.id, secret)"))
+        assertFalse(execute.contains("ensureNamespace"))
+        assertFalse(execute.contains("ensureSimpleNamespace"))
+        assertTrue(execute.contains("manager.pushFromHome("))
         val read = source.substringAfter("fun readRemote(").substringBefore("fun openRestore()")
-        assertFalse(read.contains("ensureNamespace"))
+        assertFalse(read.contains("ensureNamespace"));assertFalse(read.contains("ensureSimpleNamespace"))
         assertFalse(source.contains("Page.COMPARISON"))
     }
 
@@ -40,7 +39,8 @@ class BuiltinSetupNamespaceWiringTest {
         assertTrue(prepare.contains("!isOfficialAccount(account)"))
         assertTrue(prepare.contains("currentOfficialHomeNamespace(owner, account, selection, namespace)"))
         assertTrue(prepare.contains("owner.connect()"))
-        assertTrue(prepare.contains("if (!preparedNamespace.isSuccess()) throw"))
+        assertTrue(prepare.contains("preparedNamespace.requireSuccess("))
+        assertTrue(prepare.indexOf("preparedNamespace.requireSuccess(") < prepare.indexOf("this.preparedOfficialNamespace.succeeded(key)"))
         val comparison = source.substringAfter("private void readComparison(boolean prepareNamespace, boolean allowHomePreview)").substringBefore("private ")
         assertTrue(comparison.indexOf("prepareOfficialHomeNamespace(activeFacade)") < comparison.indexOf("activeFacade.inspect()"))
         val commit = source.substringAfter("private boolean drainSharedCommit()").substringBefore("private ")

@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,7 +61,9 @@ fun SharedConnectionTheme(content: @Composable () -> Unit) {
         shapes = sharedConnectionShapes,
         typography = Typography(
             body1 = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
-            body2 = TextStyle(fontSize = 14.sp, lineHeight = 22.4.sp),
+            // Keep fallback-font ascenders inside the declared line box at large font scales.
+            body2 = TextStyle(fontSize = 14.sp, lineHeight = 22.4.sp,
+                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.None)),
             caption = TextStyle(fontSize = 12.sp, lineHeight = 19.2.sp),
             h5 = TextStyle(fontSize = 24.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
             button = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),

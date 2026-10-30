@@ -29,14 +29,15 @@ class DesktopSharedSnapshotSelectionTest {
   val state = DesktopSharedHomeAdapter.state(context)
   assertNull(history.defaultSnapshot)
   assertTrue(state.canRestore)
-  assertEquals("云端有多份进度，请点击恢复后选择。", state.status)
+  assertEquals(pdsync.i18n.DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text(), state.status)
   assertEquals(2, history.graph.tips.size)
  }
 
- @Test fun desktopConflictChoicesDeduplicateContentWhileRoutingByFullGraphTips() {
+ @Test fun desktopConflictChoicesDeduplicateContentWhileCurrentLayoutUsesSingleLatest() {
   val source = Files.readString(Path.of("src/main/kotlin/pdsync/Main.kt"))
   assertContains(source, "branches = value.branches.sortedBy { it.commit.id }.distinctBy { it.snapshot.manifest.id }.map")
-  assertContains(source, "fun hasRemoteBranches() = remoteTips.size > 1 || (graphHistory?.graph?.tips?.size ?: 0) > 1")
+  assertContains(source, "remoteTips = setOfNotNull(loadedGraph.simple?.latest)")
+  assertContains(source, "DesktopSimpleSession(value.copy(saveRoot=location.selected(value).toString())")
   assertContains(source.substringAfter("fun openRestore()").substringBefore("fun setAutomaticPaused("),
    "if (hasRemoteBranches() &&")
   assertContains(source, "retryable, conflict != null || hasRemoteBranches(), busy")

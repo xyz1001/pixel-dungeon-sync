@@ -10,20 +10,15 @@ import kotlin.test.*
 class DesktopHistoryRefreshWiringTest {
  @TempDir lateinit var temp: Path
 
- private class ReadCheckedStore : AppendStore {
-  val commits = linkedMapOf<String, ByteArray>()
-  val objects = linkedMapOf<String, ByteArray>()
-  var writes = 0
-  var failReads = false
-  override fun listCommits(cursor: String?): CommitPage {
-   check(!failReads) { "history unavailable" }
-   return CommitPage(commits.keys.toList())
-  }
-  override fun readCommit(id: String) = commits[id]?.copyOf()
-  override fun readObject(id: String) = objects[id]?.copyOf()
-  override fun writeCommit(id: String, bytes: ByteArray) { writes++; commits[id] = bytes.copyOf() }
-  override fun writeObject(id: String, bytes: ByteArray) { writes++; objects[id] = bytes.copyOf() }
-  override fun legacyPresent() = false
+ private class ReadCheckedStore : SimpleSaveStore {
+  val nodes=linkedMapOf<String,SaveNode>();val objects=linkedMapOf<String,ByteArray>()
+  var tip:String?=null;var writes=0;var objectReads=0;var failReads=false
+  override fun latest():String? {check(!failReads){"history unavailable"};return tip}
+  override fun node(hashId:String)=nodes[hashId]
+  override fun objectBytes(hashId:String):ByteArray {objectReads++;return objects.getValue(hashId)}
+  override fun createObject(hashId:String,bytes:ByteArray):Boolean {writes++;if(hashId in objects)return false;objects[hashId]=bytes;return true}
+  override fun createNode(node:SaveNode):Boolean {writes++;if(node.hashId in nodes)return false;nodes[node.hashId]=node;return true}
+  override fun setLatest(hashId:String) {writes++;tip=hashId}
  }
  private val versions = object : ProfileVersions {
   override fun annotate(snapshot: Snapshot) = snapshot.copy(manifest = snapshot.manifest.copy(version = "v1"))
@@ -51,7 +46,7 @@ class DesktopHistoryRefreshWiringTest {
   assertContains(remote, "homeSelectionGeneration == selectionGeneration")
   assertContains(remote, "renewalReads.isManualCurrent(manualRefresh, config)")
   assertContains(remote, "refreshProfile(readConfig, canPublish = ::currentPage)")
-  assertContains(remote, "manager.readHomeHistory(syncAccess.store(manager.config, manager.adapter.id, secret))")
+  assertContains(remote, "manager.readHomeHistory(syncAccess.store(manager.config, manager.adapter.id, secret), fullHistory=refreshLocal)")
   assertContains(remote, "if (!localHistoryVerified) return@launch")
   assertTrue(remote.indexOf("busy = true") < remote.indexOf("scope.launch"))
   assertTrue(remote.indexOf("refreshProfile(readConfig,") < remote.indexOf("manager.readHomeHistory("))
@@ -68,47 +63,44 @@ class DesktopHistoryRefreshWiringTest {
  }
 
  @Test fun reopenedEmptyAndPopulatedDirectoriesReadCloudHistoryWithoutWritingSavesOrPublishing() {
-  val remoteRoot = temp.resolve("remote-fixture").createDirectory()
+  val remoteRoot=temp.resolve("remote-fixture").createDirectory()
   remoteRoot.resolve("game1").createDirectory()
-  remoteRoot.resolve("game1/game.dat").writeText("cloud progress")
-  val store = ReadCheckedStore()
-  val remote = AppendProfileSession(AppConfig(saveRoot = remoteRoot.toString(), username = "account"),
-   temp.resolve("remote-state"), versions = versions, captureQuietMillis = 0)
-  assertIs<AppendPushResult.Success>(remote.push(store) { true })
-  val cloudBefore = store.commits.mapValues { it.value.toList() } to store.objects.mapValues { it.value.toList() }
-  store.writes = 0
-
-  for (populated in listOf(false, true)) {
-   val root = temp.resolve("local-$populated").createDirectory()
-   if (populated) { root.resolve("game1").createDirectory(); root.resolve("game1/game.dat").writeText("local progress") }
-   val owner = AppConfig(selectedSaveRoot = root.toString(), username = "account",
-    onboardingProgress = OnboardingProgress.COMPLETE)
-   val location = DefaultProfileLocation(versions = versions)
-   val before = bytes(root)
+  remoteRoot.resolve("game1/game.dat").writeText("""{"version":896,"init_ver":896,"turn":1}""")
+  val store=ReadCheckedStore()
+  val snapshot=Snapshots.capture(remoteRoot,Shattered,"demo","896",null)
+  SimpleSaveSync(store,temp.resolve("remote-baseline")).upload({}, {SaveUpload(snapshot.manifest.files,snapshot.zip,"cloud")})
+  val cloudBefore=store.nodes.toMap() to store.objects.mapValues {it.value.toList()}
+  store.writes=0
+  // Inject only the transport: exercise the production desktop current-layout adapter.
+  val unusedTransport=AppendOnlyWebDav("http://127.0.0.1:1","shattered","demo","","")
+  for(populated in listOf(false,true)) {
+   val root=temp.resolve("local-$populated").createDirectory()
+   if(populated) {
+    root.resolve("game1").createDirectory()
+    root.resolve("game1/game.dat").writeText("""{"version":896,"init_ver":896,"turn":2}""")
+   }
+   val owner=AppConfig(selectedSaveRoot=root.toString(),saveRoot=root.toString(),username="account",onboardingProgress=OnboardingProgress.COMPLETE)
+   val before=bytes(root)
    repeat(2) {
-    // These are the existing refreshProfile/readRemote operations selected by the actual callback.
-    assertEquals(root, location.selected(owner))
-    val manager = location.open(owner, temp.resolve("local-state-$populated"))
-    manager.history(); manager.currentVersions(); manager.syncHistory()
-    assertNull(manager.baseline())
-    assertFalse(manager.hasPending())
-    val preview = manager.readHomeHistory(store)
-    assertEquals(1, preview.graph.commits.size)
-    assertEquals(RemoteVerification.METADATA_ONLY, preview.graph.verification)
-    assertTrue(preview.verifiedCommitIds.isEmpty())
-    assertEquals(1, manager.syncHistory(preview).graph.commits.size)
-    assertTrue(manager.history().isEmpty(), "metadata read must not remember a ZIP")
-    assertEquals(before, bytes(root), "reading must not restore or create any local save")
-    assertNull(manager.baseline(), "reading never establishes sync ancestry")
-    assertFalse(manager.hasPending(), "reading never creates an upload plan")
-    store.failReads = true
-    assertFailsWith<IllegalStateException> { manager.readHomeHistory(store) }
-    store.failReads = false
-    assertEquals(before, bytes(root))
+    assertEquals(root,DefaultProfileLocation().selected(owner))
+    val manager=DesktopSimpleSession(owner,temp.resolve("local-state-$populated"),versions=versions,suppliedStore=store)
+    manager.currentVersions();assertNull(manager.syncHistory().baseline)
+    val preview=manager.readHomeHistory(unusedTransport,fullHistory=true)
+    assertEquals(1,preview.simple!!.nodes.size)
+    assertEquals(store.tip,preview.simple!!.latest)
+    assertTrue(preview.graph.commits.isEmpty(),"current layout does not manufacture a legacy DAG")
+    assertTrue(manager.history().isEmpty(),"metadata read must not remember a ZIP")
+    assertEquals(before,bytes(root),"reading must not restore or create any local save")
+    assertNull(preview.baseline,"reading never establishes sync ancestry")
+    assertFalse(manager.hasPending(),"reading never creates an upload plan")
+    store.failReads=true
+    assertFailsWith<IllegalStateException>{manager.readHomeHistory(unusedTransport,true)}
+    store.failReads=false
+    assertEquals(before,bytes(root))
    }
   }
-  assertEquals(0, store.writes)
-  assertEquals(cloudBefore, store.commits.mapValues { it.value.toList() } to store.objects.mapValues { it.value.toList() })
+  assertEquals(0,store.writes);assertEquals(0,store.objectReads)
+  assertEquals(cloudBefore,store.nodes.toMap() to store.objects.mapValues {it.value.toList()})
  }
 
  @Test fun missingDirectoryReadNeverPreparesIt() {
