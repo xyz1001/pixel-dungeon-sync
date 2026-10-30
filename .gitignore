@@ -35,6 +35,9 @@ credentials*
 .secrets/
 config.json
 config.json.legacy*
+webdav.properties
+webdav.enc*
+webdav-*.tmp
 .pixel-dungeon-sync/
 *.pem
 *.key
