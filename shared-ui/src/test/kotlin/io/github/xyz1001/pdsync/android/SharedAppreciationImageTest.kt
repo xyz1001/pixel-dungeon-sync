@@ -53,7 +53,8 @@ class SharedAppreciationImageTest {
                 repeat(3) { cycle ->
                     click(scene, node(scene, "appreciation-thumbnail").boundsInRoot.center)
                     render(scene, "viewer-$width-$height-$cycle")
-                    assertEquals(1, nodes(scene).count { tag(it) == "appreciation-viewer" })
+                    assertEquals(1, nodes(scene).count { tag(it) == "appreciation-viewer" },
+                        "Viewer after click: width=$width height=$height cycle=$cycle tags=${nodes(scene).map { tag(it) }}")
                     val bounds = node(scene, "appreciation-enlarged-image").boundsInRoot
                     assertEquals(width / 2f, bounds.center.x, 1f)
                     assertEquals(height / 2f, bounds.center.y, 1f)

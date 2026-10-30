@@ -11,6 +11,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsOwner
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
+import pdsync.i18n.SharedMessages
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -72,7 +79,7 @@ class SharedHomeHistoryRefreshRenderTest {
                         val title = observed.header.getValue("title")
                         val button = observed.header.getValue("refresh")
                         assertTrue(title.width > 0 && title.height <= 2 * 22.5f * scale + 1f,
-                            "complete title stays readable in at most two lines; locale=$locale width=$width scale=$scale title=$title button=$button section=$section")
+                            "complete title stays readable in at most two lines; locale=$locale width=$width scale=$scale title=$title button=$button section=$section density=1.0 fontScale=$scale layouts=${titleLayouts(scene)}")
                         assertTrue(title.right + 8f <= button.left + .6f, "refresh stays to the right of the title")
                         assertEquals(title.center.y, button.center.y, .6f)
                         assertTrue(button.width >= 48f && button.height >= 42f)
@@ -162,6 +169,28 @@ class SharedHomeHistoryRefreshRenderTest {
             render(scene, "history-refresh-removed")
             assertTrue(observed.header.isEmpty(), "removing the callback leaves no new control")
         } finally { scene.close() }
+    }
+
+    private fun titleLayouts(scene: ImageComposeScene): String {
+        val backing = ImageComposeScene::class.java.getDeclaredField("scene").run { isAccessible = true; get(scene) }
+        val root = backing.javaClass.getDeclaredField("mainOwner").run { isAccessible = true; get(backing) }
+        val owner = root.javaClass.getMethod("getSemanticsOwner").invoke(root) as SemanticsOwner
+        fun descend(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::descend)
+        return descend(owner.unmergedRootSemanticsNode).filter { node ->
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == SharedMessages.SAVE_HISTORY.text() }
+        }.flatMap { node ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
+            layouts.map { layout ->
+                "node=${node.id} bounds=${node.boundsInRoot} lines=${layout.lineCount} " +
+                    "overflowWidth=${layout.didOverflowWidth} overflowHeight=${layout.didOverflowHeight} " +
+                    "exceededMaxLines=${layout.multiParagraph.didExceedMaxLines} size=${layout.size} " +
+                    "fontSize=${layout.layoutInput.style.fontSize} lineHeight=${layout.layoutInput.style.lineHeight} " +
+                    "lineMetrics=" + (0 until layout.lineCount).joinToString { line ->
+                        "$line:[${layout.getLineTop(line)},${layout.getLineBottom(line)}] ellipsized=${layout.isLineEllipsized(line)}"
+                    }
+            }
+        }.joinToString("; ")
     }
 
     private class Observation : SharedHomeLayoutObserver, SharedHistoryLayoutObserver {

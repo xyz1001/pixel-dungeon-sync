@@ -25,6 +25,7 @@ dependencies {
 }
 tasks.test {
  useJUnitPlatform()
+ testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
  // Existing behavioral fixtures are Chinese; localization tests explicitly exercise other locales.
  systemProperty("user.language", "zh")
  systemProperty("user.country", "CN")

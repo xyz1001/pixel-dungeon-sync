@@ -150,6 +150,9 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+      - name: Collect synthetic render evidence
+        if: always()
+        run: python tools/ci/collect-test-evidence.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -157,11 +160,7 @@ jobs:
           path: |
             core/build/reports/tests/
             desktop/build/reports/tests/
-            ../code76-evidence/
-            desktop/build/reports/shared-comparison/choice-feedback-*.png
-            desktop/build/reports/shared-home-history-refresh/home-history-refresh-*.png
-            desktop/build/reports/shared-home/home-expired-*.png
-            ../code73-evidence/after/wizard-step*.png
+            build/ci-render-evidence/
           retention-days: 14
 
   release:
