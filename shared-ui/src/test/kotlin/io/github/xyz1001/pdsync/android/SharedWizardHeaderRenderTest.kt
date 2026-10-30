@@ -51,7 +51,7 @@ class SharedWizardHeaderRenderTest {
                             it.boundsInRoot.contains(button.boundsInRoot.center)
                     }.minBy { it.boundsInRoot.width * it.boundsInRoot.height }
                     if (fontScale == 1f) {
-                        assertEquals(112f, control.boundsInRoot.width, 1f, "reference natural button width")
+                        assertEquals(112f, control.boundsInRoot.width, 1f, "reference natural button width; width=$width step=$current label=${button.boundsInRoot} control=${control.boundsInRoot} locale=${pdsync.i18n.UiLocale.locale()}")
                         assertEquals(38f, control.boundsInRoot.height, 1f, "reference padded button height")
                     }
                     val before = exports

@@ -129,7 +129,7 @@ class SharedComparisonRenderTest {
                 val image = render(scene, "choice-feedback-$error")
                 val errorPixels = image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
                     .count { (it and 0xffffff) == 0xba1a1a }
-                if (error) assertTrue(errorPixels > 0, "actual failure must remain visible")
+                if (error) assertTrue(errorPixels > 0, "actual failure must remain visible; exactErrorPixels=$errorPixels, locale=${pdsync.i18n.UiLocale.locale()}, image=${image.width}x${image.height}")
                 else assertEquals(0, errorPixels, "ordinary status must not add a notice")
             } finally { scene.close() }
         }

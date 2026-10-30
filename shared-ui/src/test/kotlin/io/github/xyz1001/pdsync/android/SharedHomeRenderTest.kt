@@ -130,7 +130,8 @@ class SharedHomeRenderTest {
                         val status = observed.elements.getValue("status")
                         val button = observed.elements.getValue("appreciate")
                         val label = observed.elements.getValue("expiry-status-text")
-                        assertTrue(button.width >= 48 && button.height >= 42)
+                        assertTrue(button.width >= 48 && button.height >= 42,
+                            "support action minimum size; locale=$locale width=$width scale=$scale button=$button label=$label status=$status")
                         assertTrue(button.left >= status.left && button.right <= status.right)
                         assertTrue(button.top >= status.top && button.bottom <= status.bottom)
                         assertTrue(status.left >= 8 && status.right <= width - 8)

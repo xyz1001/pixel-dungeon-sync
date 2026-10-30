@@ -115,7 +115,11 @@ jobs:
           & "$env:WIX\bin\candle.exe" -?
       - name: Linux display prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb libgl1 libegl1 fakeroot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libegl1 fakeroot fontconfig fonts-noto-cjk
+          fc-match 'sans:lang=zh-cn'
+          fc-list :lang=zh family | sort -u
       - name: JVM and shared UI regressions
         shell: bash
         run: |
@@ -132,7 +136,7 @@ jobs:
         id: package
         if: ${{ !cancelled() }}
         shell: bash
-        run: bash gradlew --no-daemon :desktop:packageDistributionForCurrentOS
+        run: bash gradlew --no-daemon :desktop:createDistributable :desktop:packageDistributionForCurrentOS
       - name: Native app-image smoke and package inspection
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python tools/ci/desktop-package.py
@@ -153,6 +157,11 @@ jobs:
           path: |
             core/build/reports/tests/
             desktop/build/reports/tests/
+            ../code76-evidence/
+            desktop/build/reports/shared-comparison/choice-feedback-*.png
+            desktop/build/reports/shared-home-history-refresh/home-history-refresh-*.png
+            desktop/build/reports/shared-home/home-expired-*.png
+            ../code73-evidence/after/wizard-step*.png
           retention-days: 14
 
   release:

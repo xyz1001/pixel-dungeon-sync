@@ -88,6 +88,10 @@ The retained signer must equal `tools/ci/android-signer.sha256`, verified from t
 existing signed code135 APK (public certificate only). Current game preparation
 binds the application's actual certificate into each prepared game's metadata;
 the legacy helper test certificate is not the current application release key.
+The retained certificate is named `CN=PDSync Development`: it is the existing
+test-installation identity, not an automatically approved production signing key.
+The owner must explicitly choose to retain it for releases before uploading it;
+the workflow neither generates a new key nor silently changes that identity.
 Changing the signer breaks ordinary updates and existing bridge bindings.
 Secrets grant the tag workflow signing
 capability; anyone able to modify trusted release code can potentially use them.

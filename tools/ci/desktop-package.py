@@ -14,13 +14,24 @@ ROOT=Path(__file__).resolve().parents[2]
 def run(*args, **kwargs):
     return subprocess.run([str(x) for x in args],check=True,**kwargs)
 
+def linux_launcher(app):
+    candidates=[p for p in (app/'bin').iterdir() if p.is_file() and p.name.lower()=='pdsync']
+    assert len(candidates)==1,candidates
+    return candidates[0]
+
+def linux_image(images):
+    candidates=[p for p in images.iterdir() if p.is_dir() and (p/'lib/runtime/bin/java').is_file()]
+    assert len(candidates)==1,candidates
+    linux_launcher(candidates[0])
+    return candidates[0]
+
 def smoke(app, system, out, label):
     if system=='Windows':
         launcher=app/'PDSync.exe'; java=app/'runtime/bin/java.exe'
     elif system=='Darwin':
         launcher=app/'Contents/MacOS/PDSync'; java=app/'Contents/runtime/Contents/Home/bin/java'
     else:
-        launcher=app/'bin/PDSync'; java=app/'lib/runtime/bin/java'
+        launcher=linux_launcher(app); java=app/'lib/runtime/bin/java'
     assert launcher.is_file() and java.is_file(), (launcher,java)
     run(java,'-version')
     with tempfile.TemporaryDirectory(prefix='pdsync-smoke-') as temp:
@@ -46,7 +57,7 @@ def main():
         suffix,arch='dmg','arm64'
         assert platform.machine()=='arm64',platform.machine()
     else:
-        app=images/'PDSync'; launcher=app/'bin/PDSync'; java=app/'lib/runtime/bin/java'
+        app=linux_image(images)
         suffix,arch='deb','x64'
     smoke(app,system,out,system.lower())
     packages=list((base/suffix).glob('*.'+suffix)); assert len(packages)==1,packages
@@ -63,7 +74,7 @@ def main():
         run('dpkg-deb','--info',dest)
         with tempfile.TemporaryDirectory() as d:
             run('dpkg-deb','--extract',dest,d)
-            launchers=list(Path(d).rglob('bin/PDSync'))
+            launchers=[p for p in Path(d).rglob('*') if p.is_file() and p.parent.name=='bin' and p.name.lower()=='pdsync']
             assert len(launchers)==1,launchers
             smoke(launchers[0].parent.parent,system,out,'deb-extracted')
     else:

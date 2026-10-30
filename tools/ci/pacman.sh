@@ -2,7 +2,8 @@
 set -euo pipefail
 OUT="$RUNNER_TEMP/pacman-build"
 mkdir -p "$OUT/image"
-cp -a desktop/build/compose/binaries/main/app/PDSync/. "$OUT/image/"
+IMAGE=$(python3 -c 'import importlib.util,pathlib; p=pathlib.Path("tools/ci/desktop-package.py"); import sys;sys.path.insert(0,str(p.parent));s=importlib.util.spec_from_file_location("package",p);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);print(m.linux_image(pathlib.Path("desktop/build/compose/binaries/main/app")))')
+cp -a "$IMAGE/." "$OUT/image/"
 cp tools/ci/PKGBUILD "$OUT/PKGBUILD"
 VERSION=$(python3 -c 'import sys;sys.path.insert(0,"tools/ci");from version import version;print(version()["name"])')
 # pacman pkgver forbids hyphens; the public artifact filename retains versionName.

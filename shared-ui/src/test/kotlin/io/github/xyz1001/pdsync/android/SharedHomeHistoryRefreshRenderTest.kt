@@ -72,7 +72,7 @@ class SharedHomeHistoryRefreshRenderTest {
                         val title = observed.header.getValue("title")
                         val button = observed.header.getValue("refresh")
                         assertTrue(title.width > 0 && title.height <= 2 * 22.5f * scale + 1f,
-                            "complete title stays readable in at most two lines")
+                            "complete title stays readable in at most two lines; locale=$locale width=$width scale=$scale title=$title button=$button section=$section")
                         assertTrue(title.right + 8f <= button.left + .6f, "refresh stays to the right of the title")
                         assertEquals(title.center.y, button.center.y, .6f)
                         assertTrue(button.width >= 48f && button.height >= 42f)

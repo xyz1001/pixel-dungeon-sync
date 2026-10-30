@@ -10,6 +10,13 @@ options=('!strip' '!debug')
 package() {
     install -d "$pkgdir/opt/pdsync" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications"
     cp -a "$startdir/image/." "$pkgdir/opt/pdsync/"
-    ln -s /opt/pdsync/bin/PDSync "$pkgdir/usr/bin/pdsync"
-    printf '[Desktop Entry]\nType=Application\nName=PDSync\nExec=/opt/pdsync/bin/PDSync\nIcon=/opt/pdsync/lib/PDSync.png\nCategories=Game;Utility;\nTerminal=false\n' > "$pkgdir/usr/share/applications/pdsync.desktop"
+    local launchers=("$pkgdir"/opt/pdsync/bin/*)
+    [[ ${#launchers[@]} == 1 && -f "${launchers[0]}" ]] || return 1
+    local launcher="${launchers[0]##*/}"
+    [[ ${launcher,,} == pdsync ]] || return 1
+    ln -s "/opt/pdsync/bin/$launcher" "$pkgdir/usr/bin/pdsync"
+    printf '[Desktop Entry]\nType=Application\nName=PDSync\nExec=/usr/bin/pdsync\nCategories=Game;Utility;\nTerminal=false\n' > "$pkgdir/usr/share/applications/pdsync.desktop"
+    local icons=("$pkgdir"/opt/pdsync/lib/*.png)
+    [[ ${#icons[@]} == 1 && -f "${icons[0]}" ]] || return 1
+    printf 'Icon=/opt/pdsync/lib/%s\n' "${icons[0]##*/}" >> "$pkgdir/usr/share/applications/pdsync.desktop"
 }
