@@ -1,0 +1,15 @@
+pkgname=pdsync
+pkgver=0.0.0
+pkgrel=1
+pkgdesc='Pixel Dungeon save synchronization (bundled Java runtime)'
+arch=('x86_64')
+url='https://github.com/xyz1001/pixel-dungeon-sync'
+license=('custom')
+depends=('glibc' 'gcc-libs' 'zlib' 'freetype2' 'fontconfig' 'libx11' 'libxext' 'libxi' 'libxrender' 'libxtst' 'alsa-lib' 'libglvnd')
+options=('!strip' '!debug')
+package() {
+    install -d "$pkgdir/opt/pdsync" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications"
+    cp -a "$startdir/image/." "$pkgdir/opt/pdsync/"
+    ln -s /opt/pdsync/bin/PDSync "$pkgdir/usr/bin/pdsync"
+    printf '[Desktop Entry]\nType=Application\nName=PDSync\nExec=/opt/pdsync/bin/PDSync\nIcon=/opt/pdsync/lib/PDSync.png\nCategories=Game;Utility;\nTerminal=false\n' > "$pkgdir/usr/share/applications/pdsync.desktop"
+}
