@@ -2,7 +2,7 @@ package pdsync
 
 /** A HOME card is an explicit source only while it still belongs to the observed cloud graph. */
 internal fun desktopHasExplicitCloudRestoreSelection(history: SyncHistory?, selected: String?, selectedByUser: Boolean) =
- selectedByUser && selected != null && history?.graph?.commits?.values?.any { it.snapshot.id == selected } == true
+ selectedByUser && selected != null && history?.cloud?.any { it.snapshot.id == selected } == true
 
 /** Bind overwrite consent to the exact account/session, observation and source displayed. */
 internal class DesktopSelectedRestoreConfirmation(

@@ -38,7 +38,7 @@ class DesktopSyncAccessTest {
   assertTrue(access.isExpired(official))
  }
 
- @Test fun everyOperationRefreshesEvenWhenLoggedInAndCustomProviderCannotBypassOfficialOrigin() {
+ @Test fun validLeaseIsReusedButIdentityChangeAndRestartRefresh() {
   var refreshes = 0
   var checks = 0
   val access = DesktopSyncAccess { _, _, _ -> refreshes++; { checks++; Unit } }
@@ -46,9 +46,12 @@ class DesktopSyncAccessTest {
   first(); first()
   assertEquals(1, refreshes)
   assertEquals(2, checks)
+  access.beginOperation(official, "secret")()
+  assertEquals(1, refreshes)
+  assertEquals(4, checks, "cache reuse checks the original lease before use and for the request")
   access.beginOperation(official.copy(connectionProvider = "custom", endpoint = DESKTOP_OFFICIAL_ROOT + "nested"), "secret")()
   assertEquals(2, refreshes)
-  assertEquals(3, checks)
+  assertEquals(5, checks)
   DesktopSyncAccess { _, _, _ -> refreshes++; {} }.beginOperation(official, "secret")
   assertEquals(3, refreshes) // a restarted host must obtain a new server proof
  }
@@ -59,7 +62,7 @@ class DesktopSyncAccessTest {
   assertFalse(access.isExpired(official))
  }
 
- @Test fun historyRefreshNeedsAKnownCurrentLeaseAndAlwaysReauthorizesTheActualRead() {
+ @Test fun historyRefreshReusesValidLeaseButExpiredProofCannotSurviveFailedRefresh() {
   var refreshes = 0
   var offline = false
   var elapsed = false
@@ -79,12 +82,15 @@ class DesktopSyncAccessTest {
   assertEquals(1, refreshes, "rendering never refreshes account metadata")
   assertFalse(access.hasKnownAccess(official.copy(username = "other")))
   offline = true
+  access.store(official, "shattered", "secret")
+  assertEquals(1, refreshes, "a valid authenticated lease needs no repeated account HTTP")
+  elapsed = true
   assertFailsWith<IOException> { access.store(official, "shattered", "secret") }
-  assertEquals(2, refreshes, "a known lease cannot bypass the fresh operation request")
+  assertEquals(2, refreshes, "an expired lease requires a fresh authenticated result")
   assertFalse(access.hasKnownAccess(official), "a failed fresh metadata query invalidates the older UI proof")
   access.observeAccountStatus(official.endpoint, official.username, null, 1000L)
   assertFalse(access.hasKnownAccess(official), "display facts cannot repair failed operation authorization")
-  offline = false
+  offline = false; elapsed = false
   access.store(official, "shattered", "secret")
   assertTrue(access.hasKnownAccess(official), "fresh operation authorization recovers the button")
   elapsed = true
@@ -98,11 +104,11 @@ class DesktopSyncAccessTest {
   assertFalse(access.hasKnownAccess(official))
  }
 
- @Test fun staleLoginAndRefreshFailureCannotProduceAnyStore() {
+ @Test fun invalidCachedLeaseAndRefreshFailureCannotProduceAnyStore() {
   var permitted = true
   val access = DesktopSyncAccess { _, _, _ ->
    if (!permitted) throw IOException("Metadata unavailable")
-   val lease: () -> Unit = { Unit }
+   val lease: () -> Unit = { if (!permitted) throw IOException("Cached proof invalid") }
    lease
   }
   access.beginOperation(official, "secret")()
@@ -166,7 +172,7 @@ class DesktopSyncAccessTest {
  }
 
  @Test fun everyDesktopRemoteEntryUsesGuardedFactoryAndStartupNeverUsesDavForOfficialAccount() {
-  val main = Files.readString(Path.of("src/main/kotlin/pdsync/Main.kt"))
+  val main = Files.readString(Path.of("src/main/kotlin/pdsync/Main.kt")).replace("\r\n", "\n")
   assertFalse(main.contains("AppendOnlyWebDav("))
   assertEquals(4, Regex("syncAccess\\.store\\(").findAll(main).count())
   val startup = main.substringAfter("suspend fun reconnectSaved(").substringBefore("fun openConnection(")

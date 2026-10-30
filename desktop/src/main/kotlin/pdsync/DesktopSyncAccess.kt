@@ -2,7 +2,7 @@ package pdsync
 
 import io.github.xyz1001.pdsync.android.OfficialSyncAccess
 
-/** Every remote operation refreshes server entitlement; a lease never survives a restart. */
+/** Reuse the shared authenticated lease until its original deadline; never persist it across restarts. */
 internal class DesktopSyncAccess(
  private val isExpiry: (Exception) -> Boolean = { it is OfficialSyncAccess.AccessException && it.isExpired },
  private val begin: (String, String, String) -> (() -> Unit) = { endpoint, username, password ->
@@ -33,6 +33,13 @@ internal class DesktopSyncAccess(
    val currentDisplay = displayExpiry?.takeIf { it.identity == nextIdentity }
    reset()
    displayExpiry = currentDisplay
+  }
+  // The same shared Lease.check used by Android retains the server deadline.
+  // Display-only account facts never create a lease, and invalid leases fall through
+  // to an authenticated refresh rather than extending their lifetime.
+  check?.takeIf { knownAccess }?.let { cached ->
+   try { verify(cached); return { verify(cached) } }
+   catch (_: Exception) { /* Missing/invalid proof must be refreshed below. */ }
   }
   identity = nextIdentity
   knownAccess = false

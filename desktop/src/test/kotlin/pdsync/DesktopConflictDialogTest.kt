@@ -148,7 +148,7 @@ class DesktopConflictDialogTest {
   assertContains(overwrite, "conflictSelection = id")
   assertContains(overwrite, "execute(operationEvents.begin(Action.RESOLVE))")
   assertFalse(overwrite.contains("conflictRestoreIssue"), "cloud overwrite must not depend on reverse-restore compatibility")
-  assertContains(main, "Action.RESOLVE -> {manager.overwriteCloudConflict(")
+  assertContains(main, "Action.RESOLVE -> pushed(manager.overwriteCloudConflict(")
   assertTrue(modal.indexOf("SharedHomeScreen") < modal.indexOf("ConflictDialog("))
   val chooser = main.substringAfter("private fun ConflictDialog(").substringBefore("private fun ConfirmationPage(")
   assertContains(chooser, "SharedBranchChoiceDialog(state")

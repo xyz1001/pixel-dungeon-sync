@@ -199,17 +199,11 @@ class AndroidSyncFacade internal constructor(
  }
  fun observationGeneration():Long=mutationEpoch.get()
  fun beginHomeReadIdentityScope():AutoCloseable=bridge.beginHomeReadIdentityScope()
- private fun simpleNodes(latest:String?,known:List<SaveNode> = emptyList()):List<SaveNode> {
-  val result=mutableListOf<SaveNode>();val seen=hashSetOf<String>();var next=latest
-  while(next!=null) {
-   require(seen.add(next) && seen.size<=MAX_COMMITS)
-   val node=known.firstOrNull {it.hashId==next} ?: requireNotNull(simpleStore.node(next)){"Save metadata is missing"}
-   result+=node;next=node.parentId
-  };return result
- }
+ private fun simpleNodes(latest:String?,known:List<SaveNode> = emptyList()):List<SaveNode> =
+  SimpleSaveProtocol.history(simpleStore,latest,known)
  private fun simpleInspection(files:Map<String,String>,latest:String?,nodes:List<SaveNode>,summary:SaveSummary?=null):Inspection {
   val id=files.takeIf {it.isNotEmpty()}?.let(::contentSha256);val baseline=simpleSync.baseline()
-  val kind=when {id==null && latest==null->"BOTH_EMPTY";id==null->"REMOTE_ONLY";latest==null->"LOCAL_ONLY";id==latest->"IDENTICAL";baseline==latest->"DIFFERENT";else->"BRANCHED"}
+  val kind=SimpleSaveProtocol.kind(files,baseline,latest)
   val message=when(kind){"IDENTICAL"->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVE_BYTES_MATCH.text();"BOTH_EMPTY"->CoreMessages.ANDROID_NO_LOCAL_OR_CLOUD_SAVES_WERE_FOUND.text();"LOCAL_ONLY"->CoreMessages.ANDROID_ONLY_THIS_DEVICE_HAS_SAVES_UPLOAD_PRESERVES_THEM_IN_THE_CLOUD.text();else->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVES_DIFFER_REVIEW_VERSIONS_BEFORE_RESTORING_OR_MERGING.text()}
   val history=SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline,files,simpleCurrentName.orEmpty(),summary,nodes.associate {it.hashId to it.name},simple=SimpleHistory(nodes,latest,id))
   val remote=nodes.filter {it.hashId==latest}.map {Version(it.hashId,it.hashId,it.name,"",0,null,null,true,CoreMessages.CLOUD_HISTORY.text())}
@@ -271,13 +265,8 @@ class AndroidSyncFacade internal constructor(
   require(observed.nodes.any {it.hashId==id})
   val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget())
   try {
-   val zip=simpleStore.objectBytes(id);val entries=linkedMapOf<String,ByteArray>()
-   java.util.zip.ZipInputStream(zip.inputStream()).use {input->while(true){
-    val entry=input.nextEntry ?: break;if(entry.isDirectory)continue
-    require(safePath(entry.name) && adapter.includes(entry.name) && !isDirectoryMetadata(entry.name) && entry.name !in entries)
-    val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192);while(true){val count=input.read(buffer);if(count<0)break;require(output.size()+count<=MAX_SNAPSHOT_BYTES);output.write(buffer,0,count)};val bytes=output.toByteArray()
-    entries[entry.name]=bytes;require(entries.size<=MAX_SNAPSHOT_FILES && entries.values.sumOf {it.size.toLong()}<=MAX_SNAPSHOT_BYTES)
-   }}
+   val zip=simpleStore.objectBytes(id)
+   val entries=SimpleSaveProtocol.restoreEntries(zip,adapter)
    versions.detectVerifiedEntries(entries);val files=entries.mapValues {hash(it.value)}
    val snapshot=Snapshot(Manifest(game=adapter.id,profile=config.profile,version=CoreMessages.ANDROID_ANDROID_SAVE_EXPORT.text(),id=id,parent=null,sha256=hash(zip),files=files),zip)
    val before=freshVerifiedExport {it.snapshot.manifest.files}

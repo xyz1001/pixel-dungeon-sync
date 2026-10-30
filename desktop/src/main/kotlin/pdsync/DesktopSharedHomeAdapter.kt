@@ -53,7 +53,7 @@ internal data class DesktopHomeSelection(val snapshotId: String?, val explicit: 
 
 /** Keep a real user choice across refreshes, independent of the currently visible history page. */
 internal fun desktopHomeSelection(history: SyncHistory?, selectedId: String?, explicit: Boolean): DesktopHomeSelection =
- if (explicit && selectedId != null && history?.graph?.commits?.values?.any { it.snapshot.id == selectedId } == true)
+ if (explicit && selectedId != null && history?.cloud?.any { it.snapshot.id == selectedId } == true)
   DesktopHomeSelection(selectedId, true)
  else DesktopHomeSelection(history?.defaultSnapshot, false)
 
@@ -69,15 +69,15 @@ internal fun sameDesktopHomeProfile(previous: AppConfig?, current: AppConfig?): 
 internal object DesktopSharedHomeAdapter {
  fun state(current: DesktopHomeContext): SharedHomeState {
   val history = current.history
-  val hasRemoteBranches = current.remoteTips.size > 1 || (history?.graph?.tips?.size ?: 0) > 1
-  val target = history?.graph?.commits?.values?.firstOrNull { it.snapshot.id == current.selectedId }
+  val hasRemoteBranches = current.remoteTips.size > 1 || (history?.simple == null && (history?.graph?.tips?.size ?: 0) > 1)
+  val target = history?.cloud?.firstOrNull { it.snapshot.id == current.selectedId }
   val complete = current.config?.onboardingProgress == OnboardingProgress.COMPLETE
   val locked = current.busy || current.connectingAtStartup || current.appClosed
   val transferLocked = locked || current.archiveLoading
   val localVerified = current.hasSession && current.localHistoryVerified && current.game != null &&
    current.locationIssue == null && sameDesktopHomeProfile(current.historyOwner, current.config)
   val remoteVerified = current.historyVerified &&
-   history?.graph?.tips?.map { history.graph.commits.getValue(it).snapshot.id }?.toSet() == current.remoteTips
+   (history?.simple?.let { setOfNotNull(it.latest) } ?: history?.graph?.tips?.map { history.graph.commits.getValue(it).snapshot.id }?.toSet()) == current.remoteTips
   val archiveVerified = localVerified && (!current.connected || remoteVerified)
   val sources = SharedHomeArchiveAvailability.from(history, current.selectedId, archiveVerified)
   val frozenUploadAvailable = archiveVerified && history != null && history.graph.pending.isEmpty() &&
@@ -137,7 +137,7 @@ internal object DesktopSharedHomeAdapter {
    canLaunch = current.config != null && !locked && current.gameStatus !is GameProcessStatus.Running,
    canAppreciate = current.serviceExpired && desktopHomeOfficialIdentity(current.config),
    // Reading is useful even with an empty/unavailable local source or an earlier failed session.
-   // The account fact gates entry only; syncAccess.store still obtains a new request lease.
+   // The account fact gates entry only; syncAccess.store still checks the current authenticated lease.
    canRefreshHistory = complete && current.connected && !current.serviceExpired &&
     current.historyRefreshAccessKnown,
    pending = if (current.launchingGame) SharedHomeOperation.LAUNCH else current.operation,
