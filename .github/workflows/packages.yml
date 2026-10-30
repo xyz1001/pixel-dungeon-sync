@@ -38,10 +38,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PDSYNC_BUILD_HOME: ${{ runner.temp }}/android-inputs
-      PDSYNC_BRIDGE_RUNTIME_DEX: ${{ runner.temp }}/android-inputs/bridge-runtime.dex
-      PDSYNC_ROOT_NATIVE_DIR: ${{ runner.temp }}/android-inputs/root-native
-      PDSYNC_APKSIG_JAR: ${{ runner.temp }}/android-inputs/apksigner-api26.jar
+      PDSYNC_BUILD_HOME: ${{ github.workspace }}/../android-inputs
+      PDSYNC_BRIDGE_RUNTIME_DEX: ${{ github.workspace }}/../android-inputs/bridge-runtime.dex
+      PDSYNC_ROOT_NATIVE_DIR: ${{ github.workspace }}/../android-inputs/root-native
+      PDSYNC_APKSIG_JAR: ${{ github.workspace }}/../android-inputs/apksigner-api26.jar
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
