@@ -25,10 +25,10 @@ No phone, retained build outputs or user configuration is required.
 |---|---|---|
 | Android APK | Ubuntu / arm64-v8a, armeabi-v7a, x86, x86_64 | Python host suites, bridge/native host tests, release lint, 16KiB alignment; tag signatures at API26/36 |
 | Windows EXE | Windows 2022 / x64 | JVM/shared UI tests and bundled-runtime window smoke |
-| Windows portable ZIP | Windows 2022 / x64 | Complete app-image including Java, same native launcher smoke |
+| Windows portable ZIP | Windows 2022 / x64 | Complete app-image including Java, extracted ZIP launcher smoke |
 | Linux DEB | Ubuntu 24.04 / x64 | JVM/shared UI tests, package metadata/extraction and Xvfb window smoke |
 | Linux .pkg.tar.zst | Arch container / x64 | Non-root makepkg; pacman metadata/list/install; installed window smoke |
-| macOS DMG | macOS 15 / arm64 | JVM/shared UI tests, bundled-runtime window smoke, hdiutil verify |
+| macOS DMG | macOS 15 / arm64 | JVM/shared UI tests, hdiutil verify, read-only mounted DMG launcher smoke |
 
 Desktop smoke uses the existing `PDSYNC_SMOKE=1` and a temporary workspace; it
 checks an actual displayed window, not merely file existence. Linux needs ordinary
@@ -52,9 +52,11 @@ distinguished; the branch-conflict wording was also checked. These results are n
 an Android-device round trip or a public-network performance measurement. Package
 smoke tests cannot substitute for either.
 
-The six-artifact CI matrix has not yet completed successfully, and no formal release
-has been created. The table above describes configured checks, not completed results.
-Record the final workflow URL, commit, job conclusions, and artifacts before claiming
+The table above describes configured checks. Check the exact commit's
+[Actions run](https://github.com/xyz1001/pixel-dungeon-sync/actions/workflows/packages.yml)
+for completed job results and downloadable build artifacts; a successful build-only
+run does not publish a release. CI setup does not create a formal version tag.
+Record the workflow URL, commit, job conclusions, and artifacts before claiming
 a build is verified. Repository signing Secrets are currently absent; their upload
 requires the explicit approval below. Do not publish unsigned Android output as an
 installable release or call a non-release run an end-to-end release test.
