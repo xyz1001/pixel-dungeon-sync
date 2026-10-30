@@ -641,6 +641,7 @@ internal fun runSyncApplication(
      val pendingSource = withContext(Dispatchers.IO) { manager.retryablePendingSourceAvailable() }
      if (!current()) return@launch
      remoteTips = setOfNotNull(loadedGraph.simple?.latest); remoteInspectionReady = true
+     automaticStatus = desktopAutomaticStatusAfterCloudRead(config?.autoUploadPaused == true, conflict != null)
      remoteObserved = emptyMap()
      history = loadedHistory; graphHistory = loadedGraph
      localHistoryVerified = true; pendingUploadSourceAvailable = pendingSource

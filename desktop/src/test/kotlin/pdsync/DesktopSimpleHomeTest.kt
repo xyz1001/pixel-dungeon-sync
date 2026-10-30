@@ -32,4 +32,24 @@ class DesktopSimpleHomeTest {
   val state=DesktopSharedHomeAdapter.state(context(history()).copy(config=config.copy(username="other")))
   assertFalse(state.canUpload);assertFalse(state.canRestore)
  }
+ @Test fun successfulEmptyCloudReadReplacesUnknownStatusWithoutDisablingUpload() {
+  val empty=SyncHistory(CommitGraph(emptyMap(),emptyMap()),null,files,"",null,emptyMap(),
+   simple=SimpleHistory(emptyList(),null,contentSha256(files)))
+  val ready=context(empty).copy(remoteTips=emptySet(),selectedId=null,selectedByUser=false,
+   automaticStatus=desktopAutomaticStatusAfterCloudRead(false,false))
+  val state=DesktopSharedHomeAdapter.state(ready)
+  assertTrue(state.canUpload);assertFalse(state.canRestore)
+  assertEquals(pdsync.i18n.DesktopMessages.AUTOMATIC_UPLOAD_ENABLED.text(),state.status)
+  val unknown=DesktopSharedHomeAdapter.state(ready.copy(historyVerified=false,
+   automaticStatus=pdsync.i18n.DesktopMessages.CLOUD_CHECK_INCOMPLETE_AUTOMATIC_UPLOAD_PAUSED.text()))
+  assertFalse(unknown.canUpload)
+  assertEquals(pdsync.i18n.DesktopMessages.CLOUD_CHECK_INCOMPLETE_AUTOMATIC_UPLOAD_PAUSED.text(),unknown.status)
+  assertEquals(pdsync.i18n.DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_YOU_CAN_STILL_UPLOAD_MANUALLY.text(),
+   desktopAutomaticStatusAfterCloudRead(true,false))
+ }
+ @Test fun oneLatestConflictUsesLocalVersusCloudExplanation() {
+  val state=DesktopSharedHomeAdapter.state(context(history()).copy(hasConflict=true))
+  assertEquals(pdsync.i18n.DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text(),state.status)
+  assertEquals(io.github.xyz1001.pdsync.android.SharedHomeStatusKind.CONFLICT,state.statusKind)
+ }
 }

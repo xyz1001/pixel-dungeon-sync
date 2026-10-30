@@ -91,4 +91,23 @@ class DesktopSimpleSessionTest {
   java.util.zip.ZipOutputStream(out).use {it.putNextEntry(java.util.zip.ZipEntry("../game.dat"));it.write(1);it.closeEntry()}
   assertFailsWith<IllegalArgumentException>{SimpleSaveProtocol.restoreEntries(out.toByteArray(),Shattered)}
  }
+ @Test fun latest404IsKnownEmptyButAuthenticationAndServiceFailureAreNotEmpty() {
+  okhttp3.mockwebserver.MockWebServer().use {server->
+   server.start()
+   val root=Files.createDirectories(temp.resolve("http-game/game1"))
+   Files.writeString(root.resolve("game.dat"),"""{"version":896,"init_ver":896,"turn":1}""")
+   val desktop=DesktopSimpleSession(AppConfig(saveRoot=root.parent.toString()),temp.resolve("http-state"),versions=versions)
+   val dav=AppendOnlyWebDav(server.url("/").toString(),"shattered","demo","user","fixture")
+   server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(404))
+   val empty=desktop.readHomeHistory(dav)
+   assertNotNull(empty.simple);assertNull(empty.simple!!.latest);assertTrue(empty.simple!!.nodes.isEmpty())
+   assertEquals("/shattered/demo/latest",server.takeRequest().path)
+   for(status in listOf(401,503)) {
+    server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(status))
+    assertEquals(status,assertFailsWith<WebDavException>{desktop.readHomeHistory(dav)}.statusCode)
+    assertEquals("GET",server.takeRequest().method)
+   }
+   assertEquals(3,server.requestCount)
+  }
+ }
 }

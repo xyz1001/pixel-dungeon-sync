@@ -51,6 +51,13 @@ internal data class DesktopHomeContext(
 
 internal data class DesktopHomeSelection(val snapshotId: String?, val explicit: Boolean)
 
+/** A successful cloud read, including a missing latest, replaces the previous unknown status. */
+internal fun desktopAutomaticStatusAfterCloudRead(paused: Boolean, conflict: Boolean): String = when {
+ paused -> DesktopMessages.AUTOMATIC_UPLOAD_PAUSED_YOU_CAN_STILL_UPLOAD_MANUALLY.text()
+ conflict -> DesktopMessages.THERE_ARE_MULTIPLE_CLOUD_BRANCHES_CLICK_RESTORE_TO_CHOOSE_ONE.text()
+ else -> DesktopMessages.AUTOMATIC_UPLOAD_ENABLED.text()
+}
+
 /** Keep a real user choice across refreshes, independent of the currently visible history page. */
 internal fun desktopHomeSelection(history: SyncHistory?, selectedId: String?, explicit: Boolean): DesktopHomeSelection =
  if (explicit && selectedId != null && history?.cloud?.any { it.snapshot.id == selectedId } == true)
