@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
@@ -97,13 +98,28 @@ fun SharedHistorySection(
         if (onRefresh == null) {
             Text(SharedMessages.SAVE_HISTORY.text(), fontSize = 15.sp, lineHeight = 22.5.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 24.dp))
-        } else Row(Modifier.fillMaxWidth().padding(top = 24.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(SharedMessages.SAVE_HISTORY.text(), fontSize = 15.sp, lineHeight = 22.5.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f).onGloballyPositioned { observer?.headerElement("title", it.boundsInRoot()) })
-            SharedActionButton(SharedMessages.REFRESH.text(), onRefresh,
-                enabled = refreshEnabled && !busy && !loading, style = SharedButtonStyle.TEXT,
-                modifier = Modifier.onGloballyPositioned { observer?.headerElement("refresh", it.boundsInRoot()) })
+        } else BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 24.dp)) {
+            val title: @Composable (Modifier) -> Unit = { modifier ->
+                Text(SharedMessages.SAVE_HISTORY.text(), fontSize = 15.sp, lineHeight = 22.5.sp, fontWeight = FontWeight.Bold,
+                    modifier = modifier.onGloballyPositioned { observer?.headerElement("title", it.boundsInRoot()) })
+            }
+            val refresh: @Composable (Modifier) -> Unit = { modifier ->
+                SharedActionButton(SharedMessages.REFRESH.text(), onRefresh,
+                    enabled = refreshEnabled && !busy && !loading, style = SharedButtonStyle.TEXT,
+                    modifier = modifier.onGloballyPositioned { observer?.headerElement("refresh", it.boundsInRoot()) })
+            }
+            if (maxWidth <= 360.dp && LocalDensity.current.fontScale >= 1.5f) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    title(Modifier.fillMaxWidth())
+                    refresh(Modifier.align(Alignment.End))
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    title(Modifier.weight(1f))
+                    refresh(Modifier)
+                }
+            }
         }
         if (presentation == null) {
             if (loading) Text(SharedMessages.READING_HISTORY.text(), color = SharedUiColors.muted, fontSize = 13.sp)

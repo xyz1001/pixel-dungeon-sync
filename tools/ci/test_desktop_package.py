@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 spec = importlib.util.spec_from_file_location('desktop_package', Path(__file__).with_name('desktop-package.py'))
 package = importlib.util.module_from_spec(spec)
@@ -44,3 +46,23 @@ class LinuxImageLayoutTest(unittest.TestCase):
             (other / 'lib/runtime/bin/java').touch()
             with self.assertRaises(AssertionError):
                 package.linux_image(root)
+
+    def test_timeout_retains_partial_output_and_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = self.image(root, 'pdsync')
+            error = subprocess.TimeoutExpired('launcher', 90, output=b'started\n')
+            with patch.object(package, 'run', side_effect=[None, error]):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    package.smoke(app, 'Linux', root, 'test')
+            self.assertEqual('started\n', (root / 'test-smoke.txt').read_text())
+
+    def test_nonzero_exit_retains_output_and_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = self.image(root, 'pdsync')
+            error = subprocess.CalledProcessError(1, 'launcher', output='startup error\n')
+            with patch.object(package, 'run', side_effect=[None, error]):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    package.smoke(app, 'Linux', root, 'test')
+            self.assertEqual('startup error\n', (root / 'test-smoke.txt').read_text())

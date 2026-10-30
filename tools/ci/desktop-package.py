@@ -38,8 +38,17 @@ def smoke(app, system, out, label):
         # macOS /var is a symlink; use the actual path rather than weakening app path checks.
         env=dict(os.environ,PDSYNC_SMOKE='1',JAVA_TOOL_OPTIONS='-Dpdsync.workspace='+str(Path(temp).resolve()))
         command=[str(launcher)]
-        if system=='Linux': command=['xvfb-run','-a',*command]
-        result=run(*command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=90)
+        if system=='Linux': command=['xvfb-run','-a','-e','/dev/stderr',*command]
+        try:
+            result=run(*command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=90)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+            # Preserve startup/shutdown evidence even when the launcher never returns.
+            # This workspace is an empty CI fixture, not a user's configured account.
+            output=error.stdout or ''
+            if isinstance(output, bytes): output=output.decode('utf-8',errors='replace')
+            (out/f'{label}-smoke.txt').write_text(output,encoding='utf-8')
+            print(f'{label} smoke failed: {type(error).__name__}\n{output}',flush=True)
+            raise
         (out/f'{label}-smoke.txt').write_text(result.stdout,encoding='utf-8')
         assert 'PDSYNC_UI_SMOKE_OK' in result.stdout,result.stdout[-4000:]
 

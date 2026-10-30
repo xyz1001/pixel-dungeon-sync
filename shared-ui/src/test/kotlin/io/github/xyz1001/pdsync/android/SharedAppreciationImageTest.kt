@@ -52,7 +52,7 @@ class SharedAppreciationImageTest {
                 assertEquals(width / 2f, node(scene, "appreciation-thumbnail").boundsInRoot.center.x)
                 repeat(3) { cycle ->
                     click(scene, node(scene, "appreciation-thumbnail").boundsInRoot.center)
-                    render(scene, "viewer-$width-$height-$cycle")
+                    awaitViewer(scene, 1, "viewer-$width-$height-$cycle")
                     assertEquals(1, nodes(scene).count { tag(it) == "appreciation-viewer" },
                         "Viewer after click: width=$width height=$height cycle=$cycle tags=${nodes(scene).map { tag(it) }}")
                     val bounds = node(scene, "appreciation-enlarged-image").boundsInRoot
@@ -61,17 +61,17 @@ class SharedAppreciationImageTest {
                     assertTrue(bounds.width >= width - 34 && bounds.height >= height - 34)
                     assertRenderedFit(width, height, "viewer-$width-$height-$cycle")
                     if (cycle == 1) escape(scene) else click(scene, Offset(2f, 2f))
-                    render(scene)
+                    awaitViewer(scene, 0, "closed-$width-$height-$cycle")
                     assertEquals(0, nodes(scene).count { tag(it) == "appreciation-viewer" })
                     assertEquals(1, nodes(scene).count { tag(it) == "appreciation-thumbnail" })
                 }
                 click(scene, node(scene, "appreciation-thumbnail").boundsInRoot.center)
-                render(scene)
+                awaitViewer(scene, 1, "before-hide-$width-$height")
                 visible = false
-                render(scene)
+                awaitViewer(scene, 0, "hidden-$width-$height")
                 assertEquals(0, nodes(scene).count { tag(it) == "appreciation-viewer" })
                 visible = true
-                render(scene)
+                awaitViewer(scene, 0, "returned-$width-$height")
                 assertEquals(0, nodes(scene).count { tag(it) == "appreciation-viewer" }, "Returning never resurrects a stale viewer")
             } finally { scene.close() }
         }
@@ -119,9 +119,42 @@ class SharedAppreciationImageTest {
         scene.sendPointerEvent(PointerEventType.Press, point)
         scene.sendPointerEvent(PointerEventType.Release, point)
     }
-    private fun render(scene: ImageComposeScene, name: String? = null) {
-        repeat(3) { frame += 16_666_667; scene.render(frame).close() }
-        if (name != null) scene.render(frame + 16_666_667).use { image ->
+    private fun nextFrame(): Long {
+        frame += 16_666_667
+        return frame
+    }
+
+    // Wait for the observable layer transition, never resend the input that caused it.
+    private fun awaitViewer(scene: ImageComposeScene, expected: Int, name: String) {
+        val deadline = System.nanoTime() + 2_000_000_000L
+        var renderedFrames = 0
+        while (true) {
+            scene.render(nextFrame()).close()
+            renderedFrames++
+            val tags = nodes(scene).map { tag(it) }
+            val count = tags.count { it == "appreciation-viewer" }
+            if (count > 1 || System.nanoTime() >= deadline) {
+                saveFrame(scene, "failure-$name")
+                assertEquals(expected, count,
+                    "Viewer transition $name: frames=$renderedFrames tags=$tags")
+                error("Viewer transition timed out: $name frames=$renderedFrames tags=$tags")
+            }
+            if (count == expected) {
+                saveFrame(scene, name)
+                assertEquals(expected, nodes(scene).count { tag(it) == "appreciation-viewer" },
+                    "Viewer after capture $name: tags=${nodes(scene).map { tag(it) }}")
+                return
+            }
+            Thread.sleep(5)
+        }
+    }
+
+    private fun render(scene: ImageComposeScene) {
+        repeat(3) { scene.render(nextFrame()).close() }
+    }
+
+    private fun saveFrame(scene: ImageComposeScene, name: String) {
+        scene.render(nextFrame()).use { image ->
             val directory = Path.of("build/reports/appreciation-viewer")
             Files.createDirectories(directory)
             image.encodeToData(EncodedImageFormat.PNG)!!.use { Files.write(directory.resolve("$name.png"), it.bytes) }

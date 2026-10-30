@@ -208,9 +208,8 @@ private fun SharedShellLayout(
 @Composable
 private fun SharedPageHeader(title: String, eyebrow: String?, game: SharedGameIdentity?, metrics: SharedShellMetrics,
     diagnosticAction: SharedDiagnosticAction?, actions: @Composable RowScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = metrics.horizontal, end = metrics.horizontal,
-        top = metrics.headerTop, bottom = metrics.headerBottom), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+    val titleStack: @Composable () -> Unit = {
+        Column {
             if (!eyebrow.isNullOrBlank()) {
                 Text(eyebrow, color = MaterialTheme.colors.primary,
                     fontSize = 12.sp, lineHeight = 24.sp,
@@ -231,11 +230,28 @@ private fun SharedPageHeader(title: String, eyebrow: String?, game: SharedGameId
                 }
             }
         }
+    }
+    val actionRow: @Composable RowScope.() -> Unit = {
+
         if (diagnosticAction != null) {
             Spacer(Modifier.width(8.dp))
             SharedDiagnosticExportButton(diagnosticAction)
         }
         Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+    }
+    val padding = Modifier.fillMaxWidth().padding(start = metrics.horizontal, end = metrics.horizontal,
+        top = metrics.headerTop, bottom = metrics.headerBottom)
+    // Large text must not let the existing action squeeze the title into one-character columns.
+    if (metrics.narrow && LocalDensity.current.fontScale >= 1.5f) {
+        Column(padding) {
+            titleStack()
+            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically, content = actionRow)
+        }
+    } else {
+        Row(padding, verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { titleStack() }
+            actionRow()
+        }
     }
 }
 

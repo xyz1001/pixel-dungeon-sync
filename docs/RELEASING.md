@@ -8,7 +8,9 @@ Tags with a suffix are GitHub prereleases. Do not move/reuse release tags.
 ## Checks and artifacts
 
 `.github/workflows/packages.yml` runs on branch pushes, pull requests and manual
-dispatch. Dispatch is **build-only**: it cannot publish. All tag builds use the same
+dispatch. Dispatch cannot publish; optional `verify_signing=true` signs and verifies
+all six packages after the build jobs succeed, without creating a tag or release.
+All tag builds use the same
 tests before publishing. No `pull_request_target`, persistent checkout token or
 signing secret is used by build jobs. Only the tag release job has contents:write.
 Actions are pinned to reviewed commit SHAs. New branch runs cancel old branch runs;
@@ -57,8 +59,8 @@ The table above describes configured checks. Check the exact commit's
 for completed job results and downloadable build artifacts; a successful build-only
 run does not publish a release. CI setup does not create a formal version tag.
 Record the workflow URL, commit, job conclusions, and artifacts before claiming
-a build is verified. Repository signing Secrets are currently absent; their upload
-requires the explicit approval below. Do not publish unsigned Android output as an
+a build is verified. The key owner approved the retained Android identity and the four
+repository signing Secrets were configured on 2026-10-30. Do not publish unsigned Android output as an
 installable release or call a non-release run an end-to-end release test.
 
 Connection credentials retain their existing plaintext storage behavior:
@@ -89,19 +91,26 @@ existing signed code135 APK (public certificate only). Current game preparation
 binds the application's actual certificate into each prepared game's metadata;
 the legacy helper test certificate is not the current application release key.
 The retained certificate is named `CN=PDSync Development`: it is the existing
-test-installation identity, not an automatically approved production signing key.
-The owner must explicitly choose to retain it for releases before uploading it;
+test-installation identity, explicitly approved by its owner for releases on 2026-10-30.
+Any replacement or transfer requires the key owner's explicit approval;
 the workflow neither generates a new key nor silently changes that identity.
 Changing the signer breaks ordinary updates and existing bridge bindings.
-Secrets grant the tag workflow signing
+Secrets grant the tag workflow and explicitly requested manual signing-validation job signing
 capability; anyone able to modify trusted release code can potentially use them.
 Never put values in source, workflow inputs, command-line password arguments or
-logs. The workflow decodes the key in a temporary owner-only file and removes it
+logs. The alias is also read in-process, not passed in process arguments.
+The workflow decodes the key in a temporary owner-only file and removes it
 on exit. Missing secrets or a wrong signer fail before creating a release.
 Without secrets ordinary CI still produces an explicitly **unsigned, noninstallable**
 Android build artifact. It is never presented as a signed distributable APK.
 
 ## Publish and retry
+
+For a non-publishing signing check, run the **Test and package** workflow manually
+on the reviewed branch with `verify_signing=true`. The resulting
+`verified-release-packages` artifact contains the six packages and `SHA256SUMS.txt`.
+The job has read-only repository permission and receives no GitHub release token.
+This validates real APK signing and package assembly, not Release publication.
 
 1. Review code and public version, increment versionCode, run CI on the intended
    commit and confirm all jobs. Configure signing secrets with explicit approval.
@@ -114,8 +123,8 @@ Android build artifact. It is never presented as a signed distributable APK.
 A build/sign/check failure cannot publish a partial release. Failed attachment
 uploads may leave a **draft**; rerunning the same tag can complete that draft.
 A published release is never overwritten by reruns: use a new version and tag.
-No automatic tag creation or main-branch merge occurs. Final tag publication,
-real-signing path and Gatekeeper/SmartScreen behavior require separate validation;
+No automatic tag creation or main-branch merge occurs. Final tag publication
+and Gatekeeper/SmartScreen behavior require separate validation;
 successful non-release CI alone does not validate them.
 
 Official references: [Actions syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax),

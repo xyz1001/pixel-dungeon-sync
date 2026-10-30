@@ -13,7 +13,7 @@ def collect(root=ROOT):
         (root / 'desktop/build/reports/shared-comparison', 'choice-feedback-*.png', 'comparison'),
         (root / 'desktop/build/reports/shared-home-history-refresh', 'home-history-refresh-*.png', 'history'),
         (root / 'desktop/build/reports/shared-home', 'home-expired-*.png', 'home'),
-        (root / 'desktop/build/reports/appreciation-viewer', 'viewer-*.png', 'viewer'),
+        (root / 'desktop/build/reports/appreciation-viewer', '*.png', 'viewer'),
     ]
     count = 0
     for directory, pattern, group in sources:

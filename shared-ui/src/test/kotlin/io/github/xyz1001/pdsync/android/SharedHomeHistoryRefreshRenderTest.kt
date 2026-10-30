@@ -60,12 +60,12 @@ class SharedHomeHistoryRefreshRenderTest {
         }
     }
 
-    @Test fun oneRefreshFitsBesideHistoryTitleInBothLanguagesIncludingNarrowLargeText() {
+    @Test fun oneRefreshFitsWithHistoryTitleInBothLanguagesIncludingNarrowLargeText() {
         val previous = UiLocale.locale()
         try {
             for (locale in listOf(Locale.SIMPLIFIED_CHINESE, Locale.ENGLISH)) {
                 UiLocale.setLocale(locale)
-                for ((width, scale) in listOf(320 to 1f, 320 to 1.5f, 320 to 2f, 1165 to 1f)) {
+                for ((width, scale) in listOf(320 to 1f, 320 to 1.5f, 320 to 2f, 390 to 1.5f, 390 to 2f, 420 to 1.5f, 420 to 2f, 1165 to 1f)) {
                     val host = Host(ready())
                     val observed = Observation()
                     val scene = ImageComposeScene(width = width, height = 1800, density = Density(1f, scale)) {
@@ -80,8 +80,13 @@ class SharedHomeHistoryRefreshRenderTest {
                         val button = observed.header.getValue("refresh")
                         assertTrue(title.width > 0 && title.height <= 2 * 22.5f * scale + 1f,
                             "complete title stays readable in at most two lines; locale=$locale width=$width scale=$scale title=$title button=$button section=$section density=1.0 fontScale=$scale layouts=${titleLayouts(scene)}")
-                        assertTrue(title.right + 8f <= button.left + .6f, "refresh stays to the right of the title")
-                        assertEquals(title.center.y, button.center.y, .6f)
+                        if (section.width <= 360f && scale >= 1.5f) {
+                            assertTrue(button.top >= title.bottom + 8f - .6f, "large text refresh wraps below the complete title")
+                            assertEquals(title.right, button.right, .6f)
+                        } else {
+                            assertTrue(title.right + 8f <= button.left + .6f, "refresh stays to the right of the title")
+                            assertEquals(title.center.y, button.center.y, .6f)
+                        }
                         assertTrue(button.width >= 48f && button.height >= 42f)
                         assertTrue(title.left >= section.left && button.right <= section.right)
                         assertTrue(section.left >= 8 && section.right <= width - 8)

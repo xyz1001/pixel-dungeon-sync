@@ -1,5 +1,6 @@
 """Tag-only publishing. No debug keys, no tag creation, no published-asset overwrite."""
 import base64
+import argparse
 import hashlib
 import json
 import os
@@ -13,8 +14,8 @@ def run(*args, capture=False):
     return subprocess.run([str(x) for x in args],check=True,text=True,
                           stdout=subprocess.PIPE if capture else None).stdout
 
-def main():
-    tag=os.environ['RELEASE_TAG']
+def main(verify_only=False):
+    tag=None if verify_only else os.environ['RELEASE_TAG']
     v=version(tag=tag)
     for key in ('PDSYNC_KEYSTORE_BASE64','PDSYNC_KEY_ALIAS','PDSYNC_STORE_PASSWORD','PDSYNC_KEY_PASSWORD'):
         if not os.environ.get(key): raise SystemExit('Missing required signing secret: '+key)
@@ -31,10 +32,7 @@ def main():
         key=Path(temporary)/'release.keystore'
         key.write_bytes(base64.b64decode(os.environ['PDSYNC_KEYSTORE_BASE64'],validate=True))
         key.chmod(0o600)
-        run('java','-jar',sdk/'lib/apksigner.jar','sign','--ks',key,'--ks-key-alias',os.environ['PDSYNC_KEY_ALIAS'],
-            '--ks-pass','env:PDSYNC_STORE_PASSWORD','--key-pass','env:PDSYNC_KEY_PASSWORD',
-            '--min-sdk-version','26','--v1-signing-enabled','false','--v2-signing-enabled','true',
-            '--v3-signing-enabled','true','--v4-signing-enabled','false','--out',apk,unsigned)
+        run('java','--class-path',sdk/'lib/apksigner.jar',ROOT/'tools/ci/SignApk.java',key,apk,unsigned)
     for api in (26,36):
         verify=run('java','-jar',sdk/'lib/apksigner.jar','verify','--verbose','--print-certs',
                    '--min-sdk-version',api,'--max-sdk-version',api,apk,capture=True)
@@ -57,6 +55,9 @@ macOS is not Developer ID signed or notarized. OS trust warnings may apply.
 See README for platform/protocol support boundaries; packaging smoke is not a
 cross-platform save interoperability certification. Verify files using SHA256SUMS.txt.
 ''',encoding='utf-8')
+    if verify_only:
+        print('SIGNING_VALIDATION_OK: six artifacts verified; APK certificate SHA256 '+pin)
+        return
     # Read before mutation: a completed release is immutable to this workflow.
     releases=json.loads(run('gh','api',f'repos/{os.environ["GH_REPO"]}/releases/tags/{tag}',capture=True)) if release_exists(tag) else None
     if releases and not releases['draft']: raise SystemExit('Release already published; refusing to replace assets. Use a new version/tag.')
@@ -79,4 +80,7 @@ def release_exists(tag):
     if 'HTTP 404' in p.stderr: return False
     raise RuntimeError('Could not determine existing release state; no publication attempted')
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--verify-only',action='store_true',help='Sign and check artifacts without any GitHub Release operation')
+    main(verify_only=parser.parse_args().verify_only)
