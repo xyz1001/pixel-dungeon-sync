@@ -96,18 +96,9 @@ class AndroidSyncFacade internal constructor(
  fun connect()=connectionCheck(true)
  private fun connectionCheck(create:Boolean)=locked {
   if(simpleEnabled) {if(create && suppliedSimpleStore==null)simpleTransport.ensureSimpleNamespace();return@locked ConnectionStatus(true,CoreMessages.ANDROID_CONNECTION_VERIFIED.text(),simpleStore.latest()!=null)}
-  if(suppliedStore!=null) {
-   require(!create){CoreMessages.ANDROID_NAMESPACE_CREATION_REQUIRES_THE_WEBDAV_TRANSPORT.text()}
-   val graph=AppendRepository(state.resolve("connection-probe"),adapter,config.profile).discover(store).also {it.requireSettled()}
-   ConnectionStatus(true,CoreMessages.ANDROID_CONNECTION_VERIFIED.text(),graph.commits.isNotEmpty())
-  } else {
-   val transportConfig=config.copy(endpoint=validatedConnection.endpoint)
-   val setup=ConnectionSetup(transportConfig,adapter.id,beforeRequest=beforeRequest);setup.update(transportConfig,connection.password)
-   when(val result=if(create)setup.connect() else setup.testConnection()) {
-    is ConnectionTestResult.Success -> ConnectionStatus(true,if(create)CoreMessages.ANDROID_WEBDAV_CONNECTED_THE_SYNC_FOLDERS_ARE_READY.text() else CoreMessages.ANDROID_WEBDAV_CONNECTION_VERIFIED.text(),result.hasRemote)
-    is ConnectionTestResult.Failure -> ConnectionStatus(false,result.message,false,result.diagnosticFailure)
-   }
-  }
+  require(!create){CoreMessages.ANDROID_NAMESPACE_CREATION_REQUIRES_THE_WEBDAV_TRANSPORT.text()}
+  val graph=AppendRepository(state.resolve("connection-probe"),adapter,config.profile).discover(store).also {it.requireSettled()}
+  ConnectionStatus(true,CoreMessages.ANDROID_CONNECTION_VERIFIED.text(),graph.commits.isNotEmpty())
  }
  /** Freeze only already-known identities before Android starts the selected game. */
  fun beginControlledSession():String=locked {
@@ -403,24 +394,6 @@ class AndroidSyncFacade internal constructor(
    else->CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text()
   }
   return OperationResult(message,conflict,false,snapshotId,refreshed,complete)
- }
- private fun restoreTipSelection(inspection:Inspection,snapshotId:String):OperationResult? {
-  val observed=presentationChecked(inspection)
-  val selection=session.prepareTipRestore(observed,snapshotId,store,mirrorStopped) ?: return null
-  val before=checkActualUnchanged(observed.localFiles)
-  val after=selection.verified.snapshot.manifest.files
-  val applied=prepareGameRestore(observed.localFiles,after,"restore",selection.verified) {
-   session.stageTipRestore(selection,store,mirrorStopped)
-  }
-  val receipt=applied ?: before.takeIf { it.files==after }
-  require(receipt!=null && receipt.files==after && receipt.byteCount==selection.verified.byteCount) {
-   CoreMessages.ANDROID_THE_HELPER_RESTORE_COULD_NOT_BE_VERIFIED_UPLOAD_REMAINS_BLOCKED_RECOVER_OR_INSPECT_RETAINE.text()
-  }
-  val completed=session.completedTipRestore(selection)
-  val summary=runCatching { SaveSummary.fromVerified(selection.verified) }.getOrNull()
-  val refreshed=inspectionFromComparison(completed,HomeLocalRead(after,summary))
-  return OperationResult(CoreMessages.ANDROID_SELECTED_VERSION_RESTORED_AND_VERIFIED_IN_THE_GAME.text(),
-   false,false,snapshotId,refreshed,true)
  }
  fun overwriteCloudSuccessors(inspection:Inspection,snapshotId:String)=uploadReadLocked {overwriteCloudSuccessorsLocked(inspection,snapshotId)}
  private fun overwriteCloudSuccessorsLocked(inspection:Inspection,snapshotId:String):OperationResult {
