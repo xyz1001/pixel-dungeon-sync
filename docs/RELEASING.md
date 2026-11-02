@@ -76,6 +76,28 @@ Windows packages are unsigned (no Authenticode). macOS has no Developer ID signi
 or notarization. No signing certificate, Apple account or paid access is configured
 by these workflows. OS trust restrictions remain a distribution limitation.
 
+## README download status maintenance
+
+The user READMEs describe downloads and everyday use. Keep protocol implementation,
+UI acceptance results, and release maintenance here instead of adding progress
+reports to the README. The product/verification section above retains the desktop
+checks and Android round-trip boundary removed from the user guide.
+
+On 2026-11-02, the repository releases API returned an empty list. The
+[signing-validation run](https://github.com/xyz1001/pixel-dungeon-sync/actions/runs/41074899460)
+for `2ed4098faf83b14fe823ba36b0334e246a17c08f` still had unexpired artifact
+`12987715941`, `verified-release-packages` (319,474,849 bytes), expiring at
+2026-11-13 14:59:02 UTC. This is the temporary test download linked in both READMEs,
+not a published Release. Update both language versions when it expires or a release
+becomes available; do not replace it with an ordinary unsigned branch APK.
+
+`android-test-reports` contains Android Lint reports, not an installer or an
+on-device test result. Desktop `tests-*` artifacts are also development evidence.
+The six-package collection contains the signed Android APK and bundled-runtime
+desktop packages; platform artifact sizes therefore cannot be compared as installed
+application sizes. The package assembly and checksums are defined in
+`tools/ci/release.py`.
+
 ## Android signing prerequisite — explicit approval required
 
 Configure these repository Actions Secrets **only after the key owner approves
