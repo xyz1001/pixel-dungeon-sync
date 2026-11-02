@@ -1,8 +1,0 @@
-2026-10-09T07:52Z, cloud Linux, isolated copies of the preexisting official JAR.
-OFFICIAL_DISCOVERY_STATIC_OK version=4.0.2 code=922
-sha256=bcefd52a9c14f69c69d3ccc08a212cdd3830b2dc60d78d80895cd803fa1ec602
-oneTrusted=suggested twoTrusted=requiresSelection manual=trusted gameExecution=none
-defaultSaveCreated=false
-
-Official JAR input bytes: 54253547; ZIP declared expanded bytes: 106023283; entries: 6339.
-No download, install, game execution, network connection, or actual user profile access.

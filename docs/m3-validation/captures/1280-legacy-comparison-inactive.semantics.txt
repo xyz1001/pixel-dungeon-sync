@@ -1,9 +1,0 @@
-4 / 4
-选择存档
-配置完成
-上一步
-完成
-
-ACTIONS
-上一步; disabled=true; bounds=Rect.fromLTRB(241.0, 567.0, 307.0, 609.0)
-完成; disabled=true; bounds=Rect.fromLTRB(971.0, 567.0, 1039.0, 609.0)

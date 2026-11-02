@@ -1,2 +1,0 @@
-a7ecdf117e398314ce8581c8502415a519b779eebd46e96f3066c22857d44d6f  /workspace/shared/pds-automatic-v8/injected/runtime/core.jar
-478399bf6e3adbd9bf86fb74111326726099acffb8942c667819b0c3853bce96  /workspace/shared/pds-automatic-v8/injected/runtime/desktop.jar

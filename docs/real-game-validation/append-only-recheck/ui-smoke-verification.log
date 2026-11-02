@@ -1,9 +1,0 @@
-UI_READONLY_HASH_CHECKS_OK
-local-save-files=4 (including unchanged settings.xml)
-remote-files=6 unchanged
-HTTP PUT requests=0
-config-keys=endpoint,profile,username
-config password absent; rememberPassword false/default
-Chinese wizard, cancel/no-write, test, next, back, save, observed branches and target-required restore gate passed via CUA.
-Full conflict-dialog/restore execution not run.
-Default renderer failed; documented process-local SOFTWARE/font config succeeded.

@@ -1,7 +1,0 @@
-{
-  "case": "missing",
-  "label": "after-continue",
-  "timestamp": "2026-10-09T08:02:45.735076+00:00",
-  "files": {},
-  "requests": "Demo only: http://127.0.0.1:51540 credentials demo/demo\n"
-}

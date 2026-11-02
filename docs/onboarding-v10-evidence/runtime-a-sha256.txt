@@ -1,2 +1,0 @@
-4e6c8067647cc849aa3cd871bf4da1345f9bafa53d356981007e3e695ded4a60  core/build/libs/core.jar
-48ed0921182de47df62ef70e7ec47dcebdbfa9fae8db25775dd924615cdee1b5  desktop/build/libs/desktop.jar

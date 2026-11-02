@@ -22,9 +22,6 @@ core.[0-9]*
 *.hprof
 *.dmp
 
-# Reviewed, static validation evidence belongs with the source
-!/docs/evidence/*.log
-!/docs/cloud-evidence/*.log
 
 # Local settings, credentials, and private signing material
 .env
@@ -59,15 +56,6 @@ game[0-9]*/
 *.sqlite3
 *.db
 
-!/docs/automatic-v8-evidence/*.log
-
-!/docs/automatic-v9-evidence/*.log
-
-!/docs/onboarding-v10-evidence/*.log
-!/docs/onboarding-v10-evidence/independent/*.log
-!/docs/installation-discovery-evidence/*.log
-
-!/docs/onboarding-v10-evidence/evidence/*.log
 
 # Android generated binaries and compiler output (helper is injected at build time)
 *.apk
