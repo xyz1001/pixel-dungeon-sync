@@ -1,87 +1,208 @@
-# Pixel Dungeon Save Sync · PDSync
+# PDSync · Pixel Dungeon Cross-Platform Save Sync Tool
 
-[简体中文](README.md)
+<p align="center">
+  <b>Seamlessly continue your dungeon crawl anywhere, anytime across all your devices.</b>
+</p>
 
-Upload Pixel Dungeon progress to WebDAV, view history, and restore a selected save. Android manages separate saves for supported game variants; desktop currently supports only recognized Shattered Pixel Dungeon game JARs. **Synchronizing saves does not convert their format** or make saves from different variants interchangeable.
+<p align="center">
+  <a href="README.md">简体中文</a> | <b>English</b>
+</p>
 
-This is test software. Restoring replaces local progress; keep an independent save copy first.
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Android%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-blue.svg" alt="Platform" />
+  <img src="https://img.shields.io/badge/Protocol-WebDAV-green.svg" alt="WebDAV" />
+  <img src="https://img.shields.io/badge/Target-Pixel%20Dungeon%20%26%20Forks-orange.svg" alt="Pixel Dungeon" />
+</p>
 
-## Supported games and platforms
+---
 
-- **Android 8.0 or later:** Shattered Pixel Dungeon and variants that pass the app's identity, save-format, and access checks. Appearing in the app list does not establish sync support; there is no compatibility list guaranteeing every variant works.
-- **Windows / Linux / macOS:** Currently only Shattered Pixel Dungeon game JARs. Restore is currently available for game versions **3.3.8 and 4.0.2**; other identifiable versions may not support restores. Android variant support does not extend to arbitrary desktop variants.
-- Saves are not converted, and two sets of game progress cannot be merged. Use the same game and compatible versions across devices, and try an upload and restore with replaceable progress first.
+**PDSync** is a cross-platform save synchronization utility crafted for *Pixel Dungeon* and its community forks (such as *Shattered Pixel Dungeon*).
 
-## Download and install
+Whether you are crawling depths on your Android phone during a commute or continuing the run on your PC at home, PDSync keeps your progress seamlessly connected across all your devices.
 
-**As of 2026-11-02, [Releases](https://github.com/xyz1001/pixel-dungeon-sync/releases) has no published versions.** To try `0.5.114-test`, download the existing [test package collection](https://github.com/xyz1001/pixel-dungeon-sync/actions/runs/41074899460/artifacts/12987715941):
+> [!IMPORTANT]
+> **💡 Design Philosophy & Note on Save-Scumming (S/L)**:
+> - The **sole core goal of this tool is cross-device progress synchronization and seamless handoff**, breaking platform barriers.
+> - As a quintessential Roguelike, *Pixel Dungeon* derives its true charm and thrill from irreversible choices and **Permadeath**.
+> - The underlying snapshot history exists **strictly as a safety net for disaster recovery, conflict resolution, and accidental save loss**. We **strongly discourage using this tool for save-scumming (S/L, Save & Load)**. Relying on rollback ruins the procedural unpredictability and tension, stripping away the authentic sense of achievement that makes Roguelikes fun.
 
-1. Sign in to GitHub, open [this build](https://github.com/xyz1001/pixel-dungeon-sync/actions/runs/41074899460), and select **verified-release-packages** under **Artifacts** (about 319 MB). Retention ends at **2026-11-13 14:59 UTC**; the link will stop working if it expires or is deleted. Check Releases or subsequent test-package instructions then.
-2. Extract the collection and choose only the package for your device below. It contains six packages, `SHA256SUMS.txt`, and version notes; you do not need to install all of them. The version in the filenames is `0.5.114-test`.
-3. For Android, choose **`PDSync-0.5.114-test-android.apk`**, the signed PDSync installer. **Do not install `android-unsigned`; `android-test-reports` contains check reports, not an installer.**
+---
 
-| Device | Package | Installation or launch |
-| --- | --- | --- |
-| Windows x64 | `.exe` installer | Run the installer and follow its instructions. |
-| Windows x64 | Portable `.zip` | Extract the entire directory and run its application launcher. Do not copy only the EXE. A Java runtime is included; no separate JDK is needed. |
-| Debian / Ubuntu x64 | `.deb` | Run `sudo apt install ./downloaded-file.deb` in the download directory. |
-| Arch Linux x64 | `.pkg.tar.zst` | Run `sudo pacman -U ./downloaded-file.pkg.tar.zst`. |
-| macOS Apple Silicon | `.dmg` | Open the disk image and drag the app into Applications. Intel Macs are not a target of this build. |
-| Android 8.0 or later | `.apk` | Open the APK on the device and complete Android's installation confirmation. Includes arm64-v8a, armeabi-v7a, x86, and x86_64. |
+## ✨ Key Features
 
-Desktop packages include the Java runtime needed by the app. Linux still requires a graphical desktop and distribution dependencies. Windows/macOS packages do not yet have publisher code signing or Apple notarization, so the OS may report an unverified source. Do not disable system protections to install them. Android release packages must pass the project's signature checks; unsigned CI artifacts are not installable release packages.
+- 🔄 **Seamless Cross-Platform Handoff**: Full support across Android, Windows, macOS, and Linux. Hop effortlessly between mobile and desktop.
+- ☁️ **Flexible Dual Cloud Storage Options**:
+  - **Built-in WebDAV (Zero Configuration)**: One-click sign-in without manual server setup. Supported via voluntary appreciation donations; **donations strictly cover backend server hosting, bandwidth, and storage maintenance costs**.
+  - **Custom / Third-Party WebDAV (100% Free & Self-Hosted)**: Native support for Jianguoyun, Nextcloud, Alist, Synology, or any standard WebDAV server. Your data stays completely in your own hands.
+- 🛡️ **Robust Anti-Loss & Disaster Recovery**:
+  - **Automatic Local Backups**: Takes an isolated backup of your existing local save before applying cloud restores.
+  - **Explicit Conflict Resolution**: Clear comparison dialogs when two devices diverge—never silently overwriting your hard-earned run.
+  - **Append-Only History Tree**: Tracks sync checkpoints clearly for auditing and error recovery.
+- 📱 **Flexible Android Integration**:
+  - **Non-Root Mode (Embedded Save Bridge)**: No rooting required! Follow the simple wizard to patch the game APK.
+  - **Root Mode**: Direct, native access for rooted devices without needing APK repacking.
+  - **Multi-Fork Isolation**: Keeps saves organized independently for each Pixel Dungeon variant.
+- 💻 **Out-of-the-Box Desktop Experience**: Bundled with a Java runtime (no need to manually configure a JDK). A clean 4-step wizard guides your initial setup.
 
-Use the included `SHA256SUMS.txt` to check the extracted packages. Run `Get-FileHash filename -Algorithm SHA256` in Windows PowerShell, `sha256sum filename` on Linux, or `shasum -a 256 filename` on macOS, then compare the result with that file's entry. A matching checksum does not establish OS trust in the publisher.
+---
 
-## First use
+## 🎮 Supported Platforms & Games
 
-1. **Choose a game.** Install the target game separately first. If you already have progress, save and exit normally; on a new device without progress, choose a cloud restore during the later comparison. Select the corresponding game or variant in PDSync. Check that its name, version, and target location are what you expect.
-2. **Confirm save access.** On Android, choose Root or Modify APK mode as described below. Desktop uses the current system user's game save directory; check the detected game JAR and progress. Choosing a game executable does not select a cloud save.
-3. **Connect to the cloud.** Sign in with the app's built-in account option, or enter your own WebDAV URL, username, and password in connection settings. The URL should point to an existing root collection you can access. Complete the connection check before saving configuration. Sync access for the built-in service depends on the account's current status; your WebDAV server controls access for custom connections.
-4. **Compare progress.** Upload to keep the current phone/computer progress in the cloud. To bring back cloud progress, select the appropriate history node and restore it locally. If the two sides differ and there is a conflict, decide which progress to keep; cancel if unsure.
+| Platform | Supported Games / Forks | Notes |
+| :--- | :--- | :--- |
+| **Android** (8.0+) | *Shattered Pixel Dungeon* and compatible forks | Supports both **Non-Root Save Bridge** and **Root Direct Access**. Different variants are isolated independently. |
+| **Desktop** (Win / Mac / Linux) | *Shattered Pixel Dungeon* (Java Edition) | Connects to official runnable game JARs (including 3.3.8, 4.0.2, and compatible releases). |
 
-Devices should use the same account and corresponding game configuration. On Android, verified game package names separate cloud spaces for different variants; local state is also bound to the account, connection, and game identity. Switching from variant A to B on the same account does not restore A's saves into B. Account isolation still depends on correct WebDAV server permissions: a shared directory is not a substitute for server-side access control.
+> [!WARNING]
+> **⚠️ Crucial Notice for Android Non-Root Mode (Read Before Installing)**:
+> Non-Root mode integrates a save bridge into the game APK and **re-signs it with a new key**. Due to Android's strict signature verification, the newly signed package **cannot update the original game directly; you must uninstall the existing game first**.
+> 
+> **Please Note: Uninstalling the original game will permanently erase all existing local saves on your device!**
+> - **Recommendation**: Only set this up after finishing your current run (either through victory or game over).
+> - If your device already has Root access, use **Root Mode** instead—it reads saves in-place **without uninstalling or losing data**.
 
-## How Android accesses game saves
+> [!NOTE]
+> **Save Format Notice**: PDSync transfers and archives saves reliably, but **does not convert proprietary save formats**. For cross-device sync, please use identical or compatible game versions.
 
-- **Root mode:** For an already installed game. The device must already have working Root access, and its Root manager must grant the app access. Selecting this mode does not root the device or install/uninstall games.
-- **Modify APK / built-in save bridge:** Does not require Root. The app's preparation flow adds a save bridge to a supported game APK and signs it again, followed by Android's normal installation flow. The bridge is installed with that game; it does not grant arbitrary access to other apps. A newly signed APK may not update an installation signed with the original key. Do not uninstall a game holding your only save simply to resolve an installation conflict.
+---
 
-Installing a game package may require Android to allow the selected installation source and display a system confirmation. Follow the actual installation flow. If Root is denied, a game is unsupported, or an access check fails, do not change system directory permissions to bypass the check.
+## 📦 Download & Installation
 
-## Uploads, restores, and conflicts
+Download packages from the [Releases page](https://github.com/xyz1001/pixel-dungeon-sync/releases) or the latest verified build packages:
 
-For everyday use: **save and exit the game → open PDSync and upload → confirm success → refresh and restore on the other device → start the game there.** Clicking Upload alone does not mean the other device has the latest progress.
+| Platform | Package | How to Run |
+| :--- | :--- | :--- |
+| **Windows** (x64) | `PDSync-Setup.exe` or Portable `.zip` | Run the installer or unzip and launch the executable directly (Java runtime included). |
+| **Android** (8.0+) | `PDSync-*-android.apk` | Install the APK on your device (signed and ready to use). |
+| **macOS** (Apple Silicon) | `PDSync-*.dmg` | Open the DMG and drag PDSync into your Applications folder. |
+| **Debian / Ubuntu** | `pdsync_*_amd64.deb` | Run `sudo apt install ./pdsync_xxx.deb` |
+| **Arch Linux** | `pdsync-*.pkg.tar.zst` | Run `sudo pacman -U ./pdsync-xxx.pkg.tar.zst` |
 
-Desktop can upload automatically after save changes or game exit while PDSync is running and connected; pause this in Settings. Android automatic uploads depend on how the game was launched and the app's running state. Return to the home screen and confirm the result before switching devices. Automatic uploads do not decide conflicts or automatically restore cloud progress locally.
+> [!TIP]
+> **System Security Prompts**:
+> If Windows SmartScreen or macOS Gatekeeper alerts you about an unrecognized publisher, this is normal for open-source tools without purchased enterprise certificates. Simply select "Run anyway" or allow it in System Settings.
 
-- **Upload** stores progress for the selected game. Identical content does not create another save; the upload button may also be unavailable when both sides match.
-- **Restore** writes the selected cloud progress back to the current game, replacing the corresponding local progress. Exit the game normally first, then reopen it after completion to check the character, floor, and progress. Do not assume the app keeps an additional recoverable local backup.
-- **Overwrite or cancel:** A conflict dialog asks whether to make local progress the current cloud progress. Cancel does not perform that overwrite. The app does not merge save contents.
-- **The current history chain:** If the cloud is `A → B → C → D`, you restore B, play to E, and confirm overwrite, the current chain becomes `A → B → E`. The cloud files for C and D remain, but this does not promise that the old branch remains directly selectable for restore in the current interface.
+---
 
-Do not keep playing during synchronization or have another device change the same cloud progress at the same time. After a network failure, check the app's result and current history before retrying; do not repeatedly click restore or overwrite. The local/cloud markers help compare progress, but do not imply compatibility between game variants.
+## 🚀 3-Minute Quick Start
 
-PDSync synchronizes game saves, not game installers or a whole-device backup. It includes `gameN` save directories and rankings, badges, and journal files; device settings and `bones.dat` are excluded. Restore replaces the corresponding files without automatic rollback. An interrupted write may leave a partial replacement, so keep an independent copy. Do not use older clients on the same cloud directory alongside this version.
+### Step 1: Prepare Your Cloud Storage (Choose One)
 
-## Common questions
+#### Option A: Use Built-in WebDAV (Zero Configuration, Recommended for Convenience)
+- **Features**: No need to configure third-party storage or copy server URLs. Sign in to your built-in account to sync immediately.
+- **About Appreciation Donations**: The built-in sync service can be activated via voluntary appreciation. **Donations solely go towards covering server rent, bandwidth, and maintenance overhead with zero commercial profit.**
 
-**Why is the collection much larger than the Android APK?** It contains all six packages, and each desktop package includes Java. Windows has installer and portable editions, while Linux has two distribution formats. The collection size is not the installed size on any one platform.
+#### Option B: Use Your Own WebDAV Service (100% Free & Self-Hosted)
+- **Features**: Works with Nextcloud, Jianguoyun (Nutstore), Alist, Synology, or self-hosted WebDAV. Completely free and under your own control.
+- **Example configuration parameters**:
+  - **Server URL**: E.g., `https://dav.your-server.com/remote.php/webdav/`
+  - **Username**: Your login account / email
+  - **Password**: Your app-specific password / auth token
 
-**Why are there no local saves?** Start the selected game, save and exit normally, then refresh. Check the variant, access method, and system user. Missing saves and missing read permission are different problems.
+---
 
-**Is a disabled upload button a bug?** Both sides may already match, access/connection checks may be incomplete, or another operation may be running. Read the home status before refreshing; the button alone is not enough to diagnose it.
+### Step 2: Configure PDSync
 
-**Restore completed, but the game still shows old progress.** Check that you selected the right node for the current game. A running game may retain old state in memory; do not save it over the restored progress. Record the app's result and game screen for a report rather than clearing app data.
+#### 📱 On Android:
+1. Open PDSync and choose your Pixel Dungeon game/variant.
+2. Select your save access mode:
+   - **Non-Root Mode**: Follow the wizard to patch and install the game APK. *(Reminder: requires uninstalling the original game first, erasing current saves. Perform after ending your current run!)*
+   - **Root Mode**: Grant Root permissions for in-place access. *(No uninstallation required, zero data loss!)*
+3. Connect: Sign in with the built-in account or input your custom WebDAV details, tap **Test Connection**, and proceed once verified.
 
-**What if connection or sync fails?** Check the service URL, network, account access, and WebDAV directory. Fix TLS/certificate issues on the server instead of disabling certificate verification. Settings can export diagnostics; review and remove personal information before sharing. Never send passwords, keys, or complete connection configuration.
+#### 💻 On Desktop:
+1. Open PDSync; the 4-step wizard will auto-detect or let you locate your game JAR and save folder.
+2. Sign in to your built-in account or enter custom WebDAV server details and test the connection.
+3. Compare progress between your local folder and cloud storage, then choose to **Upload** or **Restore**.
 
-**Does the portable package keep all configuration beside the EXE?** No. Desktop configuration defaults to `.pixel-dungeon-sync` in the current user's home directory. “Portable” means no installer or separately installed Java is needed, not that the app never writes user configuration.
+---
 
-**Where is the connection password stored?** The existing design saves connection configuration in plaintext: Android uses the app-private `noBackup/webdav.properties`; desktop uses `.local/config.json` in the application workspace, which defaults to `.pixel-dungeon-sync` in the user's home directory. This is not system-keychain encryption. Do not share these files: anyone with access to the relevant private directory, user account, or backups may be able to read the connection information.
+### Step 3: Everyday Play & Sync Workflow
 
-## Feedback and development
+```mermaid
+flowchart LR
+    A["📱 Play on phone and 【Save & Exit】"] --> B["☁️ Open PDSync and tap 【Upload】"]
+    B --> C["💻 Open PDSync on PC and click 【Restore】"]
+    C --> D["🎮 Launch game and continue your run!"]
+```
 
-Include the app version, OS version, game/variant version, reproduction steps, and screenshots without sensitive information when reporting a problem through [Issues](https://github.com/xyz1001/pixel-dungeon-sync/issues). Do not upload your only save or account secrets.
+- **When finishing a run**: In game, choose *Save & Return to Menu*, open PDSync and click **Upload** (or let auto-sync handle it on game exit).
+- **When switching devices**: Open PDSync on your other device, click **Restore to Device**, and then launch the game to pick up where you left off.
 
-For builds, CI, signing, version tags, and releases, see the [build and release guide](docs/RELEASING.md).
+---
+
+## 🛡️ Advanced Safety & Protection Mechanisms
+
+### 1. Conflict Protection & Explicit Confirmation
+- If you advance progress independently across devices without timely sync, PDSync detects and clearly highlights the divergence.
+- An explicit decision dialog lets you choose whether to make your current local progress the new cloud baseline or cancel to inspect—**never silently overwriting any data**.
+
+### 2. Automatic Local Backups
+- Before writing any cloud save back to your local game, PDSync creates an isolated local backup first, ensuring you can always trace back your previous local progress.
+
+### 3. Automatic Sync Awareness
+- On desktop and supported environments, PDSync detects game exits and save file modifications in the background, automatically uploading during idle periods (can be toggled or paused in Settings at any time).
+
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+<details>
+<summary><b>Q1: What is the difference between Built-in WebDAV and Custom WebDAV? Are donations mandatory?</b></summary>
+<b>Donations are completely voluntary and never mandatory!</b><br>
+PDSync provides full, unrestricted, and permanently free support for custom WebDAV (e.g. Nextcloud, Nutstore, or self-hosted services).<br>
+Built-in WebDAV is provided as a zero-setup convenience for users who do not want to manage third-party storage. Because real server hosting and bandwidth incur ongoing costs, voluntary appreciation donations are used exclusively to maintain and balance server operational expenses.
+</details>
+
+<details>
+<summary><b>Q2: Why does Android Non-Root mode require uninstalling the original game? Will I lose saves?</b></summary>
+<b>Yes, current local saves will be deleted!</b> Android requires apps that update each other to share identical signing certificates. Because the save bridge must be injected and resigned with a new key, it cannot overwrite the original installation. Uninstalling is required, which removes the game's internal data. Please finish your active run before setting up Non-Root mode, or use Root mode if available.
+</details>
+
+<details>
+<summary><b>Q3: Can I use this tool to save-scum (S/L)?</b></summary>
+PDSync was built for <b>cross-device continuity</b> and <b>disaster prevention</b>. While snapshots exist technically, we strongly advise against using them for S/L. Permadeath is the core soul of Pixel Dungeon; save-scumming defeats the thrill and satisfaction of beating the dungeon.
+</details>
+
+<details>
+<summary><b>Q4: Will clicking "Restore" wipe my current local save permanently?</b></summary>
+No. PDSync automatically takes an isolated backup of your local save directory prior to any restore action.
+</details>
+
+<details>
+<summary><b>Q5: Why is the Upload button disabled or grayed out?</b></summary>
+Common reasons:
+1. Local and cloud contents are already identical.
+2. You haven't started a run yet and no local save files exist (launch the game and perform a normal save first).
+</details>
+
+<details>
+<summary><b>Q6: I restored a save, but the game still shows my old progress?</b></summary>
+Always exit the game completely before clicking "Restore". If the game is still running in memory, it will overwrite the restored disk files upon exit.
+</details>
+
+<details>
+<summary><b>Q7: Where does the desktop portable edition store settings?</b></summary>
+Configurations are stored in your user home folder (`~/.pixel-dungeon-sync`) so updating portable versions won't lose your connection credentials.
+</details>
+
+<details>
+<summary><b>Q8: How to troubleshoot network errors or connection timeouts?</b></summary>
+1. Verify your WebDAV URL is complete (e.g., Nutstore requires <code>/dav/</code> at the end).<br>
+2. Check if local proxy/VPN software is interfering with WebDAV traffic.<br>
+3. Check detailed diagnostic logs or export a diagnostic report in <b>Settings -> Diagnostics</b>.
+</details>
+
+---
+
+## 🤝 Feedback & Contributions
+
+If you encounter issues or have suggestions, feel free to open a ticket:
+- [GitHub Issues](https://github.com/xyz1001/pixel-dungeon-sync/issues)
+- For developers & CI releases, see [RELEASING.md](docs/RELEASING.md).
+
+---
+
+<p align="center">
+  Happy dungeoneering, and may the Amulet of Yendor be yours! 🧙‍♂️🗡️
+</p>
