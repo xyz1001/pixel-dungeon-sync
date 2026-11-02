@@ -306,7 +306,7 @@ class SharedM3ReferenceRenderTest {
                 session.click(session.button("完成").boundsInRoot.center)
                 assertTrue(host.calls.isEmpty())
                 session.click(session.button(if (choice == SharedProgressChoice.LOCAL) "使用本机进度" else "使用云端进度").boundsInRoot.center)
-                session.capture("legacy-comparison-$choice-selected")
+                session.capture("legacy-choice-${choice.name.lowercase()}-selected")
                 assertEquals(choice, host.state.selectedProgress)
                 assertFalse(session.button("完成").config.contains(SemanticsProperties.Disabled))
                 session.click(session.button("完成").boundsInRoot.center)
