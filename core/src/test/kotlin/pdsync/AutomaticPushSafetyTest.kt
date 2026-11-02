@@ -48,7 +48,7 @@ class AutomaticPushSafetyTest {
  private fun session(content: String? = "original"): AppendProfileSession {
   val root = temp.resolve("save-${sequence++}").createDirectory()
   if (content != null) { root.resolve("game1").createDirectory(); root.resolve("game1/game.dat").writeText(content) }
-  return AppendProfileSession(AppConfig(saveRoot = root.toString()), temp.resolve("state-${sequence++}"), versions = versions, captureQuietMillis = 0)
+  return AppendProfileSession(AppConfig(saveRoot = root.toString()), temp.resolve("state-${sequence++}"), versions = versions)
  }
  private fun edit(local: AppendProfileSession, content: String) {
   local.root.resolve("game1").createDirectories(); local.root.resolve("game1/game.dat").writeText(content)
@@ -72,7 +72,7 @@ class AutomaticPushSafetyTest {
   val saved = assertNotNull(file.load())
   // Config reload restores the selected root, not a manufactured empty sync ancestry.
   val restarted = AppendProfileSession(saved.copy(saveRoot = saved.selectedSaveRoot!!),
-   local.directory.parent.parent, versions = versions, captureQuietMillis = 0)
+   local.directory.parent.parent, versions = versions)
   assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(saved.onboardingProgress, true, restarted.baselineFiles() != null))
   assertNull(restarted.baseline()); assertFalse(restarted.hasPending())
   assertEquals(OnboardingKind.BOTH_EMPTY, skippedWithoutWrites(restarted, store).kind)
@@ -105,7 +105,7 @@ class AutomaticPushSafetyTest {
    file.save(local.config.copy(selectedSaveRoot = local.root.toString(), onboardingProgress = OnboardingProgress.COMPLETE))
    val saved = assertNotNull(file.load())
    val restarted = AppendProfileSession(saved.copy(saveRoot = saved.selectedSaveRoot!!),
-    local.directory.parent.parent, versions = versions, captureQuietMillis = 0)
+    local.directory.parent.parent, versions = versions)
    assertEquals(OnboardingProgress.COMPLETE, OnboardingGate.resumedProgress(saved.onboardingProgress, true, false))
    assertNull(restarted.baseline()); assertFalse(restarted.hasPending()); assertEquals(writes, store.writes)
    // A later genuine exit event still runs the unchanged conservative automatic gate.

@@ -103,7 +103,7 @@ class SharedBranchChoiceDialogRenderTest {
     }
     @Test fun actualHomeUploadCancelRefreshConfirmAndRestartUseRealFacadeAndProductionMapping() {
         val root=flowRoot.resolve("current-schema");val bridge=FlowBridge();val store=FlowStore()
-        fun reopen()=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,null,0,suppliedSimpleStore=store)
+        fun reopen()=AndroidSyncFacade(root,flowConnection,bridge,flowIdentity,null,suppliedSimpleStore=store)
         var facade=reopen()
         facade.upload(facade.inspectHome());bridge.files=flowFiles(2);facade.upload(facade.inspectHome())
         val b=requireNotNull(store.tip)
@@ -111,7 +111,7 @@ class SharedBranchChoiceDialogRenderTest {
         // A second application session holds B as its real accepted parent, then advances to E.
         val localRoot=flowRoot.resolve("local-branch")
         val localBridge=FlowBridge().also {it.files=flowFiles(2)}
-        var local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store)
+        var local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,suppliedSimpleStore=store)
         // Reusing existing content B changes latest, then the remote session returns to C.
         local.overwriteCloudSuccessors(local.inspectHome(),c)
         facade.overwriteCloudSuccessors(facade.inspectHome(),b)
@@ -134,13 +134,13 @@ class SharedBranchChoiceDialogRenderTest {
             assertEquals(before,store.writes.size);assertFalse("合并" in modalTexts(scene));assertFalse("Merge" in modalTexts(scene))
             click(scene,SharedMessages.CANCEL.text());refresh();render(scene,"flow-cancel")
             assertEquals(c,store.tip);assertEquals(before,store.writes.size)
-            local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store)
+            local=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,suppliedSimpleStore=store)
             refresh();upload();render(scene,"flow-reopen");click(scene,SharedMessages.OVERWRITE_CLOUD.text());render(scene,"flow-result")
             val e=requireNotNull(store.tip);assertEquals(b,store.nodes.getValue(e).parentId)
             assertTrue(c in store.nodes && c in store.objects)
             assertEquals(listOf("zip","metadata","latest"),store.writes.drop(before))
             assertEquals(localBridge.files.mapValues {hash(it.value)},AndroidArchiveSnapshot.read(store.objects.getValue(e),AndroidGameAdapter(flowIdentity)).files)
-            val final=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,0,suppliedSimpleStore=store).inspectHome()
+            val final=AndroidSyncFacade(localRoot,flowConnection,localBridge,flowIdentity,null,suppliedSimpleStore=store).inspectHome()
             assertEquals("IDENTICAL",final.kind);assertFalse(final.isRetryablePending)
         } finally {scene.close()}
     }

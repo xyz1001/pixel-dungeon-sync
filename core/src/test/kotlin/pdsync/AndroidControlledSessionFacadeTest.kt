@@ -38,7 +38,7 @@ class AndroidControlledSessionFacadeTest {
   fun latest()=json.decodeFromString<AppendCommit>(commits.values.last().decodeToString())
  }
  private val bridge=Bridge();private val store=Store()
- private fun facade()=AndroidSyncFacade(temp,connection,bridge,identity,store,0,sessions)
+ private fun facade()=AndroidSyncFacade(temp,connection,bridge,identity,store,sessions)
  private fun publish():String {assertEquals("UPLOADED",facade().autoUpload().status);return requireNotNull(store.latest().snapshot.directoryMetadata!!.runs.getValue("game1").runUUID)}
  private fun progress(duration:Double=3.0,seed:Long=5352470251118){bridge.bytes=bridge.bytes+("game1/game.dat" to controlledRun(duration,seed))}
  private fun current()=store.latest().snapshot.directoryMetadata!!.runs.getValue("game1")

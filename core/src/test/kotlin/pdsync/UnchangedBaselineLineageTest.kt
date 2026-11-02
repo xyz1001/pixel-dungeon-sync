@@ -31,7 +31,7 @@ class UnchangedBaselineLineageTest {
  }
  private fun session(name: String = "local") = AppendProfileSession(AppConfig(saveRoot = temp.resolve(name).createDirectories().also {
   it.resolve("game1").createDirectories(); it.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":1}")
- }.toString()), temp.resolve("$name-state"), captureQuietMillis = 0)
+ }.toString()), temp.resolve("$name-state"))
  // No-op ancestry is a read-compatibility feature for old UUID records. New schema3
  // writers cannot create these duplicate-content chains.
  private fun seedLegacy(local:AppendProfileSession,store:Memory):AppendCommit {
@@ -49,7 +49,7 @@ class UnchangedBaselineLineageTest {
  }
  private fun edit(local: AppendProfileSession) = local.root.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":2}")
  private fun compare(local: AppendProfileSession, store: Memory) = local.compareOnboarding(store) { true }
- private fun fingerprint(local: AppendProfileSession) = SaveStabilityGuard(local.root, local.adapter, { true }, 0).fingerprint()
+ private fun fingerprint(local: AppendProfileSession) = SaveStabilityGuard(local.root, local.adapter, { true }).fingerprint()
  private fun graph(vararg commits: AppendCommit) = CommitGraph(commits.associateBy { it.id }, emptyMap())
 
  @Test fun dirtyLocalProgressCanAdvanceOnlyTheVerifiedNoopAncestry() {

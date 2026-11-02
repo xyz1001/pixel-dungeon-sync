@@ -61,7 +61,10 @@ class DesktopSimpleSessionTest {
   desktop.readHomeHistory(transport(),true);desktop.restoreCloudHistory(b,transport(),true,null){true};edit(desktop,"E")
   val conflict=assertIs<AppendPushResult.Diverged>(assertIs<HomePushResult.Published>(desktop.pushFromHome(null,transport()){true}).result).conflict
   assertEquals(d,store.tip)
+  store.calls.clear()
   val e=assertIs<AppendPushResult.Success>(desktop.overwriteCloudConflict(conflict,d,transport()){true}).commit.id
+  assertEquals(listOf("latest","object","metadata","publish"),store.calls)
+  assertEquals(listOf(e,b,a),desktop.syncHistory().simple!!.nodes.map {it.hashId})
   assertEquals(b,store.nodes.getValue(e).parentId)
   assertEquals(listOf(e,b,a),SimpleSaveProtocol.history(store,e).map {it.hashId})
   assertTrue(c in store.objects && d in store.objects)

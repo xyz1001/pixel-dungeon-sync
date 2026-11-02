@@ -4134,22 +4134,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         navigate(this.onboardingActive ? SyncPage.CONNECTION : SyncPage.HOME);
     }
 
-    /* renamed from: lambda$renderConflict$80$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
-    /* synthetic */ void m87x12f15700() {
-        if (!allowRestoreAction()) return;
-        final String str = this.selected;
-        if (str == null) {
-            return;
-        }
-        final AndroidSyncFacade.Inspection inspection = this.inspection;
-        showDestructiveConfirmation(RESTORE_SAVE_154.text(), SELECTED_SAVE_155.text() + selectedName() + N_NLOCAL_SAVES_WILL_BE_BACKED_159.text(), OVERWRITE_LOCAL_SAVES_157.text(), new Runnable() { // from class: io.github.xyz1001.pdsync.android.MainActivity$$ExternalSyntheticLambda159
-            @Override // java.lang.Runnable
-            public final void run() {
-                MainActivity.this.m86xfa720d6a(inspection, str);
-            }
-        });
-    }
-
     /* renamed from: lambda$renderConflict$78$io-github-xyz1001-pdsync-android-MainActivity, reason: not valid java name */
     /* synthetic */ AndroidSyncFacade.OperationResult m85x84f7e729(AndroidSyncFacade.Inspection inspection, String str) throws Exception {
         return sync().overwriteCloudSuccessors(inspection, str);

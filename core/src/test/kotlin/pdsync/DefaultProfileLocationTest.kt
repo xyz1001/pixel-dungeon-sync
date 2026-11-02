@@ -22,7 +22,7 @@ class DefaultProfileLocationTest {
   val old = Files.createTempDirectory("old-fixed-other"); old.resolve("rankings.dat").writeText("never read")
   val state = Files.createTempDirectory("fixed-state")
   val config = AppConfig(saveRoot = root.toString())
-  val previous = ProfileSession(config, desktopAccountStateRoot(state, config), captureQuietMillis = 0); val saved = previous.createSnapshot { true }
+  val previous = ProfileSession(config, desktopAccountStateRoot(state, config)); val saved = previous.createSnapshot { true }
   val current = location.open(config.copy(saveRoot = old.toString()), state)
   assertEquals(root.toRealPath(), current.root); assertEquals(previous.directory, current.directory)
   assertEquals(saved.manifest.id, current.history().single().manifest.id)
@@ -33,7 +33,7 @@ class DefaultProfileLocationTest {
   root.resolve("game1/game.dat").writeText("{\"version\":922}")
   val manual = Files.createTempDirectory("unrelated-manual"); manual.resolve("game1").createDirectories(); manual.resolve("game1/game.dat").writeText("{\"version\":900}")
   val state = Files.createTempDirectory("fixed-state")
-  val old = ProfileSession(AppConfig(saveRoot = manual.toString()), state, captureQuietMillis = 0); val snapshot = old.createSnapshot { true }
+  val old = ProfileSession(AppConfig(saveRoot = manual.toString()), state); val snapshot = old.createSnapshot { true }
   val current = location.open(AppConfig(saveRoot = manual.toString()), state)
   assertTrue(current.history().isEmpty()); assertNotEquals(old.directory, current.directory)
   assertEquals(snapshot.manifest.id, old.history().single().manifest.id)

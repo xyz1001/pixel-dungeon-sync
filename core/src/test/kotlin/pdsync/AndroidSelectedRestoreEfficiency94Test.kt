@@ -75,7 +75,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   return commit
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
- private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store,0))}
+ private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store))}
  private fun publish(store:Store,bridge:Bridge=Bridge())=rig(bridge,store).also {assertEquals("UPLOADED",it.facade.autoUpload().status)}
  private fun mirror(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->paths.filter {it.fileName.toString()=="mirror"}.findFirst().orElseThrow()}
  private fun repository(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->AppendRepository(paths.filter {it.fileName.toString()=="append-v2"}.findFirst().orElseThrow(),AndroidGameAdapter(identity),connection.profile)}
@@ -183,7 +183,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertFailsWith<java.io.IOException>{r.facade.upload(observed)}
   assertNotNull(repository(r).pending());val writes=store.writes;val records=store.commits.mapValues {hash(it.value)}
   store.failCommitReads=false
-  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store)
   reopened.upload(reopened.inspectHome())
   assertNull(repository(r).pending());assertEquals(writes,store.writes)
   assertEquals(records,store.commits.mapValues {hash(it.value)});assertTrue(store.removed.isEmpty())
@@ -196,7 +196,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    r.facade.inspectHome();bridge.content=files(9).toMutableMap()
    val writes=store.writes;val records=store.commits.mapValues {hash(it.value)}
    repeat(2) {
-    val facade=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+    val facade=AndroidSyncFacade(r.root,connection,bridge,identity,store)
     val observed=facade.inspectHome();assertNull(repository(r).baseline())
     val result=facade.upload(observed)
     assertTrue(result.isConflict);assertEquals(writes,store.writes)
@@ -213,7 +213,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertNull(first.baseline)
   assertTrue(pdsync.presentation.HistoryPresentation.from(first,0).edges.any {it.fromId=="local-current"&&it.toId==b.id})
   bridge.content=files(9).toMutableMap()
-  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store)
   val history=reopened.historyPresentation(reopened.inspectHome())
   val shown=pdsync.presentation.HistoryPresentation.from(history,0)
   assertTrue(shown.nodes.any {it.id=="local-baseline"},"refresh must retain the observed local history anchor")
@@ -300,7 +300,7 @@ class AndroidSelectedRestoreEfficiency94Test {
   assertEquals("IDENTICAL",result.refreshedInspection?.kind);assertEquals(chosen.id,result.refreshedInspection?.comparison?.baselineId)
   assertEquals(chosen.id,repository(r).baseline());assertTrue(recoveryFiles(r).isEmpty())
   bridge.content=files(9).toMutableMap()
-  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store,0)
+  val reopened=AndroidSyncFacade(r.root,connection,bridge,identity,store)
   val shown=pdsync.presentation.HistoryPresentation.from(reopened.historyPresentation(reopened.inspectHome()),0)
   assertTrue(shown.nodes.any {it.id=="local-baseline"})
   assertTrue(shown.edges.any {it.fromId=="local-baseline" && it.toId==chosen.id})
@@ -466,7 +466,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    val endpoint=server.url("/dav/").toString()
    val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
    val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
-    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0)
+    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password))
    if(historical)facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
    val home=facade.inspectHome();val exports=bridge.exports;val restores=bridge.restores;requests.clear();val started=System.nanoTime()
    val result=facade.restoreSelected(home,chosen.snapshot.id,true)
@@ -528,7 +528,7 @@ class AndroidSelectedRestoreEfficiency94Test {
    val selectedStore=object:AppendStore by dav {override val historyReadParallelism:Int get()=if(mode=="serial")1 else 4}
    val bridge=Bridge(if(historical)emptyMap() else if(noop)Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)) else files(9));val root=temp.resolve("dav-${sequence++}")
    val facade=AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
-    selectedStore,0)
+    selectedStore)
    bridge.content=Snapshots.verify(Snapshot(tip.snapshot,seed.objects.getValue(tip.snapshot.id)),AndroidGameAdapter(identity)).toMutableMap()
    facade.restoreSelected(facade.inspectHome(),tip.snapshot.id,false)
    bridge.content=files(9).toMutableMap()

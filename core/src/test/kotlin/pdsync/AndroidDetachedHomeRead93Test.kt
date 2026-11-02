@@ -48,7 +48,7 @@ class AndroidDetachedHomeRead93Test {
   override fun legacyPresent()=false
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
- private fun rig(bridge:Bridge,store:Store,root:Path=temp.resolve("workspace-${sequence++}"))=Rig(root,AndroidSyncFacade(root,connection,bridge,identity,store,0))
+ private fun rig(bridge:Bridge,store:Store,root:Path=temp.resolve("workspace-${sequence++}"))=Rig(root,AndroidSyncFacade(root,connection,bridge,identity,store))
  private fun mirror(root:Path)=Files.walk(root.resolve("connections")).use {s->s.filter {it.fileName.toString()=="mirror"}.findFirst().orElseThrow()}
  private fun content(root:Path)=Files.walk(root).use {s->s.filter(Files::isRegularFile).toList().associate {root.relativize(it).toString() to hash(it.readBytes())}}
  private fun publish(store:Store)=rig(Bridge(),store).also {assertEquals("UPLOADED",it.facade.autoUpload().status)}

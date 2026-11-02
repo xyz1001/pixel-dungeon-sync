@@ -104,7 +104,7 @@ class AndroidHistoricalRestorePublicationTest {
         val bridge = Bridge()
         val store = Store()
         val facade = reopen()
-        fun reopen() = AndroidSyncFacade(root, connection, bridge, identity, store, 0)
+        fun reopen() = AndroidSyncFacade(root, connection, bridge, identity, store)
         fun pending(): UploadPlan? = Files.walk(root).use { paths ->
             val directory = paths.filter { it.fileName.toString() == "append-v2" }.findFirst().orElseThrow()
             AppendRepository(directory, AndroidGameAdapter(identity), connection.profile).pending()

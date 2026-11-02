@@ -36,7 +36,7 @@ class HistoryChartRenderTest {
   }
   val root=temp.resolve("saves").createDirectory();root.resolve("game1").createDirectory()
   root.resolve("game1/game.dat").writeText("{\"version\":896,\"depth\":1}");root.resolve("rankings.dat").writeText("{\"total\":12}")
-  val session=AppendProfileSession(AppConfig(saveRoot=root.toString()),temp.resolve("state"),versions=versions,captureQuietMillis=0)
+  val session=AppendProfileSession(AppConfig(saveRoot=root.toString()),temp.resolve("state"),versions=versions)
   session.renameCurrent("初次出发"){true};session.push(store){true}
   root.resolve("game1/game.dat").writeText("{\"version\":896,\"depth\":2}");session.renameCurrent("继续探索"){true};session.push(store){true}
   root.resolve("game1/game.dat").writeText("{\"version\":896,\"depth\":3}")

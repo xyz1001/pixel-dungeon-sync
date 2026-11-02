@@ -69,7 +69,7 @@ class AndroidHomeReconstruction92Test {
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
- private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store,0))}
+ private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store))}
  private fun publish(store:Store,bridge:Bridge=Bridge()):Rig=rig(bridge,store).also {assertEquals("UPLOADED",it.facade.autoUpload().status)}
  private fun mirror(root:Path)=Files.walk(root.resolve("connections")).use {paths->paths.filter {it.fileName.toString()=="mirror" && Files.isDirectory(it)}.findFirst().orElseThrow()}
  private fun treeFingerprint(root:Path)=Files.walk(root).use {paths->paths.toList().associate {path->val a=Files.readAttributes(path,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS);root.relativize(path).toString() to "${a.fileKey()}:${a.lastModifiedTime()}:${a.size()}:${if(a.isRegularFile)hash(path.readBytes()) else "directory"}"}}

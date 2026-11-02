@@ -18,7 +18,7 @@ class HashLocalHistoryCompatibilityTest {
    override fun annotate(snapshot:Snapshot)=snapshot
    override fun target(path:String):TargetGame?=null
    override fun checkRestore(snapshot:Snapshot,targetPath:String) {}
-  },captureQuietMillis=0)
+  })
  }
  private fun snapshot(session:ProfileSession):Snapshot {
   val captured=Snapshots.capture(session.root,Shattered,"demo","test",null)

@@ -43,7 +43,7 @@ class AndroidPackageNamespaceTest {
   }
  }
  private fun facade(root: Path, bridge: Bridge, store: Store, connection: AndroidConnection = this.connection) =
-  AndroidSyncFacade(root, connection, bridge, bridge.identity, store, 0)
+  AndroidSyncFacade(root, connection, bridge, bridge.identity, store)
  private fun paths(root: Path, name: String) = Files.walk(root).use { paths -> paths.filter { it.fileName.toString() == name }.toList() }
  private fun write(root: Path, name: String, value: String) = root.resolve(name).also { it.parent.createDirectories(); it.writeText(value) }
  private fun fingerprint(root: Path) = Files.walk(root).use { paths ->

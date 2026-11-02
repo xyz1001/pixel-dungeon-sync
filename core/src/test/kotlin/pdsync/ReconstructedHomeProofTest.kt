@@ -26,7 +26,7 @@ class ReconstructedHomeProofTest {
    override fun target(path:String):TargetGame?=null
    override fun checkRestore(snapshot:Snapshot,targetPath:String){}
   }
-  return AppendProfileSession(AppConfig(saveRoot=root.toString()),temp.resolve("s${next++}"),versions=versions,captureQuietMillis=0)
+  return AppendProfileSession(AppConfig(saveRoot=root.toString()),temp.resolve("s${next++}"),versions=versions)
  }
  private fun seeded():Pair<Store,AppendProfileSession>{val store=Store();session().push(store){true};store.gets=0;store.puts=0;return store to session()}
  @Test fun previewHasNoObjectAuthorityThenFullUpgradeProvesIt(){

@@ -64,7 +64,7 @@ class ProductionRestoreReadOnly97Test {
   }
  }
  private data class Rig(val root:Path,val facade:AndroidSyncFacade)
- private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store,0))}
+ private fun rig(bridge:Bridge,store:Store)=temp.resolve("workspace-${sequence++}").let {Rig(it,AndroidSyncFacade(it,connection,bridge,identity,store))}
  private fun publish(store:Store,bridge:Bridge=Bridge())=rig(bridge,store).also {assertEquals("UPLOADED",it.facade.autoUpload().status)}
  private fun mirror(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->paths.filter {it.fileName.toString()=="mirror"}.findFirst().orElseThrow()}
  private fun repository(rig:Rig)=Files.walk(rig.root.resolve("connections")).use {paths->AppendRepository(paths.filter {it.fileName.toString()=="append-v2"}.findFirst().orElseThrow(),AndroidGameAdapter(identity),connection.profile)}
@@ -104,7 +104,7 @@ class ProductionRestoreReadOnly97Test {
   fun rig(bridge:Bridge):Rig {
    val endpoint=server.url("/dav/").toString();val root=temp.resolve("http-${sequence++}")
    return Rig(root,AndroidSyncFacade(root,AndroidConnection(endpoint,connection.username,connection.password,connection.profile),bridge,identity,
-    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password),0))
+    AppendOnlyWebDav(endpoint,AndroidGameAdapter(identity).id,connection.profile,connection.username,connection.password)))
   }
   fun commits()=remote.filterKeys {it.contains("pdsync-v2-commit-") || it.contains("pdsync-v3-commit-")}.values.map {json.decodeFromString<AppendCommit>(it.decodeToString())}
   fun onlyTip():AppendCommit {val all=commits();val parents=all.flatMap {it.parents}.toSet();return all.single {it.id !in parents}}

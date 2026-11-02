@@ -23,7 +23,7 @@ class LocalProgressOnboardingTest {
  private fun session(): AppendProfileSession {
   val name = "local-${index++}"; val root = temp.resolve(name).createDirectory()
   root.resolve("game1").createDirectory(); root.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":1}")
-  return AppendProfileSession(AppConfig(saveRoot = root.toString()), temp.resolve("$name-state"), captureQuietMillis = 0)
+  return AppendProfileSession(AppConfig(saveRoot = root.toString()), temp.resolve("$name-state"))
  }
  private fun edit(local: AppendProfileSession, turn: Int = 2) = local.root.resolve("game1/game.dat").writeText("{\"version\":896,\"turn\":$turn}")
  private fun compare(local: AppendProfileSession, store: Memory) = local.compareOnboarding(store) { true }
@@ -33,12 +33,12 @@ class LocalProgressOnboardingTest {
  }
  @Test fun ordinaryLocalProgressCanCompleteOnboardingWithoutWritingAnything() {
   val (local, store, base) = setup(); val comparison = compare(local, store)
-  val before = SaveStabilityGuard(local.root, local.adapter, { true }, 0).fingerprint()
+  val before = SaveStabilityGuard(local.root, local.adapter, { true }).fingerprint()
   val sidecar = local.root.resolve(DIRECTORY_METADATA_FILE).readBytes()
   assertEquals(OnboardingKind.DIFFERENT, comparison.kind); assertEquals(OnboardingLineage.SAME_TIP, comparison.baselineLineage)
   local.confirmLocalProgressReady(comparison, store) { true }
   assertEquals(base.id, local.baseline()); assertEquals(2, store.writes); assertFalse(local.hasPending())
-  assertEquals(before, SaveStabilityGuard(local.root, local.adapter, { true }, 0).fingerprint()); assertContentEquals(sidecar, local.root.resolve(DIRECTORY_METADATA_FILE).readBytes())
+  assertEquals(before, SaveStabilityGuard(local.root, local.adapter, { true }).fingerprint()); assertContentEquals(sidecar, local.root.resolve(DIRECTORY_METADATA_FILE).readBytes())
  }
  @Test fun changedLocalBytesRejectAnOldDecision() {
   val (local, store, base) = setup(); val comparison = compare(local, store); edit(local, 3)

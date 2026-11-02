@@ -28,7 +28,7 @@ class ExistingUploadContentTest {
  private fun session(content:String="A"):AppendProfileSession {
   val id=sequence++;val root=temp.resolve("root-$id").createDirectory()
   root.resolve("game1").createDirectory().resolve("game.dat").writeText(content)
-  return AppendProfileSession(AppConfig(saveRoot=root.toString(),profile="reuse"),temp.resolve("state-$id"),versions=versions,captureQuietMillis=0)
+  return AppendProfileSession(AppConfig(saveRoot=root.toString(),profile="reuse"),temp.resolve("state-$id"),versions=versions)
  }
  private fun edit(session:AppendProfileSession,content:String)=session.root.resolve("game1/game.dat").writeText(content)
  private fun push(session:AppendProfileSession,store:Store)=assertIs<AppendPushResult.Success>(session.push(store){true})
@@ -56,7 +56,7 @@ class ExistingUploadContentTest {
   assertTrue(validContentHashId(commit.id))
   session.renameHistory(commit.snapshot.id,"first display name")
   assertEquals("first display name",session.syncHistory().aliases[commit.snapshot.id])
-  val restarted=AppendProfileSession(session.config,temp.resolve("state-0"),versions=versions,captureQuietMillis=0)
+  val restarted=AppendProfileSession(session.config,temp.resolve("state-0"),versions=versions)
   assertEquals("first display name",restarted.syncHistory().aliases[commit.snapshot.id])
   restarted.renameHistory(commit.snapshot.id,"second display name",restarted.readHomeHistory(store))
   assertEquals("second display name",restarted.syncHistory().aliases[commit.snapshot.id])

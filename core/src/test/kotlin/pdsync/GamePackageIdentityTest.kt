@@ -107,7 +107,7 @@ class GamePackageIdentityTest {
   val target = targetJar(); ShatteredProfileVersions.checkRestore(source, target.toString())
   val root = temp.resolve("target-save").createDirectories()
   val session = ProfileSession(AppConfig(saveRoot = root.toString(), profile = profile, targetGame = target.toString()),
-   temp.resolve("state"), captureQuietMillis = 0)
+   temp.resolve("state"))
   session.remember(downloaded, "verified current snapshot")
   session.restoreHistory(source.manifest.id) { true }
   assertEquals("{\"version\":896,\"turn\":1}", root.resolve("game1/game.dat").readText())
@@ -159,7 +159,7 @@ class GamePackageIdentityTest {
  }
  @Test fun foreignNamespaceAndDifferentPackageCannotBeRestoredOrRemembered() {
   val root = temp.resolve("unchanged-save").createDirectories()
-  val session = ProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), temp.resolve("isolated-state"), captureQuietMillis = 0)
+  val session = ProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), temp.resolve("isolated-state"))
   for (other in listOf(aliased(), snapshot().let { it.copy(manifest = it.manifest.copy(gamePackage = "org.other.game")) })) {
    assertFails { ShatteredProfileVersions.annotate(other) }
    assertFails { ShatteredProfileVersions.checkRestore(other, targetJar().toString()) }
@@ -170,9 +170,9 @@ class GamePackageIdentityTest {
  @Test fun currentScopeUsesItsAdapterIdentityAndDoesNotReuseAnotherNamespace() {
   val root = temp.resolve("scope-save").createDirectories(); val state = temp.resolve("scope-state")
   val config = AppConfig(saveRoot = root.toString(), profile = profile)
-  val old = ProfileSession(config, state, Adapter(alias, spd), captureQuietMillis = 0)
-  val current = ProfileSession(config, state, Shattered, captureQuietMillis = 0)
-  val restarted = ProfileSession(config, state, Shattered, captureQuietMillis = 0)
+  val old = ProfileSession(config, state, Adapter(alias, spd))
+  val current = ProfileSession(config, state, Shattered)
+  val restarted = ProfileSession(config, state, Shattered)
   val key = hash(listOf("package-current-v1", Shattered.id, root.toRealPath().toString(), config.validated().endpoint, profile).joinToString("\n").encodeToByteArray())
   assertEquals(state.resolve("profiles/$key"), current.directory)
   assertNotEquals(old.directory, current.directory); assertEquals(current.directory, restarted.directory)

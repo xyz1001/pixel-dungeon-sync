@@ -5,7 +5,6 @@ import kotlin.io.path.*
 /** Loopback-only isolated end-to-end harness; never accepts a real save path. */
 fun main() {
  val root = Files.createTempDirectory("pds-e2e-")
- val backup = Files.createTempDirectory("pds-backup-")
  val state = Files.createTempDirectory("pds-state-")
  try {
   root.resolve("game1").createDirectories()
@@ -27,16 +26,15 @@ fun main() {
   check(repository.discover(store).tips == setOf(second.id))
   val downloaded = repository.download(store, second)
   root.resolve("game1/game.dat").writeText("modified")
-  Snapshots.restore(downloaded, root, backup, Shattered, "synthetic-v1", { true })
+  Snapshots.restore(downloaded, root, Shattered, "synthetic-v1", { true })
   check(root.resolve("game1/game.dat").readText() == "synthetic-run")
   check(root.resolve("journal.dat").readText() == "synthetic-journal")
-  check(backup.listDirectoryEntries().isEmpty())
   val sibling = publish(listOf(first.id))
   check(repository.discover(store).tips == setOf(second.id, sibling.id))
   val resolution = publish(listOf(second.id, sibling.id), "resolution")
   check(repository.discover(store).tips == setOf(resolution.id))
   println("PDSYNC_E2E_OK immutable-upload/readback/parent-DAG/restore/no-backup/retained-branches/resolution/no-head")
  } finally {
-  listOf(root, backup, state).forEach { path -> Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } } }
+  listOf(root, state).forEach { path -> Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } } }
  }
 }

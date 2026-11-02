@@ -14,7 +14,7 @@ class DesktopConflictDialogTest {
 
  private fun session(name: String) = AppendProfileSession(
   AppConfig(saveRoot = temp.resolve(name).createDirectory().toString(), username = "account-a"),
-  temp.resolve("$name-state"), captureQuietMillis = 0)
+  temp.resolve("$name-state"))
 
  @Test fun observationOwnerRejectsAccountSessionAndNavigationChangesIncludingReopenedSameConflict() {
   val manager = session("first")

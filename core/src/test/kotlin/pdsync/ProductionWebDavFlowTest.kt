@@ -87,7 +87,7 @@ class ProductionWebDavFlowTest {
   val root=temp.resolve(device).resolve("saves").createDirectories()
   return AppConfig(saveRoot=root.toString(),selectedSaveRoot=root.toString(),endpoint=dav.endpoint,profile="e2e",targetGame=target.toString(),username="fixture",password="",onboardingProgress=OnboardingProgress.COMPLETE)
  }
- private fun open(c:AppConfig)=AppendProfileSession(c,temp.resolve(Path.of(c.saveRoot).parent.fileName.toString()).resolve("app-state"),captureQuietMillis=0)
+ private fun open(c:AppConfig)=AppendProfileSession(c,temp.resolve(Path.of(c.saveRoot).parent.fileName.toString()).resolve("app-state"))
  private fun published(s:AppendProfileSession,dav:Dav)=assertIs<AppendPushResult.Success>(s.push(dav.store()){true}).commit
  private fun restore(s:AppendProfileSession,dav:Dav)=s.restoreRemote(s.readRemote(dav.store()).single().entry.manifest.id,dav.store()){true}
  private fun advance(s:AppendProfileSession,slot:Int,value:String) {

@@ -197,7 +197,6 @@ object ShatteredProfileVersions : ProfileVersions {
 class ProfileSession(
  config: AppConfig, private val stateRoot: Path, val adapter: GameAdapter = Shattered,
  private val versions: ProfileVersions = ShatteredProfileVersions,
- private val captureQuietMillis: Long = 2_000,
  deviceLabel: (() -> String?)? = null
 ) {
  val config = config.validated()
@@ -208,7 +207,6 @@ class ProfileSession(
  private val scopeKey = hash(listOf("package-current-v1", adapter.id, root.toString(), this.config.endpoint, this.config.profile).joinToString("\n").encodeToByteArray())
  val directory: Path = state.resolve("profiles").resolve(scopeKey)
  private val historyRoot = directory.resolve("history")
- private val backupRoot = directory.resolve("backups")
  private val headPath = directory.resolve("head.txt")
  private val queue = PendingSnapshots(directory.resolve("pending"), adapter)
  private val queueKey = scopeKey
@@ -264,7 +262,7 @@ class ProfileSession(
  }
  internal fun capture(stopped: () -> Boolean, parent: String? = head(), persistDirectoryMetadata: Boolean = true): Snapshot {
   validateRootStructure()
-  val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
+  val snapshot = versions.annotate(SaveStabilityGuard(root, adapter, stopped).capture(config.profile, "自动识别", parent, captureContextProvider = metadata::captureContext))
   require(snapshot.manifest.files.isNotEmpty()) { CoreSessionMessages.AN_EMPTY_FOLDER_CAN_ONLY_BE_USED_FOR_RESTORING_EMPTY.text() }
   return snapshot.copy(manifest=snapshot.manifest.copy(directoryMetadata=directoryMetadata.observe(snapshot.manifest.files,initialImport=!historyRoot.exists(),persist=persistDirectoryMetadata)))
  }
@@ -413,7 +411,7 @@ class ProfileSession(
   restore(verified.snapshot,stopped,expectedFiles,verified)
  private fun restore(snapshot: Snapshot, stopped: () -> Boolean, expectedFiles: Map<String,String>?, verified: VerifiedSnapshot?): RestoreResult {
   guard(stopped); checkedManifest(snapshot.manifest)
-  val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+  val stability = SaveStabilityGuard(root, adapter, stopped)
   val before = stability.fingerprint()
   require(expectedFiles==null || before.files==expectedFiles) { CoreSessionMessages.LOCAL_CONTENT_CHANGED_BEFORE_RESTORING_SELECT_AGAIN.text() }
   val compatibility: (Snapshot,String)->Unit = { candidate, _ ->
@@ -422,7 +420,7 @@ class ProfileSession(
   val beforeReplacement: ()->Unit = { stability.requireUnchanged(before) }
   val afterRestore: ()->Unit = { directoryMetadata.adopt(snapshot.manifest.directoryMetadata,snapshot.manifest.files) }
   if(verified==null)
-   Snapshots.restore(snapshot,root,backupRoot,adapter,"自动识别",stopped,
+   Snapshots.restore(snapshot,root,adapter,"自动识别",stopped,
     validateCompatibility=compatibility,beforeReplacement=beforeReplacement,afterRestore=afterRestore)
   else Snapshots.restoreVerified(verified,root,adapter,"自动识别",stopped,compatibility,beforeReplacement,afterRestore)
   return RestoreResult(snapshot.manifest)

@@ -107,8 +107,30 @@ class RootUiContract(unittest.TestCase):
         self.assertIn('restoreSupported() && canRequestSaveAccess()', body(MAIN, 'private boolean canHomeRestore()'))
         self.assertIn('backupRecoverySupported()', body(MAIN, 'private SettingsCapabilities settingsCapabilities()'))
         self.assertIn('if (capabilities.canRecoverBackup)', body(MAIN, 'private void showSettingsMaintenance('))
-        for signature in ('public void requestRestore()', 'void m87x12f15700()'):
-            self.assertIn('if (!allowRestoreAction()) return;', body(MAIN, signature))
+        restore = body(MAIN, 'public void requestRestore()')
+        self.assertIn('if (!canHomeRestore()) return;', restore)
+        self.assertIn('if (!allowRestoreAction()) return;', restore)
+        self.assertIn('if (restoreSupported()) return true;', body(MAIN, 'private boolean allowRestoreAction()'))
+        self.assertIn('m143x7dd3dfcf(observed, target)', restore)
+        confirmation = body(MAIN, 'void m143x7dd3dfcf(')
+        for guard in ('this.busy', 'this.inspection != inspection',
+                      '!java.util.Objects.equals(this.selected, str)', '!homeAccountAccessAvailable()',
+                      '!restoreSupported()', '!homeArchiveAvailability().getRestoreSourceAvailable()'):
+            self.assertIn(guard, confirmation)
+        conflict = body(MAIN, 'private void renderConflict()')
+        for guard in ('root == ownerRoot', 'page == SyncPage.CONFLICT', 'resumed && !isDestroyed()',
+                      '!busy && !sharedAppreciationOnly', 'inspection == observed',
+                      'facade == ownerFacade', 'connection == ownerConnection',
+                      'ownerContext.accepts(currentHomeContext(sharedHomeRenderToken), true, busy)',
+                      'observed.isOverwriteConflict()', 'cloudVerified', 'connection != null',
+                      'observed.getRemoteVersions()', 'branch.getSnapshotId().equals(snapshotId)',
+                      '!restoreNeedsAttention()', '!observed.isRetryablePending()',
+                      'canResolve() && hasBranch(snapshotId) && snapshotId.equals(selected)',
+                      'm86xfa720d6a(observed, snapshotId)'):
+            self.assertIn(guard, conflict)
+        self.assertIn('if (owner == null || this.busy) return;', body(MAIN, 'void m86xfa720d6a('))
+        self.assertIn('sync().overwriteCloudSuccessors(inspection, str)', body(MAIN, 'AndroidSyncFacade.OperationResult m85x84f7e729('))
+        self.assertIn('requireOfficialSyncAccess(this.connection)', body(MAIN, 'private AndroidSyncFacade sync()'))
         for signature in ('AndroidSyncFacade.OperationResult m141x92df934d(', 'AndroidSyncFacade.OperationResult m142x859b98e('):
             self.assertIn('requireRestoreSupport()', body(MAIN, signature))
         recovery = body(MAIN, 'String m113x3e2c50ed()')

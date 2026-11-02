@@ -57,7 +57,7 @@ class OnboardingComparisonTest {
   override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) { "incompatible" } }
  }
  private fun session(value: String? = "alive", version: String = "v1") = AppendProfileSession(
-  AppConfig(saveRoot = root(value).toString()), temp.resolve("state-${next++}"), versions = versions(version), captureQuietMillis = 0)
+  AppConfig(saveRoot = root(value).toString()), temp.resolve("state-${next++}"), versions = versions(version))
  private fun edit(session: AppendProfileSession, value: String) = session.root.resolve("game1/game.dat").writeText(value)
  private fun content(session: AppendProfileSession) = session.root.resolve("game1/game.dat").readText()
  private fun publish(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit

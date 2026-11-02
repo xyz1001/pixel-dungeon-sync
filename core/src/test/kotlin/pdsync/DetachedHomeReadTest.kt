@@ -30,7 +30,7 @@ class DetachedHomeReadTest {
   root.resolve("game1").createDirectories().resolve("game.dat").writeText("""{"version":896}""")
   val snapshot=Snapshots.capture(root,Shattered,"test","test",null)
   val commit=AppendCommit(id=UUID.randomUUID().toString(),parents=emptyList(),snapshot=snapshot.manifest,objectBytes=snapshot.zip.size)
-  val session=AppendProfileSession(AppConfig(saveRoot=root.toString(),endpoint="https://dav.test/",profile="test"),temp.resolve("state"),Shattered,policy,0)
+  val session=AppendProfileSession(AppConfig(saveRoot=root.toString(),endpoint="https://dav.test/",profile="test"),temp.resolve("state"),Shattered,policy)
   return session to Store(commit,json.encodeToString(commit).encodeToByteArray())
  }
  private fun tree()=Files.walk(temp).use {paths->paths.filter(Files::isRegularFile).toList().associate {temp.relativize(it).toString() to hash(it.readBytes())}}

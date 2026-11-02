@@ -194,11 +194,9 @@ object Snapshots {
   return files
  }
  /** Replaces the selected save set without retaining overwritten bytes or rolling them back. */
- fun restore(snapshot: Snapshot, root: Path, backupRoot: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {}, onBackupReady: (Snapshot, Path) -> Unit = { _, _ -> },
+ fun restore(snapshot: Snapshot, root: Path, adapter: GameAdapter, version: String, guard: () -> Boolean, beforeWrite: () -> Unit = {}, afterFileWrite: (String) -> Unit = {},
   validateCompatibility: (Snapshot, String) -> Unit = { candidate, target -> require(adapter.compatible(candidate.manifest.version, target)) },
-  captureBackup: (Path) -> Snapshot = { capture(it, adapter, snapshot.manifest.profile, version, null) },
   beforeReplacement: () -> Unit = {}, afterRestore: () -> Unit = {}) {
-  // Legacy arguments remain source-compatible; no backup path, capture or callback is used.
   restoreImpl(snapshot,root,adapter,version,guard,beforeWrite,afterFileWrite,validateCompatibility,beforeReplacement,afterRestore,null)
  }
  internal fun restoreVerified(verified: VerifiedSnapshot, root: Path, adapter: GameAdapter, version: String, guard: () -> Boolean,

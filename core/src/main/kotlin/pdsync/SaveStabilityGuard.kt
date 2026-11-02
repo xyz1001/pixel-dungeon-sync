@@ -25,13 +25,9 @@ class SaveStabilityGuard(
  private val root: Path,
  private val adapter: GameAdapter,
  private val stopped: () -> Boolean,
- private val quietMillis: Long = 2_000,
- private val pause: (Long) -> Unit = { Thread.sleep(it) },
  private val captureSnapshot: ((Path, GameAdapter, String, String, String?, SnapshotCaptureContext?) -> Snapshot)? = null,
  private val captureFileHashes: ((Path, GameAdapter) -> Map<String, String>)? = null
 ) {
- init { require(quietMillis >= 0) }
-
  /** Uses the existing bounded capture/path checks; does not inspect excluded device files. */
  fun fingerprint(): SaveFingerprint {
   val injected = captureFileHashes

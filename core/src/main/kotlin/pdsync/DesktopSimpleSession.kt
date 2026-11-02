@@ -7,7 +7,7 @@ import java.nio.file.Path
  */
 class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  val adapter:GameAdapter=Shattered,private val versions:ProfileVersions=ShatteredProfileVersions,private val suppliedStore:SimpleSaveStore?=null) {
- private val local=ProfileSession(config,desktopAccountStateRoot(stateRoot,config),adapter,versions,0)
+ private val local=ProfileSession(config,desktopAccountStateRoot(stateRoot,config),adapter,versions)
  val config get()=local.config
  val root get()=local.root
  private val baselinePath=local.directory.resolve("simple/baseline-hash")
@@ -26,7 +26,7 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  fun deviceIdentity()=local.deviceIdentity()
  fun targetInfo()=local.targetInfo()
  fun currentVersions()=local.currentVersions()
- fun observedFiles():Map<String,String> = local.locked {Snapshots.readLocal(root,adapter).entries.mapValues {hash(it.value)}}
+ fun observedFiles():Map<String,String> = local.locked {Snapshots.readLocal(root,adapter).fingerprint.files}
  fun baselineFiles():Map<String,String>? {
   val files=observedFiles()
   val id=if(java.nio.file.Files.exists(baselinePath))java.nio.file.Files.readString(baselinePath) else null
@@ -34,7 +34,7 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  }
  private fun baseline():String?=if(java.nio.file.Files.exists(baselinePath))java.nio.file.Files.readString(baselinePath) else null
  fun syncHistory(previous:SyncHistory?=null):SyncHistory {
-  val read=Snapshots.readLocal(root,adapter);val files=read.entries.mapValues {hash(it.value)}
+   val read=Snapshots.readLocal(root,adapter);val files=read.fingerprint.files
   return SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline(),files,currentName.orEmpty(),
    if(files.isEmpty())null else SaveSummary.readVerified(root,read.entries),nodes.associate {it.hashId to it.name},
    simple=SimpleHistory(nodes,latest,files.takeIf {it.isNotEmpty()}?.let(::contentSha256)))
@@ -71,10 +71,7 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
    is SaveUploadResult.Conflict -> {latest=result.latest;AppendPushResult.Diverged(conflict(files,result.latest))}
    is SaveUploadResult.Complete -> {
     latest=result.node.hashId;acceptedFiles=files
-    val known=nodes.associateBy {it.hashId};val chain=mutableListOf(result.node);val seen=mutableSetOf(result.node.hashId)
-    var next=result.node.parentId
-    while(next!=null && seen.add(next)) {val ancestor=known[next] ?: break;chain+=ancestor;next=ancestor.parentId}
-    nodes=chain
+     nodes=knownAncestorChain(result.node,nodes)
     AppendPushResult.Success(commit(result.node,files),false,reused=!result.uploaded)
    }
   }
@@ -106,7 +103,7 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  fun restoreHistory(id:String,stopped:()->Boolean)=restore(id,active(),stopped)
  fun checkRestore(id:String) {require(nodes.any {it.hashId==id});requireNotNull(targetInfo())}
  fun inspectDirectory(stopped:()->Boolean):DirectorySnapshotMetadata = local.locked {
-  local.guard(stopped);val files=Snapshots.readLocal(root,adapter).entries.mapValues {hash(it.value)}
+   local.guard(stopped);val files=Snapshots.readLocal(root,adapter).fingerprint.files
   DirectorySnapshotMetadata(displayName=currentName.orEmpty(),contentSha256=contentSha256(files))
  }
  fun renameCurrent(name:String,stopped:()->Boolean):DirectorySnapshotMetadata {

@@ -39,8 +39,8 @@ class ProfileScopeIsolationTest {
   val save = root(); val state = temp.resolve("state")
   val oldScopes = listOf(priorScope(save, state), priorScope(save, state, automatic = true))
   val before = storedBytes(state.resolve("profiles"))
-  val manager = ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
-  val append = AppendProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
+  val manager = ProfileSession(AppConfig(save.toString()), state)
+  val append = AppendProfileSession(AppConfig(save.toString()), state)
   assertTrue(manager.history().isEmpty()); assertFalse(manager.hasPending())
   assertTrue(append.history().isEmpty()); assertFalse(append.hasPending()); assertNull(append.baseline())
   oldScopes.forEach { (directory, snapshot) ->
@@ -49,7 +49,7 @@ class ProfileScopeIsolationTest {
   assertEquals(before, storedBytes(state.resolve("profiles")))
   val current = manager.createSnapshot { true }
   assertNull(current.manifest.parent)
-  val restarted = ProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
+  val restarted = ProfileSession(AppConfig(save.toString()), state)
   assertEquals(current.manifest.id, restarted.history().single().manifest.id)
   before.forEach { (path, digest) -> assertEquals(digest, hash(state.resolve("profiles").resolve(path).readBytes())) }
  }
@@ -57,7 +57,7 @@ class ProfileScopeIsolationTest {
   val save = root(); val state = temp.resolve("state")
   priorScope(save, state, "4.0.1"); priorScope(save, state, "4.0.2")
   val before = storedBytes(state.resolve("profiles"))
-  val manager = AppendProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
+  val manager = AppendProfileSession(AppConfig(save.toString()), state)
   assertNull(manager.baseline()); assertFalse(manager.hasPending()); assertTrue(manager.history().isEmpty())
   assertEquals(before, storedBytes(state.resolve("profiles")))
  }
@@ -68,7 +68,7 @@ class ProfileScopeIsolationTest {
   directory.resolve("history/${snapshot.manifest.id}.entry.json").writeText("invalid json")
   directory.resolve("append-v2/active-plan.txt").writeText("broken queue")
   val before = storedBytes(state.resolve("profiles"))
-  val manager = AppendProfileSession(AppConfig(save.toString()), state, captureQuietMillis = 0)
+  val manager = AppendProfileSession(AppConfig(save.toString()), state)
   assertTrue(manager.history().isEmpty()); assertFalse(manager.hasPending()); assertNull(manager.baseline())
   assertEquals(before, storedBytes(state.resolve("profiles")))
  }

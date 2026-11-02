@@ -32,7 +32,7 @@ class DesktopHomeMetadataTest {
   val root = temp.resolve(name).createDirectories()
   root.resolve("game1").createDirectory().resolve("game.dat").writeText(content)
   return AppendProfileSession(AppConfig(saveRoot=root.toString(), username="account"), temp.resolve("state-$name"),
-   versions=versions, captureQuietMillis=0)
+   versions=versions)
  }
  private fun seeded(): Pair<Store, AppendProfileSession> {
   val store=Store(); val publisher=session("publisher", "same progress")

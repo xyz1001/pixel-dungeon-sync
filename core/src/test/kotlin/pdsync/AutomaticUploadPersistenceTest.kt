@@ -29,7 +29,7 @@ class AutomaticUploadPersistenceTest {
   if(!root.resolve("game1/game.dat").exists()) root.resolve("game1/game.dat").writeText("original")
   return AppConfig(saveRoot=root.toString())
  }
- private fun session()=AppendProfileSession(config(),temp.resolve("state"),versions=versions,captureQuietMillis=0)
+ private fun session()=AppendProfileSession(config(),temp.resolve("state"),versions=versions)
  @Test fun `first discovery failure persists exact snapshot and restart retries it`() {
   val a=session(); val store=Memory()
   assertFailsWith<SocketException> { a.push(store) { true } }

@@ -65,7 +65,7 @@ class AndroidReadOnlyRestoreTest {
         val root = temp.resolve("workspace-${sequence++}")
         val bridge = Bridge()
         val facade = reopen()
-        fun reopen() = AndroidSyncFacade(root, connection, bridge, identity, store, 0)
+        fun reopen() = AndroidSyncFacade(root, connection, bridge, identity, store)
         fun repo() = AppendRepository(find("append-v2"), AndroidGameAdapter(identity), connection.profile)
         fun find(name: String): Path = Files.walk(root).use { paths -> paths.filter { it.fileName.toString() == name }.findFirst().orElseThrow() }
         fun sidecar() = assertIs<SidecarRead.Valid>(DirectoryMetadataStore(find("mirror")).read()).value

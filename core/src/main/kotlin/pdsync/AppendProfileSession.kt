@@ -69,10 +69,10 @@ sealed interface HomePushResult {
  */
 class AppendProfileSession(
  config: AppConfig, stateRoot: Path, adapter: GameAdapter = Shattered,
- versions: ProfileVersions = ShatteredProfileVersions, private val captureQuietMillis: Long = 2000,
+ versions: ProfileVersions = ShatteredProfileVersions,
  deviceLabel: (() -> String?)? = null
 ) {
- private val local = ProfileSession(config, stateRoot, adapter, versions, captureQuietMillis, deviceLabel)
+ private val local = ProfileSession(config, stateRoot, adapter, versions, deviceLabel)
  val config get() = local.config
  val root get() = local.root
  val adapter get() = local.adapter
@@ -345,7 +345,7 @@ class AppendProfileSession(
    baseline!=null && !observed.descendsFrom(selected.id,baseline))return@readLocked null
   local.guard(stopped);noLegacyPending();appliedOnly()
   require(repository.pending()==null && baseline==comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
-  val before=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).fingerprint()
+  val before=SaveStabilityGuard(root,adapter,stopped).fingerprint()
   require(before.files==comparison.localFiles &&
    (comparison.localSource!=LocalObservationSource.FILESYSTEM || before==comparison.fingerprint)) {
    CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()
@@ -364,7 +364,7 @@ class AppendProfileSession(
   require(repository.pending()==null && repository.baseline()==selection.baseline) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val graph=discoverMetadata(store)
   require(graph==selection.graph) { CoreSessionMessages.CLOUD_BRANCHES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
-  SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).requireUnchanged(selection.before)
+  SaveStabilityGuard(root,adapter,stopped).requireUnchanged(selection.before)
   local.remember(selection.verified,CoreSessionMessages.SELECTED_CLOUD_HISTORY.text(),repository.observedAt(selection.selected.id))
   SafePaths.atomicWrite(applyMarker,"selected-tip-restore".encodeToByteArray())
   val restored=local.restore(selection.verified,stopped,selection.before.files)
@@ -554,7 +554,7 @@ class AppendProfileSession(
   require(repository.pending()==null && repository.baseline()==comparison.baselineId) {
    CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text()
   }
-  SaveStabilityGuard(root,adapter,stopped,captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+  SaveStabilityGuard(root,adapter,stopped).requireUnchanged(requireNotNull(comparison.fingerprint))
   val graph=requireNotNull(comparison.graph)
   val commit=matchingUpload(graph,comparison.localFiles) ?: return@locked null
   associateUpload(commit,graph)
@@ -563,7 +563,7 @@ class AppendProfileSession(
  fun push(store: AppendStore, stopped: () -> Boolean): AppendPushResult = local.locked {
   local.guard(stopped); noLegacyPending(); appliedOnly()
   val pending=repository.pending()
-  val stability=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis)
+  val stability=SaveStabilityGuard(root,adapter,stopped)
   val fingerprint=if(pending==null)stability.awaitStable() else null
   val files=pending?.commit?.snapshot?.files ?: requireNotNull(fingerprint).files
   fun freeze():UploadPlan {
@@ -607,7 +607,7 @@ class AppendProfileSession(
    if(observedHistory.graph.pending.isNotEmpty())return@locked null
    val files=currentFiles()
    val candidate=observedHistory.graph.commits.values.firstOrNull {it.snapshot.files.isNotEmpty() && it.snapshot.files==files} ?: return@locked null
-   val stability=SaveStabilityGuard(root,adapter,stopped,captureQuietMillis);val fingerprint=stability.awaitStable()
+   val stability=SaveStabilityGuard(root,adapter,stopped);val fingerprint=stability.awaitStable()
    if(candidate.snapshot.files!=fingerprint.files)return@locked null
    val fresh=discover(store);stability.requireUnchanged(fingerprint);noLegacyPending();appliedOnly()
    if(repository.pending()!=null)return@locked null
@@ -712,7 +712,7 @@ class AppendProfileSession(
  } catch(failure:Exception) { comparisonFailure(failure) }
  private fun compareLocked(store:AppendStore,stopped:()->Boolean,metadataOnly:Boolean,retain:Set<String> = emptySet(),proofs:MutableMap<String,VerifiedSnapshot>?=null,uploadMetadata:Boolean=false):OnboardingComparison {
    local.guard(stopped); local.validateRoot()
-   val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+   val stability = SaveStabilityGuard(root, adapter, stopped)
    val fingerprint = if(metadataOnly) stability.fingerprint() else stability.awaitStable()
    val baseline = repository.baseline()
    if (needsApply()) return blockedComparison(SyncBlockReason.RESTORE_RECOVERY_REQUIRED, CoreSessionMessages.THE_PREVIOUS_RESTORE_IS_NOT_CONFIRMED_COMPLETE_EXPLICITLY_ARCHIVE_IT.text(), fingerprint, baseline)
@@ -794,7 +794,7 @@ class AppendProfileSession(
   require(comparison.kind != OnboardingKind.BLOCKED || (allowPending && comparison.retryablePending)) { CoreSessionMessages.COMPLETE_A_SAFE_COMPARISON_OR_RESOLVE_THE_BLOCKED_OPERATION_FIRST.text() }
   local.guard(stopped); noLegacyPending(); appliedOnly(); local.validateRoot()
   val expected = requireNotNull(comparison.fingerprint) { CoreSessionMessages.COMPARISON_IS_INCOMPLETE_TRY_AGAIN.text() }
-  val stability = SaveStabilityGuard(root, adapter, stopped, captureQuietMillis)
+  val stability = SaveStabilityGuard(root, adapter, stopped)
   require(stability.awaitStable() == expected) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_THE_OLD_SELECTION_WAS_NOT.text() }
   require(repository.baseline() == comparison.baselineId) { CoreSessionMessages.THE_SYNC_BASELINE_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
   val pending = repository.pending()
@@ -976,7 +976,7 @@ class AppendProfileSession(
    }
    val captured = DiagnosticTiming.measure(DiagnosticPhase.UPLOAD_CAPTURE) {captureContent(stopped)}
    require(captured.manifest.files == comparison.localFiles) { CoreSessionMessages.LOCAL_SAVES_CHANGED_AFTER_COMPARISON_COMPARE_AGAIN.text() }
-   if(!optimistic)SaveStabilityGuard(root, adapter, stopped, captureQuietMillis).requireUnchanged(requireNotNull(comparison.fingerprint))
+   if(!optimistic)SaveStabilityGuard(root, adapter, stopped).requireUnchanged(requireNotNull(comparison.fingerprint))
    repository.prepare(captured, listOfNotNull(comparison.baselineId), operation = local.operationMetadata())
   }
   try {

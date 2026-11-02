@@ -32,7 +32,7 @@ class ProfileSessionTest {
    override fun annotate(snapshot: Snapshot) = snapshot.copy(manifest = snapshot.manifest.copy(version = version))
    override fun target(path: String): TargetGame? = null
    override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) }
-  }, captureQuietMillis = 0)
+  })
  private fun divergent(): Triple<ProfileSession, Memory, PreservedConflict> {
   val store = Memory(); session(root("remote")).push(store) { true }
   val local = session(root("local"))
@@ -132,17 +132,15 @@ class ProfileSessionTest {
  @Test fun mutationAfterBackupCancelsWithoutStaleRollback() {
   val source = root("old"); val target = root("before"); var calls = 0
   val snapshot = Snapshots.capture(source, Shattered, "demo", "v1", null)
-  assertFails { Snapshots.restore(snapshot, target, Files.createTempDirectory("backup"), Shattered, "v1", {
+  assertFails { Snapshots.restore(snapshot, target, Shattered, "v1", {
    calls++; if (calls == 2) target.resolve("game1/game.dat").writeText("external-new"); true
   }) }
   assertEquals("external-new", target.resolve("game1/game.dat").readText())
  }
- @Test fun legacyBackupCallbacksAreNeverInvokedAndNoBackupIsCreated() {
+ @Test fun restoreReplacesSelectedSave() {
   val target = root("current"); val snapshot = Snapshots.capture(root("old"), Shattered, "demo", "v1", null)
-  val backupRoot=Files.createTempDirectory("unused-backup").resolve("absent")
-  Snapshots.restore(snapshot,target,backupRoot,Shattered,"v1",{true},
-   onBackupReady={_,_->error("must not register backup")}, captureBackup={error("must not capture backup")})
-  assertFalse(backupRoot.exists()); assertEquals("old",target.resolve("game1/game.dat").readText())
+  Snapshots.restore(snapshot,target,Shattered,"v1",{true})
+  assertEquals("old",target.resolve("game1/game.dat").readText())
  }
  @Test fun conflictPreservesBothAndLocalChoiceCreatesChild() {
   val (manager, store, conflict) = divergent()

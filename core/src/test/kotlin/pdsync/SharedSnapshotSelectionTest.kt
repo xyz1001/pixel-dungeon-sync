@@ -44,7 +44,7 @@ class SharedSnapshotSelectionTest {
    override fun checkRestore(snapshot: Snapshot, targetPath: String) = Unit
   }
   return AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile),
-   temp.resolve("state-${sequence++}"), versions = versions, captureQuietMillis = 0)
+   temp.resolve("state-${sequence++}"), versions = versions)
  }
  private fun repository(session: AppendProfileSession) = AppendRepository(session.directory.resolve("append-v2"), Shattered, profile)
  private fun seed(store: Store, child: Boolean = false): Pair<AppendCommit, AppendCommit> {
@@ -178,7 +178,7 @@ class SharedSnapshotSelectionTest {
  }
  private fun androidStore(): Pair<Store, AppendCommit> {
   val store = Store(); val bridge = Bridge().also { it.content = files() }
-  val source = AndroidSyncFacade(temp.resolve("android-source-${sequence++}"), connection, bridge, androidIdentity, store, 0)
+  val source = AndroidSyncFacade(temp.resolve("android-source-${sequence++}"), connection, bridge, androidIdentity, store)
   assertEquals("UPLOADED", source.autoUpload().status)
   val original = json.decodeFromString<AppendCommit>(store.commits.values.single().decodeToString())
   // Keep the complete original Manifest and object bytes, including metadata and source identity.
@@ -192,7 +192,7 @@ class SharedSnapshotSelectionTest {
 
  @Test fun androidListsOneSnapshotAndReadOnlyRestoreKeepsTwoTipsAndVerifiedBaseline() {
   val (store, selected) = androidStore(); val bridge = Bridge()
-  val facade = AndroidSyncFacade(temp.resolve("android-read-only"), connection, bridge, androidIdentity, store, 0)
+  val facade = AndroidSyncFacade(temp.resolve("android-read-only"), connection, bridge, androidIdentity, store)
   val inspection = facade.inspect()
   assertEquals("BRANCHED", inspection.kind)
   assertEquals(firstId, inspection.remoteVersions.single().commitId)
@@ -210,7 +210,7 @@ class SharedSnapshotSelectionTest {
  @Test fun androidExplicitRestoreAndConflictResolutionBothAcceptDuplicateSnapshotSelection() {
   for (resolveDirectly in listOf(false, true)) {
    val (store, selected) = androidStore(); val bridge = Bridge()
-   val facade = AndroidSyncFacade(temp.resolve("android-choice-$resolveDirectly"), connection, bridge, androidIdentity, store, 0)
+   val facade = AndroidSyncFacade(temp.resolve("android-choice-$resolveDirectly"), connection, bridge, androidIdentity, store)
    val inspection = facade.inspect()
    val result = if (resolveDirectly) facade.resolveConflict(inspection, selected.snapshot.id)
     else facade.restoreSelected(inspection, selected.snapshot.id, false)

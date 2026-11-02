@@ -8,30 +8,27 @@ import okhttp3.mockwebserver.*
 class CoreTest {
  private fun root() = Files.createTempDirectory("pds-test").also { it.resolve("game1").createDirectories(); it.resolve("game1/game.dat").writeText("alive"); it.resolve("game1/depth1.dat").writeText("floor"); it.resolve("rankings.dat").writeText("record"); it.resolve("settings.xml").writeText("device") }
  private fun snap() = Snapshots.capture(root(),Shattered,"test","v1",null)
- @Test fun roundtripAndRecords() { val s=snap(); val r=root(); val b=Files.createTempDirectory("backup"); Snapshots.restore(s,r,b,Shattered,"v1",{true}); assertEquals("record",r.resolve("rankings.dat").readText()); assertEquals("device",r.resolve("settings.xml").readText()); assertEquals(3,Snapshots.verify(s,Shattered).size) }
+ @Test fun roundtripAndRecords() { val s=snap(); val r=root(); Snapshots.restore(s,r,Shattered,"v1",{true}); assertEquals("record",r.resolve("rankings.dat").readText()); assertEquals("device",r.resolve("settings.xml").readText()); assertEquals(3,Snapshots.verify(s,Shattered).size) }
  @Test fun checksumFailure() { val s=snap(); assertFails { Snapshots.verify(s.copy(zip=byteArrayOf(1)),Shattered) } }
- @Test fun partialFailureDoesNotRestoreOverwrittenBytes() { val r=root(); r.resolve("game1/game.dat").writeText("original"); assertFails { Snapshots.restore(snap(),r,Files.createTempDirectory("backup"),Shattered,"v1",{true},{error("disk failure")}) }; assertFalse(r.resolve("game1/game.dat").exists()) }
- @Test fun overwriteRoundTripKeepsExistingBackupFilesAndCreatesNone() {
+ @Test fun partialFailureDoesNotRestoreOverwrittenBytes() { val r=root(); r.resolve("game1/game.dat").writeText("original"); assertFails { Snapshots.restore(snap(),r,Shattered,"v1",{true},{error("disk failure")}) }; assertFalse(r.resolve("game1/game.dat").exists()) }
+ @Test fun overwriteRoundTrip() {
   val target=root();val a=Snapshots.capture(target,Shattered,"test","v1",null)
   val source=root();source.resolve("game1/game.dat").writeText("B");source.resolve("game2").createDirectories();source.resolve("game2/game.dat").writeText("B-second")
   val b=Snapshots.capture(source,Shattered,"test","v1",null)
-  val backups=Files.createTempDirectory("existing-backups");backups.resolve("old.zip").writeBytes(byteArrayOf(1,2,3))
-  val oldFiles=backups.listDirectoryEntries().associate {it.fileName.toString() to it.readBytes().toList()}
   listOf(a,b,a).forEach {selected->
-   Snapshots.restore(selected,target,backups,Shattered,"v1",{true})
+   Snapshots.restore(selected,target,Shattered,"v1",{true})
    assertEquals(selected.manifest.files,Snapshots.fileHashes(target,Shattered))
-   assertEquals(oldFiles,backups.listDirectoryEntries().associate {it.fileName.toString() to it.readBytes().toList()})
   }
  }
  @Test fun failureAfterFirstDesiredFileDoesNotResurrectOriginalSave() {
   val target=root();target.resolve("game1/game.dat").writeText("original")
-  val selected=snap();val backups=Files.createTempDirectory("no-backup").resolve("absent")
-  val error=assertFails {Snapshots.restore(selected,target,backups,Shattered,"v1",{true},afterFileWrite={throw java.io.IOException("injected write failure")})}
-  assertEquals("injected write failure",error.message);assertFalse(backups.exists())
+  val selected=snap()
+  val error=assertFails {Snapshots.restore(selected,target,Shattered,"v1",{true},afterFileWrite={throw java.io.IOException("injected write failure")})}
+  assertEquals("injected write failure",error.message)
   assertFalse(target.resolve("game1/game.dat").exists() && target.resolve("game1/game.dat").readText()=="original")
   assertTrue(Files.walk(target).use { paths -> paths.filter { Files.isRegularFile(it) && it.fileName.toString() != "settings.xml" }.count() } < selected.manifest.files.size)
  }
- @Test fun deletionDoesNotResurrect() { val r=root(); r.resolve("game1/depth1.dat").deleteExisting(); r.resolve("game1/game.dat").deleteExisting(); r.resolve("game1").deleteExisting(); val s=Snapshots.capture(r,Shattered,"test","v1",null); val target=root(); Snapshots.restore(s,target,Files.createTempDirectory("backup"),Shattered,"v1",{true}); assertFalse(target.resolve("game1").exists()) }
+ @Test fun deletionDoesNotResurrect() { val r=root(); r.resolve("game1/depth1.dat").deleteExisting(); r.resolve("game1/game.dat").deleteExisting(); r.resolve("game1").deleteExisting(); val s=Snapshots.capture(r,Shattered,"test","v1",null); val target=root(); Snapshots.restore(s,target,Shattered,"v1",{true}); assertFalse(target.resolve("game1").exists()) }
  @Test fun aliases() { val r=root(); assertEquals(1,deduplicate(listOf(r,r.resolve(".")),Shattered).size) }
  private class Memory:Store {
   var current:RemoteHead?=null; val data=mutableMapOf<String,Snapshot>(); var failUpload=false; var corrupt=false; var failPublish=false
@@ -46,11 +43,11 @@ class CoreTest {
  @Test fun offlineBranches() { val m=Memory(); val a=snap(); Sync(m).push(a); val b=snap(); val e=assertFailsWith<Conflict> { Sync(m).push(b) }; assertEquals(a.manifest.id,e.remote.manifest.id); assertEquals(b,e.local) }
  @Test fun authError() { MockWebServer().use { s -> s.enqueue(MockResponse().setResponseCode(401)); s.start(); assertFails { WebDav(s.url("/").toString(),"shattered","test","bad","bad").head() } } }
  @Test fun webdavConditionalWrite() { MockWebServer().use { s -> s.enqueue(MockResponse().setResponseCode(412)); s.start(); val m=snap().manifest; assertFails { WebDav(s.url("/").toString(),"shattered","test","a","b").publish(m,RemoteHead(m,"\"old\"")) }; assertEquals("\"old\"",s.takeRequest().getHeader("If-Match")) } }
- @Test fun runningDoesNotBlockRestoreButVersionIsStillRequired() { assertNotNull(Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v1",{false})); assertFails { Snapshots.restore(snap(),root(),Files.createTempDirectory("backup"),Shattered,"v2",{true}) } }
+ @Test fun runningDoesNotBlockRestoreButVersionIsStillRequired() { assertNotNull(Snapshots.restore(snap(),root(),Shattered,"v1",{false})); assertFails { Snapshots.restore(snap(),root(),Shattered,"v2",{true}) } }
  @Test fun gameRestartBeforeRestoreDoesNotOverwriteNewerSave() {
-  val target=root(); val backup=Files.createTempDirectory("backup"); var guardCalls=0
+  val target=root(); var guardCalls=0
   assertFails {
-   Snapshots.restore(snap(),target,backup,Shattered,"v1",{
+   Snapshots.restore(snap(),target,Shattered,"v1",{
     guardCalls++
     if(guardCalls==1) true else {
      target.resolve("game1/game.dat").writeText("newer save from restarted game")
@@ -60,7 +57,6 @@ class CoreTest {
   }
   assertTrue(guardCalls >= 2)
   assertEquals("newer save from restarted game",target.resolve("game1/game.dat").readText())
-  assertTrue(Files.list(backup).use { it.count() } == 0L)
  }
  @Test fun actualHttpRoundtrip() { MockWebServer().use { server ->
   val snapshot=snap()
@@ -96,7 +92,6 @@ class CoreTest {
   assertFailsWith<IllegalArgumentException> { Snapshots.capture(target,Shattered,"test","v1",null) }
   assertEquals("save file",target.readText())
  }
- @Test fun unusedLegacyBackupPathIsNeverTraversed() { val r=root(); val holder=Files.createTempDirectory("pds-alias"); val alias=holder.resolve("saves"); Files.createSymbolicLink(alias,r); Snapshots.restore(snap(),r,alias.resolve("backup"),Shattered,"v1",{true}); assertFalse(r.resolve("backup").exists()); assertEquals("alive",r.resolve("game1/game.dat").readText()) }
  private fun archive(entries: Map<String,ByteArray>): Snapshot {
   val out=java.io.ByteArrayOutputStream()
   java.util.zip.ZipOutputStream(out).use { z -> entries.forEach { (name,bytes) -> z.putNextEntry(java.util.zip.ZipEntry(name)); z.write(bytes); z.closeEntry() } }
@@ -116,16 +111,14 @@ class CoreTest {
  }
  @Test fun tooManyManifestEntries() { val s=snap(); val files=(0..MAX_SNAPSHOT_FILES).associate { "game1/file$it.dat" to "hash" }; assertFails { Snapshots.verify(s.copy(manifest=s.manifest.copy(files=files)),Shattered) } }
  @Test fun partialRestoreDoesNotRollBackRecords() {
-  val target=root(); val original=Snapshots.capture(target,Shattered,"test","v1",null)
+  val target=root()
   val source=root(); source.resolve("game1/game.dat").writeText("changed"); source.resolve("rankings.dat").writeText("changed-record")
-  val backup=Files.createTempDirectory("backup")
-  assertFails { Snapshots.restore(Snapshots.capture(source,Shattered,"test","v1",null),target,backup,Shattered,"v1",{true},afterFileWrite={error("mid-write failure")}) }
+  assertFails { Snapshots.restore(Snapshots.capture(source,Shattered,"test","v1",null),target,Shattered,"v1",{true},afterFileWrite={error("mid-write failure")}) }
   assertFalse(target.resolve("game1/game.dat").exists() && target.resolve("game1/game.dat").readText()=="alive")
-  assertTrue(Files.list(backup).use { it.count() } == 0L)
  }
  @Test fun symlinkRestoreTargetRejected() {
   val target=root(); Files.createSymbolicLink(target.resolve("game1/link.dat"),target.resolve("settings.xml"))
-  assertFails { Snapshots.restore(snap(),target,Files.createTempDirectory("backup"),Shattered,"v1",{true}) }
+  assertFails { Snapshots.restore(snap(),target,Shattered,"v1",{true}) }
   assertEquals("alive",target.resolve("game1/game.dat").readText())
  }
  @Test fun retryAlreadyPublishedSnapshot() { val m=Memory(); val s=snap(); Sync(m).push(s); m.failUpload=true; m.failPublish=true; assertEquals(s.manifest,Sync(m).push(s)); assertEquals(1,m.data.size) }

@@ -40,7 +40,7 @@ class SnapshotMetadataTest {
   override fun checkRestore(snapshot: Snapshot, targetPath: String) = Unit
  }
  private fun session(save: Path = root(), state: Path = directory("state")) =
-  ProfileSession(AppConfig(saveRoot = save.toString()), state, versions = policy, captureQuietMillis = 0)
+  ProfileSession(AppConfig(saveRoot = save.toString()), state, versions = policy)
  private class Memory: AppendStore {
   val commits = linkedMapOf<String, ByteArray>()
   val objects = linkedMapOf<String, ByteArray>()
@@ -217,10 +217,10 @@ class SnapshotMetadataTest {
  }
  @Test fun appendHistoryRestorePublishesOriginalProvenanceAndCurrentRestoringActor() {
   val remote = Memory()
-  val a = AppendProfileSession(AppConfig(saveRoot = root("source A").toString()), directory("state-a"), versions = policy, captureQuietMillis = 0)
+  val a = AppendProfileSession(AppConfig(saveRoot = root("source A").toString()), directory("state-a"), versions = policy)
   val initial = assertIs<AppendPushResult.Success>(a.push(remote) { true }).commit
   val initialBytes = remote.commits.getValue(initial.id).copyOf()
-  val b = AppendProfileSession(AppConfig(saveRoot = directory("empty").toString()), directory("state-b"), versions = policy, captureQuietMillis = 0)
+  val b = AppendProfileSession(AppConfig(saveRoot = directory("empty").toString()), directory("state-b"), versions = policy)
   b.restoreRemote(b.readRemote(remote).single().entry.manifest.id, remote) { true }
   b.root.resolve("game1/game.dat").writeText("newer B")
   val later = assertIs<AppendPushResult.Success>(b.push(remote) { true }).commit
@@ -236,9 +236,9 @@ class SnapshotMetadataTest {
 
  @Test fun appendConflictRestoreKeepsSelectedSnapshotOriginWithoutCreatingAnotherActor() {
   val remote = Memory()
-  val a = AppendProfileSession(AppConfig(saveRoot = root("initial").toString()), directory("state-a"), versions = policy, captureQuietMillis = 0)
+  val a = AppendProfileSession(AppConfig(saveRoot = root("initial").toString()), directory("state-a"), versions = policy)
   val initial = assertIs<AppendPushResult.Success>(a.push(remote) { true }).commit
-  val b = AppendProfileSession(AppConfig(saveRoot = directory("empty").toString()), directory("state-b"), versions = policy, captureQuietMillis = 0)
+  val b = AppendProfileSession(AppConfig(saveRoot = directory("empty").toString()), directory("state-b"), versions = policy)
   b.restoreRemote(b.readRemote(remote).single().entry.manifest.id, remote) { true }
   a.root.resolve("game1/game.dat").writeText("chosen A")
   val aBranch = assertIs<AppendPushResult.Success>(a.push(remote) { true }).commit
@@ -264,16 +264,15 @@ class SnapshotMetadataTest {
 
  }
 
- @Test fun metadataOnlyWriteAtReplacementBoundaryCancelsWithoutAnyBackup() {
+ @Test fun metadataOnlyWriteAtReplacementBoundaryCancels() {
   val source=root("old source"); val target=root("current target")
-  val backup=directory("backup").resolve("absent")
   val externalTime=FileTime.from(Instant.parse("2026-10-10T10:11:12Z"))
   var attempted=false
   assertFailsWith<SaveNotStableException> {
-   Snapshots.restore(snapshot(save=source),target,backup,Shattered,"v1",{true},beforeWrite={attempted=true},
+   Snapshots.restore(snapshot(save=source),target,Shattered,"v1",{true},beforeWrite={attempted=true},
     beforeReplacement={Files.setLastModifiedTime(target.resolve("game1/game.dat"),externalTime)})
   }
-  assertFalse(attempted);assertFalse(backup.exists())
+  assertFalse(attempted)
   assertEquals("current target",target.resolve("game1/game.dat").readText())
   assertEquals(externalTime,Files.getLastModifiedTime(target.resolve("game1/game.dat")))
  }

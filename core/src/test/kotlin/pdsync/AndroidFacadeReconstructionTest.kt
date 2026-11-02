@@ -81,7 +81,7 @@ class AndroidFacadeReconstructionTest {
     }
     private data class Rig(val root: Path, val facade: AndroidSyncFacade)
     private fun rig(bridge: FakeBridge, store: MemoryAppendStore, root: Path = temp.resolve("workspace-${sequence++}"), game: AndroidGameIdentity = identity) =
-        Rig(root, AndroidSyncFacade(root, connection, bridge, game, store, 0))
+        Rig(root, AndroidSyncFacade(root, connection, bridge, game, store))
     private fun readFiles(root: Path): Map<String, ByteArray> = Files.walk(root).use { paths ->
         paths.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && Shattered.includes(root.relativize(it).toString().replace('\\', '/')) && !isDirectoryMetadata(it.fileName.toString()) }
             .toList().associate { root.relativize(it).toString().replace('\\', '/') to it.readBytes() }
@@ -101,7 +101,7 @@ class AndroidFacadeReconstructionTest {
         val root = temp.resolve("official-root-migration")
         val bridge = FakeBridge(); val store = MemoryAppendStore()
         val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
-        fun facade(connection: AndroidConnection) = AndroidSyncFacade(root, connection, bridge, identity, store, 0)
+        fun facade(connection: AndroidConnection) = AndroidSyncFacade(root, connection, bridge, identity, store)
         val first = facade(old)
         assertEquals("UPLOADED", first.autoUpload().status)
         val commit = store.latest(); val beforeMirror = mirror(root)
@@ -132,7 +132,7 @@ class AndroidFacadeReconstructionTest {
         val root = temp.resolve("official-root-pending")
         val bridge = FakeBridge(); val store = MemoryAppendStore()
         val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
-        val before = AndroidSyncFacade(root, old, bridge, identity, store, 0)
+        val before = AndroidSyncFacade(root, old, bridge, identity, store)
         val inspection = before.inspect()
         store.beforeObject = { throw java.io.IOException("Synthetic interruption") }
         assertFails { before.upload(inspection) }
@@ -143,7 +143,7 @@ class AndroidFacadeReconstructionTest {
         val pending = marker.parent.resolve("uploads/$pendingId.json")
         val frozen = pending.readBytes()
         val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
-        val migrated = AndroidSyncFacade(root, current, bridge, identity, store, 0)
+        val migrated = AndroidSyncFacade(root, current, bridge, identity, store)
         assertContentEquals(frozen, pending.readBytes())
         val retry = migrated.inspect(); assertTrue(retry.isRetryablePending)
         assertEquals(1L, Files.list(root.resolve("connections")).use { it.count() })
@@ -157,12 +157,12 @@ class AndroidFacadeReconstructionTest {
         val store = MemoryAppendStore(); publish(FakeBridge(), store)
         val root = temp.resolve("official-root-recovery"); val bridge = FakeBridge(emptyMap())
         val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
-        val before = AndroidSyncFacade(root, old, bridge, identity, store, 0)
+        val before = AndroidSyncFacade(root, old, bridge, identity, store)
         val inspection = before.inspect(); bridge.failRestore = true
         assertFails { before.restoreSelected(inspection, store.latest().snapshot.id, false) }
         val journalBytes = journal(root).readBytes()
         val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
-        val migrated = AndroidSyncFacade(root, current, bridge, identity, store, 0)
+        val migrated = AndroidSyncFacade(root, current, bridge, identity, store)
         assertTrue(migrated.hasUnresolvedRestore()); assertTrue(migrated.inspect().needsRestoreRecovery)
         assertContentEquals(journalBytes, journal(root).readBytes())
         bridge.failRestore = false; migrated.recoverRestore()
@@ -218,7 +218,7 @@ class AndroidFacadeReconstructionTest {
             server.start()
             val dav=AppendOnlyWebDav(server.url("/dav/").toString(),identity.namespace,"hero","","")
             val root=temp.resolve("three-slot-workspace")
-            val facade=AndroidSyncFacade(root,connection,bridge,identity,dav,0)
+            val facade=AndroidSyncFacade(root,connection,bridge,identity,dav)
             // previewLocal does not initialize the mirror; Step 3 must capture that empty mirror.
             assertEquals(3,facade.previewLocal().fileCount)
             repeat(2) {

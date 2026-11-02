@@ -30,15 +30,15 @@ class ReconstructedFileHashesTest {
   assertEquals(22, Snapshots.capture(root, Shattered, "demo", "v1", null).zip.size)
  }
  @Test fun fingerprintUsesHashHookWhileActualCaptureBuildsOneArchive() {
-  valid(); var captures = 0; var hashReads = 0; var paused = -1L
-  val guard = SaveStabilityGuard(root, Shattered, { true }, pause = { paused = it },
+  valid(); var captures = 0; var hashReads = 0
+  val guard = SaveStabilityGuard(root, Shattered, { true },
    captureSnapshot = { path, adapter, profile, version, parent, context ->
     captures++; Snapshots.capture(path, adapter, profile, version, parent, context)
    },
    captureFileHashes = { path, adapter -> hashReads++; Snapshots.fileHashes(path, adapter) })
   guard.fingerprint(); assertEquals(0, captures)
   val snapshot = guard.capture("demo", "v1", null)
-  assertEquals(1, captures); assertEquals(1, hashReads); assertEquals(-1L, paused)
+  assertEquals(1, captures); assertEquals(1, hashReads)
   assertEquals(Snapshots.fileHashes(root, Shattered), snapshot.manifest.files)
  }
  @Test fun incompleteRunsAndAliasesAreRejected() {

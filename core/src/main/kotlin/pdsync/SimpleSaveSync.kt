@@ -9,6 +9,18 @@ import kotlinx.serialization.decodeFromString
 /** The complete wire metadata. Content identity uses the existing PDSYNC-CONTENT-V1 algorithm. */
 @Serializable data class SaveNode(val hashId:String,val parentId:String?,val name:String)
 
+/** Retain only the published node and its already-known, acyclic ancestors. */
+internal fun knownAncestorChain(published:SaveNode,knownNodes:List<SaveNode>):List<SaveNode> {
+ val known=knownNodes.associateBy {it.hashId}
+ val chain=mutableListOf(published);val seen=mutableSetOf(published.hashId)
+ var parent=published.parentId
+ while(parent!=null && seen.add(parent)) {
+  val ancestor=known[parent] ?: break
+  chain+=ancestor;parent=ancestor.parentId
+ }
+ return chain
+}
+
 interface SimpleSaveStore {
  fun latest():String?
  fun node(hashId:String):SaveNode?

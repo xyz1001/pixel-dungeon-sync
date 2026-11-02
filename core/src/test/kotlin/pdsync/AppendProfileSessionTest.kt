@@ -41,7 +41,7 @@ class AppendProfileSessionTest {
   override fun checkRestore(snapshot: Snapshot, targetPath: String) { require(snapshot.manifest.version == version) { "incompatible" } }
  }
  private fun session(root: Path = root(), state: Path = temp.resolve("state-${next++}"), profile: String = "demo", version: String = "v1") =
-  AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), state, versions = versions(version), captureQuietMillis = 0)
+  AppendProfileSession(AppConfig(saveRoot = root.toString(), profile = profile), state, versions = versions(version))
  private fun content(session: AppendProfileSession) = session.root.resolve("game1/game.dat").readText()
  private fun edit(session: AppendProfileSession, value: String) = session.root.resolve("game1/game.dat").writeText(value)
  private fun published(session: AppendProfileSession, store: Memory) = assertIs<AppendPushResult.Success>(session.push(store) { true }).commit
@@ -322,7 +322,7 @@ class AppendProfileSessionTest {
   val store = Memory(); val local = session(); store.legacy = true
   assertTrue(local.readRemote(store).isEmpty()); assertTrue(store.commits.isEmpty())
   store.legacy = false
-  val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions(), captureQuietMillis = 0)
+  val old = ProfileSession(local.config, temp.resolve("legacy-state"), versions = versions())
   val oldStore = object: Store {
    override fun head(): RemoteHead? = null
    override fun upload(snapshot: Snapshot) { error("offline") }
@@ -353,7 +353,7 @@ class AppendProfileSessionTest {
    override fun compatible(source: String, target: String) = source == target
    override fun launchCommand(executable: Path) = listOf(executable.toString())
   }
-  val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions(), captureQuietMillis = 0)
+  val other = AppendProfileSession(AppConfig(saveRoot = root.toString()), state, variant, versions())
   assertNotEquals(shattered.directory, other.directory)
   val store = Memory(); published(shattered, store)
   assertNull(other.baseline()); assertTrue(other.history().isEmpty())

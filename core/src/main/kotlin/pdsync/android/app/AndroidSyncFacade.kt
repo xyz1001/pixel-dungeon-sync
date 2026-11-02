@@ -18,15 +18,15 @@ import pdsync.*
 /** Platform-neutral sync facade. The helper owns actual Android files; core owns history. */
 class AndroidSyncFacade internal constructor(
  workspaceRoot: Path, private val connection: AndroidConnection, private val bridge: AndroidGameBridge,
- val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?, private val quietMillis: Long,
+ val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?,
  private val controlledSessions:AndroidControlledSessions=sharedControlledSessions,
  private val beforeRequest:WebDavRequestCheck=WebDavRequestCheck {},
  private val suppliedSimpleStore:SimpleSaveStore?=null
 ) {
  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
-  this(root,connection,bridge,identity,null,0)
+  this(root,connection,bridge,identity,null)
  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity, beforeRequest:WebDavRequestCheck):
-  this(root,connection,bridge,identity,null,0,sharedControlledSessions,beforeRequest)
+  this(root,connection,bridge,identity,null,sharedControlledSessions,beforeRequest)
  private val validatedConnection=AppConfig(endpoint=connection.endpoint,profile=connection.profile,username=connection.username).validated()
  private val validatedStateConnection=validatedConnection.copy(endpoint=connection.stateEndpoint).validated()
  private val adapter=AndroidGameAdapter(identity)
@@ -59,7 +59,7 @@ class AndroidSyncFacade internal constructor(
  private val simpleStore by lazy {suppliedSimpleStore ?: simpleTransport.simpleStore()}
  private val simpleSync by lazy {SimpleSaveSync(simpleStore,workspace.resolve("baseline-hash"))}
  internal data class SimpleObservation(val files:Map<String,String>,val latest:String?,val nodes:List<SaveNode>)
- private val session by lazy { AppendProfileSession(config,state,adapter,versions,quietMillis) { "Android" } }
+ private val session by lazy { AppendProfileSession(config,state,adapter,versions) { "Android" } }
  private val mirrorStopped:()->Boolean={verifiedTarget();true}
 
  class ConnectionStatus(val isSuccess:Boolean,val message:String,val hasRemote:Boolean,private val diagnosticFailure:DiagnosticFailure=DiagnosticFailure.OTHER) {
@@ -237,14 +237,7 @@ class AndroidSyncFacade internal constructor(
     }
     is SaveUploadResult.Complete -> {
      // The receipt may only retain known ancestors of the published node, not the replaced tip.
-     val known=inspection?.simpleObservation?.nodes.orEmpty().associateBy {it.hashId}
-     val nodes=mutableListOf(result.node)
-     val seen=mutableSetOf(result.node.hashId)
-     var parent=result.node.parentId
-     while(parent!=null && seen.add(parent)) {
-      val ancestor=known[parent] ?: break
-      nodes+=ancestor;parent=ancestor.parentId
-     }
+      val nodes=knownAncestorChain(result.node,inspection?.simpleObservation?.nodes.orEmpty())
      val view=simpleInspection(files,result.node.hashId,nodes,summary)
      OperationResult(if(result.uploaded)CoreMessages.ANDROID_SNAPSHOT_UPLOADED_AND_VERIFIED.text() else CoreMessages.ANDROID_NO_CHANGED_LOCAL_SNAPSHOT_NEEDS_UPLOADING.text(),false,false,result.node.hashId,view,true)
     }

@@ -41,7 +41,7 @@ class DirectoryMetadataTest {
   val after=Snapshots.capture(root,adapter,"demo","1",null)
   assertEquals(before.manifest.files,after.manifest.files)
   assertEquals(contentSha256(before.manifest.files),contentSha256(after.manifest.files))
-  assertEquals(before.manifest.files,SaveStabilityGuard(root,adapter,{true},0).fingerprint().files)
+  assertEquals(before.manifest.files,SaveStabilityGuard(root,adapter,{true}).fingerprint().files)
  }
  @Test fun identitiesSurviveRestartAndTransferButChangedSlotsBecomeUnknown() {
   val store=DirectoryMetadataStore(root());val f=files();val initial=store.observe(f);val id=initial.runs.getValue("game1").runUUID
@@ -81,7 +81,7 @@ class DirectoryMetadataTest {
   val root=root();val before=Snapshots.capture(root,Shattered,"demo","1",null)
   val target=root();target.resolve("game1/game.dat").writeText("changed")
   val incoming=Snapshots.capture(target,Shattered,"demo","1",null)
-  assertFails { Snapshots.restore(incoming,root,temp.resolve("backups"),Shattered,"1",{true},afterRestore={throw java.io.IOException("sidecar failure")}) }
+  assertFails { Snapshots.restore(incoming,root,Shattered,"1",{true},afterRestore={throw java.io.IOException("sidecar failure")}) }
   assertEquals(incoming.manifest.files,Snapshots.capture(root,Shattered,"demo","1",null).manifest.files)
  }
  @Test fun realSessionOnlyMarksBaselineAfterVerifiedPublicationAndTransfersMetadata() {
@@ -91,8 +91,8 @@ class DirectoryMetadataTest {
    override fun checkRestore(snapshot:Snapshot,targetPath:String)=Unit
   }
   val source=root();val target=temp.resolve("target").createDirectory()
-  val a=AppendProfileSession(AppConfig(saveRoot=source.toString()),temp.resolve("state-a"),versions=policy,captureQuietMillis=0)
-  val b=AppendProfileSession(AppConfig(saveRoot=target.toString()),temp.resolve("state-b"),versions=policy,captureQuietMillis=0)
+  val a=AppendProfileSession(AppConfig(saveRoot=source.toString()),temp.resolve("state-a"),versions=policy)
+  val b=AppendProfileSession(AppConfig(saveRoot=target.toString()),temp.resolve("state-b"),versions=policy)
   val remote=object:AppendStore {
    val commits=linkedMapOf<String,ByteArray>();val objects=linkedMapOf<String,ByteArray>();var fail=true
    override fun listCommits(cursor:String?)=CommitPage(commits.keys.toList())

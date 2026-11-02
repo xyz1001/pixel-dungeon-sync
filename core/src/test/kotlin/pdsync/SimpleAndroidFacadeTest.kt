@@ -57,7 +57,7 @@ class SimpleAndroidFacadeTest {
   override fun setLatest(hashId:String){calls+="PUT latest";tip=hashId}
   override fun objectBytes(hashId:String):ByteArray {calls+="GET zip";return objects.getValue(hashId)}
  }
- private fun facade(bridge:Bridge,store:Store)=AndroidSyncFacade(temp.resolve("work-${sequence++}"),connection,bridge,identity,null,0,suppliedSimpleStore=store)
+ private fun facade(bridge:Bridge,store:Store)=AndroidSyncFacade(temp.resolve("work-${sequence++}"),connection,bridge,identity,null,suppliedSimpleStore=store)
  @Test fun uploadHistoryRestoreUsesOnlyNewLayout() {
   val store=Store();val bridge=Bridge();val facade=facade(bridge,store)
   val initial=facade.inspectHome();store.calls.clear();val exports=bridge.exports
