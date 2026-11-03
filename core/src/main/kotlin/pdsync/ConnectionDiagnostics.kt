@@ -7,6 +7,17 @@ import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.atomic.AtomicLong
 
+/** Per-call evidence for the narrowly permitted DAV read replay. */
+internal class DavReadAttemptState {
+ @Volatile var connectStarts=0
+ @Volatile var acquisitions=0
+ @Volatile var requestHeaderStarts=0
+ @Volatile var responseHeaderStarts=0
+ @Volatile var protocol:Protocol?=null
+ fun isReusedHttp11BeforeResponse() = connectStarts==0 && acquisitions==1 &&
+  requestHeaderStarts==1 && responseHeaderStarts==0 && protocol==Protocol.HTTP_1_1
+}
+
 /** Observation only: preserves the caller's listener and all transport policies. No endpoint data retained. */
 object ConnectionDiagnostics {
  private val ids=AtomicLong()
@@ -21,13 +32,13 @@ object ConnectionDiagnostics {
      if(trace!=null) trace.record(DiagnosticStage.TRANSPORT,result,failure,details)
      else DiagnosticLog.record(DiagnosticStage.TRANSPORT,result,failure,details)
     } finally {if(interrupted)Thread.currentThread().interrupt()}
-   })
+    }, readAttempt=call.request().tag(DavReadAttemptState::class.java))
   }.build()
  }
 
  internal class Observer(private val delegate:EventListener,private val target:DiagnosticDetails.NetworkTarget,
   private val id:Long,private val output:(DiagnosticResult,DiagnosticFailure,DiagnosticDetails)->Unit,
-  private val clock:()->Long=System::nanoTime):EventListener() {
+   private val clock:()->Long=System::nanoTime,private val readAttempt:DavReadAttemptState?=null):EventListener() {
   private var stage="CALL_START"
   private var protocol="UNKNOWN"
   private var attempts=0L;private var starts=0L;private var ends=0L;private var acquired=0L;private var headers=0L
@@ -63,14 +74,14 @@ object ConnectionDiagnostics {
     if(error==null)DiagnosticFailure.NONE else DiagnosticLog.classify(error),evidence(call,error))
   }
   override fun callStart(call:Call){started=clock();delegate.callStart(call)}
-  override fun connectStart(call:Call,address:InetSocketAddress,proxy:Proxy){attempts++;stage="CONNECT";delegate.connectStart(call,address,proxy)}
+   override fun connectStart(call:Call,address:InetSocketAddress,proxy:Proxy){readAttempt?.let{it.connectStarts++};attempts++;stage="CONNECT";delegate.connectStart(call,address,proxy)}
   override fun secureConnectStart(call:Call){starts++;secureAt=clock();stage="SECURE_CONNECT";delegate.secureConnectStart(call)}
   override fun secureConnectEnd(call:Call,handshake:Handshake?){ends++;secureAt?.let{secureNanos+=clock()-it};secureAt=null;delegate.secureConnectEnd(call,handshake)}
   override fun connectEnd(call:Call,address:InetSocketAddress,proxy:Proxy,protocol:Protocol?){this.protocol=protocolToken(protocol);delegate.connectEnd(call,address,proxy,protocol)}
   override fun connectFailed(call:Call,address:InetSocketAddress,proxy:Proxy,protocol:Protocol?,error:IOException){failed(call,error);delegate.connectFailed(call,address,proxy,protocol,error)}
-  override fun connectionAcquired(call:Call,connection:Connection){acquired++;if(attempts==0L)reused=true else newConnection=true;stage="ACQUIRED";protocol=protocolToken(connection.protocol());delegate.connectionAcquired(call,connection)}
-  override fun requestHeadersStart(call:Call){stage="REQUEST_HEADERS";delegate.requestHeadersStart(call)}
-  override fun responseHeadersStart(call:Call){headers++;stage="RESPONSE_HEADERS";delegate.responseHeadersStart(call)}
+   override fun connectionAcquired(call:Call,connection:Connection){readAttempt?.let{it.acquisitions++;it.protocol=connection.protocol()};acquired++;if(attempts==0L)reused=true else newConnection=true;stage="ACQUIRED";protocol=protocolToken(connection.protocol());delegate.connectionAcquired(call,connection)}
+   override fun requestHeadersStart(call:Call){readAttempt?.let{it.requestHeaderStarts++};stage="REQUEST_HEADERS";delegate.requestHeadersStart(call)}
+   override fun responseHeadersStart(call:Call){readAttempt?.let{it.responseHeaderStarts++};headers++;stage="RESPONSE_HEADERS";delegate.responseHeadersStart(call)}
   override fun responseBodyStart(call:Call){stage="RESPONSE_BODY";delegate.responseBodyStart(call)}
   override fun requestFailed(call:Call,error:IOException){failed(call,error);delegate.requestFailed(call,error)}
   override fun responseFailed(call:Call,error:IOException){failed(call,error);delegate.responseFailed(call,error)}

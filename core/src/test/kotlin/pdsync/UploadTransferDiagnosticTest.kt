@@ -18,6 +18,7 @@ class UploadTransferDiagnosticTest {
   server.enqueue(MockResponse().setBody("synthetic-body").setBodyDelay(180,TimeUnit.MILLISECONDS))
   server.enqueue(MockResponse().setResponseCode(201).setBody("ok"))
   server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+  server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
   server.start(java.net.InetAddress.getByName("127.0.0.1"),0)
   val dav=AppendOnlyWebDav(server.url("/dav/").toString(),"synthetic","probe","PRIVATE_ACCOUNT","PRIVATE_PASSWORD")
   val trace=DiagnosticLog.begin(DiagnosticAction.PUSH,false)
@@ -33,8 +34,13 @@ class UploadTransferDiagnosticTest {
   assertEquals(1L,totals.getValue(DiagnosticTransferKind.CACHE_HIT).count)
   assertEquals(1L,totals.getValue(DiagnosticTransferKind.CACHE_MISS).count)
   assertEquals(3L,totals.getValue(DiagnosticTransferKind.OBJECT_PUT).sentBytes)
-  assertEquals(1L,totals.getValue(DiagnosticTransferKind.COMMIT_GET).failed)
-  assertEquals(3,server.requestCount,"logging must not replay requests")
+  assertEquals(2L,totals.getValue(DiagnosticTransferKind.COMMIT_GET).failed)
+  assertEquals(2L,totals.getValue(DiagnosticTransferKind.COMMIT_GET).count)
+  assertEquals(4,server.requestCount,"only one safe GET retry; diagnostics must not add requests")
+  val requests=List(4) { assertNotNull(server.takeRequest(1,TimeUnit.SECONDS)) }
+  assertEquals(listOf("GET","PUT","GET","GET"),requests.map {it.method})
+  assertEquals(1,requests.count {it.method=="PUT"})
+  assertNull(server.takeRequest(1,TimeUnit.SECONDS),"no third GET attempt or diagnostic request")
   val events=ZipInputStream(ByteArrayInputStream(DiagnosticLog.snapshotExport())).use {zip->
    var found="";while(true){val e=zip.nextEntry ?: break;if(e.name=="events.jsonl")found=zip.readBytes().decodeToString()};found
   }

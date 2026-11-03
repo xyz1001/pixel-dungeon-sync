@@ -354,7 +354,7 @@ class AppendOnlyWebDav(
  }
 
  private fun get(url: HttpUrl, limit: Int, cancellation: MetadataReadCancellation? = null, historyObject:Boolean = false): ByteArray? =
-  execute(request(url).get().build(), cancellation = cancellation, historyObject = historyObject) { response ->
+   execute(request(url).get().build(), cancellation = cancellation, historyObject = historyObject, retrySafeRead = true) { response ->
   when (response.code) {
    404 -> null
    200 -> readBounded(response, limit)
@@ -395,10 +395,36 @@ class AppendOnlyWebDav(
  }
 
  private fun request(url: HttpUrl) = Request.Builder().url(url).header("Authorization", auth).header("Cache-Control", "no-cache, no-store")
+ private class RetryReadOnFreshConnection(val safeError:IOException):Exception()
+
  private fun <T> execute(request: Request, requestClient: OkHttpClient = client,
-  cancellation: MetadataReadCancellation? = null, historyObject:Boolean = false, block: (Response) -> T): T {
+  cancellation: MetadataReadCancellation? = null, historyObject:Boolean = false, retrySafeRead:Boolean = false,
+  block: (Response) -> T): T {
+  if (!retrySafeRead || request.method != "GET" || request.body != null)
+   return executeAttempt(request,requestClient,cancellation,historyObject,false,null,block)
+  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+  try {
+   return executeAttempt(request,requestClient,cancellation,historyObject,true,deadline,block)
+  } catch (retry:RetryReadOnFreshConnection) {
+   cancellation?.checkActive()
+   if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException()
+   if (deadline-System.nanoTime()<=0) throw retry.safeError
+   val pool=okhttp3.ConnectionPool()
+   try {
+    val fresh=requestClient.newBuilder().connectionPool(pool).build()
+    return executeAttempt(request,fresh,cancellation,historyObject,false,deadline,block)
+   } finally { pool.evictAll() }
+  }
+ }
+
+ private fun <T> executeAttempt(request: Request, requestClient: OkHttpClient,
+  cancellation: MetadataReadCancellation?, historyObject:Boolean, allowHeaderRetry:Boolean,
+  deadlineNanos:Long?, block: (Response) -> T): T {
   cancellation?.checkActive()
   beforeRequest.check()
+  cancellation?.checkActive()
+  if(Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException()
+  if(deadlineNanos!=null && deadlineNanos-System.nanoTime()<=0) throw IOException("WebDAV network request failed [TIMEOUT]")
   val requestStarted = System.nanoTime()
   val requestId = nextDiagnosticRequestId.incrementAndGet()
   var responseHeadersReceived = false
@@ -427,7 +453,11 @@ class AppendOnlyWebDav(
     original.writeTo(counting);counting.flush()
    }
   }}
-  val call = requestClient.newCall(request.newBuilder().method(request.method,measuredBody).build())
+  val readAttempt=if(allowHeaderRetry) DavReadAttemptState() else null
+  val call = requestClient.newCall(request.newBuilder().method(request.method,measuredBody)
+   .tag(DavReadAttemptState::class.java,readAttempt).build())
+  if(deadlineNanos!=null) call.timeout().deadlineNanoTime(deadlineNanos)
+  var openingFailed=false
   // Elapsed at this event: headers on success, or the observed header/body failure; never request data.
   fun context(error:IOException? = null) = DiagnosticDetails.builder().networkTarget(DiagnosticDetails.NetworkTarget.DAV)
    .requestDurationMs(((System.nanoTime() - requestStarted) / 1_000_000).coerceAtLeast(0))
@@ -442,7 +472,8 @@ class AppendOnlyWebDav(
   return try {
   cancellation?.checkActive()
   val headersStarted=System.nanoTime()
-  val raw=try {call.execute()} finally {headersNanos=System.nanoTime()-headersStarted}
+   val raw=try {call.execute()} catch(error:IOException) {openingFailed=true;throw error}
+    finally {headersNanos=System.nanoTime()-headersStarted}
   responseHeadersReceived = true
   raw.use {
    val response=raw.body?.let { original -> raw.newBuilder().body(object:okhttp3.ResponseBody() {
@@ -472,8 +503,8 @@ class AppendOnlyWebDav(
  }
  catch (error: io.github.xyz1001.pdsync.android.OfficialSyncAccess.AccessException) { throw error }
  catch (error: IOException) {
-  // A network change can invalidate several pooled sockets. Discard only idle connections;
-  // the current request still fails and only a later explicit operation may reconnect.
+   // A network change can invalidate several pooled sockets. Discard only idle connections;
+   // cleanup itself never replays; only a narrowly eligible GET may try once on a fresh pool.
   // This catch also covers response-body reads. Never treat cancellation, interruption,
   // timeouts, DNS, TLS or HTTP/business failures as evidence of stale pooled sockets.
   if (!call.isCanceled() && !Thread.currentThread().isInterrupted
@@ -494,12 +525,29 @@ class AppendOnlyWebDav(
    is java.io.InterruptedIOException -> "INTERRUPTED"
    else -> "IO"
   }
-  throw IOException("WebDAV network request failed [$category]")
+   val safeError=IOException("WebDAV network request failed [$category]")
+   if(allowHeaderRetry && openingFailed && !responseHeadersReceived &&
+    readAttempt?.isReusedHttp11BeforeResponse()==true && !call.isCanceled() &&
+    !Thread.currentThread().isInterrupted && strictEofChain(error)) throw RetryReadOnFreshConnection(safeError)
+   throw safeError
  } finally {
   if(call.isCanceled() || Thread.currentThread().isInterrupted)transferResult=DiagnosticResult.CANCELED
   transferTrace?.transfers?.add(kind,headersNanos,bodyNanos,System.nanoTime()-requestStarted,sent,received,transferResult)
   registration?.close()
  }
+ }
+
+ private fun strictEofChain(error:IOException):Boolean {
+  val seen=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable,Boolean>())
+  var current:Throwable?=error
+  var eof=false
+  while(current!=null) {
+   if(seen.size>=16 || !seen.add(current) || current.suppressed.isNotEmpty())return false
+   if(current.javaClass==java.io.EOFException::class.java)eof=true
+   else if(current.javaClass!=IOException::class.java)return false
+   current=current.cause
+  }
+  return eof
  }
 
  // OkHttp may wrap a peer-closed EOF in a plain IOException. Inspect only causes,
