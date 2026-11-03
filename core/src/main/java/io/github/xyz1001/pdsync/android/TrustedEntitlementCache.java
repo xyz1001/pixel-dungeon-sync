@@ -13,8 +13,8 @@ import java.security.MessageDigest;
 
 /** Private, display-only history of authenticated account metadata. Never grants DAV access. */
 final class TrustedEntitlementCache {
-    static final String OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/";
-    private static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/dav/";
+    static final String OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top/";
+    private static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top/dav/";
     private static final Object LOCK = new Object();
     // Process-local UI uncertainty; never persisted and never used as a DAV authorization lease.
     private static final java.util.Set<String> pendingOrFailedRefreshes = java.util.concurrent.ConcurrentHashMap.newKeySet();

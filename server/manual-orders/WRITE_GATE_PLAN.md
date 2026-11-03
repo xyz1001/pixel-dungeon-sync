@@ -2,7 +2,7 @@
 
 Read-only observations on 2026-10-13 for `webdav.xyz1001.top`:
 
-- nginx is active, listens on TLS 8443 for IPv4/IPv6.
+- nginx is active, listens on TLS 443 for IPv4/IPv6.
 - `/api/` proxies to `127.0.0.1:8088/api/` (existing auth gateway).
 - `/dav/`, `/upload/`, and `/` each proxy to `127.0.0.1:8090/`.
 - SFTPGo Compose publishes management port 8080 with `host_ip=127.0.0.1`.

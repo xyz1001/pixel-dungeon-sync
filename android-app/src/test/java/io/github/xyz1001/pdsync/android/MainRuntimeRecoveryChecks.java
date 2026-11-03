@@ -344,7 +344,7 @@ public final class MainRuntimeRecoveryChecks {
                 equal(original, Files.readString(config), "unmarked and custom settings retain exact bytes");
                 check(!value.retainsLegacyOfficialScope(), "custom source never receives an alias");
             }
-            for (String endpoint : new String[]{old + "child/", "https://other.invalid/dav/", "https://webdav.xyz1001.top:8443/dav", old + " "}) {
+            for (String endpoint : new String[]{old + "child/", "https://other.invalid/dav/", "https://webdav.xyz1001.top/dav", old + " "}) {
                 String original = fields.replace(old, endpoint) + "provider=official\n";
                 Files.writeString(config, original); store.load();
                 equal(original, Files.readString(config), "nearby or other official-marked endpoint is not migrated");

@@ -497,17 +497,17 @@ public final class OfficialServiceRegistrationChecks {
     }
 
     private static void endpointAndCredentialPolicy() throws Exception {
-        for (String endpoint : new String[] {"https://webdav.xyz1001.top:8443/dav/",
-                "https://webdav.xyz1001.top:8443", "https://webdav.xyz1001.top:8443//",
-                "http://webdav.xyz1001.top:8443/", "https://webdav.xyz1001.top/",
-                "https://user@webdav.xyz1001.top:8443/", "https://WEBDAV.xyz1001.top:8443/",
-                "http://webdav.xyz1001.top:8443/dav/",
-                "https://other.invalid:8443/dav/", "https://webdav.xyz1001.top.evil.invalid:8443/dav/",
-                "https://webdav.xyz1001.top/dav/", "https://webdav.xyz1001.top:443/dav/",
-                "https://user@webdav.xyz1001.top:8443/dav/", DAV_URL + "?query=value", DAV_URL + "#part",
-                "https://webdav.xyz1001.top:8443/dav", "https://webdav.xyz1001.top:8443/other/",
-                "https://webdav.xyz1001.top:8443/dav/../dav/", "https://webdav.xyz1001.top:8443/%64av/",
-                "https://webdav.xyz1001.top.:8443/dav/", " " + DAV_URL, "//webdav.xyz1001.top:8443/dav/"}) {
+        for (String endpoint : new String[] {"https://webdav.xyz1001.top/dav/",
+                "https://webdav.xyz1001.top", "https://webdav.xyz1001.top//",
+                "http://webdav.xyz1001.top/", "https://webdav.xyz1001.top:8443/",
+                "https://user@webdav.xyz1001.top/", "https://WEBDAV.xyz1001.top/",
+                "http://webdav.xyz1001.top/dav/",
+                "https://other.invalid/dav/", "https://webdav.xyz1001.top.evil.invalid/dav/",
+                "https://webdav.xyz1001.top:443/dav/", "https://webdav.xyz1001.top:443/",
+                "https://user@webdav.xyz1001.top/dav/", DAV_URL + "?query=value", DAV_URL + "#part",
+                "https://webdav.xyz1001.top/dav", "https://webdav.xyz1001.top/other/",
+                "https://webdav.xyz1001.top/dav/../dav/", "https://webdav.xyz1001.top/%64av/",
+                "https://webdav.xyz1001.top./dav/", " " + DAV_URL, "//webdav.xyz1001.top/dav/"}) {
             failResponse(200, VALID.replace(DAV_URL, endpoint), FailureKind.INVALID_RESPONSE, true);
         }
         for (String username : new String[] {"", "bad:name", "bad\\nname", "bad\\u0000name", "x".repeat(1025)}) {

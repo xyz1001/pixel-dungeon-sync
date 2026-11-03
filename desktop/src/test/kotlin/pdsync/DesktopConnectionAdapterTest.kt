@@ -37,13 +37,13 @@ class DesktopConnectionAdapterTest {
  }
 
  @Test fun legacyConfigurationDefaultsToCustomEvenAtOfficialRoot() {
-  path.writeText("""{"endpoint":"https://webdav.xyz1001.top:8443/","profile":"preserved","username":"alice","password":"fixture-secret"}""")
+  path.writeText("""{"endpoint":"https://webdav.xyz1001.top/","profile":"preserved","username":"alice","password":"fixture-secret"}""")
   val before = path.readBytes()
   val loaded = assertNotNull(file.load())
   assertEquals("custom", loaded.connectionProvider)
   val port = adapter(loaded)
   assertFalse(assertNotNull(port.initialConnection).official)
-  assertEquals("https://webdav.xyz1001.top:8443", port.initialConnection!!.endpoint)
+  assertEquals("https://webdav.xyz1001.top", port.initialConnection!!.endpoint)
   assertContentEquals(before, path.readBytes())
  }
 
@@ -54,9 +54,9 @@ class DesktopConnectionAdapterTest {
    assertEquals(DESKTOP_OFFICIAL_ROOT, dto.endpoint)
   }
   for (endpoint in listOf(
-   "https://webdav.xyz1001.top:8443/dav/", "https://webdav.xyz1001.top:8443/another",
-   "https://webdav.xyz1001.top:8443.evil.invalid/", "https://webdav.xyz1001.top/",
-   "https://webdav.xyz1001.top:8443/?x=1", "https://webdav.xyz1001.top:8443//"
+   "https://webdav.xyz1001.top/dav/", "https://webdav.xyz1001.top/another",
+   "https://webdav.xyz1001.top.evil.invalid/", "https://webdav.xyz1001.top:8443/",
+   "https://webdav.xyz1001.top/?x=1", "https://webdav.xyz1001.top//"
   )) {
    val dto = desktopConnectionConfig(original().copy(endpoint = endpoint, connectionProvider = "official"), "fixture")
    assertFalse(dto.official, endpoint)
@@ -188,7 +188,7 @@ class DesktopConnectionAdapterTest {
  @Test fun officialFormCannotSendCredentialsToDifferentPathOrHost() {
   var probes = 0
   val port = adapter { probes++; null }
-  for (endpoint in listOf("https://webdav.xyz1001.top:8443/dav/", "https://other.invalid/")) {
+  for (endpoint in listOf("https://webdav.xyz1001.top/dav/", "https://other.invalid/")) {
    assertFailsWith<IllegalArgumentException> { port.testConnection(connection(endpoint = endpoint, official = true)) }
   }
   assertEquals(0, probes)
@@ -260,7 +260,7 @@ class DesktopConnectionAdapterTest {
   val official = adapter(assertNotNull(file.load()))
   assertTrue(official.isSavedConnection(connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = true)))
   assertFalse(official.isSavedConnection(connection(endpoint = DESKTOP_OFFICIAL_ROOT, official = false)))
-  file.save(original().copy(endpoint = "https://webdav.xyz1001.top:8443/dav/", connectionProvider = "official"))
+  file.save(original().copy(endpoint = "https://webdav.xyz1001.top/dav/", connectionProvider = "official"))
   val legacy = adapter(assertNotNull(file.load()))
   assertFalse(legacy.initialConnection!!.official)
   assertFalse(legacy.isSavedConnection(legacy.initialConnection!!))

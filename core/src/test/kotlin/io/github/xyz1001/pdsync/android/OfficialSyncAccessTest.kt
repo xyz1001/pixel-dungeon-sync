@@ -107,12 +107,14 @@ class OfficialSyncAccessTest {
         assertFalse(assertFailsWith<OfficialSyncAccess.AccessException>{lease.check()}.isExpired)
     }
     @Test fun actualOriginCannotBeBypassedWithPathOrProvider() {
-        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top:8443/dav/"))
-        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://WEBDAV.XYZ1001.TOP:8443/"))
-        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top.:8443/"))
-        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://%77ebdav.xyz1001.top:8443/"))
-        assertFalse(OfficialSyncAccess.isOfficialEndpoint("https://example.com:8443/"))
-        assertFalse(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top:8443.evil/"))
+        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top/dav/"))
+        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top:443/dav/"))
+        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://WEBDAV.XYZ1001.TOP/"))
+        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top./"))
+        assertTrue(OfficialSyncAccess.isOfficialEndpoint("https://%77ebdav.xyz1001.top/"))
+        assertFalse(OfficialSyncAccess.isOfficialEndpoint("https://example.com/"))
+        assertFalse(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top.evil/"))
+        assertFalse(OfficialSyncAccess.isOfficialEndpoint("https://webdav.xyz1001.top:8443/"))
     }
     @Test fun operationCrossingDeadlineStopsBeforeNextDavRequest() {
         val f=Fixture();val lease=f.begin();var calls=0

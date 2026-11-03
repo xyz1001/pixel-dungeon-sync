@@ -102,7 +102,7 @@ class AndroidConnection @JvmOverloads constructor(
  retainLegacyOfficialScope: Boolean = false
 ) {
  // This narrow migration changes transport only. No arbitrary endpoint/account alias is accepted.
- init { require(!retainLegacyOfficialScope || endpoint == "https://webdav.xyz1001.top:8443/") }
- val stateEndpoint = if(retainLegacyOfficialScope) "https://webdav.xyz1001.top:8443/dav/" else endpoint
+ init { require(!retainLegacyOfficialScope || endpoint == "https://webdav.xyz1001.top/") }
+ val stateEndpoint = if(retainLegacyOfficialScope) "https://webdav.xyz1001.top/dav/" else endpoint
  override fun toString() = "AndroidConnection(profile=$profile, credentials=<redacted>)"
 }

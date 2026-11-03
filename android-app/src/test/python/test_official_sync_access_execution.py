@@ -88,9 +88,9 @@ class Check {
   static class AndroidSyncFacade {}
   static class SecureConnectionStore { static class Connection {
     static final String PROVIDER_OFFICIAL="official";
-    String provider="official", endpoint="https://webdav.xyz1001.top:8443/", username="u", password="p";
+    String provider="official", endpoint="https://webdav.xyz1001.top/", username="u", password="p";
   }}
-  static class OfficialServiceRegistrationClient { static final String DAV_URL="https://webdav.xyz1001.top:8443/"; }
+  static class OfficialServiceRegistrationClient { static final String DAV_URL="https://webdav.xyz1001.top/"; }
   static class AndroidMessages { static final AndroidMessages SYNC_RUNTIME_09=new AndroidMessages(); String text(){return "blocked";} }
   static long now=10, deadline=20, generation=1; static int requests, cacheWrites; static boolean fail, changeDuringRequest;
   static long connectionGeneration(){return generation;}
@@ -100,7 +100,7 @@ class Check {
     static class Entitlement { final Long expiresMs=deadline, serverTimeMs=now; final String username="u"; void requireSyncAccess() throws IOException { if(now>=expiresMs)throw new IOException("expired"); } }
   }
   static class OfficialSyncAccess {
-    static boolean isOfficialEndpoint(String e){return e.equals("https://webdav.xyz1001.top:8443/");}
+    static boolean isOfficialEndpoint(String e){return e.equals("https://webdav.xyz1001.top/");}
     interface Clock { long nanoTime(); default long wallTimeMillis(){return 0;} }
     static Lease fromEntitlement(ManagedAccountClient.Entitlement e, long started, Clock clock){return new Lease(e, started, clock, 0, false);}
     static class AccessException extends IOException { AccessException(boolean expired, String message){super(message);} }
@@ -140,7 +140,7 @@ class Check {
     TrustedEntitlementCache.beginRefresh(a.endpoint,a.username); fail=true; blocked(()->requireOfficialSyncAccess(c,a,f)); blocked(g::check); fail=false;
     int before=requests; a.provider="custom"; requireOfficialSyncAccess(c,a,f); check(requests==before+1); before=requests;
     a.provider="official"; a.endpoint="https://custom.example/"; requireOfficialSyncAccess(c,a,f); check(requests==before);
-    a.endpoint="https://webdav.xyz1001.top:8443/"; blocked(()->requireOfficialSyncAccess(c,a,new AndroidSyncFacade()));
+    a.endpoint="https://webdav.xyz1001.top/"; blocked(()->requireOfficialSyncAccess(c,a,new AndroidSyncFacade()));
   }
 }
 '''

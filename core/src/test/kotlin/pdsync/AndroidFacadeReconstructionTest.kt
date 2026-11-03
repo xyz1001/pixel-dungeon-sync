@@ -100,12 +100,12 @@ class AndroidFacadeReconstructionTest {
     @Test fun officialRootTransportRetainsBaselineHistoryAndExactLocalScopes() {
         val root = temp.resolve("official-root-migration")
         val bridge = FakeBridge(); val store = MemoryAppendStore()
-        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        val old = AndroidConnection("https://webdav.xyz1001.top/dav/", "synthetic", "test-only", "hero")
         fun facade(connection: AndroidConnection) = AndroidSyncFacade(root, connection, bridge, identity, store)
         val first = facade(old)
         assertEquals("UPLOADED", first.autoUpload().status)
         val commit = store.latest(); val beforeMirror = mirror(root)
-        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, "changed-test-only", old.profile, true)
+        val current = AndroidConnection("https://webdav.xyz1001.top/", old.username, "changed-test-only", old.profile, true)
         val migrated = facade(current)
         assertEquals("UNCHANGED", migrated.autoUpload().status)
         val inspection = migrated.inspect()
@@ -116,7 +116,7 @@ class AndroidFacadeReconstructionTest {
         bridge.files = fixture(2)
         assertEquals("UPLOADED", migrated.autoUpload().status)
         assertEquals(listOf(commit.id), store.latest().parents)
-        assertEquals(current.endpoint, "https://webdav.xyz1001.top:8443/")
+        assertEquals(current.endpoint, "https://webdav.xyz1001.top/")
         assertEquals(old.endpoint, current.stateEndpoint)
         // No implicit origin alias: the same URL without explicit official provenance is isolated.
         facade(AndroidConnection(current.endpoint, old.username, old.password, old.profile))
@@ -131,7 +131,7 @@ class AndroidFacadeReconstructionTest {
     @Test fun officialRootTransportRetainsFrozenPendingPublication() {
         val root = temp.resolve("official-root-pending")
         val bridge = FakeBridge(); val store = MemoryAppendStore()
-        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        val old = AndroidConnection("https://webdav.xyz1001.top/dav/", "synthetic", "test-only", "hero")
         val before = AndroidSyncFacade(root, old, bridge, identity, store)
         val inspection = before.inspect()
         store.beforeObject = { throw java.io.IOException("Synthetic interruption") }
@@ -142,7 +142,7 @@ class AndroidFacadeReconstructionTest {
         val pendingId = marker.readText()
         val pending = marker.parent.resolve("uploads/$pendingId.json")
         val frozen = pending.readBytes()
-        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
+        val current = AndroidConnection("https://webdav.xyz1001.top/", old.username, old.password, old.profile, true)
         val migrated = AndroidSyncFacade(root, current, bridge, identity, store)
         assertContentEquals(frozen, pending.readBytes())
         val retry = migrated.inspect(); assertTrue(retry.isRetryablePending)
@@ -156,12 +156,12 @@ class AndroidFacadeReconstructionTest {
     @Test fun officialRootTransportRetainsUnresolvedRestoreJournal() {
         val store = MemoryAppendStore(); publish(FakeBridge(), store)
         val root = temp.resolve("official-root-recovery"); val bridge = FakeBridge(emptyMap())
-        val old = AndroidConnection("https://webdav.xyz1001.top:8443/dav/", "synthetic", "test-only", "hero")
+        val old = AndroidConnection("https://webdav.xyz1001.top/dav/", "synthetic", "test-only", "hero")
         val before = AndroidSyncFacade(root, old, bridge, identity, store)
         val inspection = before.inspect(); bridge.failRestore = true
         assertFails { before.restoreSelected(inspection, store.latest().snapshot.id, false) }
         val journalBytes = journal(root).readBytes()
-        val current = AndroidConnection("https://webdav.xyz1001.top:8443/", old.username, old.password, old.profile, true)
+        val current = AndroidConnection("https://webdav.xyz1001.top/", old.username, old.password, old.profile, true)
         val migrated = AndroidSyncFacade(root, current, bridge, identity, store)
         assertTrue(migrated.hasUnresolvedRestore()); assertTrue(migrated.inspect().needsRestoreRecovery)
         assertContentEquals(journalBytes, journal(root).readBytes())

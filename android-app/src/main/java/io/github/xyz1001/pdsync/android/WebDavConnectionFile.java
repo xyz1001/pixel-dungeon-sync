@@ -25,8 +25,8 @@ import java.util.Properties;
 /* loaded from: classes.dex */
 final class WebDavConnectionFile {
     static final String FILE_NAME = "webdav.properties";
-    static final String OFFICIAL_ROOT_ENDPOINT = "https://webdav.xyz1001.top:8443/";
-    static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top:8443/dav/";
+    static final String OFFICIAL_ROOT_ENDPOINT = "https://webdav.xyz1001.top/";
+    static final String LEGACY_OFFICIAL_ENDPOINT = "https://webdav.xyz1001.top/dav/";
     private static final int MAX_BYTES = 65536;
     // All instances share the app-private connection record; migrations must not race user saves.
     private static final Object FILE_LOCK = new Object();

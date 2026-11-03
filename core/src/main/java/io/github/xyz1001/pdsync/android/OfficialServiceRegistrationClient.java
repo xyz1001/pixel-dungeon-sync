@@ -52,8 +52,8 @@ import pdsync.AppendOnlyKt;
  * generic unknown outcomes retain login guidance, which cannot repair trial provisioning.
  */
 final class OfficialServiceRegistrationClient {
-    static final String REGISTER_URL = "https://webdav.xyz1001.top:8443/api/register";
-    static final String DAV_URL = "https://webdav.xyz1001.top:8443/";
+    static final String REGISTER_URL = "https://webdav.xyz1001.top/api/register";
+    static final String DAV_URL = "https://webdav.xyz1001.top/";
     static final int MAX_RESPONSE_BYTES = 32 * 1024;
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Pattern JSON_NUMBER = Pattern.compile("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?");
@@ -369,7 +369,7 @@ final class OfficialServiceRegistrationClient {
         try {
             URI uri = new URI(endpoint);
             if (!"https".equals(uri.getScheme()) || !"webdav.xyz1001.top".equals(uri.getHost())
-                    || uri.getPort() != 8443 || uri.getRawUserInfo() != null
+                    || !(uri.getPort() == -1 || uri.getPort() == 443) || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null
                     || !"/".equals(uri.getRawPath()) || !DAV_URL.equals(endpoint)) {
                 throw failure(FailureKind.INVALID_RESPONSE, true);

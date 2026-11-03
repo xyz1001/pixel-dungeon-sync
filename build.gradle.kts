@@ -14,6 +14,12 @@ plugins {
 }
 
 subprojects {
+    tasks.withType<JavaCompile>().configureEach {
+        options.encoding = "UTF-8"
+    }
+    tasks.withType<Test>().configureEach {
+        defaultCharacterEncoding = "UTF-8"
+    }
     tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEach {
         exclude("**/config.json", "**/config.json.legacy*", "**/.local/**", "**/.pixel-dungeon-sync/**")
     }

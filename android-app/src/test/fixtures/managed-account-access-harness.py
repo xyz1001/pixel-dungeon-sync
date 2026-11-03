@@ -48,7 +48,7 @@ public final class ManagedAccountAccessHarness {
     }
     private static void rememberEntitlement(android.content.Context app, SecureConnectionStore.Connection account,
                                             ManagedAccountClient.Entitlement entitlement) { saved++; }
-    static final class OfficialServiceRegistrationClient { static final String DAV_URL = "https://webdav.xyz1001.top:8443/"; }
+    static final class OfficialServiceRegistrationClient { static final String DAV_URL = "https://webdav.xyz1001.top/"; }
     static final class SecureConnectionStore {
         static final class Connection {
             static final String PROVIDER_OFFICIAL = "official";

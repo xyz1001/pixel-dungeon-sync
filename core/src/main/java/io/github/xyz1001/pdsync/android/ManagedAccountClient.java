@@ -48,7 +48,7 @@ import pdsync.AppendOnlyKt;
  * Public appreciation reads never send credentials. A 401 alone does not prove expiry.
  */
 final class ManagedAccountClient {
-    static final String ORIGIN = "https://webdav.xyz1001.top:8443";
+    static final String ORIGIN = "https://webdav.xyz1001.top";
     static final String DAV_URL = ORIGIN + "/";
     static final String ENTITLEMENT_URL = ORIGIN + "/api/account/entitlement";
     static final String APPRECIATION_URL = ORIGIN + "/api/account/appreciation";
@@ -376,7 +376,7 @@ final class ManagedAccountClient {
         try {
             URI uri = new URI(url);
             if (!"https".equals(uri.getScheme()) || !"webdav.xyz1001.top".equals(uri.getHost())
-                    || uri.getPort() != 8443 || uri.getRawUserInfo() != null
+                    || !(uri.getPort() == -1 || uri.getPort() == 443) || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null
                     || !(ENTITLEMENT_URL.equals(url) || APPRECIATION_URL.equals(url) || IMAGE_URL.equals(url))
                     || (authenticated && !ENTITLEMENT_URL.equals(url))) throw failure(FailureKind.INVALID_INPUT);

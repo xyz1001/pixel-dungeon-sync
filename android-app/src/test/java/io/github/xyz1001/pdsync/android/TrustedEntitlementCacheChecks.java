@@ -121,7 +121,7 @@ public final class TrustedEntitlementCacheChecks {
     private static void ambiguousVersionOneHistoryIsRejected() throws Exception {
         Path directory = Files.createTempDirectory("synthetic-legacy-entitlement-");
         try {
-            String old = "https://webdav.xyz1001.top:8443/dav/", user = "account-a";
+            String old = "https://webdav.xyz1001.top/dav/", user = "account-a";
             TrustedEntitlementCache cache = new TrustedEntitlementCache(directory);
             Path legacy = writeVersionOne(directory, old, user);
             byte[] original = Files.readAllBytes(legacy);

@@ -328,10 +328,10 @@ public final class ManagedAccountClientChecks {
     private static void invalidInputs() throws Exception {
         AtomicInteger count = new AtomicInteger();
         Transport forbidden = request -> { count.incrementAndGet(); throw new AssertionError("No invalid input may be sent"); };
-        for (String endpoint : new String[] {null, "", "http://webdav.xyz1001.top:8443/dav/", "https://evil.invalid/dav/",
+        for (String endpoint : new String[] {null, "", "http://webdav.xyz1001.top/dav/", "https://evil.invalid/dav/",
                 ORIGIN + "/dav/", ORIGIN, ORIGIN + "//", ORIGIN + "/?q=1", ORIGIN + "/#x", ORIGIN + "/dav", ORIGIN + "/dav//", ORIGIN + "/dav/?q=1", ORIGIN + "/dav/#x",
-                "https://user@webdav.xyz1001.top:8443/dav/", "https://webdav.xyz1001.top/dav/",
-                "https://WEBDAV.xyz1001.top:8443/dav/", "http://127.0.0.1:18080/", ORIGIN + "/%64av/"}) {
+                "https://user@webdav.xyz1001.top/dav/", "https://webdav.xyz1001.top:8443/dav/",
+                "https://WEBDAV.xyz1001.top/dav/", "http://127.0.0.1:18080/", ORIGIN + "/%64av/"}) {
             fail(() -> new ManagedAccountClient(endpoint, USER, PASSWORD, forbidden), FailureKind.INVALID_INPUT);
         }
         for (String username : new String[] {null, "", "bad:name", "bad\nname", "用户名", ".bad", "x".repeat(65)}) {

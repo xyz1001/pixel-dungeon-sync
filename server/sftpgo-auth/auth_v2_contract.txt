@@ -1,6 +1,6 @@
 ## 6. 用户指定凭据接口（version 2）
 
-POST https://webdav.xyz1001.top:8443/api/register
+POST https://webdav.xyz1001.top/api/register
 Content-Type: application/json
 
 注册：{"version":2,"action":"register","username":"<username>","password":"<password>"}
@@ -12,7 +12,7 @@ Content-Type: application/json
 用户名密码同时用于 WebDAV Basic Auth；网关不另存密码，不建立新的身份数据库。
 
 成功 HTTP 200：
-{"code":200,"message":"success","data":{"webdav_url":"https://webdav.xyz1001.top:8443/dav/","username":"<username>","quota_bytes":5242880,"quota_mb":5,"upload_bandwidth_kb":100,"download_bandwidth_kb":100}}
+{"code":200,"message":"success","data":{"webdav_url":"https://webdav.xyz1001.top/","username":"<username>","quota_bytes":5242880,"quota_mb":5,"upload_bandwidth_kb":100,"download_bandwidth_kb":100}}
 
 成功响应不返回 password、access_token 或账户密码哈希。客户端使用用户本次输入的密码连接 WebDAV。
 登录配额来自认证通过后的 SFTPGo 账户，0 表示上游无限制。注册沿用原 5 MiB、100 KB/s 配额与现有账号创建策略。

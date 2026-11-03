@@ -14,7 +14,7 @@ public final class OfficialSyncAccess {
             okhttp3.HttpUrl uri = okhttp3.HttpUrl.get(endpoint);
             String host = uri.host();
             if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-            return "https".equals(uri.scheme()) && "webdav.xyz1001.top".equals(host) && uri.port() == 8443;
+            return "https".equals(uri.scheme()) && "webdav.xyz1001.top".equals(host) && uri.port() == 443;
         } catch (Exception invalid) { return false; }
     }
 

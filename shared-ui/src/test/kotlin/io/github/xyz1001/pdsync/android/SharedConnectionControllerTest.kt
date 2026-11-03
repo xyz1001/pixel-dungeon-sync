@@ -128,7 +128,7 @@ class SharedConnectionControllerTest {
             requests += request
             onAuth?.invoke()
             if (authFailure) throw IOException("SECRET request details")
-            response(request, """{"code":200,"message":"ok","data":{"webdav_url":"https://webdav.xyz1001.top:8443/","username":"alice","quota_mb":1,"quota_bytes":1048576,"upload_bandwidth_kb":0,"download_bandwidth_kb":0}}""")
+            response(request, """{"code":200,"message":"ok","data":{"webdav_url":"https://webdav.xyz1001.top/","username":"alice","quota_mb":1,"quota_bytes":1048576,"upload_bandwidth_kb":0,"download_bandwidth_kb":0}}""")
         }
         override fun account(config: SharedConnectionConfig): ManagedAccountClient {
             privateConstructs++

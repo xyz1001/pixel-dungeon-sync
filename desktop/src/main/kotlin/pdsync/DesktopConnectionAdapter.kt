@@ -140,7 +140,7 @@ internal class DesktopConnectionAdapter(
  }
 }
 
-internal const val DESKTOP_OFFICIAL_ROOT = "https://webdav.xyz1001.top:8443/"
+internal const val DESKTOP_OFFICIAL_ROOT = "https://webdav.xyz1001.top/"
 
 /** Accept only the exact root emitted by this client, allowing ConfigFile's removed final slash. */
 internal fun isDesktopOfficialRoot(endpoint: String): Boolean =

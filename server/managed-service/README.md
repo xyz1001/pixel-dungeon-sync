@@ -14,7 +14,7 @@ order-review API, or public Feishu event endpoint.
 ## WebDAV root URL
 
 The selected deployment uses the existing HTTPS origin root as the DAV base:
-`https://webdav.xyz1001.top:8443/`. Keep nginx's existing root mapping to the
+`https://webdav.xyz1001.top/`. Keep nginx's existing root mapping to the
 empty-prefix SFTPGo listener and its separate `/api/` and `/upload/` handlers.
 No new DAV listener or port is needed. Set the external `public_webdav_url` to
 that root together with the matching official-client endpoint update; the
