@@ -5031,6 +5031,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.draftLoaded = false;
         this.page = syncPage;
         this.notice = CHECK_THE_SELECTED_GAME_265.text();
+        // Re-entering game setup is an explicit foreground action. A restored Root
+        // selection is metadata only; prove authorization without changing modes.
+        if (syncPage == SyncPage.DISCOVERY && this.resumed && !isDestroyed()
+                && this.setupSession.owner == this && this.rootGame != null
+                && currentAccessMode() == GameModeChoice.Mode.ROOT
+                && !this.setupSession.flow.rootAuthorized()
+                && this.setupSession.flow.matches(this.setupSession.flow.generation(), selectedGamePackage())
+                && this.setupSession.modeChoice.pending() == null && !this.installer.hasActiveRequest()
+                && !restoreNeedsAttention()) requestRootAuthorization();
     }
 
     /* JADX INFO: Access modifiers changed from: private */

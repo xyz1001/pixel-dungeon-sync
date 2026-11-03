@@ -1,0 +1,85 @@
+package io.github.xyz1001.pdsync.android;
+
+import java.io.IOException;
+
+public class MainActivity {
+    enum SyncPage { DISCOVERY, HOME }
+    enum DiagnosticAction { ACCESS_CHECK }
+    enum OnboardingProgress { PENDING }
+    interface Task<T> { T run() throws Exception; }
+    interface SetupDone<T> { void accept(MainActivity owner, T value) throws Exception; }
+    static final class Text { String text() { return "message"; } }
+    static final Text REQUESTING_ROOT_ACCESS_14 = new Text(), ROOT_ACCESS_WAS_NOT_GRANTED_RETRY_15 = new Text(), CHECK_THE_SELECTED_GAME_265 = new Text();
+    static final class BridgeDiagnostics {
+        enum Stage { SAVE_READINESS }
+        static final class Failure extends IOException {
+            Failure(Stage stage, String code, String text, Throwable cause) { super(code, cause); }
+        }
+    }
+    static final class RootSetupAuthorization {
+        static int calls; static boolean fail;
+        static void probe(Object context, String name) throws IOException {
+            calls++; if (fail) throw new IOException("ROOT_DENIED_OR_EXITED");
+        }
+    }
+    static final class GameModeChoice { enum Mode { ROOT, APK } Object request; Object pending() { return request; } }
+    static final class SetupSession { final GameSetupFlow flow = new GameSetupFlow(); final GameModeChoice modeChoice = new GameModeChoice(); MainActivity owner; }
+    static final class Installer { boolean active; boolean hasActiveRequest() { return active; } }
+    final SetupSession setupSession = new SetupSession();
+    final Installer installer = new Installer();
+    boolean resumed = true, busy, destroyed, recovery, onboardingActive, draftLoaded;
+    Object rootGame = new Object(), localPreview, setupOutcome;
+    SyncPage page = SyncPage.HOME;
+    OnboardingProgress progress;
+    String notice;
+    MainActivity() { setupSession.owner = this; }
+    GameModeChoice.Mode accessMode = GameModeChoice.Mode.ROOT;
+    GameModeChoice.Mode currentAccessMode() { return accessMode; }
+    Task<?> queued;
+    SetupDone<Object> done;
+    long generation; String target;
+    boolean isDestroyed() { return destroyed; }
+    boolean restoreNeedsAttention() { return recovery; }
+    Object getApplicationContext() { return this; }
+    String selectedGamePackage() { return setupSession.flow.target(); }
+    void resetPathPreview() { }
+    @SuppressWarnings("unchecked") <T> void setupWork(DiagnosticAction action, String message, Task<T> work, SetupDone<T> callback) {
+        generation = setupSession.flow.generation(); target = setupSession.flow.target();
+        queued = work; done = (SetupDone<Object>) callback;
+    }
+    void finish() throws Exception {
+        Task<?> work = queued; queued = null;
+        try { Object result = work.run(); if (setupSession.flow.matches(generation, target)) done.accept(this, result); }
+        catch (IOException expected) { }
+    }
+    static void require(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+    /* PRODUCTION_METHODS */
+    public static void main(String[] args) throws Exception {
+        MainActivity a = new MainActivity(); a.setupSession.flow.select("game.one");
+        a.m20xb2d4905(SyncPage.DISCOVERY, null);
+        require(a.queued != null, "saved root target: explicit reentry must schedule probe");
+        require(!a.setupSession.flow.rootAuthorized(), "must not authorize before probe");
+        a.finish(); require(a.setupSession.flow.rootAuthorized(), "successful probe must authorize");
+        MainActivity b = new MainActivity(); b.setupSession.flow.select("game.one"); RootSetupAuthorization.fail = true;
+        b.m20xb2d4905(SyncPage.DISCOVERY, null); b.finish();
+        require(!b.setupSession.flow.rootAuthorized(), "failed probe must not authorize"); RootSetupAuthorization.fail = false;
+        MainActivity c = new MainActivity(); c.setupSession.flow.select("game.one");
+        c.m20xb2d4905(SyncPage.DISCOVERY, null); c.setupSession.flow.select("game.two"); c.finish();
+        require(!c.setupSession.flow.rootAuthorized(), "stale result must not authorize new target");
+        MainActivity d = new MainActivity(); d.setupSession.flow.select("game.one"); d.recovery = true;
+        d.m20xb2d4905(SyncPage.DISCOVERY, null); require(d.queued == null, "recovery must block probe");
+        MainActivity e = new MainActivity(); e.setupSession.flow.select("game.one"); e.installer.active = true;
+        e.m20xb2d4905(SyncPage.DISCOVERY, null); require(e.queued == null, "installation must block probe");
+        MainActivity f = new MainActivity(); f.setupSession.flow.select("game.one"); f.resumed = false;
+        f.m20xb2d4905(SyncPage.DISCOVERY, null); require(f.queued == null, "background must not probe");
+        MainActivity g = new MainActivity(); g.setupSession.flow.select("game.one");
+        g.m20xb2d4905(SyncPage.HOME, null); require(g.queued == null, "non-discovery entry must not probe");
+        MainActivity h = new MainActivity(); h.setupSession.flow.select("game.one"); h.setupSession.modeChoice.request = new Object();
+        h.m20xb2d4905(SyncPage.DISCOVERY, null); require(h.queued == null, "pending/cancelable choice must not probe");
+        MainActivity i = new MainActivity(); i.setupSession.flow.select("game.one"); i.accessMode = GameModeChoice.Mode.APK;
+        i.m20xb2d4905(SyncPage.DISCOVERY, null); require(i.queued == null, "APK mode must not probe");
+        MainActivity j = new MainActivity(); j.setupSession.flow.select("game.one"); j.setupSession.owner = null;
+        j.m20xb2d4905(SyncPage.DISCOVERY, null); require(j.queued == null, "detached owner must not probe");
+        System.out.println("root reentry host checks passed");
+    }
+}
