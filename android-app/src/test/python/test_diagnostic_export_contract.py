@@ -156,7 +156,7 @@ class DiagnosticExportContract(unittest.TestCase):
         completion = body(MAIN, 'void m148lambda$work$0')
         self.assertEqual(completion.count('trace.record(DiagnosticStage.FINISHED, result, failure, details)'), 2)
         refresh = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
-        self.assertIn('startDetachedHomeRead(captured, false, false, ticket)', refresh)
+        self.assertIn('startDetachedHomeRead(captured, false, true, ticket, true)', refresh)
         self.assertIn('state.refresh.deferBeforeRead(ticket)', refresh)
         self.assertNotIn('work(', refresh)
         self.assertNotIn('DiagnosticLog.failure(', refresh)

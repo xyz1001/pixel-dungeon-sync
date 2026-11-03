@@ -17,7 +17,7 @@ METHODS = (
     'public void onAccountAccessChanged(',
     'private void drainRenewalArchiveRead()',
     'private boolean isCurrentHomeRead(',
-    'private void readHomeArchives(',
+    'private boolean readHomeArchives(',
 )
 
 
@@ -71,7 +71,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
 
     def test_reader_retains_readiness_and_fresh_facade_boundary(self):
         reader=body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
-        self.assertIn('if (!readyForSaves()) outcome.notReady = true;', reader)
+        self.assertIn('outcome.rootReadiness != null ? !outcome.rootReadiness.canContinue() : !readyForSaves()', reader)
         self.assertIn('outcome.facade = SyncRuntime.localFacade(this, account);', reader)
         self.assertNotIn('outcome.facade = this.facade', reader)
 
@@ -93,7 +93,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
             self.assertNotIn(forbidden, callbacks)
         drain = body(MAIN, 'private void drainRenewalArchiveRead()')
         self.assertIn('readHomeArchives(account, selection, namespace)', drain)
-        read_home = body(MAIN, 'private void readHomeArchives(')
+        read_home = body(MAIN, 'private boolean readHomeArchives(')
         for forbidden in ('checkRootAccess(', 'readInstallationReadiness(', 'refreshComparison(',
                           'prepareOfficialHomeNamespace(', '.connect(', '.upload(', '.autoUpload(',
                           '.restore', '.mergeConflict(', 'replaceMirror(', 'completeOnboarding(',
@@ -101,7 +101,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
             self.assertNotIn(forbidden, drain + read_home)
         self.assertEqual(1, read_home.count('startDetachedHomeRead(account, false, false, null)'))
         reader=body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
-        self.assertLess(reader.index('if (!readyForSaves())'), reader.index('owner.readHomeRemote(context)'))
+        self.assertLess(reader.index('!readyForSaves()'), reader.index('owner.readHomeRemote(context)'))
         self.assertIn('readComparison(true)', body(MAIN, 'private void readComparison()'))
         read = body(MAIN, 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)')
         self.assertIn('if (prepareNamespace) prepareOfficialHomeNamespace(activeFacade)', read)
@@ -109,7 +109,7 @@ class RenewalArchiveReadExecution(unittest.TestCase):
 
     def test_existing_navigation_drains_only_after_home_and_retains_queue_on_rotation(self):
         navigate = body(MAIN, 'private void navigate(')
-        self.assertIn('if (syncPage == SyncPage.HOME) { drainRenewalArchiveRead();', navigate)
+        self.assertIn('if (syncPage == SyncPage.HOME)', navigate)
         self.assertLess(navigate.index('this.page = syncPage'), navigate.index('drainRenewalArchiveRead()'))
         back = body(MAIN, 'public void onBack(ConnectionEntryModel.Back destination)')
         self.assertLess(back.index('closeSharedConnection()'), back.index('drainRenewalArchiveRead()'))

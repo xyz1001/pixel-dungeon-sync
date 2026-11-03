@@ -43,7 +43,7 @@ class SetupLifecycleContract(unittest.TestCase):
                       'this.installer.hasActiveRequest()', '!this.resumed', 'this.busy'):
             self.assertIn(guard, dispatch)
         resume = body(MAIN, 'protected void onResume()')
-        self.assertIn('this.setupSession.modeChoice.pending() != null) { render(); return;', resume)
+        self.assertIn('this.setupSession.modeChoice.pending() != null) { this.homeEntryReadPending = false; render(); return;', resume)
         self.assertNotIn('dispatchInlineAccess(', resume)
         self.assertIn('dismissGameModeDialog()', body(MAIN, 'protected void onPause()'))
         dismiss = body(MAIN, 'private void dismissGameModeDialog()')
@@ -128,7 +128,8 @@ class SetupLifecycleContract(unittest.TestCase):
     def test_ordinary_resume_does_not_scan(self):
         resume = body(MAIN, 'protected void onResume()')
         self.assertIn('if (this.initialLoad && !this.setupSession.running) refreshReadiness()', resume)
-        self.assertIn('else { drainRenewalArchiveRead(); drainExternalInstallation(); drainPendingSetup(); }', resume)
+        for drain in ('drainHomeEntryRead()', 'drainRenewalArchiveRead()', 'drainExternalInstallation()', 'drainPendingSetup()'):
+            self.assertIn(drain, resume)
         self.assertIn('if (this.installer.externalInstallObservation())', resume)
         self.assertNotIn('externalActivityReturned(', resume)
         for forbidden in ('requestReadinessRefresh()', 'inspectReady', 'probeRoot', 'sha256', 'readComparison'):

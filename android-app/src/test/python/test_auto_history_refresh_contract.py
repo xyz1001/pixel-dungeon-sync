@@ -33,7 +33,7 @@ class AutoHistoryRefreshContract(unittest.TestCase):
         for gate in ('!this.resumed', 'this.busy', 'isDestroyed()', 'this.page != SyncPage.HOME',
                      'this.readinessState.restorePending', 'this.installer.hasActiveRequest()'):
             self.assertIn(gate, refresh)
-        self.assertIn('startDetachedHomeRead(captured, false, false, ticket)', refresh)
+        self.assertIn('startDetachedHomeRead(captured, false, true, ticket, true)', refresh)
         reader=body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
         self.assertIn('owner.readHomeRemote(context)', reader)
         self.assertIn('owner.acceptHomeObservation(remote)', reader)

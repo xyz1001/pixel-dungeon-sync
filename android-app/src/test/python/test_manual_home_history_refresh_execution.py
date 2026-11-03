@@ -21,7 +21,7 @@ METHODS = (
     'private boolean isHomeArchiveLoading()',
     'private void drainRenewalArchiveRead()',
     'private boolean isCurrentHomeRead(',
-    'private void readHomeArchives(',
+    'private boolean readHomeArchives(',
     'private void requireCurrentArchiveRead(',
     'private void readComparison(boolean prepareNamespace)', 'private void readComparison(boolean prepareNamespace, boolean allowHomePreview)',
 )
@@ -58,7 +58,7 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertIn('Manual HOME history refresh execution passed', result.stdout)
 
     def test_regression_detects_cached_entitlement_blocking_retry(self):
-        result = self.execute(('&& readyForSaves();', '&& readyForSaves() && homeAccountAccessAvailable();'))
+        result = self.execute(('&& canRequestSaveAccess();', '&& canRequestSaveAccess() && homeAccountAccessAvailable();'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('unavailable cached access blocked foreground retry', result.stderr)
 
@@ -74,12 +74,12 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
         self.assertIn('no previous observation must remain refreshable', result.stderr)
 
     def test_regression_detects_namespace_preparation(self):
-        result = self.execute(('startDetachedHomeRead(account, false, false, null, true);', 'startDetachedHomeRead(account, true, false, null, true);'))
+        result = self.execute(('startDetachedHomeRead(account, false, true, null, true)', 'startDetachedHomeRead(account, true, true, null, true)'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('manual read provisioned the remote namespace', result.stderr)
 
     def test_regression_detects_missing_manual_renewal_dedupe(self):
-        result = self.execute(('this.renewalArchiveRead.take(account, selection, namespace);', ''))
+        result = self.execute(('this.renewalArchiveRead.take(account, selection, namespace);', '{}'))
         self.assertNotEqual(0, result.returncode)
         self.assertIn('manual refresh must consume same-scope pending renewal', result.stderr)
 
@@ -92,9 +92,9 @@ class ManualHomeHistoryRefreshExecution(unittest.TestCase):
     def test_manual_and_renewal_share_only_read_only_inspection_work(self):
         manual = body(MAIN, 'private void refreshHomeHistory()')
         self.assertIn('if (!canRefreshHomeHistory()) return;', manual)
-        self.assertIn('startDetachedHomeRead(account, false, false, null, true)', manual)
+        self.assertIn('startDetachedHomeRead(account, false, true, null, true)', manual)
         self.assertIn('fullHistory ? owner.inspectHomeHistory() : owner.inspectHome()', body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)'))
-        helper = body(MAIN, 'private void readHomeArchives(')
+        helper = body(MAIN, 'private boolean readHomeArchives(')
         self.assertEqual(1, helper.count('startDetachedHomeRead(account, false, false, null)'))
         self.assertNotIn('work(', helper)
         for forbidden in ('checkRootAccess(', 'requestRootAuthorization(', 'readInstallationReadiness(',

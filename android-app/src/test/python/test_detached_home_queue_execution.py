@@ -9,7 +9,7 @@ SRC = Path(__file__).resolve().parents[2] / 'main/java/io/github/xyz1001/pdsync/
 MAIN = (SRC / 'MainActivity.java').read_text()
 SIGNATURES = ('private static final class DetachedHomeRead {', 'private static final class DetachedHomeOutcome {',
  'private void cancelDetachedHomeRead(', 'private void requireDetachedHomeRead(', 'private boolean startDetachedHomeRead(',
- 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)', 'private void finishDetachedHomeRead(')
+ 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)', 'private void checkDetachedRootReadiness(', 'private void finishDetachedHomeRead(')
 
 class DetachedHomeQueueExecution(unittest.TestCase):
  def test_real_queue_network_lock_lifetime_cancellation_identity_and_live_access(self):
@@ -23,7 +23,7 @@ public class MainActivity {
  enum DiagnosticAction {INSPECT} enum DiagnosticPhase {QUEUE_WAIT,UI_COMPLETION}
  enum DiagnosticStage {VERIFY,FINISHED} enum DiagnosticResult {STARTED,SKIPPED,SUCCEEDED}
  static class Text {String text(){return "existing message";}}
- static final Text CHECKING_SAVES_144=new Text(),SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137=new Text(),THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145=new Text();
+ static final Text CHECKING_SAVES_144=new Text(),SETTINGS_HAVE_CHANGED_PLEASE_RETRY_137=new Text(),THE_CLOUD_IS_TEMPORARILY_UNAVAILABLE_PLEASE_145=new Text(),THE_CURRENT_SAVE_BACKEND_DOES_NOT_130=new Text();
  static class SecureConnectionStore {static class Connection {}}
  static class SyncRuntime {
   static final Object OPERATION_LOCK=new Object();static Object account;static long generation=1;static int refreshes;
@@ -31,6 +31,22 @@ public class MainActivity {
   static void requireOfficialSyncAccess(Object app,Object account,AndroidSyncFacade facade)throws Exception{refreshes++;if(facade.failAuthorization)throw new IOException("offline authorization");facade.gate=true;}
   static void checkOfficialSyncAccess(Object account,AndroidSyncFacade facade)throws Exception {if(!facade.gate)throw new IOException("expired");}
   static void clearOfficialSyncAccess(AndroidSyncFacade facade){facade.gate=false;}
+  static SelectedRootGame rootGame(MainActivity a){return a.rootGame;}
+  static GameAccessBackend backend(MainActivity a){return a.backend;}
+  static boolean rootSelectionMatches(MainActivity a,SelectedRootGame chosen){return a.rootGame==chosen;}
+ }
+ static class SelectedRootGame {String selectionToken(){return "game";}}
+ static class GameAccessBackend {
+  enum Mode {ROOT_DIRECT} static class Capabilities {boolean exportSupported=true;}
+  CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(0);boolean deny;int checks;
+  Mode mode(){return Mode.ROOT_DIRECT;} Capabilities capabilities(){return new Capabilities();} void targetGame(){}
+  void inspectReady() throws Exception {checks++;entered.countDown();while(true){try{release.await();break;}catch(InterruptedException ignored){}} if(deny)throw new IOException("denied");}
+ }
+ static class InstallationReadiness {
+  enum PackageStatus {VERIFIED} enum AccessStatus {NOT_CHECKED,READY,RECOVERY_NEEDED}
+  AccessStatus access; boolean restorePending; InstallationReadiness(AccessStatus s,boolean p){access=s;restorePending=p;}
+  static InstallationReadiness rootDirect(PackageStatus p,boolean v,boolean i,boolean pending,AccessStatus a){return new InstallationReadiness(a,pending);}
+  boolean canContinue(){return access==AccessStatus.READY;} String statusDescription(){return "not ready";}
  }
  static class DiagnosticTrace {void record(Object... o){}}
  static class DiagnosticLog {static DiagnosticTrace begin(Object... o){return new DiagnosticTrace();}}
@@ -65,19 +81,20 @@ public class MainActivity {
  static class AutomaticHistoryOutcome {long observationGeneration;AndroidSyncFacade facade;AndroidSyncFacade.Inspection inspection;SyncHistory history;Exception error;AutomaticHistoryOutcome(Object t,Object a){}}
  static class AutoSyncService {static boolean claimHistoryRefresh(MainActivity a,Object t){a.claims++;return true;}}
  static class Installer{boolean hasActiveRequest(){return false;}}
- static class Readiness{String statusDescription(){return "not ready";}}
  static class StaleArchiveReadException extends Exception{}
  final ExecutorService homeReader=Executors.newSingleThreadExecutor();final HomeArchiveReadState archiveReads=new HomeArchiveReadState();
  final OfficialNamespacePreparation preparedOfficialNamespace=new OfficialNamespacePreparation();final AutomaticHistoryState automaticHistoryState=new AutomaticHistoryState();
- final Installer installer=new Installer();final Readiness readinessState=new Readiness();final BlockingQueue<Runnable> ui=new LinkedBlockingQueue<>();
+ final Installer installer=new Installer();InstallationReadiness readinessState=new InstallationReadiness(InstallationReadiness.AccessStatus.NOT_CHECKED,false);final BlockingQueue<Runnable> ui=new LinkedBlockingQueue<>();
  volatile DetachedHomeRead detachedHomeRead;SecureConnectionStore.Connection connection=new SecureConnectionStore.Connection();
- AndroidSyncFacade facade,nextFacade=new AndroidSyncFacade();AndroidSyncFacade.Inspection inspection;SyncHistory history;Object homeObservationOwner,rootGame;
+ AndroidSyncFacade facade,nextFacade=new AndroidSyncFacade();AndroidSyncFacade.Inspection inspection;SyncHistory history;Object homeObservationOwner;
+ SelectedRootGame rootGame;GameAccessBackend backend=new GameAccessBackend();GameAccessBackend.Capabilities accessCapabilities;String bridgeAccessCode="NOT_CHECKED";boolean journal;
  boolean busy,cloudVerified,feedbackError,foreground=true,ready=true,official=true;String details="old details",notice="old notice",selected="old",explicitHomeSelection="old",selection="game",namespace="ns",endpoint="url",profile="profile";
  int errors,renders,creations,claims,automaticApplied,readiness;
  MainActivity(){SyncRuntime.account=connection;}
  Object getApplicationContext(){return this;}boolean isForegroundHome(){return foreground;}boolean readyForSaves(){return ready;}boolean isOfficialAccount(Object a){return official;}
  void render(){renders++;}void reportError(Exception e){errors++;details=e.getMessage();}void runOnUiThread(Runnable action){ui.add(action);}
  void readInstallationReadiness(){readiness++;}void checkRootAccess(){}void maybeActivateSetupComponent(){}
+ boolean hasAnyRestoreJournal(){return journal;}void drainHomeEntryRead(){}void rememberCurrentAutomaticHistory(){}
  void invalidatePreparedOfficialNamespace(){preparedOfficialNamespace.clear();}String comparisonCopy(){return "read complete";}String safeText(String s){return s;}Object currentHomeContext(int n){return new Object();}
  void drainRenewalArchiveRead(){}void drainAutomaticHistoryRefresh(){if(automaticHistoryState.outcome!=null)automaticApplied++;}
  boolean currentAutomaticHistory(Object t,Object a){return a==connection;}
@@ -153,8 +170,36 @@ public class MainActivity {
    check(a.claims==1,"not-ready automatic read was consumed without I/O");
   }finally{a.close();}
  }
+ static void checkedRoot()throws Exception {
+  MainActivity a=new MainActivity();a.rootGame=new SelectedRootGame();a.ready=false;
+  try {a.startDetachedHomeRead(a.connection,false,true,null,true);a.finish();
+   check(a.readinessState.access==InstallationReadiness.AccessStatus.READY&&a.cloudVerified,"checked Root not published");
+   check(a.backend.checks==1&&a.nextFacade.connects==0,"Root read must not provision");
+  }finally{a.close();}
+  for(boolean cancelled:new boolean[]{false,true}){
+   MainActivity s=new MainActivity();s.rootGame=new SelectedRootGame();s.backend.release=new CountDownLatch(1);InstallationReadiness before=s.readinessState;
+   try{s.startDetachedHomeRead(s.connection,false,true,null,true);check(s.backend.entered.await(5,TimeUnit.SECONDS),"Root probe did not start");
+    if(cancelled){s.foreground=false;s.cancelDetachedHomeRead();}else{s.selection="other";}
+    s.backend.release.countDown();s.finish();check(s.readinessState==before&&s.inspection==null&&s.creations==0,"stale Root published or reached cloud");
+   }finally{s.close();}
+  }
+  for(boolean journal:new boolean[]{false,true}){
+   MainActivity s=new MainActivity();s.rootGame=new SelectedRootGame();s.journal=journal;s.backend.deny=!journal;
+   try{s.startDetachedHomeRead(s.connection,false,true,null,true);s.finish();
+    check(s.creations==0&&s.nextFacade.connects==0,"denied or recovery read reached cloud");
+    check(journal?s.backend.checks==0:s.errors==1,"Root failure/recovery not surfaced");
+    if(!journal){s.backend.deny=false;s.nextFacade=new AndroidSyncFacade();s.startDetachedHomeRead(s.connection,false,true,null,true);s.finish();
+     check(s.cloudVerified&&s.backend.checks==2&&s.nextFacade.connects==0,"denied Root could not retry read-only");}
+   }finally{s.close();}
+  }
+  MainActivity late=new MainActivity();late.rootGame=new SelectedRootGame();InstallationReadiness before=late.readinessState;
+  try{late.startDetachedHomeRead(late.connection,false,true,null,true);Runnable completion=late.ui.poll(5,TimeUnit.SECONDS);
+   check(completion!=null,"missing Root completion");late.rootGame=new SelectedRootGame();late.selection="other";completion.run();
+   check(late.readinessState==before&&late.inspection==null,"stale Root completion published");
+  }finally{late.close();}
+ }
  public static void main(String[] args)throws Exception{
-  good();cancelledAndStale();retryAfterFailure();automatic();
+  good();cancelledAndStale();retryAfterFailure();automatic();checkedRoot();
   MainActivity a=new MainActivity();try{a.nextFacade.fail=true;a.startDetachedHomeRead(a.connection,false,false,null);a.finish();check(a.errors==1&&!a.busy&&!a.archiveReads.loading(),"failure left loading");}finally{a.close();}
   MainActivity b=new MainActivity();try{b.ready=false;int count=SyncRuntime.refreshes;b.startDetachedHomeRead(b.connection,false,true,null);b.finish();check(SyncRuntime.refreshes==count&&b.nextFacade.accepts==0,"readiness failure issued remote request");}finally{b.close();}
   for(boolean automatic:new boolean[]{false,true}) {

@@ -50,6 +50,7 @@ class MainActivity {
     Installer installer = new Installer();
     Readiness readinessState = new Readiness();
     boolean resumed = true, destroyed, sharedAppreciationOnly, busy, cloudVerified = true, available = true, ready = true;
+    Object detachedHomeRead;
     SyncPage page = SyncPage.HOME;
     String notice = "", details = "";
     int workCalls, reads, preparingReads;

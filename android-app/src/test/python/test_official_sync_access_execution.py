@@ -24,7 +24,7 @@ class OfficialSyncAccessExecution(unittest.TestCase):
         auto = body(AUTO, 'private void attemptUpload()')
         self.assertLess(auto.index('SyncRuntime.requireOfficialSyncAccess'), auto.index('this.facade.autoUpload()'))
         history = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
-        self.assertIn('startDetachedHomeRead(captured, false, false, ticket)', history)
+        self.assertIn('startDetachedHomeRead(captured, false, true, ticket, true)', history)
         reader=body(MAIN, 'private boolean startDetachedHomeRead(SecureConnectionStore.Connection account, boolean prepareNamespace,\n                                         boolean checkReadiness, AutoSyncHistoryRefresh.Ticket automatic, boolean fullHistory)')
         self.assertLess(reader.index('lease.authorize('), reader.index('owner.readHomeRemote(context)'))
         self.assertIn('SyncRuntime.requireOfficialSyncAccess(getApplicationContext(), account, owner)', reader)

@@ -162,7 +162,7 @@ class MainActivity {
  DiagnosticDetails diagnosticWorkDetails(){return new DiagnosticDetails();}
  void reportError(Exception error){errors++;}
  void render(){rendered++;if(renderFails)throw new IllegalStateException("render failed");}
- void rememberCurrentAutomaticHistory(){} void drainReadinessRefresh(){} void drainRenewalArchiveRead(){}
+ void rememberCurrentAutomaticHistory(){} void drainReadinessRefresh(){} void drainRenewalArchiveRead(){} void drainHomeEntryRead(){}
  void drainAutomaticHistoryRefresh(){} void drainExternalInstallation(){}
  /* METHODS */
  static void check(boolean value,String text){if(!value)throw new AssertionError(text);}

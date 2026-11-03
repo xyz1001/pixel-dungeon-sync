@@ -95,6 +95,8 @@ class MainActivity {
     SyncPage page = SyncPage.HOME;
     OnboardingProgress progress = OnboardingProgress.COMPLETE;
     boolean resumed = true, destroyed, sharedAppreciationOnly, busy, available = true, ready = true;
+    boolean rootRequestable;
+    Object detachedHomeRead;
     boolean cloudVerified = true;
     AndroidSyncFacade facade = new AndroidSyncFacade();
     AndroidSyncFacade nextFacade = new AndroidSyncFacade();
@@ -115,6 +117,7 @@ class MainActivity {
     boolean isDestroyed() { return destroyed; }
     boolean homeAccountAccessAvailable() { return available; }
     boolean readyForSaves() { return ready; }
+    boolean canRequestSaveAccess() { return ready || rootRequestable; }
     boolean currentAutomaticHistory(Object ticket, Object account) { return account == connection; }
     String comparisonCopy() { return "comparison ready"; }
     String safeText(String value) { return value; }
@@ -245,12 +248,26 @@ class MainActivity {
         check(host.cloudVerified && host.workCalls == 3 && !host.available,
                 "foreground retry must read without treating cached access as authority");
     }
+    static void rootNotCheckedIsRequestable() {
+        MainActivity host = new MainActivity(); host.ready = false; host.rootRequestable = true;
+        check(host.canRefreshHomeHistory(), "Root NOT_CHECKED must permit an explicit retry");
+        host.refreshHomeHistory(); check(host.workCalls == 1, "Root NOT_CHECKED did not queue checked read");
+    }
     static void manualConsumesPendingRenewal() throws Exception {
         MainActivity host = new MainActivity();
         host.renewalArchiveRead.open(host.connection, SyncRuntime.selection, SyncRuntime.namespace, false);
         host.renewalArchiveRead.started(); host.renewalArchiveRead.result(true);
         host.refreshHomeHistory(); host.runPending(); host.drainRenewalArchiveRead();
         check(host.workCalls == 1 && host.facade.reads == 1, "manual refresh must consume same-scope pending renewal");
+    }
+    static void rejectedManualPreservesRenewal() {
+        MainActivity host = new MainActivity();
+        host.renewalArchiveRead.open(host.connection, SyncRuntime.selection, SyncRuntime.namespace, false);
+        host.renewalArchiveRead.started(); host.renewalArchiveRead.result(true);
+        SyncRuntime.account = new SecureConnectionStore.Connection();
+        host.refreshHomeHistory();
+        check(host.workCalls == 0 && host.renewalArchiveRead.take(host.connection, SyncRuntime.selection, SyncRuntime.namespace),
+                "rejected manual read consumed pending renewal");
     }
     static Change[] scopeChanges() {
         return new Change[] {
@@ -351,7 +368,7 @@ class MainActivity {
         terminal(replacement); check(replacement.cloudVerified, "replacement HOME must independently refresh after rotation");
     }
     public static void main(String[] args) throws Exception {
-        guards(); emptyUnknownHistoryAndRepeatedClicks(); unavailableCacheCanRetry(); manualConsumesPendingRenewal();
+        guards(); emptyUnknownHistoryAndRepeatedClicks(); unavailableCacheCanRetry(); rootNotCheckedIsRequestable(); manualConsumesPendingRenewal(); rejectedManualPreservesRenewal();
         staleBeforeWorkerAndBeforeCompletion(); staleDuringRead(); failureAfterLeavingScope(); failureBlockedReadinessAndRetry();
         System.out.println("Manual HOME history refresh execution passed");
     }

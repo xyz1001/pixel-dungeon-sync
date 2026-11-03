@@ -130,7 +130,7 @@ public class MainActivity {
         self.assertIn("activeFacade.inspectHome()", read)
         self.assertIn("activeFacade.inspect()", read)
         self.assertIn("invalidatePreparedOfficialNamespace()", read)
-        manual = body(MAIN, "private void readHomeArchives(")
+        manual = body(MAIN, "private boolean readHomeArchives(")
         self.assertIn("startDetachedHomeRead(account, false, false, null)", manual)
         self.assertNotIn("preparedOfficialNamespace", manual)
         prepare = body(MAIN, "private void prepareOfficialHomeNamespace(")
