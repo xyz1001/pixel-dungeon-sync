@@ -57,10 +57,10 @@ public final class AndroidUiFlowChecks {
         ConnectionEndpointPolicy.validate("http://127.0.0.1:8080/saves", "", "");
         checks++;
         final int[] writes = {0};
-        ConnectionUpdatePolicy.apply(false, false, () -> {}, () -> writes[0]++);
+        ConnectionUpdatePolicy.apply(false, () -> {}, () -> writes[0]++);
         check(writes[0] == 0, "Testing alone does not save a connection");
         try {
-            ConnectionUpdatePolicy.apply(true, false, () -> { throw new IOException("DAV failed"); }, () -> writes[0]++);
+            ConnectionUpdatePolicy.apply(true, () -> { throw new IOException("DAV failed"); }, () -> writes[0]++);
             throw new AssertionError("Failed DAV test was accepted");
         } catch (IOException expected) {
             check(writes[0] == 0, "Failed DAV cannot save a connection");

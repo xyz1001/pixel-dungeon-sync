@@ -161,7 +161,6 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
     override fun isSavedConnection(config: SharedConnectionConfig): Boolean = runCatching {
         val candidate = AndroidConnectionComposition.toStored(config)
         candidate.validate()
-        if (candidate.isTemporary) return@runCatching false
         val stored = SecureConnectionStore(app).load() ?: return@runCatching false
         // Keep the store's existing official-root migration and provider rules authoritative.
         stored.endpoint == candidate.endpoint && stored.username == candidate.username &&
@@ -197,7 +196,7 @@ internal class AndroidConnectionPorts(context: Context) : SharedConnectionPorts 
             requireEntryContext()
             // Fail closed if saving credentials or the final completion marker fails.
             SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.PENDING)
-            if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)
+            SecureConnectionStore(app).save(candidate)
             requireEntryContext()
             SyncRuntime.setOnboardingProgress(app, candidate, OnboardingProgress.COMPLETE)
             requireEntryContext()

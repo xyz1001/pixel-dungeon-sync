@@ -102,10 +102,6 @@ final class WebDavConnectionFile {
             }
         }
 
-        public boolean isTemporary() {
-            return this.endpoint.regionMatches(true, 0, "http:", 0, 5);
-        }
-
         public String toString() {
             return "WebDAV connection [private fields hidden]";
         }
@@ -161,7 +157,6 @@ final class WebDavConnectionFile {
                         required(properties, "password"), required(properties, "profile"),
                         properties.getProperty("provider"));
                 value.validate();
-                if (value.isTemporary()) throw new IOException();
                 // Never infer provenance from the URL. Unmarked/custom and near-match URLs stay intact.
                 if (Value.PROVIDER_OFFICIAL.equals(value.provider)
                         && LEGACY_OFFICIAL_ENDPOINT.equals(properties.getProperty("endpoint"))) {
@@ -203,9 +198,6 @@ final class WebDavConnectionFile {
     void save(Value value) throws IOException {
         synchronized (FILE_LOCK) {
             value.validate();
-            if (value.isTemporary()) {
-                throw new IOException(AndroidMessages.WEB_DAV_CONNECTION_FILE_04.text());
-            }
             Properties properties = new Properties();
             properties.setProperty("version", "1");
             properties.setProperty("endpoint", value.endpoint);

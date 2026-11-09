@@ -10,9 +10,9 @@ final class ConnectionUpdatePolicy {
     private ConnectionUpdatePolicy() {
     }
 
-    static void apply(boolean z, boolean z2, Operation operation, Operation operation2) throws Exception {
+    static void apply(boolean z, Operation operation, Operation operation2) throws Exception {
         operation.run();
-        if (!z || z2) {
+        if (!z) {
             return;
         }
         operation2.run();

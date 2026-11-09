@@ -67,7 +67,8 @@ class SharedConnectionAndroidContract(unittest.TestCase):
             self.assertNotIn(mutation, probe)
         self.assertIn("override fun saveAndActivate(config: SharedConnectionConfig) = persistAndActivate(config)", ADAPTER)
         save = body(ADAPTER, "private fun persistAndActivate(")
-        self.assertIn("if (!candidate.isTemporary) SecureConnectionStore(app).save(candidate)", save)
+        self.assertIn("\n            SecureConnectionStore(app).save(candidate)", save)
+        self.assertLess(save.index(".save(candidate)"), save.index("OnboardingProgress.COMPLETE"))
         self.assertLess(save.index(".save(candidate)"), save.index("SyncRuntime.setConnection(candidate)"))
         self.assertIn("AutoSyncService.cancelForConnectionChange(app)", save)
         self.assertNotIn("forget(", ADAPTER)
@@ -163,7 +164,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
         creation = body(render, "if (this.sharedConnectionSession == null)")
         self.assertNotIn("setSavedConnectionRecovery", creation)
         self.assertIn("setSavedConnectionRecovery", render)
-        self.assertIn("this.connection.isTemporary() && this.secrets.exists()", render)
+        self.assertIn("boolean canRestore = !this.connectionLoadError.isEmpty()", render)
         reload = body(MAIN, "public void onReloadSavedConnection()")
         self.assertIn("this.sharedReloadPending = true", reload)
         failed = body(MAIN, "void m149lambda$work$1$iogithubxyz1001pdsyncandroidMainActivity(")
@@ -207,7 +208,7 @@ class SharedConnectionAndroidContract(unittest.TestCase):
     def test_saved_reentry_is_a_durable_match_without_authentication_or_runtime_activation(self):
         saved = body(ADAPTER, "override fun isSavedConnection(")
         self.assertIn("candidate.validate()", saved)
-        self.assertIn("candidate.isTemporary", saved)
+        self.assertNotIn("isTemporary", saved)
         self.assertIn("SecureConnectionStore(app).load()", saved)
         for field in ("endpoint", "username", "password", "profile", "provider"):
             self.assertIn("stored." + field + " == candidate." + field, saved)

@@ -28,11 +28,6 @@ public final class SecureConnectionStore {
 
     public static final class Connection extends WebDavConnectionFile.Value {
         @Override // io.github.xyz1001.pdsync.android.WebDavConnectionFile.Value
-        public /* bridge */ /* synthetic */ boolean isTemporary() {
-            return super.isTemporary();
-        }
-
-        @Override // io.github.xyz1001.pdsync.android.WebDavConnectionFile.Value
         public /* bridge */ /* synthetic */ String toString() {
             return super.toString();
         }

@@ -199,13 +199,11 @@ public final class MainRuntimeRecoveryChecks {
             byte[] original = Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME));
             WebDavConnectionFile.Value updated = new WebDavConnectionFile.Value("https://dav.example.test/next", "", "", "new-profile");
             AtomicInteger saved = new AtomicInteger();
-            fails(IOException.class, () -> ConnectionUpdatePolicy.apply(true, false, () -> { throw new IOException("failed test"); }, () -> { saved.incrementAndGet(); store.save(updated); }));
+            fails(IOException.class, () -> ConnectionUpdatePolicy.apply(true, () -> { throw new IOException("failed test"); }, () -> { saved.incrementAndGet(); store.save(updated); }));
             equal(0, saved.get(), "failed connection test never saves");
             check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "failed test preserves original bytes");
-            ConnectionUpdatePolicy.apply(false, false, () -> {}, () -> { saved.incrementAndGet(); store.save(updated); });
+            ConnectionUpdatePolicy.apply(false, () -> {}, () -> { saved.incrementAndGet(); store.save(updated); });
             equal(0, saved.get(), "non-saving or cancelled edit does not persist");
-            ConnectionUpdatePolicy.apply(true, true, () -> {}, () -> { saved.incrementAndGet(); store.save(updated); });
-            equal(0, saved.get(), "temporary test never persists");
             for (int mode = 0; mode < 4; mode++) {
                 final int failureMode = mode;
                 final byte[][] suppliedBytes = new byte[1][];
@@ -232,14 +230,17 @@ public final class MainRuntimeRecoveryChecks {
                     equal(1L, children.count(), "failed save cleans credential temporary file");
                 }
             }
-            WebDavConnectionFile.Value temporary = new WebDavConnectionFile.Value("http://127.0.0.1:8765/dav", "", "", "test");
-            fails(IOException.class, () -> store.save(temporary));
-            fails(IOException.class, () -> store.save(new WebDavConnectionFile.Value(temporary.endpoint, "", "", "test",
-                    WebDavConnectionFile.Value.PROVIDER_OFFICIAL)));
-            check(Arrays.equals(original, Files.readAllBytes(root.resolve(WebDavConnectionFile.FILE_NAME))), "loopback test cannot overwrite saved HTTPS");
-            sameConnection(old, store.load());
-            ConnectionUpdatePolicy.apply(true, false, () -> {}, () -> store.save(updated));
-            sameConnection(updated, store.load());
+            WebDavConnectionFile.Value loopback = new WebDavConnectionFile.Value("http://127.0.0.1:8765/dav", "", "", "test");
+            ConnectionUpdatePolicy.apply(true, () -> {}, () -> store.save(loopback));
+            sameConnection(loopback, new WebDavConnectionFile(root.toFile()).load());
+            for (WebDavConnectionFile.Value invalid : List.of(
+                    new WebDavConnectionFile.Value("http://example.test/dav", "", "", "test"),
+                    new WebDavConnectionFile.Value(loopback.endpoint, "user", "", "test"))) {
+                fails(IOException.class, () -> store.save(invalid));
+                sameConnection(loopback, new WebDavConnectionFile(root.toFile()).load());
+            }
+            ConnectionUpdatePolicy.apply(true, () -> {}, () -> store.save(updated));
+            sameConnection(updated, new WebDavConnectionFile(root.toFile()).load());
             check(!updated.toString().contains(updated.endpoint), "connection string hides endpoint and credentials");
             store.forget();
             equal(null, store.load(), "forget removes saved config");
@@ -251,7 +252,7 @@ public final class MainRuntimeRecoveryChecks {
                     new byte[]{(byte)0xff},
                     "version=2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
                     "version=1\nendpoint=https://example.test\nprofile=test\nusername=\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                    "version=1\nendpoint=http://127.0.0.1\nprofile=test\nusername=\npassword=\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "version=1\nendpoint=http://example.test\nprofile=test\nusername=\npassword=\n".getBytes(java.nio.charset.StandardCharsets.UTF_8),
                     new byte[65537]
             };
             for (byte[] invalid : malformed) {

@@ -1172,7 +1172,16 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 (owner, value) -> {
                     if (owner.setupSession.flow.target() == null && owner.selectedGamePackage() != null)
                         owner.setupSession.flow.select(owner.selectedGamePackage());
-                    owner.m69xebc6eee5(z, value); owner.maybeActivateSetupComponent(); owner.drainPendingSetup();
+                    // Commit initial routing on the current owner, only after readiness succeeded
+                    // and setupWork accepted the result for this generation and target.
+                    if (z) owner.initialLoad = false;
+                    try {
+                        owner.m69xebc6eee5(z, value);
+                    } catch (Exception error) {
+                        if (z) owner.initialLoad = true;
+                        throw error;
+                    }
+                    owner.maybeActivateSetupComponent(); owner.drainPendingSetup();
                 });
     }
 
@@ -1185,7 +1194,6 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                     } catch (Exception e) {
                 this.connectionLoadError = safeError(e);
             }
-            this.initialLoad = false;
         }
         readInstallationReadiness();
         SecureConnectionStore.Connection connection = this.connection;
@@ -3140,8 +3148,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             this.sharedConnectionSession.getController().attach(this);
         }
         final AndroidConnectionComposition.Session visibleSession = this.sharedConnectionSession;
-        boolean canRestore = !this.connectionLoadError.isEmpty()
-                || (this.connection != null && this.connection.isTemporary() && this.secrets.exists());
+        boolean canRestore = !this.connectionLoadError.isEmpty();
         visibleSession.getController().setSavedConnectionRecovery(
                 this.connectionLoadError.isEmpty() ? "" : COULD_NOT_READ_CONNECTION_SETTINGS_PLEASE_2.text(),
                 canRestore ? (this.connectionLoadError.isEmpty() ? RESTORE_SAVED_CONNECTION_135.text() : RETRY_READING_SAVED_CONNECTION_136.text()) : "");
