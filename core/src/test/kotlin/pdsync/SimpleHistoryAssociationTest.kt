@@ -20,8 +20,10 @@ class SimpleHistoryAssociationTest {
  }
  @Test fun editedLocalContinuesActualBaselineNotOtherBranchLatest() {
   val v=view(listOf(node(4,3),node(3,2),node(2,1),node(1)),4,5,2)
-  assertEquals(listOf(HistoryEdge(id(2),"local-current",dashed=true)),localEdges(v))
-  assertEquals(v.nodes.single {it.id==id(2)}.row,v.nodes.single {it.id=="local-current"}.row)
+  assertEquals(listOf(HistoryEdge("local-baseline","local-current",dashed=true)),localEdges(v))
+  assertTrue(HistoryEdge("local-baseline",id(2),sameContent=true) in v.edges)
+  assertEquals(v.nodes.single {it.id==id(2)}.row,v.nodes.single {it.id=="local-baseline"}.row)
+  assertNotEquals(v.nodes.single {it.id=="local-baseline"}.row,v.nodes.single {it.id=="local-current"}.row)
   assertTrue(v.nodes.single {it.id=="local-current"}.dirty)
  }
  @Test fun restoredHistoricalContentPairsWithRestoredNodeNotLatest() {

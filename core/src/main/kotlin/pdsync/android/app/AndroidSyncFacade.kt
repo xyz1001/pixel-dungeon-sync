@@ -227,7 +227,7 @@ class AndroidSyncFacade internal constructor(
      SaveUpload(exported.snapshot.manifest.files,exported.snapshot.zip,"")
     }
     files=payload.files;require(files.isNotEmpty())
-    val name=simpleCurrentName ?: inspection?.simpleObservation?.nodes?.firstOrNull {it.hashId==simpleSync.baseline()}?.name ?: CoreMessages.SAVE_1_S.text(contentSha256(files).take(6))
+     val name=simpleCurrentName ?: CoreMessages.SAVE_1_S.text(contentSha256(files).take(6))
     payload.copy(name=name)
    },confirmed,{if(Thread.currentThread().isInterrupted)throw InterruptedException()})
    return when(result) {

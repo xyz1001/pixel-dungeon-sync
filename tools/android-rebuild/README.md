@@ -92,15 +92,11 @@ execute or silently discover a library. Run the metadata-only packaging tests wi
 
 This optional split workflow keeps the main-app signing key durable on the user's Windows device while the cloud builds the unsigned APK. It does not require changing or rebuilding an already delivered, correctly signed APK. Build-host signing above remains supported when the retained signing material is intentionally available on that host.
 
-### Coordinate the public signer before building
+### Release signing and bridge caller identity
 
-The embedded runtime has an immutable main-app certificate pin. The certificate used for final signing must match the runtime bundled in that same APK. Coordinate only the public X.509 certificate in DER form and the lowercase SHA-256 digest of those DER bytes, not a hash of the Base64 text. Keep these source values consistent:
+The current embedded runtime authenticates the main app by its framework-provided package name, actual UID and game activation/source binding, not by its signing certificate. Historical certificate metadata is not a caller-access pin. This does not distinguish a malicious replacement using the same package name, and assumes Android package/UID isolation is trusted; root or cross-signature replacement weakens that assumption. Legacy standalone helper permissions and game-package integrity checks are separate mechanisms.
 
-- `android-helper/src/main/java/io/github/xyz1001/pdsync/bridge/MainCallerPolicy.java`: `MAIN_SIGNER_SHA256`
-- `android-helper/res/values/strings.xml`: legacy `expected_main_cert_sha256`
-- `android-helper/src/test/main-public-certificate.base64`: the public DER certificate encoded as Base64 for the authentication test
-
-These are public certificate data, not a private key. Keep the same signer for future updates; a different key breaks ordinary update compatibility and the embedded caller-authentication pin. If an intentional signer change is needed, coordinate these public inputs before rebuilding the helper runtime and main app. Never substitute a newly generated key merely because a build machine was replaced. This main-app signing key is separate from the game-signing key held by the Android app for game preparation.
+Release APK signing remains mandatory. The lowercase SHA-256 digest of the signing certificate's DER bytes must match `tools/ci/android-signer.sha256`; do not hash its Base64 text. Keep the same private key for ordinary Android updates. Replacing it requires the key owner's explicit approval and ordinarily prevents an in-place update, even though the current embedded bridge does not pin the main-app signer. Never generate a replacement merely because a build machine was replaced. This key is separate from the game-signing key held by the Android app for game preparation.
 
 ### Build and transfer the unsigned main app
 
@@ -136,7 +132,7 @@ if ($LASTEXITCODE -ne 0) { throw 'API-26 signature verification failed' }
 if ($LASTEXITCODE -ne 0) { throw 'API-36 signature verification failed' }
 ```
 
-Check that the printed signer certificate SHA-256 digest exactly matches the public fingerprint pinned in the source. API 26 uses v2 signatures; v3 applies from API 28, so do not expect v3 verification on API 26. Do not modify or run zipalign on the signed APK afterward, because post-signing changes invalidate its signature. These checks establish signature verification at the selected API levels, not a real-device runtime test. Preserve the same local key and backup for every later update; transfer only the resulting APK and public verification information as needed.
+Check that the printed signer certificate SHA-256 digest exactly matches `tools/ci/android-signer.sha256`. API 26 uses v2 signatures; v3 applies from API 28, so do not expect v3 verification on API 26. Do not modify or run zipalign on the signed APK afterward, because post-signing changes invalidate its signature. These checks establish signature verification at the selected API levels, not a real-device runtime test. Preserve the same local key and backup for every later update; transfer only the resulting APK and public verification information as needed.
 
 ## API-26 runtime apksig compatibility
 

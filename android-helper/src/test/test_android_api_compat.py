@@ -182,24 +182,12 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import android.os.ParcelFileDescriptor;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 
 public final class AndroidApiCompatTests {
     private static int assertions;
     private static void check(boolean condition, String message) {
         assertions++;
         if (!condition) throw new AssertionError(message);
-    }
-    private static byte[][] bytes(Signature[] signers) {
-        if (signers == null) return null;
-        byte[][] result = new byte[signers.length][];
-        for (int i = 0; i < signers.length; i++) result[i] = signers[i] == null ? null : signers[i].toByteArray();
-        return result;
-    }
-    private static void denied(String pin, Signature[] signers, String reason) {
-        try { MainCallerPolicy.requirePinnedSigner(pin, bytes(signers)); }
-        catch (SecurityException expected) { assertions++; return; }
-        throw new AssertionError("Expected refusal: " + reason);
     }
     private static Object modernSigners(PackageInfo info, Signature[] signers) throws Exception {
         Class<?> type = Class.forName("android.content.pm.SigningInfo");
@@ -409,15 +397,11 @@ public final class AndroidApiCompatTests {
         byte[] certificate = "public-main-test-certificate".getBytes(StandardCharsets.UTF_8);
         Signature good = new Signature(certificate);
         Signature bad = new Signature("wrong-current-certificate".getBytes(StandardCharsets.UTF_8));
-        StringBuilder hex = new StringBuilder();
-        for (byte value : MessageDigest.getInstance("SHA-256").digest(certificate))
-            hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
-        String pin = hex.toString();
         info.signatures = new Signature[]{good};
         if (sdk >= 28) {
-            denied(pin, AndroidApiCompat.currentSigners(info), "no legacy fallback for absent SigningInfo");
+            check(AndroidApiCompat.currentSigners(info) == null, "no legacy fallback for absent SigningInfo");
             modernSigners(info, new Signature[]{bad});
-            denied(pin, AndroidApiCompat.currentSigners(info), "legacy signer cannot override current signer");
+            check(AndroidApiCompat.currentSigners(info)[0] == bad, "legacy signer cannot override current signer");
             modernSigners(info, new Signature[]{good});
             PackageInfo.class.getField("versionCodeMajor").setInt(info, 2);
             check(AndroidApiCompat.versionCode(info) == ((2L << 32) | 17), "modern full version code");
@@ -429,12 +413,12 @@ public final class AndroidApiCompatTests {
             try { Class.forName("android.content.pm.SigningInfo"); throw new AssertionError("stub leaked modern class"); }
             catch (ClassNotFoundException expected) { assertions++; }
         }
-        MainCallerPolicy.requirePinnedSigner(pin, bytes(AndroidApiCompat.currentSigners(info))); assertions++;
-        Signature[][] rejected = {null, new Signature[0], new Signature[]{null},
+        check(AndroidApiCompat.currentSigners(info)[0] == good, "current signer returned");
+        Signature[][] cases = {null, new Signature[0], new Signature[]{null},
             new Signature[]{new Signature(new byte[0])}, new Signature[]{bad}, new Signature[]{good, good}};
-        for (Signature[] signers : rejected) {
+        for (Signature[] signers : cases) {
             if (sdk >= 28) modernSigners(info, signers); else info.signatures = signers;
-            denied(pin, AndroidApiCompat.currentSigners(info), "missing, empty, malformed, wrong or multiple signers");
+            check(AndroidApiCompat.currentSigners(info) == signers, "current signer array passed through");
         }
         StructStat stat = new StructStat();
         String expected = "1:2:32768:10001:1:12:13:" + (sdk >= 27 ? "123:17:456" : "0:17:0");

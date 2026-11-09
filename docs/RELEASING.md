@@ -101,22 +101,25 @@ application sizes. The package assembly and checksums are defined in
 ## Android signing prerequisite — explicit approval required
 
 Configure these repository Actions Secrets **only after the key owner approves
-uploading the existing signing material to `xyz1001/pixel-dungeon-sync`**:
+uploading the retained signing material to `xyz1001/pixel-dungeon-sync`**:
 
-* `PDSYNC_KEYSTORE_BASE64`: base64 bytes of the existing keystore (not a new/debug key).
-* `PDSYNC_KEY_ALIAS`: existing alias.
+* `PDSYNC_KEYSTORE_BASE64`: base64 bytes of the approved retained keystore (not an automatically generated debug key).
+* `PDSYNC_KEY_ALIAS`: its alias.
 * `PDSYNC_STORE_PASSWORD`: keystore password.
 * `PDSYNC_KEY_PASSWORD`: key password (repeat the store password when identical).
 
-The retained signer must equal `tools/ci/android-signer.sha256`, verified from the
-existing signed code135 APK (public certificate only). Current game preparation
-binds the application's actual certificate into each prepared game's metadata;
-the legacy helper test certificate is not the current application release key.
-The retained certificate is named `CN=PDSync Development`: it is the existing
-test-installation identity, explicitly approved by its owner for releases on 2026-10-30.
-Any replacement or transfer requires the key owner's explicit approval;
-the workflow neither generates a new key nor silently changes that identity.
-Changing the signer breaks ordinary updates and existing bridge bindings.
+The retained signer's DER certificate SHA-256 must equal
+`tools/ci/android-signer.sha256`. Any replacement or transfer requires the key
+owner's explicit approval; the workflow neither generates a new key nor silently
+changes that identity. When replacing a key, retain a protected local backup and
+update all four Secrets and the public fingerprint together before running signing
+jobs. Changing the signer breaks ordinary Android update compatibility.
+The current embedded bridge authenticates package name, actual UID and activation/
+source binding rather than pinning the main application's certificate. This assumes
+trusted package/UID isolation and cannot distinguish a malicious same-package
+replacement. Historical certificate metadata and the legacy helper test certificate
+are not the release signer authority; standalone helper permissions and game-package
+integrity verification are separate from embedded caller authentication.
 Secrets grant the tag workflow and explicitly requested manual signing-validation job signing
 capability; anyone able to modify trusted release code can potentially use them.
 Never put values in source, workflow inputs, command-line password arguments or

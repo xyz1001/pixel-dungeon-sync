@@ -14,6 +14,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import pdsync.android.app.*
+import pdsync.i18n.CoreMessages
 import kotlin.io.path.*
 import kotlin.test.*
 
@@ -58,6 +59,25 @@ class SimpleAndroidFacadeTest {
   override fun objectBytes(hashId:String):ByteArray {calls+="GET zip";return objects.getValue(hashId)}
  }
  private fun facade(bridge:Bridge,store:Store)=AndroidSyncFacade(temp.resolve("work-${sequence++}"),connection,bridge,identity,null,suppliedSimpleStore=store)
+ @Test fun changedUploadsUseTheirOwnDefaultNamesAndPreserveExplicitCurrentName() {
+  val store=Store();val bridge=Bridge();val facade=facade(bridge,store)
+  val ids=(1..3).map {turn->
+   bridge.content=files(turn).toMutableMap()
+   val expected=contentSha256(bridge.content.mapValues {hash(it.value)})
+   val id=requireNotNull(facade.upload(facade.inspectHome()).snapshotId)
+   assertEquals(expected,id);assertEquals(CoreMessages.SAVE_1_S.text(id.take(6)),store.nodes.getValue(id).name)
+   id
+  }
+  assertEquals(3,ids.toSet().size);assertEquals(3,store.nodes.size)
+  store.calls.clear();assertEquals(ids.last(),facade.upload(facade.inspectHome()).snapshotId)
+  assertEquals(3,store.nodes.size);assertEquals(3,store.objects.size)
+  assertFalse(store.calls.any {it.startsWith("PUT ")})
+  bridge.content=files(4).toMutableMap();val view=facade.inspectHome()
+  facade.renameCurrent(view,"Custom name")
+  val named=requireNotNull(facade.upload(view).snapshotId)
+  assertEquals(contentSha256(bridge.content.mapValues {hash(it.value)}),named)
+  assertEquals("Custom name",store.nodes.getValue(named).name)
+ }
  @Test fun uploadHistoryRestoreUsesOnlyNewLayout() {
   val store=Store();val bridge=Bridge();val facade=facade(bridge,store)
   val initial=facade.inspectHome();store.calls.clear();val exports=bridge.exports

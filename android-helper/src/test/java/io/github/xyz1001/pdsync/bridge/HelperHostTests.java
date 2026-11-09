@@ -207,11 +207,6 @@ public final class HelperHostTests {
         MainCallerPolicy.requireIdentity(main,10,11,10,new String[]{main}); assertions++;
         denied(()->MainCallerPolicy.requireIdentity(main,11,11,11,new String[]{main}),"main shared UID refusal");
         denied(()->MainCallerPolicy.requireIdentity(main,10,11,10,new String[]{main,"evil.pkg"}),"main independent UID requirement");
-        byte[] certificate="public-test-certificate".getBytes();
-        MainCallerPolicy.requirePinnedSigner(SaveArchive.sha256(certificate),new byte[][]{certificate}); assertions++;
-        denied(()->MainCallerPolicy.requirePinnedSigner("0".repeat(64),new byte[][]{certificate}),"wrong certificate pin");
-        denied(()->MainCallerPolicy.requirePinnedSigner("",new byte[][]{certificate}),"missing certificate pin");
-        denied(()->MainCallerPolicy.requirePinnedSigner(SaveArchive.sha256(certificate),new byte[][]{certificate,certificate}),"multiple signers rejected");
     }
     static void embeddedIdentityTests(Path base) throws Exception {
         String game="test.embedded.game", origin="5".repeat(64);

@@ -154,19 +154,27 @@ data class HistoryPresentation(
   @JvmStatic fun from(state: SyncHistory, requestedPage: Int): HistoryPresentation {
    state.simple?.let {simple->
     val ordered=simple.nodes.distinctBy {it.hashId}
-    val all=ordered.mapIndexed {row,node->HistoryNode(node.hashId,node.hashId,node.name.ifBlank {CoreMessages.SAVE_1_S.text(node.hashId.take(6))},"","",if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),0,row,selectable=true,cloudHead=node.hashId==simple.latest)}.toMutableList()
     val matchingCurrent=ordered.firstOrNull {it.hashId==simple.currentId}
-    val localAnchor=matchingCurrent ?: ordered.firstOrNull {it.hashId==state.baseline}
-    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(matchingCurrent!=null)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,ordered.indexOf(localAnchor).coerceAtLeast(0),dirty=matchingCurrent==null)
-    val pages=maxOf(1,(maxOf(1,ordered.size)+PAGE_SIZE-1)/PAGE_SIZE);val page=requestedPage.coerceIn(0,pages-1)
+    val baseline=ordered.firstOrNull {it.hashId==state.baseline}
+    val showBaseline=simple.currentId!=null && matchingCurrent==null && baseline!=null
+    val baselineRow=ordered.indexOf(baseline)
+    val all=ordered.mapIndexed {row,node->HistoryNode(node.hashId,node.hashId,node.name.ifBlank {CoreMessages.SAVE_1_S.text(node.hashId.take(6))},"","",if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),0,if(showBaseline && row>baselineRow)row+1 else row,selectable=true,cloudHead=node.hashId==simple.latest)}.toMutableList()
+    if(showBaseline) {
+     val node=requireNotNull(baseline)
+     all+=HistoryNode("local-baseline",node.hashId,node.name.ifBlank {CoreMessages.SYNC_BASELINE.text()},"","",CoreMessages.SYNCED_TO_CLOUD.text(),1,baselineRow)
+    }
+    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(matchingCurrent!=null)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,if(showBaseline)baselineRow+1 else ordered.indexOf(matchingCurrent).coerceAtLeast(0),dirty=matchingCurrent==null)
+    val totalRows=maxOf(1,all.maxOfOrNull {it.row+1}?:0)
+    val pages=maxOf(1,(totalRows+PAGE_SIZE-1)/PAGE_SIZE);val page=requestedPage.coerceIn(0,pages-1)
     val shown=all.filter {it.row/PAGE_SIZE==page}.map {it.copy(row=it.row%PAGE_SIZE)};val ids=shown.map {it.id}.toSet()
     val edges=ordered.mapNotNull {n->n.parentId?.takeIf {it in ids && n.hashId in ids}?.let {HistoryEdge(it,n.hashId)}}.toMutableList()
-    // Content equality pairs the lanes; a changed local save continues its actual baseline.
-    // Never substitute latest for an absent baseline or invent a cloud ancestry edge.
-    if("local-current" in ids && localAnchor?.hashId in ids) {
-     edges += if(matchingCurrent!=null) HistoryEdge("local-current",matchingCurrent.hashId,sameContent=true)
-      else HistoryEdge(requireNotNull(localAnchor).hashId,"local-current",dashed=true)
-    }
+    // Content associations and local progress are displayed only with both endpoints visible.
+    if("local-current" in ids && matchingCurrent?.hashId in ids)
+     edges+=HistoryEdge("local-current",requireNotNull(matchingCurrent).hashId,sameContent=true)
+    if("local-baseline" in ids && baseline?.hashId in ids)
+     edges+=HistoryEdge("local-baseline",requireNotNull(baseline).hashId,sameContent=true)
+    if("local-baseline" in ids && "local-current" in ids)
+     edges+=HistoryEdge("local-baseline","local-current",dashed=true)
     return HistoryPresentation(shown,edges,page,pages,maxOf(1,shown.maxOfOrNull {it.row+1}?:1),ordered.size,simple.currentId==null)
    }
    data class TimedNode(val node: HistoryNode, val instant: Instant?)

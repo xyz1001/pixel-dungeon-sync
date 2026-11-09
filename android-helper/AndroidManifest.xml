@@ -22,9 +22,6 @@
         android:allowBackup="false"
         android:supportsRtl="true">
         <meta-data
-            android:name="io.github.xyz1001.pdsync.EXPECTED_MAIN_CERT_SHA256"
-            android:resource="@string/expected_main_cert_sha256"/>
-        <meta-data
             android:name="io.github.xyz1001.pdsync.BOUND_GAME_PACKAGE"
             android:value="io.github.xyz1001.pdsync.UNBOUND_GAME"/>
         <meta-data
