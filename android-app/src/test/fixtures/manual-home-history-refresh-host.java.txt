@@ -69,6 +69,7 @@ class MainActivity {
         int reads, historyReads;
         Inspection inspect() throws Exception { reads++; inspectHook.run(); return observed; }
         Inspection inspectHome() throws Exception { return inspect(); }
+        Inspection inspectHomeHistory() throws Exception { return inspect(); }
         AutoCloseable beginHomeReadIdentityScope() { return () -> {}; }
         SyncHistory historyPresentation(Inspection observation) throws Exception {
             check(observation == observed, "history must use this exact inspection");

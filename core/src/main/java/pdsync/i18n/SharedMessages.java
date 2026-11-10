@@ -8,7 +8,10 @@ public final class SharedMessages {
     public static final UiText OVERWRITE_CLOUD_WARNING = new UiText("shared.overwrite_cloud_warning", "将云端最新存档改为本地存档，当前历史链沿本地父节点延续。原有云端历史文件保留。", "Set the local save as the latest cloud save and continue its parent history. Existing cloud history files are retained.");
     public static final UiText REFRESH = new UiText("shared.refresh", "刷新", "Refresh");
     public static final UiText SAVE_NAME = new UiText("shared.save_name", "存档名称", "Save name");
-    public static final UiText NAME_HINT = new UiText("shared.name_hint", "留空使用默认名，最多40字", "Leave blank for the default name; up to 40 characters");
+    public static final UiText FULL_CONTENT_ID = new UiText("shared.full_content_id", "内容 ID：%1$s", "Content ID: %1$s");
+    public static final UiText DEVICE_NAME = new UiText("shared.device_name", "设备名：%1$s", "Device name: %1$s");
+    public static final UiText LOCAL_BASELINE_STATUS = new UiText("shared.local_baseline_status", "同步基线 · %1$s", "Sync baseline · %1$s");
+    public static final UiText NAME_HINT = new UiText("shared.name_hint", "留空则不显示名称，最多40字", "Leave blank for no name; up to 40 characters");
     public static final UiText SAVING = new UiText("shared.saving", "保存中…", "Saving…");
     public static final UiText SAVE = new UiText("shared.save", "保存", "Save");
     public static final UiText CANCEL = new UiText("shared.cancel", "取消", "Cancel");

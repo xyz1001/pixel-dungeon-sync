@@ -9,6 +9,27 @@ import kotlin.test.*
 
 class SimpleSaveWebDavTest {
  @TempDir lateinit var root:Path
+ @Test fun renamePutAndFreshGetPreserveIdentityAndFailureThrows() {
+  MockWebServer().use {server->
+   server.start()
+   val store=AppendOnlyWebDav(server.url("/").toString(),"game","profile","user","test").simpleStore()
+   val ancestor=SaveNode("a".repeat(64),null,"Old")
+   val latest=SaveNode("b".repeat(64),ancestor.hashId,"Old latest")
+   for(node in listOf(ancestor,latest)) {
+    val renamed=node.copy(name="New ${node.hashId.first()}")
+    server.enqueue(MockResponse().setResponseCode(204))
+    server.enqueue(MockResponse().setResponseCode(200).setBody(SimpleSaveSync.encode(renamed).decodeToString()))
+    store.rename(renamed);assertEquals(renamed,store.node(node.hashId))
+    val put=server.takeRequest();val get=server.takeRequest()
+    assertEquals("PUT",put.method);assertEquals("GET",get.method)
+    assertEquals("/game/profile/saves/${node.hashId}.json",put.path);assertEquals(put.path,get.path)
+    assertEquals(renamed,SimpleSaveSync.decode(put.body.readByteArray()))
+   }
+   server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After","0"))
+   assertFailsWith<WebDavException> {store.rename(latest.copy(name="Failure"))}
+   assertEquals("PUT",server.takeRequest().method);assertEquals(5,server.requestCount)
+  }
+ }
  @Test fun normalUploadUsesLatestGetAndThreePutsWithoutReadback() {
   MockWebServer().use {server->
    server.start();server.enqueue(MockResponse().setResponseCode(404))

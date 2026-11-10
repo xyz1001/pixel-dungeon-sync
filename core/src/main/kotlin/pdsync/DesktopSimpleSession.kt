@@ -2,7 +2,7 @@ package pdsync
 
 import java.nio.file.Path
 
-/** Desktop file adapter for the same three-field protocol used by Android.
+/** Desktop file adapter for the same protocol used by Android.
  * The legacy result types below are UI adapters only; no legacy repository or wire format is used.
  */
 class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
@@ -15,8 +15,9 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  private var nodes=emptyList<SaveNode>()
  private var latest:String?=null
  private var currentName:String?=null
+ private var currentNameHash:String?=null
  private var acceptedFiles:Map<String,String>?=null
- private fun protocol(store:SimpleSaveStore)=SimpleSaveSync(store,baselinePath)
+ private fun protocol(store:SimpleSaveStore)=SimpleSaveSync(store,baselinePath,local::operationMetadata)
  private fun active()=requireNotNull(remote){"Read the current cloud profile first"}
  private fun bind(store:AppendOnlyWebDav):SimpleSaveStore=(suppliedStore ?: store.simpleStore()).also {remote=it}
  fun hasPending()=false
@@ -35,9 +36,12 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  private fun baseline():String?=if(java.nio.file.Files.exists(baselinePath))java.nio.file.Files.readString(baselinePath) else null
  fun syncHistory(previous:SyncHistory?=null):SyncHistory {
    val read=Snapshots.readLocal(root,adapter);val files=read.fingerprint.files
-  return SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline(),files,currentName.orEmpty(),
+   return SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline(),files,currentName.takeIf {currentNameHash==contentSha256(files)}.orEmpty(),
    if(files.isEmpty())null else SaveSummary.readVerified(root,read.entries),nodes.associate {it.hashId to it.name},
-   simple=SimpleHistory(nodes,latest,files.takeIf {it.isNotEmpty()}?.let(::contentSha256)))
+    simple=SimpleHistory(nodes,latest,files.takeIf {it.isNotEmpty()}?.let(::contentSha256),
+     read.entries.keys.takeIf {it.isNotEmpty()}?.let {keys->runCatching {
+      keys.map {key->read.fingerprint.metadata.getValue(key).also {require(!it.directory)}.modified.toInstant()}.maxOrNull()?.toString()
+     }.getOrNull()},local.deviceIdentity()))
  }
  fun readHomeHistory(store:AppendOnlyWebDav,fullHistory:Boolean=false):SyncHistory {
   val cloud=bind(store);val previousLatest=latest;latest=cloud.latest()
@@ -65,7 +69,7 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
    versions.annotate(VerifiedSnapshot.captured(snapshot,read.entries))
    files=snapshot.manifest.files
    require(files.isNotEmpty())
-   SaveUpload(files,snapshot.zip,currentName ?: nodes.find {it.hashId==baseline()}?.name ?: "Save ${contentSha256(files).take(6)}")
+    SaveUpload(files,snapshot.zip,currentName.takeIf {currentNameHash==contentSha256(files)}.orEmpty())
   },confirmed,{if(Thread.currentThread().isInterrupted)throw InterruptedException()})
   when(result) {
    is SaveUploadResult.Conflict -> {latest=result.latest;AppendPushResult.Diverged(conflict(files,result.latest))}
@@ -104,17 +108,19 @@ class DesktopSimpleSession(config:AppConfig,stateRoot:Path,
  fun checkRestore(id:String) {require(nodes.any {it.hashId==id});requireNotNull(targetInfo())}
  fun inspectDirectory(stopped:()->Boolean):DirectorySnapshotMetadata = local.locked {
    local.guard(stopped);val files=Snapshots.readLocal(root,adapter).fingerprint.files
-  DirectorySnapshotMetadata(displayName=currentName.orEmpty(),contentSha256=contentSha256(files))
+   val id=contentSha256(files)
+   DirectorySnapshotMetadata(displayName=currentName.takeIf {currentNameHash==id}.orEmpty(),contentSha256=id)
  }
  fun renameCurrent(name:String,stopped:()->Boolean):DirectorySnapshotMetadata {
   local.guard(stopped)
-  currentName=sanitizeSnapshotName(name)
-  val metadata=inspectDirectory(stopped)
-  nodes.find {it.hashId==metadata.contentSha256}?.let {old->
-   val updated=old.copy(name=requireNotNull(currentName));active().rename(updated)
-   nodes=nodes.map {if(it.hashId==old.hashId)updated else it}
-  }
-  return metadata
+   val metadata=inspectDirectory(stopped)
+   val renamed=sanitizeSnapshotName(name)
+   nodes.find {it.hashId==metadata.contentSha256}?.let {old->
+    val updated=old.copy(name=renamed);active().rename(updated)
+    nodes=nodes.map {if(it.hashId==old.hashId)updated else it}
+   }
+   currentName=renamed;currentNameHash=metadata.contentSha256
+   return metadata.copy(displayName=renamed)
  }
  fun renameHistory(id:String,name:String,observed:SyncHistory) {
   require(observed.simple?.nodes?.any {it.hashId==id}==true)

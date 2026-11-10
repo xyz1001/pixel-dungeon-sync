@@ -35,6 +35,37 @@ class DesktopSimpleSessionTest {
  private fun edit(session:DesktopSimpleSession,value:String)=Files.writeString(session.root.resolve("game1/game.dat"),value)
  private fun put(session:DesktopSimpleSession)=assertIs<AppendPushResult.Success>(assertIs<HomePushResult.Published>(session.pushFromHome(null,transport()){true}).result)
 
+ @Test fun localHistoryUsesNewestIncludedFileTimeAndLocalDevice() {
+  val store=Memory();val desktop=session(store)
+  val game=desktop.root.resolve("game1/game.dat");val rankings=desktop.root.resolve("rankings.dat")
+  Files.writeString(rankings,"ranking")
+  Files.setLastModifiedTime(game,java.nio.file.attribute.FileTime.fromMillis(1700000000000))
+  Files.setLastModifiedTime(rankings,java.nio.file.attribute.FileTime.fromMillis(1700000100000))
+  put(desktop)
+  val history=desktop.readHomeHistory(transport(),true).simple!!
+  assertEquals("2023-11-14T22:15:00Z",history.localModifiedAt)
+  assertEquals(desktop.deviceIdentity(),history.localDevice)
+  Files.delete(game);Files.delete(rankings)
+  assertNull(desktop.syncHistory().simple!!.localModifiedAt)
+ }
+
+ @Test fun namesAreExplicitAndScopedToContent() {
+  val store=Memory();val desktop=session(store)
+   val first=put(desktop).commit.id;assertEquals("",store.nodes.getValue(first).name)
+   val operation=assertNotNull(store.nodes.getValue(first).operation)
+   assertEquals(desktop.deviceIdentity(),operation.device)
+   desktop.renameCurrent("Named ancestor"){true}
+   assertEquals("Named ancestor",store.nodes.getValue(first).name)
+   assertEquals(operation,store.nodes.getValue(first).operation)
+  edit(desktop,"B");val second=put(desktop).commit.id
+  assertEquals(first,store.nodes.getValue(second).parentId);assertEquals("",store.nodes.getValue(second).name)
+  store.calls.clear();assertTrue(put(desktop).reused);assertEquals(2,store.nodes.size)
+  desktop.renameHistory(second,"Named second",desktop.syncHistory())
+  val reopened=DesktopSimpleSession(desktop.config,temp.resolve("state"),versions=versions,suppliedStore=store)
+  val history=reopened.readHomeHistory(transport(),true).simple!!.nodes
+  assertEquals(listOf("Named second","Named ancestor"),history.map {it.name})
+ }
+
  @Test fun desktopAndAndroidProtocolUseSameObjectsParentsAndRestoreBytes() {
   val store=Memory();val desktop=session(store)
   val a=put(desktop).commit.id

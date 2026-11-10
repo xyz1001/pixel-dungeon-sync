@@ -21,12 +21,17 @@ class AndroidSyncFacade internal constructor(
  val identity: AndroidGameIdentity, private val suppliedStore: AppendStore?,
  private val controlledSessions:AndroidControlledSessions=sharedControlledSessions,
  private val beforeRequest:WebDavRequestCheck=WebDavRequestCheck {},
- private val suppliedSimpleStore:SimpleSaveStore?=null
+  private val suppliedSimpleStore:SimpleSaveStore?=null,
+  private val deviceLabel:()->String?={"Android"}
 ) {
- constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
-  this(root,connection,bridge,identity,null)
- constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity, beforeRequest:WebDavRequestCheck):
-  this(root,connection,bridge,identity,null,sharedControlledSessions,beforeRequest)
+  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity):
+   this(root,connection,bridge,identity,null)
+  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity, deviceLabel:String):
+   this(root,connection,bridge,identity,null,deviceLabel={deviceLabel})
+  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity, beforeRequest:WebDavRequestCheck):
+   this(root,connection,bridge,identity,null,sharedControlledSessions,beforeRequest)
+  constructor(root:Path, connection:AndroidConnection, bridge:AndroidGameBridge, identity:AndroidGameIdentity, beforeRequest:WebDavRequestCheck, deviceLabel:String):
+   this(root,connection,bridge,identity,null,sharedControlledSessions,beforeRequest,deviceLabel={deviceLabel})
  private val validatedConnection=AppConfig(endpoint=connection.endpoint,profile=connection.profile,username=connection.username).validated()
  private val validatedStateConnection=validatedConnection.copy(endpoint=connection.stateEndpoint).validated()
  private val adapter=AndroidGameAdapter(identity)
@@ -54,11 +59,13 @@ class AndroidSyncFacade internal constructor(
   }
  }
  private var simpleCurrentName:String?=null
+ private var simpleCurrentNameHash:String?=null
  private val simpleEnabled get()=suppliedStore==null || suppliedSimpleStore!=null
  private val simpleTransport by lazy {AppendOnlyWebDav(validatedConnection.endpoint,adapter.id,config.profile,connection.username,connection.password,beforeRequest=beforeRequest)}
  private val simpleStore by lazy {suppliedSimpleStore ?: simpleTransport.simpleStore()}
- private val simpleSync by lazy {SimpleSaveSync(simpleStore,workspace.resolve("baseline-hash"))}
- internal data class SimpleObservation(val files:Map<String,String>,val latest:String?,val nodes:List<SaveNode>)
+  private val simpleDeviceMetadata by lazy {DeviceMetadata(base,hostname=deviceLabel)}
+  private val simpleSync by lazy {SimpleSaveSync(simpleStore,workspace.resolve("baseline-hash"),simpleDeviceMetadata::operation)}
+  internal data class SimpleObservation(val files:Map<String,String>,val latest:String?,val nodes:List<SaveNode>,val summary:SaveSummary?,val localModifiedAt:String?)
  private val session by lazy { AppendProfileSession(config,state,adapter,versions) { "Android" } }
  private val mirrorStopped:()->Boolean={verifiedTarget();true}
 
@@ -186,26 +193,28 @@ class AndroidSyncFacade internal constructor(
   val current=if(simpleEnabled)inspectSimple() else inspectLocked(metadataOnly=true)
   if(!simpleEnabled)return@locked current
   val observed=requireNotNull(current.simpleObservation)
-  simpleInspection(observed.files,observed.latest,simpleNodes(observed.latest,observed.nodes))
+   simpleInspection(observed.files,observed.latest,simpleNodes(observed.latest,observed.nodes),observed.summary,observed.localModifiedAt)
  }
  fun observationGeneration():Long=mutationEpoch.get()
  fun beginHomeReadIdentityScope():AutoCloseable=bridge.beginHomeReadIdentityScope()
  private fun simpleNodes(latest:String?,known:List<SaveNode> = emptyList()):List<SaveNode> =
   SimpleSaveProtocol.history(simpleStore,latest,known)
- private fun simpleInspection(files:Map<String,String>,latest:String?,nodes:List<SaveNode>,summary:SaveSummary?=null):Inspection {
+  private fun simpleInspection(files:Map<String,String>,latest:String?,nodes:List<SaveNode>,summary:SaveSummary?=null,localModifiedAt:String?=null):Inspection {
   val id=files.takeIf {it.isNotEmpty()}?.let(::contentSha256);val baseline=simpleSync.baseline()
   val kind=SimpleSaveProtocol.kind(files,baseline,latest)
   val message=when(kind){"IDENTICAL"->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVE_BYTES_MATCH.text();"BOTH_EMPTY"->CoreMessages.ANDROID_NO_LOCAL_OR_CLOUD_SAVES_WERE_FOUND.text();"LOCAL_ONLY"->CoreMessages.ANDROID_ONLY_THIS_DEVICE_HAS_SAVES_UPLOAD_PRESERVES_THEM_IN_THE_CLOUD.text();else->CoreMessages.ANDROID_LOCAL_AND_CLOUD_SAVES_DIFFER_REVIEW_VERSIONS_BEFORE_RESTORING_OR_MERGING.text()}
-  val history=SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline,files,simpleCurrentName.orEmpty(),summary,nodes.associate {it.hashId to it.name},simple=SimpleHistory(nodes,latest,id))
+   val history=SyncHistory(CommitGraph(emptyMap(),emptyMap()),baseline,files,simpleCurrentName.takeIf {simpleCurrentNameHash==id}.orEmpty(),summary,nodes.associate {it.hashId to it.name},simple=SimpleHistory(nodes,latest,id,localModifiedAt,simpleDeviceMetadata.currentDevice()))
   val remote=nodes.filter {it.hashId==latest}.map {Version(it.hashId,it.hashId,it.name,"",0,null,null,true,CoreMessages.CLOUD_HISTORY.text())}
-  return Inspection(owner,null,kind,message,files.size,remote,false,latest!=null,false,history=history,simpleObservation=SimpleObservation(files,latest,nodes))
+   return Inspection(owner,null,kind,message,files.size,remote,false,latest!=null,false,history=history,simpleObservation=SimpleObservation(files,latest,nodes,summary,localModifiedAt))
  }
  private fun inspectSimple():Inspection {
   requireNoRecovery();val own=uploadTarget.get()==null;if(own)uploadTarget.set(verifiedTarget())
   try {
    val observation=bridge.readSnapshot()
    val files=observation?.files ?: freshVerifiedExport {it.snapshot.manifest.files}
-   val latest=simpleStore.latest();return simpleInspection(files,latest,latest?.let {listOf(requireNotNull(simpleStore.node(it)))} ?: emptyList())
+    val modified=observation?.inventory?.values?.maxOfOrNull {it.modifiedMillis}?.let {runCatching {java.time.Instant.ofEpochMilli(it).toString()}.getOrNull()}
+    val summary=observation?.let {SaveSummary.fromObservation(it.inventory.keys,it.summaryEntries) {name->it.inventory.getValue(name).modifiedMillis}}
+    val latest=simpleStore.latest();return simpleInspection(files,latest,latest?.let {listOf(requireNotNull(simpleStore.node(it)))} ?: emptyList(),summary,modified)
   }finally{if(own)uploadTarget.remove()}
  }
  private fun uploadSimple(inspection:Inspection?,confirmed:String?=null):OperationResult {
@@ -227,7 +236,7 @@ class AndroidSyncFacade internal constructor(
      SaveUpload(exported.snapshot.manifest.files,exported.snapshot.zip,"")
     }
     files=payload.files;require(files.isNotEmpty())
-     val name=simpleCurrentName ?: CoreMessages.SAVE_1_S.text(contentSha256(files).take(6))
+      val name=simpleCurrentName.takeIf {simpleCurrentNameHash==contentSha256(files)}.orEmpty()
     payload.copy(name=name)
    },confirmed,{if(Thread.currentThread().isInterrupted)throw InterruptedException()})
    return when(result) {
@@ -427,7 +436,7 @@ class AndroidSyncFacade internal constructor(
   require(verified.isObjectVerified && verified.kind!="BLOCKED"){verified.message};verified
  }
  fun completeOnboarding(inspection:Inspection)=locked {if(simpleEnabled){require(inspection.owner===owner);return@locked Unit};val c=checked(inspection);checkActualUnchanged(c.localFiles);if(keepsLocalProgress(c))session.confirmLocalProgressReady(c,store,mirrorStopped) else session.confirmOnboardingReady(c,store,mirrorStopped)}
- fun renameCurrent(inspection:Inspection,name:String)=locked {if(simpleEnabled){require(inspection.owner===owner);simpleCurrentName=sanitizeSnapshotName(name);val observed=requireNotNull(inspection.simpleObservation);val id=contentSha256(observed.files);observed.nodes.find {it.hashId==id}?.let {simpleStore.rename(it.copy(name=requireNotNull(simpleCurrentName)))};return@locked Unit};checkActualUnchanged(checked(inspection).localFiles);session.renameCurrent(name,mirrorStopped)}
+ fun renameCurrent(inspection:Inspection,name:String)=locked {if(simpleEnabled){require(inspection.owner===owner);val observed=requireNotNull(inspection.simpleObservation);val id=contentSha256(observed.files);val renamed=sanitizeSnapshotName(name);observed.nodes.find {it.hashId==id}?.let {simpleStore.rename(it.copy(name=renamed))};simpleCurrentName=renamed;simpleCurrentNameHash=id;return@locked Unit};checkActualUnchanged(checked(inspection).localFiles);session.renameCurrent(name,mirrorStopped)}
  fun renameHistory(snapshotId:String,name:String)=locked {if(simpleEnabled){val node=requireNotNull(simpleStore.node(snapshotId));simpleStore.rename(node.copy(name=sanitizeSnapshotName(name)));return@locked Unit};requireNoRecovery();verifiedTarget();session.renameHistory(snapshotId,name)}
 
  fun renameHistory(inspection:Inspection,snapshotId:String,name:String)=locked {if(simpleEnabled){require(inspection.owner===owner);val node=requireNotNull(inspection.simpleObservation?.nodes?.find {it.hashId==snapshotId});simpleStore.rename(node.copy(name=sanitizeSnapshotName(name)));return@locked Unit};presentationChecked(inspection);session.renameHistory(snapshotId,name,requireNotNull(inspection.history){inspection.message})}

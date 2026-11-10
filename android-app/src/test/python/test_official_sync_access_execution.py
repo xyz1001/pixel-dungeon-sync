@@ -20,7 +20,7 @@ class OfficialSyncAccessExecution(unittest.TestCase):
         self.assertIn('SyncRuntime.localFacade(this, connection)', body(MAIN, 'private AndroidSyncFacade requireSyncFacade()'))
         factory = body(RUNTIME, 'private static AndroidSyncFacade createFacade(')
         self.assertLess(factory.index('gate.refresh(context)'), factory.index('backend(context)'))
-        self.assertIn('androidGameIdentityGameIdentity, gate)', factory)
+        self.assertIn('androidGameIdentityGameIdentity, gate,', factory)
         auto = body(AUTO, 'private void attemptUpload()')
         self.assertLess(auto.index('SyncRuntime.requireOfficialSyncAccess'), auto.index('this.facade.autoUpload()'))
         history = body(MAIN, 'private void drainAutomaticHistoryRefresh()')
@@ -35,9 +35,12 @@ class OfficialSyncAccessExecution(unittest.TestCase):
         methods = ('private AndroidSyncFacade localSync() throws Exception ' + body(MAIN, 'private AndroidSyncFacade localSync()')
                    + '\nprivate AndroidSyncFacade sync() throws Exception ' + body(MAIN, 'private AndroidSyncFacade sync()')
                    + '\nprivate AndroidSyncFacade requireSyncFacade() throws Exception ' + body(MAIN, 'private AndroidSyncFacade requireSyncFacade()'))
-        for action in ('recoverRestore', 'discardInterruptedRestore', 'archivePending', 'renameHistory', 'renameCurrent', 'confirmRunIdentity'):
+        for action in ('recoverRestore', 'discardInterruptedRestore', 'archivePending', 'confirmRunIdentity'):
             self.assertIn('localSync().' + action + '(', MAIN)
             self.assertNotIn('sync().' + action + '(', MAIN)
+        for action in ('renameHistory', 'renameCurrent'):
+            self.assertIn('sync().' + action + '(', MAIN)
+            self.assertNotIn('localSync().' + action + '(', MAIN)
         self.assertIn('createFacade(context, connection2, false)', body(RUNTIME, 'static AndroidSyncFacade localFacade('))
         fixture = r'''
 import java.io.IOException;

@@ -2,6 +2,9 @@ package pdsync
 
 import java.nio.file.Path
 import java.nio.file.Files
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import kotlinx.serialization.json.jsonObject
@@ -19,13 +22,40 @@ class SimpleSaveSyncTest {
   override fun createNode(node:SaveNode):Boolean {call("metadata PUT");if(node.hashId in nodes)return false;nodes[node.hashId]=node;return true}
   override fun setLatest(hashId:String) {call("latest PUT");tip=hashId}
   override fun objectBytes(hashId:String)=objects.getValue(hashId)
+  override fun rename(node:SaveNode) {nodes[node.hashId]=node}
  }
  private fun snapshot(n:Int)=SaveUpload(mapOf("game1/game.dat" to hash("turn$n".encodeToByteArray())),byteArrayOf(n.toByte()),"武僧")
  @Test fun exactlyThreeFieldsAndStableIdentity() {
   val s=snapshot(1);val id=contentSha256(s.files);val node=SaveNode(id,null,s.name)
   assertEquals(setOf("hashId","parentId","name"),json.parseToJsonElement(SimpleSaveSync.encode(node).decodeToString()).jsonObject.keys)
-  assertEquals(node,SimpleSaveSync.decode(SimpleSaveSync.encode(node)))
+   assertEquals(node,SimpleSaveSync.decode(SimpleSaveSync.encode(node)))
+   assertEquals(node.copy(name=""),SimpleSaveSync.decode(SimpleSaveSync.encode(node.copy(name=""))))
+   assertEquals(node.copy(name="存档 8d8ebb"),SimpleSaveSync.decode(SimpleSaveSync.encode(node.copy(name="存档 8d8ebb"))))
   assertEquals(id,contentSha256(s.copy(zip=byteArrayOf(99)).files))
+ }
+ @Test fun operationIsCreatedOnceAndPreservedThroughRetryReuseAndRename() {
+  val store=Store()
+  val firstMetadata=DeviceMetadata(root.resolve("device"),Clock.fixed(Instant.parse("2024-01-02T03:04:05Z"),ZoneOffset.UTC)){"Test device"}
+  val laterMetadata=DeviceMetadata(root.resolve("device"),Clock.fixed(Instant.parse("2025-02-03T04:05:06Z"),ZoneOffset.UTC)){"Changed label"}
+  val firstSync=SimpleSaveSync(store,root.resolve("baseline"),firstMetadata::operation)
+  store.fail="latest PUT"
+  assertFailsWith<java.io.IOException> {firstSync.upload({},{snapshot(1)})}
+  val original=store.nodes.values.single()
+  assertEquals("2024-01-02T03:04:05Z",original.operation!!.preparedAt)
+  assertEquals("Test device",original.operation!!.device.label)
+  assertEquals(original,SimpleSaveSync.decode(SimpleSaveSync.encode(original)))
+  store.fail=null
+  val later=SimpleSaveSync(store,root.resolve("baseline"),laterMetadata::operation)
+  assertEquals(original,(later.upload({},{snapshot(1)}) as SaveUploadResult.Complete).node)
+  assertEquals(original,(later.upload({},{snapshot(1)}) as SaveUploadResult.Complete).node)
+  store.rename(original.copy(name="Renamed"))
+  val renamed=store.nodes.getValue(original.hashId)
+  assertEquals(original.operation,SimpleSaveSync.decode(SimpleSaveSync.encode(renamed)).operation)
+  later.upload({},{snapshot(2)})
+  assertEquals(renamed,(later.upload({},{snapshot(1)}) as SaveUploadResult.Complete).node)
+  val legacy=SimpleSaveSync.decode("""{"hashId":"${original.hashId}","parentId":null,"name":"old"}""".encodeToByteArray())
+  assertNull(legacy.operation)
+  assertFails {SimpleSaveSync.decode(SimpleSaveSync.encode(original.copy(operation=original.operation!!.copy(preparedAt="invalid"))))}
  }
  @Test fun appendOrdersWritesAndSavesOnlyBaseline() {
   val store=Store();val file=root.resolve("baseline");val sync=SimpleSaveSync(store,file);var captures=0;var permissions=0

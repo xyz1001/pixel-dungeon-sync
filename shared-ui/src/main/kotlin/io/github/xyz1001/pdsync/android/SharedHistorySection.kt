@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -262,7 +260,13 @@ private fun SharedHistoryCanvas(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** A short content reference is a suffix, never a generated save name. */
+internal fun sharedHistoryCardTitle(node: HistoryNode): String {
+    val name = node.name.takeIf { it.isNotBlank() }.orEmpty()
+    val contentId = node.contentId?.take(6)?.takeIf { it.isNotEmpty() } ?: return name
+    return if (name.isNotEmpty()) "$name（$contentId）" else contentId
+}
+
 @Composable
 private fun SharedHistoryCard(node: HistoryNode, selected: Boolean, busy: Boolean, onSelect: (String) -> Unit) {
     val background = when {
@@ -293,22 +297,24 @@ private fun SharedHistoryCard(node: HistoryNode, selected: Boolean, busy: Boolea
             onClick = { onSelect(selectableSnapshotId) })
     }
     Column(modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FlowRow(Modifier.fillMaxWidth().padding(bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(node.name, Modifier.widthIn(min = 120.dp), color = SharedUiColors.text, fontSize = 14.sp,
-                lineHeight = 19.6.sp, fontWeight = FontWeight.Bold)
-            val cloudHead = node.cloudHead
-            val badgeBackground = if (node.dirty) Color(0xFFFEF3C7) else if (cloudHead) Color(0xFFE0F2FE)
-                else if (node.column == 0) SharedUiColors.secondary else Color(0xFFDCFCE7)
-            val badgeText = if (node.dirty) Color(0xFF92400E) else if (cloudHead) Color(0xFF0369A1)
-                else if (node.column == 0) SharedUiColors.label else Color(0xFF15803D)
-            val status = if (node.id == "local-current") SharedMessages.LOCAL_CURRENT_STATUS.text(node.status) else node.status
-            Text(status, Modifier.widthIn(max = 150.dp).background(badgeBackground, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
-                color = badgeText, fontSize = 11.sp, lineHeight = 15.4.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Text(node.time, color = SharedUiColors.label, fontSize = 12.sp, lineHeight = 16.8.sp,
+        val title = sharedHistoryCardTitle(node)
+        if (title.isNotBlank()) Text(title, Modifier.fillMaxWidth().semantics {
+            val roleAndStatus = when (node.id) {
+                "local-current" -> SharedMessages.LOCAL_CURRENT_STATUS.text(node.status)
+                "local-baseline" -> SharedMessages.LOCAL_BASELINE_STATUS.text(node.status)
+                else -> node.status
+            }
+            contentDescription = listOfNotNull(node.name.takeIf { it.isNotBlank() },
+                node.contentId?.let { SharedMessages.FULL_CONTENT_ID.text(it) }, roleAndStatus).joinToString(" · ")
+        }, color = SharedUiColors.text, fontSize = 14.sp, lineHeight = 19.6.sp, fontWeight = FontWeight.Bold)
+        // Lane headers and card styling supply routine roles; keep actual unsynced progress visible.
+        if (node.dirty) Text(node.status,
+            Modifier.widthIn(max = 150.dp).background(Color(0xFFFEF3C7), RoundedCornerShape(50))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            color = Color(0xFF92400E), fontSize = 11.sp, lineHeight = 15.4.sp, fontWeight = FontWeight.SemiBold)
+        if (node.time.isNotBlank()) Text(node.time, color = SharedUiColors.label, fontSize = 12.sp, lineHeight = 16.8.sp,
             fontWeight = FontWeight.SemiBold)
-        Text(node.detail, modifier = Modifier.padding(top = 2.dp), color = SharedUiColors.muted,
+        if (node.detail.isNotBlank()) Text(node.detail, modifier = Modifier.padding(top = 2.dp), color = SharedUiColors.muted,
             fontSize = 12.sp, lineHeight = 16.8.sp)
     }
 }

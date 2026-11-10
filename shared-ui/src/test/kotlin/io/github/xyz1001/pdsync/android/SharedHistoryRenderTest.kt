@@ -42,6 +42,53 @@ import kotlin.test.assertTrue
 
 /** Real production Compose measurement, software rendering and pointer dispatch, without a fixture in production. */
 class SharedHistoryRenderTest {
+    @Test fun simpleContentIdsRemainVisibleWithEmptyAndLongNamesOnNarrowScreens() {
+        val hashes = listOf("d04de083", "8e3ac18f", "4894b709").map { it.padEnd(64, '0') }
+        val names = listOf("", "存档 8d8ebb", longName)
+        val operation = CommitOperationMetadata(
+            device = DeviceIdentity("12345678-1234-1234-1234-123456789abc", "上传电脑"),
+            preparedAt = "2026-11-10T08:09:10Z")
+        val state = SyncHistory(CommitGraph(emptyMap(), emptyMap()), hashes.last(), emptyMap(), "", null,
+            emptyMap(), simple = pdsync.SimpleHistory(hashes.mapIndexed { i, hash ->
+                pdsync.SaveNode(hash, null, names[i], operation = if (i == 2) operation else null)
+            }, hashes.first(), "f".repeat(64), localModifiedAt = "2026-11-11T10:11:12Z",
+                localDevice = DeviceIdentity("abcdef12-1234-1234-1234-123456789abc", "本机手机")))
+        val view = HistoryPresentation.from(state, 0)
+        val cloud = view.nodes.filter { it.column == 0 }
+        assertEquals(listOf("d04de0", "存档 8d8ebb（8e3ac1）", "$longName（4894b7）"),
+            cloud.map(::sharedHistoryCardTitle))
+        assertEquals("ffffff", sharedHistoryCardTitle(view.nodes.single { it.id == "local-current" }))
+        assertEquals("$longName（4894b7）", sharedHistoryCardTitle(view.nodes.single { it.id == "local-baseline" }))
+        for (card in listOf(cloud.last(), view.nodes.single { it.id == "local-baseline" })) {
+            assertEquals(HistoryPresentation.time(operation.preparedAt), card.time)
+            assertEquals("设备名：上传电脑", card.detail)
+        }
+        assertTrue(cloud.take(2).all { it.time.isEmpty() && it.detail.isEmpty() })
+        val local = view.nodes.single { it.id == "local-current" }
+        assertEquals(HistoryPresentation.time("2026-11-11T10:11:12Z"), local.time)
+        assertEquals("设备名：本机手机", local.detail)
+        for (width in listOf(1165, 320)) {
+            val observed = Observation()
+            val scene = ImageComposeScene(width = width, height = 1600, density = Density(1f)) {
+                SharedConnectionTheme {
+                    CompositionLocalProvider(LocalSharedHistoryLayoutObserver provides observed) {
+                        SharedHistorySection(view, null, false, {}, {}, {})
+                    }
+                }
+            }
+            try {
+                render(scene, "history-simple-content-ids-$width")
+                val layout = assertNotNull(observed.layout)
+                assertEquals(5, layout.cards.size)
+                assertTrue(layout.cards.values.all { it.left >= 0 && it.right <= layout.width })
+                assertTrue(layout.cards.getValue(hashes.last()).height > layout.cards.getValue(hashes.first()).height,
+                    "long names wrap; an empty name adds no placeholder row")
+                assertTrue(layout.cards.values.all { card -> layout.renameActions.values.none { it.overlaps(card) } })
+                assertEquals(hashes, view.nodes.filter { it.column == 0 }.map { it.contentId })
+            } finally { scene.close() }
+        }
+    }
+
     private val oldFiles = mapOf("game1/game.dat" to "a".repeat(64))
     private val newFiles = mapOf("game1/game.dat" to "b".repeat(64))
     private val longName = "这是一段需要完整换行显示且不能被省略的真实存档名称用于验证长名称仍然能够看清"

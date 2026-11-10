@@ -368,8 +368,8 @@ final class SyncRuntime {
         }
         AndroidGameIdentity androidGameIdentityGameIdentity = currentGameIdentity(context);
         AndroidSyncFacade result = gate == null
-                ? new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile, connection2.retainsLegacyOfficialScope()), backend(context), androidGameIdentityGameIdentity)
-                : new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile, connection2.retainsLegacyOfficialScope()), backend(context), androidGameIdentityGameIdentity, gate);
+                ? new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile, connection2.retainsLegacyOfficialScope()), backend(context), androidGameIdentityGameIdentity, android.os.Build.MODEL)
+                : new AndroidSyncFacade(new File(context.getFilesDir().getCanonicalFile(), "sync").toPath(), new AndroidConnection(connection2.endpoint, connection2.username, connection2.password, connection2.profile, connection2.retainsLegacyOfficialScope()), backend(context), androidGameIdentityGameIdentity, gate, android.os.Build.MODEL);
         if (gate != null) officialGates.put(result, gate);
         return result;
     }

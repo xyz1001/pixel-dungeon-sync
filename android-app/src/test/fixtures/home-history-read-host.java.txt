@@ -1,15 +1,22 @@
 package io.github.xyz1001.pdsync.android;
 import java.util.*;
+import java.io.IOException;
 
 class MainActivity {
     enum SyncPage { HOME, SETTINGS }
     enum OnboardingProgress { COMPLETE, INCOMPLETE }
-    static class SecureConnectionStore { static class Connection {} }
+    static class SecureConnectionStore { static class Connection { String endpoint="endpoint", username="user", profile="profile"; } }
     static class SyncRuntime {
         static SecureConnectionStore.Connection account; static String selection = "game-a", namespace = "scope-a";
         static SecureConnectionStore.Connection currentConnection() { return account; }
         static String currentSelectionToken(MainActivity a) { return selection; }
         static String currentNamespace(MainActivity a) { return namespace; }
+        static long generation=1;
+        static long connectionGeneration() { return generation; }
+        static AndroidSyncFacade localFacade(MainActivity a, SecureConnectionStore.Connection c) { return new AndroidSyncFacade(); }
+        static void clearOfficialSyncAccess(AndroidSyncFacade f) { f.authorized=false; }
+        static void requireOfficialSyncAccess(Object context, SecureConnectionStore.Connection c, AndroidSyncFacade f) throws IOException { if(f.denied || f.expired) throw new IOException("access denied"); f.authorized=true; f.refreshes++; }
+        static void checkOfficialSyncAccess(SecureConnectionStore.Connection c, AndroidSyncFacade f) throws IOException { f.gate(); }
     }
     static class AutoSyncStatusPolicy { static class Record {} }
     static class AutoSyncService {
@@ -20,6 +27,10 @@ class MainActivity {
     static class AppendCommit { Snapshot getSnapshot() { return new Snapshot(); } }
     static class SyncHistory {
         List<AppendCommit> cloud = new ArrayList<>();
+        Map<String,String> aliases = new LinkedHashMap<>();
+        Map<String,String> getAliases() { return aliases; }
+        String current="current", currentId="latest";
+        String getCurrentName() { return current; }
         List<AppendCommit> getCloud() { return cloud; }
         String getDefaultSnapshot() { return cloud.isEmpty() ? null : "snapshot-a"; }
     }
@@ -27,8 +38,21 @@ class MainActivity {
     static class AndroidSyncFacade {
         static class Inspection { String kind = "BOTH_EMPTY"; String getKind() { return kind; } boolean getNeedsRestoreRecovery() { return false; } boolean objectVerified = true; boolean isObjectVerified() { return objectVerified; } }
         Inspection observed = new Inspection(); SyncHistory history = new SyncHistory(); Hook hook = () -> {}, historyHook = () -> {}; int reads;
-        Inspection inspect() throws Exception { reads++; hook.run(); return observed; }
+        boolean authorized, denied, expired, currentMatches=true, changeDuringPut; int refreshes, puts, readChecks;
+        void gate() throws IOException { if(!authorized || expired) throw new IOException("WebDAV access denied"); }
+        Inspection inspect() throws Exception { gate(); readChecks++; reads++; hook.run(); return observed; }
         Inspection inspectHome() throws Exception { return inspect(); }
+        Map<String,String> remote = new LinkedHashMap<>(); boolean failRename; int fullReads;
+        void renameHistory(Inspection inspection, String id, String name) throws Exception {
+            gate();
+            if (failRename) throw new java.io.IOException("PUT failed");
+            puts++; remote.put(id, name); if(changeDuringPut) SyncRuntime.generation++;
+        }
+        void renameCurrent(Inspection inspection, String name) throws Exception { if(currentMatches) renameHistory(inspection,"latest",name); }
+        void recoverRestore() { }
+        Inspection inspectHomeHistory() throws Exception {
+            fullReads++; Inspection result = inspect(); history.aliases = new LinkedHashMap<>(remote); return result;
+        }
         Hook closeHook = () -> {};
         AutoCloseable beginHomeReadIdentityScope() { return () -> closeHook.run(); }
         SyncHistory historyPresentation(Inspection inspection) throws Exception { historyHook.run(); return history; }
@@ -51,15 +75,53 @@ class MainActivity {
     SyncPage page = SyncPage.HOME; boolean destroyed, cloudVerified, resumed = true, sharedAppreciationOnly; int published, verified, namespacePreparations;
     AndroidSyncFacade facade = new AndroidSyncFacade(); AndroidSyncFacade.Inspection inspection;
     SyncHistory history; Object homeObservationOwner; String selected, explicitHomeSelection;
+    static class HomeActionContext {
+        final Object account, facade, inspection, history; final String scope;
+        HomeActionContext(MainActivity a) { account=a.connection; facade=a.facade; inspection=a.inspection; history=a.history; scope=SyncRuntime.selection+SyncRuntime.namespace; }
+        boolean accepts(HomeActionContext other, boolean page, boolean busy) { return page && !busy && other!=null && account==other.account && facade==other.facade && inspection==other.inspection && history==other.history && scope.equals(other.scope); }
+    }
+    static class HistoryNamePresentation {
+        static String sanitize(String s) { return s; }
+        static String currentCloudId(SyncHistory h) { return h.currentId; }
+        static SyncHistory display(SyncHistory h, Map<String,String> aliases, String current) {
+            SyncHistory copy=new SyncHistory(); copy.aliases.putAll(h.aliases); copy.aliases.putAll(aliases); copy.current=current==null?h.current:current; copy.currentId=h.currentId; return copy;
+        }
+    }
+    static class Text { String text() { return "notice"; } }
+    static final Text SAVED_ON_THIS_DEVICE_PUBLISHED_HISTORY_266 = new Text(), SAVES_HAVE_CHANGED_PLEASE_RENAME_AGAIN_267 = new Text(), SAVING_NAME_268 = new Text(), NAME_SAVED_269 = new Text(), SET_UP_THE_CLOUD_CONNECTION_FIRST_143 = new Text(), THE_CONNECTION_HAS_CHANGED_COMPARE_AGAIN_158 = new Text();
+    enum DiagnosticAction { CONFIGURE }
+    interface Task<T> { T run() throws Exception; }
+    interface Done<T> { void accept(T value) throws Exception; }
+    static class Naming { java.util.function.Consumer<String> save; String initial; void open(String id, String initial, String label, java.util.function.Consumer<String> save, Runnable cancel) { this.save = save; this.initial=initial; } }
+    Naming homeNaming = new Naming(); int sharedHomeRenderToken; String notice; Exception workFailure;
+    HomeActionContext currentHomeContext(int token) { return new HomeActionContext(this); }
+    boolean isCurrentHomeAction(HomeActionContext owner) { return true; }
+    void render() {} void refreshComparison(SyncPage page) {} void chooseRunIdentity() {}
+    final ThreadLocal<OfficialOperationLease> officialOperationLease = new ThreadLocal<>();
+    Object getApplicationContext() { return this; }
+    static class AndroidHomeDialogComposition { static void showNaming(MainActivity a, int token, String initial, String label, java.util.function.Consumer<String> save, Runnable cancel) { a.homeNaming.save=save; } }
+    boolean defer; Runnable pending;
+    <T> void work(DiagnosticAction action, String message, Task<T> task, Done<T> done) {
+        workFailure=null;
+        pending=() -> {
+            try {
+                T result;
+                try (OfficialOperationLease lease = new OfficialOperationLease()) {
+                    officialOperationLease.set(lease);
+                    try { result=task.run(); } finally { officialOperationLease.remove(); }
+                }
+                done.accept(result);
+            } catch (Exception failure) { workFailure = failure; }
+        };
+        if(!defer) pending.run();
+    }
     MainActivity() { SyncRuntime.account = connection; SyncRuntime.selection = "game-a"; SyncRuntime.namespace = "scope-a"; }
     boolean isDestroyed() { return destroyed; }
     boolean isForegroundHome() { return resumed && !destroyed && page == SyncPage.HOME && !sharedAppreciationOnly; }
     void publishArchiveReadState() { published++; }
     Object diagnosticInspectionDetails(AndroidSyncFacade.Inspection inspection) { return null; }
-    AndroidSyncFacade sync() { return facade; }
     void prepareOfficialHomeNamespace(AndroidSyncFacade facade) { namespacePreparations++; }
     void invalidatePreparedOfficialNamespace() { }
-    Object currentHomeContext(int token) { return new Object(); }
     /* PRODUCTION_METHODS */
     static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
     static void terminal(MainActivity a) { check(!a.archiveReads.loading(), "terminal read left loading active"); check(a.published == 2, "start and terminal state must publish"); }
@@ -129,6 +191,46 @@ class MainActivity {
         MainActivity action = new MainActivity(); action.facade.closeHook = () -> { throw new AssertionError("full action used HOME scope"); };
         action.readComparison(true, false); terminal(action);
         check(action.verified == 1, "post-action full read lost verification");
+        MainActivity rename = new MainActivity();
+        rename.facade.remote.put("ancestor", "old ancestor"); rename.facade.remote.put("latest", "old latest");
+        rename.inspection = rename.facade.observed; rename.history = rename.facade.history;
+        rename.history.aliases.putAll(rename.facade.remote); rename.defer=true;
+        rename.rename("ancestor"); rename.homeNaming.save.accept("new ancestor");
+        check("new ancestor".equals(rename.displayHomeHistory().aliases.get("ancestor")) && rename.facade.puts==0 && "old ancestor".equals(rename.history.aliases.get("ancestor")), "optimistic name must precede PUT without mutating evidence");
+        rename.pending.run();
+        check(rename.workFailure == null && rename.facade.puts == 1 && rename.facade.refreshes == 1 && rename.facade.readChecks == 0 && !rename.facade.authorized, "PUT must revoke authorization without readback");
+        rename.rename("ancestor"); check("new ancestor".equals(rename.homeNaming.initial), "reopened editor must see displayed name");
+        rename.rename("latest"); rename.homeNaming.save.accept("new latest");
+        rename.pending.run();
+        check("new ancestor".equals(rename.displayHomeHistory().aliases.get("ancestor")) && "new latest".equals(rename.displayHomeHistory().aliases.get("latest")), "successive overlays must accumulate");
+        rename.facade.failRename = true; rename.notice = null;
+        rename.rename("ancestor"); rename.homeNaming.save.accept("failed");
+        rename.pending.run();
+        check(rename.workFailure != null && rename.notice == null && rename.facade.readChecks == 0 && "new ancestor".equals(rename.displayHomeHistory().aliases.get("ancestor")) && "new latest".equals(rename.displayHomeHistory().aliases.get("latest")), "failed PUT must roll back only its name");
+        check(!rename.facade.authorized, "failed PUT must revoke authorization");
+        rename.history=new SyncHistory(); rename.history.aliases.put("ancestor","remote change");
+        check("remote change".equals(rename.displayHomeHistory().aliases.get("ancestor")), "new observation must discard overlays");
+        MainActivity staleRename = new MainActivity(); staleRename.inspection=staleRename.facade.observed; staleRename.history=staleRename.facade.history; staleRename.defer=true;
+        staleRename.rename("ancestor"); staleRename.homeNaming.save.accept("pending");
+        staleRename.history=new SyncHistory(); staleRename.history.aliases.put("ancestor","new page"); staleRename.facade.failRename=true; staleRename.pending.run();
+        check(staleRename.facade.puts==0 && staleRename.workFailure==null && "new page".equals(staleRename.displayHomeHistory().aliases.get("ancestor")), "stale queued work must not overwrite new observation");
+        for (boolean dialog : new boolean[]{false,true}) for (boolean match : new boolean[]{false,true}) {
+            MainActivity current = new MainActivity(); current.inspection=current.facade.observed; current.history=current.facade.history; current.history.currentId=match?"latest":null; current.cloudVerified=true; current.facade.currentMatches=match;
+            if(dialog) current.editCurrent(); else current.renameCurrentInline(); current.homeNaming.save.accept("current name");
+            check(current.workFailure == null && current.facade.puts == (match ? 1 : 0) && current.facade.readChecks == 0 && current.facade.refreshes == 1 && !current.facade.authorized && "current name".equals(current.displayHomeHistory().current) && (match == current.displayHomeHistory().aliases.containsKey("latest")), "current rename authorization or matching branch");
+        }
+        for (int failure=0; failure<3; failure++) {
+            MainActivity denied = new MainActivity(); denied.inspection=denied.facade.observed; denied.history=denied.facade.history;
+            if(failure==0) denied.facade.denied=true; if(failure==1) denied.facade.expired=true; if(failure==2) SyncRuntime.account=new SecureConnectionStore.Connection();
+            denied.rename("ancestor"); denied.homeNaming.save.accept("blocked");
+            check((failure == 2 || denied.workFailure != null) && denied.facade.puts == 0 && !denied.facade.authorized, "denied/expired/changed binding must not PUT");
+        }
+        MainActivity changed = new MainActivity(); changed.inspection=changed.facade.observed; changed.history=changed.facade.history; changed.facade.changeDuringPut=true;
+        changed.rename("ancestor"); changed.homeNaming.save.accept("changed");
+        check(changed.facade.puts == 1 && changed.facade.readChecks == 0 && !changed.facade.authorized && changed.displayHomeHistory() == changed.history, "binding change after PUT must not publish stale result");
+        MainActivity recovery = new MainActivity();
+        recovery.work(DiagnosticAction.CONFIGURE, "", () -> { recovery.sync(); recovery.localSync().recoverRestore(); return null; }, result -> {});
+        check(recovery.workFailure == null && !recovery.facade.authorized && recovery.facade.puts == 0 && recovery.facade.readChecks == 0, "local recovery must revoke access without network I/O");
         System.out.println("History read terminal and stale-scope checks passed");
     }
 }

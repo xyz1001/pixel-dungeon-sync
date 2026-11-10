@@ -74,7 +74,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('return;', home)
         self.assertLess(render.index(home), render.index('ScrollView scrollView'))
         host = body(MAIN, 'private void renderHome()')
-        self.assertIn('AndroidOnboardingComposition.showHome(this, this.history, this.historyPage, selectedGameIdentity()', host)
+        self.assertIn('AndroidOnboardingComposition.showHome(this, displayHomeHistory(), this.historyPage, selectedGameIdentity()', host)
         for old_layout in ('new TimelineView', 'heading(', '\n        text(', 'addButton(', 'button(', 'this.body.addView('):
             self.assertNotIn(old_layout, host)
         self.assertNotIn('final class TimelineView', MAIN)
@@ -264,7 +264,7 @@ class SharedHomeAndroidContract(unittest.TestCase):
     def test_noop_capabilities_use_shared_full_content_evidence_and_recheck_callbacks(self):
         home = body(MAIN, 'private void renderHome()')
         evidence = body(MAIN, 'private SharedHomeContent homeContent()')
-        for required in ('SharedHomeContent.fromHome(this.history, this.selected', 'this.cloudVerified',
+        for required in ('SharedHomeContent.fromHome(displayHomeHistory(), this.selected', 'this.cloudVerified',
                          'this.connection != null', 'this.facade != null', 'this.inspection != null',
                          'this.progress == OnboardingProgress.COMPLETE', '!restoreNeedsAttention()',
                          'kind() != OnboardingKind.BLOCKED', 'this.inspection.isRetryablePending()',
@@ -306,16 +306,18 @@ class SharedHomeAndroidContract(unittest.TestCase):
         self.assertIn('this.homeNaming.open(', inline_current)
         self.assertIn('renameCurrentInline()', rename)
         self.assertIn('AndroidHomeDialogComposition.showNaming(', current)
-        self.assertIn('localSync().renameCurrent(observed, name)', inline_current)
-        self.assertIn('readComparison()', inline_current)
+        self.assertIn('saveHomeName(owner, observed, null, name)', inline_current)
         self.assertIn('chooseRunIdentity()', inline_current)
         for signature in ('protected void onPause()', 'protected void onDestroy()', 'private void navigate(', 'private void renderHome()'):
             self.assertIn('this.homeNaming.close()', body(MAIN, signature))
         self.assertIn('chooseRunIdentity()', current)
-        self.assertIn('localSync().renameHistory(observed, snapshotId, name)', rename)
-        self.assertIn('localSync().renameCurrent(observed, name)', current)
-        self.assertIn('readComparison()', rename)
-        self.assertIn('readComparison()', current)
+        self.assertIn('saveHomeName(owner, observed, snapshotId, name)', rename)
+        self.assertIn('saveHomeName(owner, observed, null, name)', current)
+        save = body(MAIN, 'private void saveHomeName(')
+        self.assertIn('sync().renameHistory(observed, snapshotId, name)', save)
+        self.assertIn('sync().renameCurrent(observed, name)', save)
+        self.assertLess(save.index('render()'), save.index('work(DiagnosticAction.CONFIGURE'))
+        self.assertNotIn('readComparison(', save)
         confirmation = body(MAIN, 'private void renderConfirmation()')
         self.assertIn('SharedConfirmationState(', confirmation)
         self.assertIn('AndroidHomeDialogComposition.confirmationView(', confirmation)

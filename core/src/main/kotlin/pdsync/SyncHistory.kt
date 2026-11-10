@@ -14,4 +14,16 @@ data class SyncHistory(val graph: CommitGraph, val baseline: String?, val curren
  val cloud get()=simple?.nodes?.map {node->AppendCommit(id=node.hashId,parents=listOfNotNull(node.parentId),snapshot=Manifest(game="",profile="",version="",id=node.hashId,parent=node.parentId,sha256="",files=emptyMap()),objectBytes=0)} ?: graph.commits.values.snapshotRepresentatives(graph.tips).sortedWith(compareByDescending<AppendCommit> { it.snapshot.metadata?.latestFileModifiedAt ?: it.snapshot.metadata?.capturedAt ?: it.operation?.preparedAt.orEmpty() }.thenBy { it.id })
  val defaultSnapshot get()=simple?.latest ?: graph.tips.singleOrNull()?.let { graph.commits.getValue(it).snapshot.id }
 }
-data class SimpleHistory(val nodes:List<SaveNode>,val latest:String?,val currentId:String?)
+data class SimpleHistory(val nodes:List<SaveNode>,val latest:String?,val currentId:String?,val localModifiedAt:String?=null,val localDevice:DeviceIdentity?=null)
+
+/** Presentation only: retain the original observation and all non-name evidence. */
+object HistoryNamePresentation {
+ @JvmStatic fun sanitize(name:String)=sanitizeSnapshotName(name)
+ @JvmStatic fun display(history:SyncHistory,aliases:Map<String,String>,currentName:String?):SyncHistory {
+  val simple=history.simple?.let {it.copy(nodes=it.nodes.map {node->aliases[node.hashId]?.let {name->node.copy(name=name)} ?: node})}
+  return history.copy(currentName=currentName ?: history.currentName,aliases=history.aliases+aliases,simple=simple)
+ }
+ @JvmStatic fun currentCloudId(history:SyncHistory):String? = history.simple?.let {simple->
+  simple.currentId?.takeIf {id->simple.nodes.any {it.hashId==id}}
+ }
+}

@@ -7,7 +7,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 
 /** The complete wire metadata. Content identity uses the existing PDSYNC-CONTENT-V1 algorithm. */
-@Serializable data class SaveNode(val hashId:String,val parentId:String?,val name:String)
+@Serializable data class SaveNode(val hashId:String,val parentId:String?,val name:String,val operation:CommitOperationMetadata?=null)
 
 /** Retain only the published node and its already-known, acyclic ancestors. */
 internal fun knownAncestorChain(published:SaveNode,knownNodes:List<SaveNode>):List<SaveNode> {
@@ -39,7 +39,8 @@ sealed interface SaveUploadResult {
 }
 
 /** One snapshot, one latest read, three ordered writes. No local save archive or verification markers. */
-class SimpleSaveSync(private val store:SimpleSaveStore,private val baselineFile:Path) {
+class SimpleSaveSync(private val store:SimpleSaveStore,private val baselineFile:Path,
+                     private val operation:()->CommitOperationMetadata? = {null}) {
  fun baseline():String? = if(Files.exists(baselineFile))
   Files.readAllBytes(baselineFile).decodeToString().also {require(validContentHashId(it))} else null
 
@@ -58,7 +59,7 @@ class SimpleSaveSync(private val store:SimpleSaveStore,private val baselineFile:
   if(parent!=latest && latest!=null && confirmedLatest!=latest)
    return SaveUploadResult.Conflict(id,latest)
   checkCanceled()
-  val proposed=SaveNode(id,parent,snapshot.name)
+  val proposed=SaveNode(id,parent,snapshot.name,operation()?.validated())
   store.createObject(id,snapshot.zip)
   checkCanceled()
   val node=if(store.createNode(proposed))proposed else
@@ -78,7 +79,8 @@ class SimpleSaveSync(private val store:SimpleSaveStore,private val baselineFile:
   fun encode(node:SaveNode):ByteArray = json.encodeToString(node).encodeToByteArray()
   fun decode(bytes:ByteArray):SaveNode = json.decodeFromString<SaveNode>(bytes.decodeToString()).also {
    require(validContentHashId(it.hashId) && (it.parentId==null || validContentHashId(it.parentId)))
-   require(it.hashId!=it.parentId)
+    require(it.hashId!=it.parentId)
+    it.operation?.validated()
   }
  }
 }

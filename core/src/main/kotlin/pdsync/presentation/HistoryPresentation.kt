@@ -16,7 +16,9 @@ import java.util.PriorityQueue
 data class HistoryNode(
  val id: String, val snapshotId: String?, val name: String, val time: String,
  val detail: String, val status: String, val column: Int, val row: Int,
- val dirty: Boolean = false, val selectable: Boolean = false, val cloudHead: Boolean = false
+ val dirty: Boolean = false, val selectable: Boolean = false, val cloudHead: Boolean = false,
+ /** Display-only content digest, never a commit/snapshot handle or operation target. */
+ val contentId: String? = null
 )
 
 /** sameContent is a display-only content match, never an operation or ancestry edge. */
@@ -158,12 +160,26 @@ data class HistoryPresentation(
     val baseline=ordered.firstOrNull {it.hashId==state.baseline}
     val showBaseline=simple.currentId!=null && matchingCurrent==null && baseline!=null
     val baselineRow=ordered.indexOf(baseline)
-    val all=ordered.mapIndexed {row,node->HistoryNode(node.hashId,node.hashId,node.name.ifBlank {CoreMessages.SAVE_1_S.text(node.hashId.take(6))},"","",if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),0,if(showBaseline && row>baselineRow)row+1 else row,selectable=true,cloudHead=node.hashId==simple.latest)}.toMutableList()
+    val all=ordered.mapIndexed {row,node->HistoryNode(
+     node.hashId,node.hashId,node.name,
+     node.operation?.let { time(it.preparedAt) }.orEmpty(),
+     node.operation?.device?.let { pdsync.i18n.SharedMessages.DEVICE_NAME.text(it.label) }.orEmpty(),
+     if(node.hashId==simple.latest)CoreMessages.CURRENT_CLOUD_BRANCH.text() else CoreMessages.CLOUD_HISTORY.text(),
+     0,if(showBaseline && row>baselineRow)row+1 else row,
+     selectable=true,cloudHead=node.hashId==simple.latest,contentId=node.hashId)
+    }.toMutableList()
     if(showBaseline) {
      val node=requireNotNull(baseline)
-     all+=HistoryNode("local-baseline",node.hashId,node.name.ifBlank {CoreMessages.SYNC_BASELINE.text()},"","",CoreMessages.SYNCED_TO_CLOUD.text(),1,baselineRow)
+     all+=HistoryNode("local-baseline",node.hashId,node.name,
+      node.operation?.let { time(it.preparedAt) }.orEmpty(),
+      node.operation?.device?.let { pdsync.i18n.SharedMessages.DEVICE_NAME.text(it.label) }.orEmpty(),
+      CoreMessages.SYNCED_TO_CLOUD.text(),1,baselineRow,contentId=node.hashId)
     }
-    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName.ifBlank {CoreMessages.CURRENT_LOCAL.text()},"","",if(matchingCurrent!=null)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),1,if(showBaseline)baselineRow+1 else ordered.indexOf(matchingCurrent).coerceAtLeast(0),dirty=matchingCurrent==null)
+    if(simple.currentId!=null)all+=HistoryNode("local-current",null,state.currentName,
+     simple.localModifiedAt?.let { time(it) }.orEmpty(),simple.localDevice?.let { pdsync.i18n.SharedMessages.DEVICE_NAME.text(it.label) }.orEmpty(),
+     if(matchingCurrent!=null)CoreMessages.SYNCED_TO_CLOUD.text() else CoreMessages.NOT_SYNCED_TO_CLOUD.text(),
+     1,if(showBaseline)baselineRow+1 else ordered.indexOf(matchingCurrent).coerceAtLeast(0),
+     dirty=matchingCurrent==null,contentId=simple.currentId)
     val totalRows=maxOf(1,all.maxOfOrNull {it.row+1}?:0)
     val pages=maxOf(1,(totalRows+PAGE_SIZE-1)/PAGE_SIZE);val page=requestedPage.coerceIn(0,pages-1)
     val shown=all.filter {it.row/PAGE_SIZE==page}.map {it.copy(row=it.row%PAGE_SIZE)};val ids=shown.map {it.id}.toSet()

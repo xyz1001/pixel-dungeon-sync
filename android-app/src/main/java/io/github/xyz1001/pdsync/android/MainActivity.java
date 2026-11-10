@@ -80,6 +80,7 @@ import pdsync.OnboardingKind;
 import pdsync.OnboardingProgress;
 import pdsync.SaveSummary;
 import pdsync.SyncHistory;
+import pdsync.HistoryNamePresentation;
 import pdsync.android.app.AndroidSyncFacade;
 import pdsync.presentation.HistoryPresentation;
 import pdsync.presentation.SyncPage;
@@ -502,6 +503,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
             AndroidDiagnosticLogging.confirmationEvent("CONFIRMATION_DEPARTURE", DiagnosticResult.PENDING);
         }
         this.resumed = false;
+        ++this.homeNameEpoch;
+        this.homeNameOverlay = null;
         cancelDetachedHomeRead();
         ++this.sharedHomeRenderToken;
         if (this.homeNaming != null) this.homeNaming.close();
@@ -1357,6 +1360,8 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         boolean enteringHome = this.page != syncPage && syncPage == SyncPage.HOME;
         if (this.page != syncPage) {
+            ++this.homeNameEpoch;
+            this.homeNameOverlay = null;
             cancelDetachedHomeRead();
             this.archiveReads.invalidate();
             ++this.sharedHomeRenderToken;
@@ -1644,7 +1649,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         this.footer = null;
         this.scroll = null;
         this.renderedPage = this.page;
-        AndroidOnboardingComposition.showHome(this, this.history, this.historyPage, selectedGameIdentity(),
+        AndroidOnboardingComposition.showHome(this, displayHomeHistory(), this.historyPage, selectedGameIdentity(),
                 homeStatus, serviceExpired ? SharedHomeStatusKind.EXPIRED : homeStatusKind(content), isForegroundHome(), this.busy, canUpload, canRestore, canLaunch, homeOperation(),
                 isHomeArchiveLoading(),
                 this.selected, this.explicitHomeSelection, content, homeNotice, this.feedbackError, "",
@@ -1731,7 +1736,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
     }
 
     private SharedHomeContent homeContent() {
-        return SharedHomeContent.fromHome(this.history, this.selected,
+        return SharedHomeContent.fromHome(displayHomeHistory(), this.selected,
                 this.cloudVerified && this.connection != null && this.facade != null && this.inspection != null
                         && this.progress == OnboardingProgress.COMPLETE && this.readinessState.canContinue()
                         && !restoreNeedsAttention() && kind() != OnboardingKind.BLOCKED,
@@ -5049,6 +5054,60 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                 && !restoreNeedsAttention()) requestRootAuthorization();
     }
 
+    /** Names are display overlays, never replacement inspection or authorization evidence. */
+    private static final class HomeNameOverlay {
+        final HomeActionContext owner;
+        final long connectionGeneration;
+        final Map<String, String> aliases = new LinkedHashMap<>();
+        String currentName;
+        HomeNameOverlay(HomeActionContext owner, long generation) { this.owner = owner; this.connectionGeneration = generation; }
+    }
+    private HomeNameOverlay homeNameOverlay;
+    private long homeNameEpoch;
+
+    private boolean ownsHomeNames(HomeNameOverlay overlay) {
+        return overlay != null && overlay.connectionGeneration == SyncRuntime.connectionGeneration()
+                && this.connection == SyncRuntime.currentConnection()
+                && overlay.owner != null && overlay.owner.accepts(currentHomeContext(0), true, false);
+    }
+
+    private SyncHistory displayHomeHistory() {
+        if (this.history == null || !ownsHomeNames(this.homeNameOverlay)) return this.history;
+        return HistoryNamePresentation.display(this.history, this.homeNameOverlay.aliases, this.homeNameOverlay.currentName);
+    }
+
+    private void saveHomeName(HomeActionContext owner, AndroidSyncFacade.Inspection observed, String snapshotId, String rawName) {
+        if (!isCurrentHomeAction(owner) || this.history == null) return;
+        if (!ownsHomeNames(this.homeNameOverlay)) this.homeNameOverlay = new HomeNameOverlay(currentHomeContext(0), SyncRuntime.connectionGeneration());
+        final HomeNameOverlay overlay = this.homeNameOverlay;
+        final long epoch = this.homeNameEpoch;
+        final Map<String, String> previousAliases = new LinkedHashMap<>(overlay.aliases);
+        final String previousCurrent = overlay.currentName;
+        final String name = HistoryNamePresentation.sanitize(rawName);
+        if (snapshotId == null) {
+            overlay.currentName = name;
+            String matchingCloud = HistoryNamePresentation.currentCloudId(this.history);
+            if (matchingCloud != null) overlay.aliases.put(matchingCloud, name);
+        } else overlay.aliases.put(snapshotId, name);
+        // Publish before queuing network work, without changing the proof snapshot.
+        render();
+        work(DiagnosticAction.CONFIGURE, SAVING_NAME_268.text(), () -> {
+            try {
+                if (epoch != this.homeNameEpoch || this.homeNameOverlay != overlay || !isForegroundHome() || !ownsHomeNames(overlay)) throw new StaleArchiveReadException();
+                if (snapshotId == null) sync().renameCurrent(observed, name);
+                else sync().renameHistory(observed, snapshotId, name);
+                return null;
+            } catch (Exception failure) { return failure; }
+        }, failure -> {
+            if (epoch != this.homeNameEpoch || this.homeNameOverlay != overlay || !isForegroundHome() || !ownsHomeNames(overlay)) return;
+            if (failure != null) {
+                overlay.aliases.clear(); overlay.aliases.putAll(previousAliases); overlay.currentName = previousCurrent;
+                throw failure;
+            }
+            this.notice = NAME_SAVED_269.text();
+        });
+    }
+
     /* JADX INFO: Access modifiers changed from: private */
     public void rename(final String snapshotId) {
         if (this.homeNaming == null) return;
@@ -5058,7 +5117,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
         final AndroidSyncFacade.Inspection observed = this.inspection;
-        SyncHistory observedHistory = this.history;
+        SyncHistory observedHistory = displayHomeHistory();
         String alias = observedHistory == null ? null : observedHistory.getAliases().get(snapshotId);
         this.homeNaming.open(snapshotId, alias == null ? "" : alias,
                 SAVED_ON_THIS_DEVICE_PUBLISHED_HISTORY_266.text(), name -> {
@@ -5067,12 +5126,7 @@ public final class MainActivity extends ComponentActivity implements SharedConne
                         render();
                         return;
                     }
-                    work(DiagnosticAction.CONFIGURE, SAVING_NAME_268.text(), () -> {
-                        localSync().renameHistory(observed, snapshotId, name);
-                        // An explicit update refreshes the full observation, never only its mirror.
-                        readComparison();
-                        return null;
-                    }, result -> this.notice = NAME_SAVED_269.text());
+                    saveHomeName(owner, observed, snapshotId, name);
                 }, null);
     }
 
@@ -5084,18 +5138,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
         final AndroidSyncFacade.Inspection observed = this.inspection;
-        final String initialName = this.history == null ? "" : this.history.getCurrentName();
+        final SyncHistory displayed = displayHomeHistory();
+        final String initialName = displayed == null ? "" : displayed.getCurrentName();
         this.homeNaming.open(null, initialName, "", name -> {
             if (!isCurrentHomeAction(owner)) {
                 this.notice = SAVES_HAVE_CHANGED_PLEASE_RENAME_AGAIN_267.text();
                 render();
                 return;
             }
-            work(DiagnosticAction.CONFIGURE, SAVING_NAME_268.text(), () -> {
-                localSync().renameCurrent(observed, name);
-                readComparison();
-                return null;
-            }, result -> this.notice = NAME_SAVED_269.text());
+            saveHomeName(owner, observed, null, name);
         }, () -> {
             if (isCurrentHomeAction(owner)) chooseRunIdentity();
         });
@@ -5109,18 +5160,15 @@ public final class MainActivity extends ComponentActivity implements SharedConne
         }
         final HomeActionContext owner = currentHomeContext(this.sharedHomeRenderToken);
         final AndroidSyncFacade.Inspection observed = this.inspection;
-        final String initialName = this.history == null ? "" : this.history.getCurrentName();
+        final SyncHistory displayed = displayHomeHistory();
+        final String initialName = displayed == null ? "" : displayed.getCurrentName();
         AndroidHomeDialogComposition.showNaming(this, this.sharedHomeRenderToken, initialName, "", name -> {
             if (!isCurrentHomeAction(owner)) {
                 this.notice = SAVES_HAVE_CHANGED_PLEASE_RENAME_AGAIN_267.text();
                 render();
                 return;
             }
-            work(DiagnosticAction.CONFIGURE, SAVING_NAME_268.text(), () -> {
-                localSync().renameCurrent(observed, name);
-                readComparison();
-                return null;
-            }, result -> this.notice = NAME_SAVED_269.text());
+            saveHomeName(owner, observed, null, name);
         }, () -> {
             if (isCurrentHomeAction(owner)) chooseRunIdentity();
         });
