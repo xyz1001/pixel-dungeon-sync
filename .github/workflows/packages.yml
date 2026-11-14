@@ -234,6 +234,42 @@ jobs:
           PDSYNC_KEY_PASSWORD: ${{ secrets.PDSYNC_KEY_PASSWORD }}
         run: python3 tools/ci/release.py
 
+  deploy-website:
+    if: >-
+      always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+      needs.release.result == 'success'
+    needs: [release]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inject release version and download links
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 tools/ci/inject_website_version.py --tag "$RELEASE_TAG"
+      - name: Deploy website to server via SSH
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+          PORT: ${{ secrets.SERVER_PORT || '22' }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$HOST" ] || [ -z "$USER" ]; then
+            echo "::warning ::SERVER_SSH_KEY, SERVER_HOST or SERVER_USER secret is not configured. Skipping website deployment."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H -p "$PORT" "$HOST" >> ~/.ssh/known_hosts
+          rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new" website/ ${USER}@${HOST}:/var/www/spd.xyz1001.top/
+          ssh -i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new ${USER}@${HOST} "chmod -R 755 /var/www/spd.xyz1001.top"
+          echo "Website deployed to /var/www/spd.xyz1001.top/ successfully!"
+
   cleanup-artifacts:
     needs: [android, desktop, signing-validation, release]
     # Fork PR tokens are read-only; never run checked-out PR code with write access.

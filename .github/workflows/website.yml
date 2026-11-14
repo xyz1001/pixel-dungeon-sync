@@ -1,0 +1,73 @@
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+      - 'tools/ci/inject_website_version.py'
+      - '.github/workflows/website.yml'
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-website:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 自动注入当前发布 tag 或最新稳定 tag 的版本与免流加速下载直链
+      - name: Inject latest version and download links
+        run: |
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            TAG="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+          if [ -n "$TAG" ]; then
+            echo "Using release tag: ${TAG}"
+            python3 tools/ci/inject_website_version.py --tag "${TAG}"
+          else
+            echo "Using default version from manifest"
+            python3 tools/ci/inject_website_version.py
+          fi
+
+      # 通过 SSH 与 Rsync 自动同步至服务器静态目录（极速增量传输）
+      - name: Deploy website to server via SSH
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+          PORT: ${{ secrets.SERVER_PORT || '22' }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$HOST" ] || [ -z "$USER" ]; then
+            echo "::warning ::SERVER_SSH_KEY, SERVER_HOST or SERVER_USER secret is not configured. Skipping website deployment."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H -p "$PORT" "$HOST" >> ~/.ssh/known_hosts
+          rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new" website/ ${USER}@${HOST}:/var/www/spd.xyz1001.top/
+          ssh -i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new ${USER}@${HOST} "chmod -R 755 /var/www/spd.xyz1001.top"
+          echo "Website deployed to /var/www/spd.xyz1001.top/ successfully!"

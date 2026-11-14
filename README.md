@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://spd.xyz1001.top"><img src="https://img.shields.io/badge/Website-spd.xyz1001.top-10b981.svg" alt="Website" /></a>
   <img src="https://img.shields.io/badge/Platform-Android%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-blue.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/Protocol-WebDAV-green.svg" alt="WebDAV" />
   <img src="https://img.shields.io/badge/Target-Pixel%20Dungeon%20%26%20Forks-orange.svg" alt="Pixel Dungeon" />
@@ -68,7 +69,7 @@
 
 ## 📦 下载与安装
 
-请前往 [Releases 页面](https://github.com/xyz1001/pixel-dungeon-sync/releases)（或在 CI 构建产物/测试发布包中）下载对应平台的安装包：
+请访问 [官方网站 (spd.xyz1001.top)](https://spd.xyz1001.top) 或前往 [Releases 页面](https://github.com/xyz1001/pixel-dungeon-sync/releases)（或在 CI 构建产物/测试发布包中）下载对应平台的安装包：
 
 | 系统平台 | 推荐下载文件 | 安装 / 运行方式 |
 | :--- | :--- | :--- |

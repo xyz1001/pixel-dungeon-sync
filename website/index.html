@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDSync · 像素地牢跨平台存档多端同步工具 - 随时随地，多端无缝接力</title>
+  <meta name="description" content="专为《像素地牢》(Pixel Dungeon) 及其衍生改版（如《破碎的像素地牢》Shattered Pixel Dungeon）打造的跨平台存档多端同步工具。支持 Android、Windows、macOS、Linux，双轨云端方案，本地容灾保护。">
+  <meta name="keywords" content="像素地牢,破碎的像素地牢,Shattered Pixel Dungeon,PDSync,存档同步,跨平台接力,WebDAV,免Root,Android,Windows,macOS,Linux">
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="css/style.css?v=20261114_01">
+</head>
+<body>
+
+  <!-- 顶部导航栏 -->
+  <header class="navbar">
+    <div class="container nav-container">
+      <a href="#" class="brand">
+        <img src="assets/logo.svg" alt="PDSync Logo" class="brand-logo">
+        <span>PDSync <span class="brand-badge">v0.5.114</span></span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="#features" class="nav-link">核心特性</a>
+        <a href="#download" class="nav-link">平台下载</a>
+        <a href="#modes" class="nav-link">接入模式</a>
+        <a href="#guide" class="nav-link">上手指引</a>
+        <a href="#philosophy" class="nav-link">游戏理念</a>
+        <a href="#faq" class="nav-link">常见问题</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/xyz1001/pixel-dungeon-sync" target="_blank" rel="noopener" class="nav-github-link" title="GitHub 源码仓库">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a href="#download" class="btn btn-sm btn-primary">立即下载</a>
+        <button class="menu-toggle" onclick="toggleMobileMenu()" aria-label="切换菜单">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero 首屏区域 -->
+  <section class="hero-section">
+    <div class="hero-glow-bg"></div>
+    <div class="container hero-container">
+      <div class="hero-content">
+        <div class="hero-tag-group">
+          <span class="pill pill-green">🎮 Roguelike 探索接力</span>
+          <span class="pill pill-blue">📱 Android / 💻 PC / 🍏 Mac / 🐧 Linux</span>
+          <span class="pill pill-outline">🛡️ 本地容灾备份</span>
+        </div>
+
+        <h1 class="hero-title">
+          让地牢冒险永不中断<br>
+          <span class="text-gradient">像素地牢跨平台存档同步工具</span>
+        </h1>
+
+        <p class="hero-subtitle">
+          专为《像素地牢》(Pixel Dungeon) 及其改版打造。无论在通勤途中用手机探险，还是回到家在 PC 大屏前鏖战，进度无缝衔接，随时随地开启地牢漫游！
+        </p>
+
+        <div class="hero-actions">
+          <button class="btn btn-lg btn-primary" onclick="handleHeroDownload()">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span id="hero-download-text">立即下载最新版</span>
+            <span class="version-tag">v0.5.114</span>
+          </button>
+          <button class="btn btn-lg btn-secondary" onclick="openDownloadModal()">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <span>全平台下载列表</span>
+          </button>
+        </div>
+
+        <div class="hero-tips">
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          <span>开源免费 · 支持免流高速节点 · 附 SHA-256 完整性哈希校验</span>
+        </div>
+
+        <div class="hero-stats-row">
+          <div class="stat-item">
+            <span class="stat-val">4 大系统</span>
+            <span class="stat-label">全平台覆盖与适配</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-val">双轨存储</span>
+            <span class="stat-label">免配置内置 + 自建 WebDAV</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-val">零冲档</span>
+            <span class="stat-label">覆盖前自动本地快照</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero 右侧：地牢宝箱规格卡片 -->
+      <div class="hero-side-card">
+        <div class="dungeon-chest-card">
+          <div class="chest-card-header">
+            <div class="chest-icon-wrap">
+              <img src="assets/logo.svg" alt="PDSync Chest">
+            </div>
+            <div class="chest-header-text">
+              <h3>PDSync 核心守护规格</h3>
+              <p>专为 Roguelike 玩家打造的进度保障引擎</p>
+            </div>
+          </div>
+
+          <div class="chest-spec-list">
+            <div class="chest-spec-item">
+              <div class="spec-icon-badge green">🔄</div>
+              <div class="spec-text-group">
+                <span class="spec-title">跨端进度多向漫游</span>
+                <span class="spec-desc">Android 手机 ⇋ Windows / macOS / Linux PC 电脑</span>
+              </div>
+            </div>
+
+            <div class="chest-spec-item">
+              <div class="spec-icon-badge blue">☁️</div>
+              <div class="spec-text-group">
+                <span class="spec-title">双轨自由云存储</span>
+                <span class="spec-desc">免配置内置 WebDAV 一键登录 · 坚果云/自建网盘完全自由</span>
+              </div>
+            </div>
+
+            <div class="chest-spec-item">
+              <div class="spec-icon-badge amber">🛡️</div>
+              <div class="spec-text-group">
+                <span class="spec-title">本地恢复前自动备份</span>
+                <span class="spec-desc">写回前打上快照 · 冲突弹出清晰对比 · 绝不擅自覆盖</span>
+              </div>
+            </div>
+
+            <div class="chest-spec-item">
+              <div class="spec-icon-badge purple">📱</div>
+              <div class="spec-text-group">
+                <span class="spec-title">Android 免 Root / Root 自由选</span>
+                <span class="spec-desc">免 Root 内置存档桥安装 · Root 原生无损读取免重签</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chest-card-footer">
+            <div class="status-indicator">
+              <span class="status-dot"></span>
+              <span>同步节点与服务器运行平稳</span>
+            </div>
+            <span>v0.5.114 稳定版</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 工作流条幅 (Workflow Banner) -->
+  <section class="workflow-section">
+    <div class="container">
+      <div class="workflow-track">
+        <div class="workflow-card">
+          <div class="workflow-step-num">STEP 01 · 手机保存</div>
+          <div class="workflow-card-title">📱 手机端「保存退出」</div>
+          <div class="workflow-card-desc">在 Android 手机上通关某层，在游戏内点击保存退出。</div>
+        </div>
+
+        <div class="workflow-card">
+          <div class="workflow-step-num">STEP 02 · 云端漫游</div>
+          <div class="workflow-card-title">☁️ 打开 PDSync 上传</div>
+          <div class="workflow-card-desc">点击「上传当前存档」，进度瞬间安全加密漫游至云端。</div>
+        </div>
+
+        <div class="workflow-card">
+          <div class="workflow-step-num">STEP 03 · 电脑恢复</div>
+          <div class="workflow-card-title">💻 电脑打开 PDSync 恢复</div>
+          <div class="workflow-card-desc">点击「恢复到本机」，写入前自动为电脑旧档创建备份。</div>
+        </div>
+
+        <div class="workflow-card">
+          <div class="workflow-step-num">STEP 04 · 无缝冒险</div>
+          <div class="workflow-card-title">🎮 开启游戏，继续接力！</div>
+          <div class="workflow-card-desc">启动电脑版游戏，角色属性、物品与地牢层数完全一致！</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 核心优势特性 (Features) -->
+  <section class="section section-bg-alt" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">CORE CAPABILITIES</span>
+        <h2 class="section-title">消除平台壁垒，地牢随时开局</h2>
+        <p class="section-desc">专注解决游戏多设备互通痛点，提供稳健、透明、可靠的同步体验</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- 特性 1 -->
+        <div class="feature-card">
+          <div class="feature-icon-box green">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l6.73-6.73"></path>
+            </svg>
+          </div>
+          <h3 class="feature-title">跨平台全覆盖接力</h3>
+          <p class="feature-text">
+            完整覆盖 Android、Windows、macOS 与 Linux 四大平台。不管你在户外用手机探索，还是回书房在 PC 上享受高清大屏，进度自由流转。
+          </p>
+          <ul class="feature-points">
+            <li>Android 8.0+ 手机与平板全支持</li>
+            <li>桌面端 Windows / Mac / Linux 原生开箱即用</li>
+          </ul>
+        </div>
+
+        <!-- 特性 2 -->
+        <div class="feature-card">
+          <div class="feature-icon-box blue">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+            </svg>
+          </div>
+          <h3 class="feature-title">双轨自由云存储方案</h3>
+          <p class="feature-text">
+            提供开箱即用的<strong>「内置 WebDAV 服务」</strong>（免去复杂网盘设置）与<strong>「自建 WebDAV」</strong>支持。原生兼容坚果云、Nextcloud、Alist、群晖 NAS 等任意标准协议。
+          </p>
+          <ul class="feature-points">
+            <li>新手免配置一键登录即可用</li>
+            <li>资深玩家完全由自己的私有云掌控</li>
+          </ul>
+        </div>
+
+        <!-- 特性 3 -->
+        <div class="feature-card">
+          <div class="feature-icon-box amber">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <h3 class="feature-title">严格防丢档与容灾备份</h3>
+          <p class="feature-text">
+            在将云端存档写入本机之前，PDSync 始终先在本地生成一份独立只读快照。当多端产生进度分歧时，弹出明确对比，由你决定保留哪份，绝不盲目覆盖。
+          </p>
+          <ul class="feature-points">
+            <li>恢复前自动打上本地时间戳快照</li>
+            <li>多端分歧明确提示并由用户人工裁决</li>
+          </ul>
+        </div>
+
+        <!-- 特性 4 -->
+        <div class="feature-card">
+          <div class="feature-icon-box purple">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">Android 免 Root / Root 双模式</h3>
+          <p class="feature-text">
+            普通设备通过内置向导将存档通信桥集成进游戏安装包，免 Root 安全使用；已获取 Root 权限的设备可直接原生读取，无需重新签名与卸载原版。
+          </p>
+          <ul class="feature-points">
+            <li>免 Root 模式自带签名注入向导</li>
+            <li>Root 模式无损原地接入</li>
+          </ul>
+        </div>
+
+        <!-- 特性 5 -->
+        <div class="feature-card">
+          <div class="feature-icon-box dark">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <h3 class="feature-title">桌面端免配 Java 运行时</h3>
+          <p class="feature-text">
+            桌面安装版与便携版均内置官方定制精简的 OpenJDK 21 运行时环境，无需系统额外安装 Java 或设置环境变量，双击即开，极简清爽。
+          </p>
+          <ul class="feature-points">
+            <li>免去配置 JDK 与 PATH 困扰</li>
+            <li>绿色便携版解压即用，不留冗余注册表</li>
+          </ul>
+        </div>
+
+        <!-- 特性 6 -->
+        <div class="feature-card">
+          <div class="feature-icon-box rose">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+          </div>
+          <h3 class="feature-title">改版独立隔离与生态兼容</h3>
+          <p class="feature-text">
+            原生深度适配《破碎的像素地牢》(Shattered Pixel Dungeon) 等主流改版，不同游戏版本的存档在云端与本地均建立独立沙盒隔离，绝不会串档或互相污染。
+          </p>
+          <ul class="feature-points">
+            <li>改版自动识别与独立存储空间</li>
+            <li>支持官方发布的兼容 JAR 与 APK</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 全平台下载专区 (Downloads) -->
+  <section class="section" id="download">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">DOWNLOADS</span>
+        <h2 class="section-title">全平台客户端下载</h2>
+        <p class="section-desc">当前稳定发布版本：<strong class="text-gradient">v0.5.114</strong> · 支持全渠道高速下载与官方直链</p>
+      </div>
+
+      <div class="download-platforms-grid">
+        <!-- Android 卡片 -->
+        <div class="platform-card" id="platform-android">
+          <span class="platform-badge-tag">移动端</span>
+          <div class="platform-header">
+            <div class="platform-icon android">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4483.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5802 8.4116 13.8437 8 12 8s-3.5802.4116-5.1368 1.1507L4.841 5.4477a.416.416 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+              </svg>
+            </div>
+            <div class="platform-title-group">
+              <h3>Android</h3>
+              <span>Android 8.0+</span>
+            </div>
+          </div>
+          <p class="platform-desc">
+            集成免 Root 存档桥与 Root 原生接入双方案，自动识别改版，手机端一键存取。
+          </p>
+          <div class="platform-actions">
+            <button class="btn btn-primary" onclick="downloadPackage('android', true)">
+              <span>高速下载 APK</span>
+            </button>
+            <div class="download-mirror-row">
+              <span class="mirror-link" onclick="downloadPackage('android', false)">GitHub 官方直链</span>
+              <span class="mirror-link" onclick="openChecksumModal()">查看哈希</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Windows 卡片 -->
+        <div class="platform-card" id="platform-windows">
+          <span class="platform-badge-tag">推荐 PC 端</span>
+          <div class="platform-header">
+            <div class="platform-icon windows">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-13.051-1.8"/>
+              </svg>
+            </div>
+            <div class="platform-title-group">
+              <h3>Windows</h3>
+              <span>Windows 10/11 x64</span>
+            </div>
+          </div>
+          <p class="platform-desc">
+            内置轻量 Java 运行时，无需配环境。提供向导安装版与解压即用便携版。
+          </p>
+          <div class="platform-actions">
+            <button class="btn btn-primary" onclick="downloadPackage('windowsExe', true)">
+              <span>下载安装版 (.exe)</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadPackage('windowsZip', true)">
+              <span>下载便携版 (.zip)</span>
+            </button>
+            <div class="download-mirror-row">
+              <span class="mirror-link" onclick="downloadPackage('windowsExe', false)">官方直链</span>
+              <span class="mirror-link" onclick="openChecksumModal()">查看哈希</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- macOS 卡片 -->
+        <div class="platform-card" id="platform-mac">
+          <span class="platform-badge-tag">桌面端</span>
+          <div class="platform-header">
+            <div class="platform-icon mac">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.4c.64-.81 1.08-1.93.96-3.07-1 .04-2.18.67-2.88 1.48-.61.7-.1.14 1.84.97 3 .02 1.07.08 2.19-.05"/>
+              </svg>
+            </div>
+            <div class="platform-title-group">
+              <h3>macOS</h3>
+              <span>Apple Silicon (M系列)</span>
+            </div>
+          </div>
+          <p class="platform-desc">
+            原生适配 Apple Silicon (arm64)，打开 DMG 拖入应用程序即可畅玩。
+          </p>
+          <div class="platform-actions">
+            <button class="btn btn-primary" onclick="downloadPackage('macDmg', true)">
+              <span>下载 DMG 镜像</span>
+            </button>
+            <div class="download-mirror-row">
+              <span class="mirror-link" onclick="downloadPackage('macDmg', false)">GitHub 官方直链</span>
+              <span class="mirror-link" onclick="openChecksumModal()">查看哈希</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Linux 卡片 -->
+        <div class="platform-card" id="platform-linux">
+          <span class="platform-badge-tag">桌面端</span>
+          <div class="platform-header">
+            <div class="platform-icon linux">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M12.001 0C8.309 0 5.483 3.047 5.483 6.942v.88c0 1.22-.387 2.378-1.09 3.297-.84 1.097-1.393 2.45-1.393 3.931 0 2.222 1.258 4.12 3.078 4.965.343.987.973 1.854 1.815 2.483l-.707 1.031c-.18.263-.122.624.135.815.112.083.243.125.375.125.168 0 .335-.068.455-.2l1.047-1.229c.866.302 1.811.472 2.802.472.992 0 1.937-.17 2.803-.472l1.048 1.229c.12.132.287.2.455.2.132 0 .263-.042.375-.125.257-.191.315-.552.135-.815l-.707-1.031c.842-.629 1.472-1.496 1.815-2.483 1.82-.845 3.078-2.743 3.078-4.965 0-1.481-.553-2.834-1.393-3.931-.703-.919-1.09-2.077-1.09-3.297v-.88C18.519 3.047 15.693 0 12.001 0z"/>
+              </svg>
+            </div>
+            <div class="platform-title-group">
+              <h3>Linux</h3>
+              <span>Debian / Arch Linux</span>
+            </div>
+          </div>
+          <p class="platform-desc">
+            提供主流发行版专属安装包（Debian/Ubuntu 的 .deb 与 Arch Linux 的 .pkg.tar.zst）。
+          </p>
+          <div class="platform-actions">
+            <button class="btn btn-primary" onclick="downloadPackage('linuxDeb', true)">
+              <span>下载 DEB 包 (.deb)</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadPackage('linuxPacman', true)">
+              <span>下载 Arch 包 (pacman)</span>
+            </button>
+            <div class="download-mirror-row">
+              <span class="mirror-link" onclick="downloadPackage('linuxDeb', false)">官方直链</span>
+              <span class="mirror-link" onclick="openChecksumModal()">查看哈希</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下载底栏说明 -->
+      <div class="download-footer-banner">
+        <div class="download-footer-info">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <span><strong>安全提示</strong>：桌面端若遇到 Windows SmartScreen 或 macOS 未知开发者提示，为开源免购商业签名证书正常现象，点击“仍要运行”即可。</span>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="openChecksumModal()">
+          <span>校验 SHA-256 哈希值</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Android 双接入模式对比 (Access Modes) -->
+  <section class="section section-bg-alt" id="modes">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">ANDROID COMPATIBILITY</span>
+        <h2 class="section-title">Android 免 Root 与 Root 双接入方案</h2>
+        <p class="section-desc">不论你的手机是否解锁或拥有 Root 权限，PDSync 均提供成熟完善的接入方案</p>
+      </div>
+
+      <div class="modes-compare-grid">
+        <!-- 免 Root 模式 -->
+        <div class="mode-card recommended">
+          <div class="mode-header">
+            <div class="mode-title-wrap">
+              <h3>免 Root 存档桥模式</h3>
+              <span class="pill pill-green">推荐普通用户</span>
+            </div>
+          </div>
+          <p class="mode-intro">
+            无需解 Bootloader 锁或刷机，通过 PDSync 内置的自动化向导，为原版游戏 APK 集成专属存档通信桥并重新签名。
+          </p>
+          <ul class="mode-feature-list">
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>零门槛安全</strong>：不改动 Android 系统底层与分区，原生系统无缝使用。</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>自动化向导</strong>：只需提供游戏原版安装包，软件自动打桥并生成签名包。</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>改版独立互不影响</strong>：每个改版拥有独立桥配置与通信信道。</span>
+            </li>
+          </ul>
+
+          <div class="mode-notice-box warning">
+            <strong>⚠️ 安装前必读（防丢档须知）：</strong><br>
+            因签名证书改变，系统无法直接覆盖原版游戏，<strong>必须先卸载原有游戏</strong>。<br>
+            卸载会导致原游戏本地旧进度被清空，<strong>请务必在打完当前这一局（通关或阵亡结算）后再卸载重装！</strong>
+          </div>
+        </div>
+
+        <!-- Root 模式 -->
+        <div class="mode-card">
+          <div class="mode-header">
+            <div class="mode-title-wrap">
+              <h3>Root 原生接入模式</h3>
+              <span class="pill pill-blue">已 Root 设备推荐</span>
+            </div>
+          </div>
+          <p class="mode-intro">
+            如果你的设备已拥有 Root 权限（如 Magisk / KernelSU / APatch），PDSync 可直接授权原生读写游戏私有数据目录。
+          </p>
+          <ul class="mode-feature-list">
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#0284c7" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>完全无需卸载原版</strong>：保留手机内现有的一切正在进行的进度与历史记录。</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#0284c7" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>无需重新打包与签名</strong>：直接配合应用商店原版或官网原版游戏使用。</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#0284c7" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>极简一键授权</strong>：初次启动弹窗授权 Root 权限即可开启同步。</span>
+            </li>
+          </ul>
+
+          <div class="mode-notice-box success">
+            <strong>💡 极速无缝上手：</strong><br>
+            无需重新安装或打包游戏，当前正在进行的一局地牢冒险即可立即上传并无缝接力到 PC 电脑上！
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3分钟快速上手 (Quickstart) -->
+  <section class="section" id="guide">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">QUICKSTART</span>
+        <h2 class="section-title">三步快速上手</h2>
+        <p class="section-desc">简单三步，在手机与电脑之间搭建起你的专属地牢进度桥梁</p>
+      </div>
+
+      <div class="steps-container">
+        <!-- 步骤 1 -->
+        <div class="step-card">
+          <div class="step-header">
+            <span class="step-number">01</span>
+            <div class="step-icon">☁️</div>
+          </div>
+          <h3 class="step-title">准备云存储（二选一）</h3>
+          <p class="step-desc">
+            <strong>选项 A（内置 WebDAV，省心免配）</strong>：直接在软件内一键登录内置服务账号。<br><br>
+            <strong>选项 B（自建 WebDAV，完全自由）</strong>：填入坚果云、Nextcloud 或私有群晖 NAS 的 WebDAV 地址与应用密码，点击【测试连接】。
+          </p>
+        </div>
+
+        <!-- 步骤 2 -->
+        <div class="step-card">
+          <div class="step-header">
+            <span class="step-number">02</span>
+            <div class="step-icon">📱</div>
+          </div>
+          <h3 class="step-title">接入手机与电脑客户端</h3>
+          <p class="step-desc">
+            <strong>手机端</strong>：选择免 Root 模式（打桥签名并重装）或 Root 模式（直接授权读取）。<br><br>
+            <strong>电脑端</strong>：运行 PDSync，向导会自动识别或手动选择游戏 JAR 文件及数据路径。
+          </p>
+        </div>
+
+        <!-- 步骤 3 -->
+        <div class="step-card">
+          <div class="step-header">
+            <span class="step-number">03</span>
+            <div class="step-icon">🔄</div>
+          </div>
+          <h3 class="step-title">日常游玩：随存随取</h3>
+          <p class="step-desc">
+            <strong>离开设备时</strong>：游戏内点击“保存并退出”，在 PDSync 点击【上传当前存档】。<br><br>
+            <strong>换到新设备</strong>：打开游戏前，先在 PDSync 点击【恢复到本机】，进游戏立即无缝继续冒险！
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 初心与 Roguelike 理念 (Philosophy) -->
+  <section class="section section-bg-alt" id="philosophy">
+    <div class="container">
+      <div class="philosophy-card">
+        <div class="philosophy-grid">
+          <div>
+            <span class="pill pill-green" style="margin-bottom: 16px;">DESIGN PRINCIPLE</span>
+            <h2 class="philosophy-title">坚守 Roguelike 核心乐趣，消除设备边界</h2>
+            <p class="philosophy-lead">
+              PDSync 的唯一核心目标是实现<strong>多设备间的进度同步与无缝接力续玩</strong>。
+            </p>
+            <p class="philosophy-text">
+              《像素地牢》作为经典的 Roguelike 游戏，不可逆的抉择与“永久死亡（Permadeath）”是其核心魅力与乐趣所在。系统内置的备份与版本快照机制，初衷仅为<strong>应对意外丢档、多端冲突裁决及网络异常时的容灾兜底</strong>。<br><br>
+              我们<strong>强烈不建议、也不鼓励将本工具用作反复读档刷关（S/L，Save & Load）的手段</strong>。过度依赖回档会抹杀随机性与紧张感，严重降低通关时的成就感。
+            </p>
+          </div>
+
+          <div class="philosophy-box">
+            <div class="philosophy-item">
+              <span class="philosophy-item-icon">🗡️</span>
+              <div class="philosophy-item-text">
+                <h4>拥抱随机与冒险</h4>
+                <p>每一步抉择皆有意义，战胜困难拿到 Amulet of Yendor 才更显珍贵。</p>
+              </div>
+            </div>
+
+            <div class="philosophy-item">
+              <span class="philosophy-item-icon">🛡️</span>
+              <div class="philosophy-item-text">
+                <h4>容灾兜底 · 安全防丢</h4>
+                <p>防崩溃、防手滑覆盖、防网络抖动。快照机制为你保驾护航，而非取巧捷径。</p>
+              </div>
+            </div>
+
+            <div class="philosophy-item">
+              <span class="philosophy-item-icon">⚡</span>
+              <div class="philosophy-item-text">
+                <h4>随时随地 · 无缝接力</h4>
+                <p>通勤用碎片时间探险，回家用大屏操作，打破软硬件平台壁垒。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 双轨云端与透明声明 (WebDAV) -->
+  <section class="section" id="webdav">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">CLOUD INFRASTRUCTURE</span>
+        <h2 class="section-title">灵活的双轨云存储支持</h2>
+        <p class="section-desc">无论你喜欢省心开箱即用，还是追求完全的数据自主，PDSync 均全面支持</p>
+      </div>
+
+      <div class="webdav-compare-grid">
+        <div class="webdav-card">
+          <div class="webdav-card-header">
+            <span style="font-size: 1.5rem;">⚡</span>
+            <h3>方案一：内置 WebDAV 服务（免配置推荐）</h3>
+          </div>
+          <p>
+            无需任何网络基础，无需去第三方网盘申请复杂应用授权码。在软件内一键登录内置服务，即可自动连接由我们维护的高速同步节点。
+          </p>
+          <div class="webdav-support-note">
+            <strong>❤️ 关于赞赏与运维成本说明：</strong><br>
+            内置服务支持通过赞赏开通。<strong>赞赏所得全部款项仅用于维持海外云服务器租赁、公网流量与存储的基本硬件与运营支出</strong>，无商业盈利目的，感谢各位地牢探险家的理解与支持！
+          </div>
+        </div>
+
+        <div class="webdav-card">
+          <div class="webdav-card-header">
+            <span style="font-size: 1.5rem;">🌐</span>
+            <h3>方案二：自建 / 第三方 WebDAV（永久免费自主）</h3>
+          </div>
+          <p>
+            PDSync 严格遵循标准 WebDAV RFC 协议，原生无缝支持坚果云、Nextcloud、Alist、群晖 NAS、TrueNAS 等任意第三方服务，永久免费支持。
+          </p>
+          <div class="webdav-support-note" style="border-left-color: var(--accent-cyan);">
+            <strong>🔒 隐私与数据自主掌控：</strong><br>
+            存档数据直接存入您指定的私有网盘中，不经过任何第三方中转，100% 数据隐私由您掌控。即使离线局域网环境也能畅快搭建。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 常见问题 (FAQ) -->
+  <section class="section section-bg-alt" id="faq">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-badge">FAQ</span>
+        <h2 class="section-title">常见问题解答</h2>
+        <p class="section-desc">解答你在安装、同步与日常游玩过程中的疑问</p>
+      </div>
+
+      <div class="faq-list">
+        <details class="faq-item" open>
+          <summary class="faq-summary">
+            <span>内置 WebDAV 和自建 WebDAV 有什么区别？赞赏是强制的吗？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p><strong>赞赏完全自愿，绝非强制！</strong></p>
+            <p>PDSync 对自定义 WebDAV（如坚果云、自建网盘等）提供完整、永久免费的支持。内置 WebDAV 是为了方便不想折腾网络配置的玩家而搭建的“开箱即用”服务。由于云服务器带宽与数据存储有持续的硬件租赁成本，我们通过赞赏机制来维持服务器收支平衡，所得款项仅用于服务器运维支出。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>为什么 Android 免 Root 模式必须卸载原版游戏？本地进度会丢吗？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p><strong>覆盖安装会导致签名校验失败，因此必须卸载，卸载会导致系统清除原版本地存档！</strong></p>
+            <p>Android 系统的安全机制要求覆盖安装的应用必须使用完全相同的签名证书。免 Root 方案必须给 APK 注入存档通信桥并重新签名，这导致签名与原版不一致，无法直接覆盖，必须先卸载原版。</p>
+            <p><strong>请特别注意</strong>：卸载会导致系统自动删除原版游戏内部的存档。请务必在打完当前局（通关或阵亡结算）后再卸载重装。如果手机有 Root 权限，使用 Root 模式则完全不会有这个问题。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>这个工具能用来搞 SL（反复读档重来）吗？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>PDSync 的设计目标是<strong>跨设备存档接力</strong>与<strong>意外容灾</strong>。虽然技术上存在历史快照，但我们<strong>非常不提倡将其作为 SL 手段</strong>。《像素地牢》的精髓正是随机性与死亡惩罚，频繁 SL 会让通关索然无味，失去游戏的原本乐趣。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>点击“恢复”会把本机现有的存档冲掉吗？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>在恢复写入前，PDSync 会先对本地当前存档做一个独立备份。如果云端和本地存在修改时间分歧，软件会弹出清晰的对比弹窗，由你确认是保留云端还是保留本地，绝不擅自冲掉任何数据。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>上传按钮为什么显示灰色不可点击？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>常见原因有两个：</p>
+            <ol>
+              <li>本地当前存档内容与云端最新记录完全一致（内容哈希相同，无需重复上传）。</li>
+              <li>尚未启动过游戏，本地尚无任何存档文件（请先进游戏走动两步并正常保存退出）。</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>恢复完成后启动游戏，怎么还是原来的老进度？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>请确保在点击“恢复”前已经<strong>彻底退出/关闭了游戏进程</strong>。如果游戏一直在后台常驻，其内存中的旧进度会在退出时再次写回磁盘，导致刚恢复的文件被覆盖。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>桌面便携版 (Portable) 的配置保存在哪里？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>为了避免覆盖更新时丢失配置，桌面端所有配置及运行记录默认保存在当前操作系统的用户目录下（<code>~/.pixel-dungeon-sync</code>）。更换便携版程序无需重新设置，升级时直接解压替换主程序即可。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>使用中遇到问题如何反馈与交流？</span>
+            <span class="faq-icon">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>欢迎前往 GitHub 参与讨论或提交问题报告：</p>
+            <ul>
+              <li>提交 Issue：<a href="https://github.com/xyz1001/pixel-dungeon-sync/issues" target="_blank" rel="noopener" style="color:var(--primary); text-decoration:underline;">GitHub Issues 页面</a>（建议附带系统平台、游戏改版名称与复现步骤）。</li>
+              <li>开源代码与构建指南：详见仓库内 <a href="https://github.com/xyz1001/pixel-dungeon-sync" target="_blank" rel="noopener" style="color:var(--primary); text-decoration:underline;">README.md</a> 与 <code>docs/</code> 文档。</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- 页脚 (Footer) -->
+  <footer class="footer">
+    <div class="container footer-container">
+      <div class="footer-left">
+        <div class="footer-brand">
+          <img src="assets/logo.svg" alt="PDSync Logo" class="footer-logo">
+          <span>PDSync · 像素地牢跨平台存档同步工具</span>
+        </div>
+        <p class="footer-disclaimer">
+          声明：本软件为开源免费的进度同步工具，基于 GPL-3.0 协议分发。与 Watabou 或 Shattered Pixel Dungeon 官方无商业隶属关系。所有相关游戏商标版权归原作者所有。
+        </p>
+        <p class="footer-disclaimer">
+          祝各位在地牢中探险愉快，Amulet of Yendor 唾手可得！🧙‍♂️🗡️
+        </p>
+      </div>
+
+      <div class="footer-right">
+        <div class="footer-links-group">
+          <h4>开源与支持</h4>
+          <ul class="footer-links-list">
+            <li><a href="https://github.com/xyz1001/pixel-dungeon-sync" target="_blank" rel="noopener" class="footer-link">GitHub 源码仓库</a></li>
+            <li><a href="https://github.com/xyz1001/pixel-dungeon-sync/releases" target="_blank" rel="noopener" class="footer-link">版本发布 (Releases)</a></li>
+            <li><a href="https://github.com/xyz1001/pixel-dungeon-sync/issues" target="_blank" rel="noopener" class="footer-link">问题反馈 (Issues)</a></li>
+            <li><a href="https://spd.xyz1001.top" class="footer-link">官方主页 (spd.xyz1001.top)</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="footer-bottom">
+        <span>&copy; 2026 PDSync Project. Released under the GNU General Public License v3.0.</span>
+        <span>Hosted securely on tencent-seoul via CI/CD.</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 全平台下载弹窗 (Download Modal) -->
+  <div id="download-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>PDSync v0.5.114 全平台软件包下载</span>
+        </h3>
+        <button class="modal-close" onclick="closeDownloadModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.6;">
+          请根据您的当前设备选择对应安装包。境内用户推荐点击「高速下载」，也可通过「官方直链」直接访问 GitHub Releases。
+        </p>
+
+        <div class="modal-package-list">
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">📱 Android APK 安装包</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-android.apk</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('android', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('android', false)">直链</button>
+            </div>
+          </div>
+
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">💻 Windows 安装包 (x64)</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-windows-x64.exe</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('windowsExe', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('windowsExe', false)">直链</button>
+            </div>
+          </div>
+
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">📦 Windows 便携免安装版 (x64)</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-windows-x64-portable.zip</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('windowsZip', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('windowsZip', false)">直链</button>
+            </div>
+          </div>
+
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">🍏 macOS 镜像 (Apple Silicon)</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-darwin-arm64.dmg</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('macDmg', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('macDmg', false)">直链</button>
+            </div>
+          </div>
+
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">🐧 Debian / Ubuntu 软件包 (x64)</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-linux-x64.deb</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('linuxDeb', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('linuxDeb', false)">直链</button>
+            </div>
+          </div>
+
+          <div class="modal-pkg-item">
+            <div class="modal-pkg-info">
+              <span class="modal-pkg-name">🐧 Arch Linux 软件包 (pacman)</span>
+              <span class="modal-pkg-file">PDSync-0.5.114-linux-x64.pkg.tar.zst</span>
+            </div>
+            <div class="modal-pkg-actions">
+              <button class="btn btn-sm btn-primary" onclick="downloadPackage('linuxPacman', true)">高速下载</button>
+              <button class="btn btn-sm btn-secondary" onclick="downloadPackage('linuxPacman', false)">直链</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHA-256 校验哈希弹窗 (Checksum Modal) -->
+  <div id="checksum-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <span>官方构建 SHA-256 完整性哈希</span>
+        </h3>
+        <button class="modal-close" onclick="closeChecksumModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.875rem; color:var(--text-muted); line-height:1.6; margin-bottom:14px;">
+          所有官方发布包均由 GitHub Actions 在纯净容器内自动构建并生成 SHA-256 哈希值，确保安装包未经任何第三方篡改。
+        </p>
+
+        <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:14px; font-family:var(--font-mono); font-size:0.75rem; line-height:1.8; overflow-x:auto;">
+          <div># SHA256SUMS.txt (v0.5.114)</div>
+          <div>Android APK 签名指纹认证通过</div>
+          <div>跨平台二进制包由 CI 自动化签署验证</div>
+        </div>
+
+        <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+          <a href="https://github.com/xyz1001/pixel-dungeon-sync/releases/tag/v0.5.114" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">
+            前往 GitHub Release 页面核对完整 SHA256SUMS.txt
+          </a>
+          <button class="btn btn-sm btn-primary" onclick="closeChecksumModal()">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/main.js?v=20261114_01"></script>
+</body>
+</html>

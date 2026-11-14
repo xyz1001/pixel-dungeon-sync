@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://spd.xyz1001.top"><img src="https://img.shields.io/badge/Website-spd.xyz1001.top-10b981.svg" alt="Website" /></a>
   <img src="https://img.shields.io/badge/Platform-Android%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-blue.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/Protocol-WebDAV-green.svg" alt="WebDAV" />
   <img src="https://img.shields.io/badge/Target-Pixel%20Dungeon%20%26%20Forks-orange.svg" alt="Pixel Dungeon" />
@@ -68,7 +69,7 @@ Whether you are crawling depths on your Android phone during a commute or contin
 
 ## 📦 Download & Installation
 
-Download packages from the [Releases page](https://github.com/xyz1001/pixel-dungeon-sync/releases) or the latest verified build packages:
+Download packages from the [Official Website (spd.xyz1001.top)](https://spd.xyz1001.top) or the [Releases page](https://github.com/xyz1001/pixel-dungeon-sync/releases):
 
 | Platform | Package | How to Run |
 | :--- | :--- | :--- |
