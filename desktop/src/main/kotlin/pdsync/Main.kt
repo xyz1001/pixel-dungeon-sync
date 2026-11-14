@@ -83,6 +83,14 @@ fun main() {
  runSyncApplication()
 }
 
+/** A request is consumed when the read starts, even if that read later fails. */
+internal class DesktopRemoteReadSchedule {
+ var pending: Boolean = true
+  private set
+ fun request() { pending = true }
+ fun started() { pending = false }
+}
+
 internal fun runSyncApplication(
  title: String = DesktopMessages.PIXEL_DUNGEON_SAVE_SYNC.text()
 ) = application {
@@ -170,7 +178,7 @@ internal fun runSyncApplication(
   var automaticStatus by remember { mutableStateOf(DesktopMessages.ESTABLISHING_A_LOCAL_OBSERVATION_BASELINE.text()) }
   var automatic by remember { mutableStateOf(AutomaticUpload()) }
   val observationDiagnostics = remember { DiagnosticObservationFailures() }
-  var remoteReadAt by remember { mutableStateOf(0L) }
+  val remoteRead = remember { DesktopRemoteReadSchedule() }
   var device by remember { mutableStateOf<DeviceIdentity?>(null) }
   var remoteObserved by remember { mutableStateOf(emptyMap<String, String>()) }
   val scope = rememberCoroutineScope()
@@ -295,7 +303,7 @@ internal fun runSyncApplication(
     reconcileHomeSelection(retainExplicit = sameProfile)
     if (!sameProfile) homeHistoryPage = 0
     homeProfile = value; remoteTips = emptySet(); conflictSelection = null; conflict = null
-    device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteReadAt = 0L
+    device = data?.device; remoteInspectionReady = false; automatic = AutomaticUpload().apply { data?.baselineFiles?.let(::establishBaseline) }; remoteRead.request()
     status = if (value == null) DesktopMessages.SAVE_CONTENTS_HAVE_NOT_BEEN_CHECKED.text() else DesktopMessages.CHECKING_FOR_SAVE_CHANGES.text()
    } catch (e: CancellationException) { throw e }
    catch (e: Exception) {
@@ -496,7 +504,7 @@ internal fun runSyncApplication(
       remoteInspectionReady = true
      }
      conflictSelection=if(action==Action.PUSH)result.conflict?.let {value->value.branches.firstOrNull {it.snapshot.manifest.files==value.observedLocalFiles}?.snapshot?.manifest?.id} else null
-     remoteReadAt = 0L
+     remoteRead.request()
      if(action in setOf(Action.CLOUD_HISTORY,Action.REMOTE_TIP,Action.RESOLVE)){selectedByUser=false;selected=null}
      val now = monotonicMillis()
      if (result.verifiedHistory != null) {
@@ -552,7 +560,7 @@ internal fun runSyncApplication(
        if (terminalFailure == null && action in setOf(Action.PUSH, Action.CLOUD_HISTORY, Action.REMOTE_TIP, Action.RESOLVE)
            && loadedGraph.graph.verification == RemoteVerification.OBJECTS_VERIFIED) {
         remoteTips = setOfNotNull(loadedGraph.simple?.latest)
-        remoteInspectionReady = true; remoteReadAt = monotonicMillis()
+         remoteInspectionReady = true; remoteRead.started()
        }
        reconcileHomeSelection()
       }
@@ -609,7 +617,7 @@ internal fun runSyncApplication(
     config == readConfig && password == secret && homeSelectionGeneration == selectionGeneration &&
     (recovery == null || renewalReads.isCurrent(recovery, config)) &&
     (manualRefresh == null || renewalReads.isManualCurrent(manualRefresh, config))
-   busy = true; remoteReadAt = monotonicMillis(); remoteInspectionReady = false; localHistoryVerified = false
+   busy = true; remoteRead.started(); remoteInspectionReady = false; localHistoryVerified = false
    pendingUploadSourceAvailable = false; status = DesktopMessages.READING_AND_VERIFYING_CLOUD_SNAPSHOTS.text()
    if (reopenLocal) automatic.skipped()
    scope.launch {
@@ -622,9 +630,9 @@ internal fun runSyncApplication(
       refreshProfile(readConfig, canPublish = ::currentPage)
       if (!currentPage()) return@launch
       automatic.skipped()
+      // refreshProfile requests a new read; this explicit/recovery read already consumes it.
+      remoteRead.started()
       if (!localHistoryVerified) return@launch
-      // refreshProfile resets this timer; a failed explicit/recovery read must not immediately replay.
-      remoteReadAt = monotonicMillis()
      }
      val manager = if (reopenLocal) session else previousManager
      if (manager == null) return@launch
@@ -902,7 +910,7 @@ internal fun runSyncApplication(
     val manager = session ?: continue
     if (connected && !remoteInspectionReady) {
      automaticStatus = DesktopMessages.CLOUD_CHECK_INCOMPLETE_AUTOMATIC_UPLOAD_PAUSED.text()
-     if (remoteReadAt == 0L || monotonicMillis() - remoteReadAt >= 60000) readRemote()
+      if (remoteRead.pending) readRemote()
      continue
     }
     val observedGeneration = pageGeneration; val observedConfig = config
@@ -943,7 +951,7 @@ internal fun runSyncApplication(
       if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || !connected || appClosed) continue
       if (!retryable && files == baseline) { automatic.succeeded(files); gameLauncher.completeExit(ownedExit) }
       else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true, ownedExit = ownedExit)
-     } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
+     } else if (connected && !busy && remoteRead.pending) readRemote()
      observationDiagnostics.recovered()
     } catch (e: CancellationException) { throw e }
     catch (failure: Exception) {
