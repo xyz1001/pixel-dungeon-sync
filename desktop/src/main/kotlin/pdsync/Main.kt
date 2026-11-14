@@ -83,20 +83,7 @@ fun main() {
  runSyncApplication()
 }
 
-/** Each application keeps only its selected target's process association; every check enumerates afresh. */
-private fun productionProcessCheck(): (TargetGame?) -> GameProcessStatus {
- val lock = Any()
- var selected: TargetGame? = null
- var detector = GameProcessDetector(null)
- return { target -> synchronized(lock) {
-  if (target != selected) { selected = target; detector = GameProcessDetector(target) }
-  detector.status()
- } }
-}
-
-/** Production always uses fresh process detection. Dependency injection is only used by test code. */
 internal fun runSyncApplication(
- processStatus: (TargetGame?) -> GameProcessStatus = productionProcessCheck(),
  title: String = DesktopMessages.PIXEL_DUNGEON_SAVE_SYNC.text()
 ) = application {
  remember { configureDesktopDiagnostics(workspace.resolve(".local")) }
@@ -176,7 +163,8 @@ internal fun runSyncApplication(
   var locationIssue by remember { mutableStateOf<String?>(pathResult.exceptionOrNull()?.message) }
   var status by remember { mutableStateOf(DesktopMessages.CHECKING_THE_DEFAULT_SAVE_LOCATION.text()) }
   var gameStatus by remember { mutableStateOf<GameProcessStatus>(GameProcessStatus.Unknown(DesktopMessages.SELECT_THE_OFFICIAL_GAME_JAR_IN_SETTINGS.text())) }
-  val gameLauncher = remember { GameLauncher(processStatus) }
+  val gameLauncher = remember { GameLauncher() }
+  fun selectedGameStopped(): Boolean = gameLauncher.status() is GameProcessStatus.Stopped
   var launchingGame by remember { mutableStateOf(false) }
   var launchNotice by remember { mutableStateOf<String?>(null) }
   var automaticStatus by remember { mutableStateOf(DesktopMessages.ESTABLISHING_A_LOCAL_OBSERVATION_BASELINE.text()) }
@@ -421,13 +409,13 @@ internal fun runSyncApplication(
    status = if (trace.action == Action.PUSH && pending) DesktopMessages.UPLOAD_CANCELLED_THE_PENDING_SNAPSHOT_HAS_BEEN_PRESERVED.text() else DesktopMessages.OPERATION_CANCELLED.text()
    confirm = null; confirmationNotice = null; navigate(Page.HOME)
   }
-  fun execute(trace: OperationTrace, isAutomatic: Boolean = false) {
+  fun execute(trace: OperationTrace, isAutomatic: Boolean = false, ownedExit: OwnedGameExit? = null) {
    val action = trace.action
    trace.record(OperationEvent.CONFIRMATION_SUBMITTED)
    val rejected = when {
     appClosed -> OperationGuard.CLOSED
     connectingAtStartup -> OperationGuard.STARTUP
-    busy -> OperationGuard.BUSY
+    busy || !selectedGameStopped() -> OperationGuard.BUSY
     session == null -> OperationGuard.NO_SESSION
     else -> null
    }
@@ -455,7 +443,10 @@ internal fun runSyncApplication(
    val expectedBefore=if(allowUniqueReplacement)confirmationFiles else null
    busy = true; homeOperation = desktopHomeOperation(action); confirm = null; confirmationNotice = null; navigate(Page.HOME)
    localHistoryVerified = false; remoteInspectionReady = false; pendingUploadSourceAvailable = false
-   if (action == Action.PUSH) { if (!isAutomatic) automatic.retryAllowed(); automatic.started() }
+   if (action == Action.PUSH) {
+    if (!isAutomatic) { automatic.retryAllowed(); automatic.started() }
+    else automatic.startedOwned(requireNotNull(ownedExit))
+   }
    status = when (action) {
     Action.RESTORE, Action.RESOLVE, Action.REMOTE_TIP -> DesktopMessages.VERIFYING_AND_BACKING_UP_THE_CURRENT_PROFILE_BEFORE_RESTORING.text()
     Action.PUSH -> DesktopMessages.PRESERVING_THE_SNAPSHOT_AND_VERIFYING_THE_CLOUD.text()
@@ -468,7 +459,7 @@ internal fun runSyncApplication(
     try {
      val result = withContext(Dispatchers.IO) { trace.withDiagnostics {
       trace.record(OperationEvent.WORK_STARTED)
-      val stopped = { true }
+      val stopped = { check(selectedGameStopped()); true }
       val remoteStore by lazy { syncAccess.store(manager.config, manager.adapter.id, secret) }
       fun store(): AppendOnlyWebDav = remoteStore
       fun pushed(result: AppendPushResult): OperationResult = when (result) {
@@ -516,7 +507,13 @@ internal fun runSyncApplication(
       automatic.skipped(); automaticStatus = result.message
      } else if (action == Action.PUSH) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
-      if (baseline != null) automatic.succeeded(baseline) else automatic.failed(now, false)
+      if (baseline != null) {
+       automatic.succeeded(baseline)
+       if (isAutomatic && result.conflict == null && ownedExit != null) operationConfig?.let { saved ->
+        if (ownedExit.target == saved.targetGame && ownedExit.saveRoot == saved.selectedSaveRoot)
+         gameLauncher.completeExit(ownedExit)
+       }
+      } else automatic.failed(now, false)
      } else if (result.appliedFiles != null) automatic.applied(result.appliedFiles, now)
      else if (action == Action.ARCHIVE) {
       val files = withContext(Dispatchers.IO) { runCatching { manager.observedFiles() }.getOrNull() }
@@ -584,7 +581,7 @@ internal fun runSyncApplication(
    scope.launch {
     try {
      val metadata=withContext(Dispatchers.IO) {
-      val stopped = { true }
+      val stopped = { check(selectedGameStopped()); true }
       if(change==null)manager.inspectDirectory(stopped) else change(manager,stopped)
      }
      directoryEditor=metadata;directoryName=metadata.displayName
@@ -666,7 +663,7 @@ internal fun runSyncApplication(
     scope.launch {
      try {
       val found = withContext(Dispatchers.IO) {
-       val stopped = { true }
+       val stopped = { check(selectedGameStopped()); true }
        manager.inspectConflict(syncAccess.store(manager.config, manager.adapter.id, password), stopped)
       }
       conflict = found; conflictSelection = null
@@ -862,7 +859,7 @@ internal fun runSyncApplication(
    while (isActive && !appClosed) {
     if (!busy && !connectingAtStartup) {
      val target = targetInfo
-     val observed = withContext(Dispatchers.IO) { gameLauncher.status(target) }
+      val observed = withContext(Dispatchers.IO) { gameLauncher.status() }
      if (!busy && !connectingAtStartup && targetInfo == target && !appClosed) {
       if (gameStatus is GameProcessStatus.Running && observed is GameProcessStatus.Stopped) launchNotice = null
       gameStatus = observed
@@ -912,7 +909,7 @@ internal fun runSyncApplication(
     try {
      val target = targetInfo
      val observation = withContext(Dispatchers.IO) {
-      val state = gameLauncher.status(target)
+      val state = gameLauncher.status()
       state to manager.observedFiles()
      }
      if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager) continue
@@ -940,11 +937,12 @@ internal fun runSyncApplication(
       retryable -> DesktopMessages.WAITING_FOR_SAVES_TO_STABILIZE_BEFORE_RETRYING_UPLOAD.text()
       else -> DesktopMessages.AUTOMATIC_UPLOAD_ENABLED.text()
      }
-     if (automatic.shouldUpload(now, config?.autoUploadPaused != true && OnboardingGate.allowsAutomatic(config?.onboardingProgress, onboardingActive, remoteInspectionReady), connected, state is GameProcessStatus.Stopped, retryable, conflict != null || hasRemoteBranches(), busy)) {
+     val ownedExit = observedConfig?.let { gameLauncher.pendingExit(it.targetGame, it.selectedSaveRoot) }
+     if (ownedExit != null && (!retryable || automatic.ownsPending(ownedExit)) && automatic.shouldUploadOwned(ownedExit, now, config?.autoUploadPaused != true && OnboardingGate.allowsAutomatic(config?.onboardingProgress, onboardingActive, remoteInspectionReady), connected, state is GameProcessStatus.Stopped, retryable, conflict != null || hasRemoteBranches(), busy)) {
       val baseline = withContext(Dispatchers.IO) { manager.baselineFiles() }
       if (busy || connectingAtStartup || page != Page.HOME || pageGeneration != observedGeneration || config != observedConfig || onboardingActive || config?.onboardingProgress != OnboardingProgress.COMPLETE || !remoteInspectionReady || session !== manager || !connected || appClosed) continue
-      if (!retryable && files == baseline) automatic.succeeded(files)
-      else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true)
+      if (!retryable && files == baseline) { automatic.succeeded(files); gameLauncher.completeExit(ownedExit) }
+      else execute(operationEvents.begin(Action.PUSH, automatic = true), isAutomatic = true, ownedExit = ownedExit)
      } else if (connected && !busy && (remoteReadAt == 0L || now - remoteReadAt >= 60000)) readRemote()
      observationDiagnostics.recovered()
     } catch (e: CancellationException) { throw e }

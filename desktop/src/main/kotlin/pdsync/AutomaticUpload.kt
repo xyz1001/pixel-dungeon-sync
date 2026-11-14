@@ -17,6 +17,15 @@ internal class AutomaticUpload(private val quietMillis: Long = 2500, private val
  private var failures = 0
  private var blocked = false
  private var comparisonSkipped = false
+ private var lastOwnedExit = 0L
+ private var attemptedOwnedExit: Long? = null
+
+ /** Schedule exactly once per observed exit, even if polling missed the running phase. */
+ fun ownedExit(generation: Long, now: Long) {
+  if (generation == lastOwnedExit) return
+  lastOwnedExit = generation
+  dirty = true; changedAt = now; comparisonSkipped = false
+ }
 
  /** A verified persisted sync baseline exposes changes made while the app was closed. */
  fun establishBaseline(files: Map<String, String>) { check(observed == null); settled = files.toMap() }
@@ -31,11 +40,18 @@ internal class AutomaticUpload(private val quietMillis: Long = 2500, private val
    dirty = true; comparisonSkipped = false
   }
  }
- @Suppress("UNUSED_PARAMETER") // Process observations never gate synchronization.
  fun shouldUpload(now: Long, enabled: Boolean, connected: Boolean, stopped: Boolean, pending: Boolean, conflict: Boolean, busy: Boolean): Boolean =
-  enabled && connected && !busy && !inFlight && !blocked && !comparisonSkipped && !conflict && observed != null &&
+  enabled && connected && stopped && !busy && !inFlight && !blocked && !comparisonSkipped && !conflict && observed != null &&
    now >= retryAt && now - changedAt >= quietMillis && (pending || dirty && observed!!.isNotEmpty())
+ fun shouldUploadOwned(exit: OwnedGameExit?, now: Long, enabled: Boolean, connected: Boolean,
+  stopped: Boolean, pending: Boolean, conflict: Boolean, busy: Boolean): Boolean {
+  if (exit == null) return false
+  ownedExit(exit.generation, now)
+  return shouldUpload(now, enabled, connected, stopped, pending, conflict, busy)
+ }
  fun started() { check(!inFlight); inFlight = true }
+ fun startedOwned(exit: OwnedGameExit) { started(); attemptedOwnedExit = exit.generation }
+ fun ownsPending(exit: OwnedGameExit): Boolean = attemptedOwnedExit == exit.generation
  /** Only the files actually published become settled; concurrent later changes remain dirty. */
  fun succeeded(publishedFiles: Map<String, String>) {
   inFlight = false; failures = 0; retryAt = 0; blocked = false; comparisonSkipped = false

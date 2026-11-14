@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class GameLaunchPlan(val command: List<String>, val directory: Path)
+internal data class OwnedGameExit(val generation: Long, val target: String, val saveRoot: String?)
 
 internal sealed interface GameLaunchResult {
  val message: String
@@ -62,7 +63,6 @@ internal fun gameLaunchPlan(target: TargetGame, java: Path, context: SavePathCon
 
 /** Blocking work belongs on Dispatchers.IO. The guard also protects non-UI/repeated callers. */
 internal class GameLauncher(
- private val processStatus: (TargetGame?) -> GameProcessStatus,
  private val context: SavePathContext = SavePathContext.current(),
  private val platform: GameProcessPlatform = GameProcessPlatform.current(),
  private val inspect: (Path) -> TargetGame? = { ShatteredInstallationDiscovery().validateJar(it).target },
@@ -75,12 +75,28 @@ internal class GameLauncher(
  private val startupMillis: Long = 1500
 ) {
  private val starting = AtomicBoolean(false)
- @Volatile private var child: Process? = null
+ private var child: Process? = null
+ private var childSession: OwnedGameExit? = null
+ private var generation = 0L
+ private val exits = mutableListOf<OwnedGameExit>()
 
- fun status(target: TargetGame?): GameProcessStatus {
-  child?.let { if (it.isAlive) return GameProcessStatus.Running(setOf(it.pid())) }
-  return processStatus(target)
+ @Synchronized fun status(): GameProcessStatus {
+  child?.let {
+   if (it.isAlive) return GameProcessStatus.Running(setOf(it.pid()))
+   child = null
+   childSession?.let(exits::add)
+   childSession = null
+  }
+  return GameProcessStatus.Stopped
  }
+
+ @Synchronized fun pendingExit(target: String, saveRoot: String?): OwnedGameExit? {
+  status()
+  exits.removeAll { it.target != target || it.saveRoot != saveRoot }
+  return exits.firstOrNull()
+ }
+
+ @Synchronized fun completeExit(exit: OwnedGameExit) { exits.remove(exit) }
 
  fun launch(configuredJar: String, selectedSaveRoot: String?): GameLaunchResult {
   if (!starting.compareAndSet(false, true)) return GameLaunchResult.Busy
@@ -90,7 +106,7 @@ internal class GameLauncher(
     require(configuredJar.isNotBlank() && path.isAbsolute && path.fileName.toString().endsWith(".jar", true))
     inspect(path) ?: return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text())
    } catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text()) }
-   when (val state = status(target)) {
+   when (val state = status()) {
     is GameProcessStatus.Running -> return GameLaunchResult.AlreadyRunning(state)
     is GameProcessStatus.Unknown -> return GameLaunchResult.Failed(DesktopMessages.CANNOT_CONFIRM_GAME_STATUS_CLOSE_THE_GAME_AND_TRY_AGAIN.text())
     GameProcessStatus.Stopped -> Unit
@@ -106,11 +122,15 @@ internal class GameLauncher(
    val java = javaExecutable() ?: return GameLaunchResult.Failed(DesktopMessages.JAVA_LAUNCHER_NOT_FOUND_INSTALL_JAVA_17_OR_UPDATE_THE_SYNC_APP.text())
    val process = try { start(gameLaunchPlan(target, java, context, platform)) }
     catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.LAUNCH_FAILED_CHECK_JAVA_OR_SELECT_THE_GAME_AGAIN_AND_RETRY.text()) }
-   child = process
+   synchronized(this) { child = process; childSession = null }
    // Detect immediate JVM/native-library failures without blocking the UI or piping output.
    if (process.waitFor(startupMillis, TimeUnit.MILLISECONDS)) {
-    child = null
+    synchronized(this) { if (child === process) child = null }
     return GameLaunchResult.Failed(DesktopMessages.THE_GAME_EXITED_AFTER_LAUNCH_CHECK_JAVA_OR_SELECT_THE_GAME_AGAIN_AND_RETRY.text())
+   }
+   synchronized(this) {
+    child = process
+    childSession = OwnedGameExit(++generation, target.path, selectedSaveRoot)
    }
    return GameLaunchResult.Started(target, process.pid())
   } catch (_: InterruptedException) {

@@ -13,10 +13,28 @@ class AutomaticUploadTest {
  @Test fun `changes debounce while running or unknown and retain pause network conflict and busy gates`() {
   for (running in listOf(true, false)) {
    val c=AutomaticUpload(); c.observe(a,false,true,0); c.observe(b,running,false,100)
-   assertFalse(c.ready(2599,stopped=false)); assertTrue(c.ready(2600,stopped=false))
+    assertFalse(c.ready(2599,stopped=false)); assertFalse(c.ready(2600,stopped=false))
    assertFalse(c.ready(2600,enabled=false)); assertFalse(c.ready(2600,connected=false))
    assertFalse(c.ready(2600,busy=true)); assertFalse(c.ready(2600,conflict=true))
   }
+ }
+ @Test fun `automatic work needs an owned exit and retries do not consume it`() {
+  val c = AutomaticUpload()
+  val exit = OwnedGameExit(1, "game.jar", "root")
+  c.observe(a, false, true, 0); c.observe(b, false, true, 1)
+  fun ready(event: OwnedGameExit?, now: Long, stopped: Boolean = true) =
+   c.shouldUploadOwned(event, now, true, true, stopped, false, false, false)
+  assertFalse(ready(null, 10000))
+  assertFalse(ready(exit, 10001, stopped = false))
+  assertFalse(ready(exit, 12500))
+  assertTrue(ready(exit, 12501))
+  assertFalse(c.ownsPending(exit))
+  c.startedOwned(exit); c.failed(12501, true)
+  assertTrue(c.ownsPending(exit))
+  assertFalse(c.ownsPending(exit.copy(generation = 2)))
+  assertFalse(ready(exit, 17500)); assertTrue(ready(exit, 17501))
+  c.started(); c.succeeded(b)
+  assertFalse(ready(null, 100000))
  }
  @Test fun `game exit does not delay a queued content change`() {
   val c=AutomaticUpload(); c.observe(a,false,true,0); c.observe(b,true,false,100)

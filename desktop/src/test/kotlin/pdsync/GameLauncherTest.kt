@@ -31,13 +31,12 @@ class GameLauncherTest {
   override fun pid() = id
  }
  private fun launcher(
-  state: (TargetGame?) -> GameProcessStatus = { GameProcessStatus.Stopped },
   inspect: (Path) -> TargetGame? = { target(it) },
   java: () -> Path? = { root.resolve("runtime/bin/${javaName()}") },
   start: (GameLaunchPlan) -> Process = { Child() },
   pathContext: SavePathContext = context(),
   platform: GameProcessPlatform = GameProcessPlatform.current()
- ) = GameLauncher(state, pathContext, platform, inspect, java, start, 0)
+ ) = GameLauncher(pathContext, platform, inspect, java, start, 0)
 
  @Test fun launchesSelectedJarWithSeparateArgumentsAndMatchingHome() {
   var seen: GameLaunchPlan? = null
@@ -103,13 +102,9 @@ class GameLauncherTest {
   repeat(2) { assertIs<GameLaunchResult.Failed>(launch.launch(target().path, null)) }
   assertEquals(2, inspections)
  }
- @Test fun alreadyRunningGameUsesExistingDetectorWithoutSpawning() {
-  val launch = launcher(state = { GameProcessStatus.Running(setOf(5)) }, start = { fail("must not launch") })
-  assertEquals(setOf(5L), assertIs<GameLaunchResult.AlreadyRunning>(launch.launch(target().path, null)).status.pids)
- }
- @Test fun uncertainProcessStateDoesNotStartAnotherGame() {
-  val result = launcher(state = { GameProcessStatus.Unknown("details") }, start = { fail("must not launch") }).launch(target().path, null)
-  assertContains(assertIs<GameLaunchResult.Failed>(result).message, "无法确认")
+ @Test fun freshLauncherDoesNotConsultExternalProcessInventory() {
+  assertEquals(GameProcessStatus.Stopped, launcher().status())
+  assertIs<GameLaunchResult.Started>(launcher().launch(target().path, null))
  }
  @Test fun liveChildPreventsDuplicateEvenIfInventoryMissesIt() {
   var starts = 0
@@ -117,7 +112,7 @@ class GameLauncherTest {
   assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
   assertIs<GameLaunchResult.AlreadyRunning>(launch.launch(target().path, null))
   assertEquals(1, starts)
-  assertIs<GameProcessStatus.Running>(launch.status(target()))
+  assertIs<GameProcessStatus.Running>(launch.status())
  }
  @Test fun closedGameCanBeLaunchedAgain() {
   var starts = 0
@@ -125,9 +120,99 @@ class GameLauncherTest {
   val launch = launcher(start = { if (++starts == 1) first else Child(id = 456) })
   assertIs<GameLaunchResult.Started>(launch.launch(target().path, null))
   first.destroy()
-  assertEquals(GameProcessStatus.Stopped, launch.status(target()))
+  assertEquals(GameProcessStatus.Stopped, launch.status())
   assertEquals(456L, assertIs<GameLaunchResult.Started>(launch.launch(target().path, null)).pid)
   assertEquals(2, starts)
+ }
+ @Test fun ownedExitIsQueuedOnceAndBoundToTargetAndSaveRoot() {
+  val child = Child()
+  val game = target().path
+  val launch = launcher(start = { child })
+  assertIs<GameLaunchResult.Started>(launch.launch(game, null))
+  assertNull(launch.pendingExit(game, null))
+  child.alive = false
+  val exit = assertNotNull(launch.pendingExit(game, null))
+  assertEquals(exit, launch.pendingExit(game, null))
+  launch.completeExit(exit)
+  assertNull(launch.pendingExit(game, null))
+ }
+ @Test fun completingAnOldExitDoesNotConsumeANewerExit() {
+  val children = mutableListOf<Child>()
+  val game = target().path
+  val launch = launcher(start = { Child(id = 100L + children.size).also(children::add) })
+  assertIs<GameLaunchResult.Started>(launch.launch(game, null))
+  children.last().alive = false
+  val first = assertNotNull(launch.pendingExit(game, null))
+  assertIs<GameLaunchResult.Started>(launch.launch(game, null))
+  children.last().alive = false
+  assertEquals(first, launch.pendingExit(game, null))
+  launch.completeExit(first)
+  val second = assertNotNull(launch.pendingExit(game, null))
+  assertNotEquals(first.generation, second.generation)
+  launch.completeExit(first)
+  assertEquals(second, launch.pendingExit(game, null))
+ }
+ @Test fun staleExitCannotAuthorizeAnotherTargetOrSaveRoot() {
+  for (changeRoot in listOf(false, true)) {
+   val child = Child()
+   val game = target().path
+   val launch = launcher(start = { child })
+   assertIs<GameLaunchResult.Started>(launch.launch(game, null))
+   child.alive = false
+   assertNull(launch.pendingExit(if (changeRoot) game else root.resolve("other.jar").toString(), if (changeRoot) "other" else null))
+   assertNull(launch.pendingExit(game, null))
+  }
+ }
+ @Test fun onlyAnOwnedExitCanAuthorizeOneAutomaticBackup() {
+  val child = Child()
+  val game = target().path
+  val launcher = launcher(start = { child })
+  val automatic = AutomaticUpload(quietMillis = 0)
+  val old = mapOf("save" to "old")
+  val changed = mapOf("save" to "changed")
+  automatic.observe(old, false, true, 0)
+  automatic.observe(changed, false, true, 1)
+  fun ready(now: Long): Boolean = automatic.shouldUploadOwned(launcher.pendingExit(game, null),
+   now, true, true, launcher.status() is GameProcessStatus.Stopped, false, false, false)
+  assertFalse(ready(2))
+  assertIs<GameLaunchResult.Started>(launcher.launch(game, null))
+  assertFalse(ready(3))
+  child.alive = false
+  assertTrue(ready(4))
+  val exit = assertNotNull(launcher.pendingExit(game, null))
+  automatic.startedOwned(exit); automatic.failed(4, true)
+  assertFalse(ready(5003)); assertTrue(ready(5004))
+  automatic.startedOwned(exit); automatic.succeeded(changed); launcher.completeExit(exit)
+  automatic.observe(mapOf("save" to "external-change"), false, true, 6000)
+  assertFalse(ready(6001))
+ }
+ @Test fun realOwnedHelperIsTrackedWhileOtherJavaDoesNotBlockAndThenExits() {
+  val source = root.resolve("OwnedProcessFixture.java")
+  Files.writeString(source, "public class OwnedProcessFixture { public static void main(String[] args) throws Exception { Thread.sleep(2000); } }")
+  val compiler = assertNotNull(javax.tools.ToolProvider.getSystemJavaCompiler())
+  assertEquals(0, compiler.run(null, null, null, "-d", root.toString(), source.toString()))
+  val java = assertNotNull(gameJavaExecutable(usable = {
+   Files.isRegularFile(it) && Files.isExecutable(it) && it.fileName.toString() in setOf("java", "java.exe")
+  }))
+  fun helper(): Process = ProcessBuilder(java.toString(), "-cp", root.toString(), "OwnedProcessFixture")
+   .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+  val external = helper()
+  var owned: Process? = null
+  try {
+   val launcher = launcher(java = { java }, start = { helper().also { owned = it } })
+   assertTrue(external.isAlive)
+   assertIs<GameLaunchResult.Started>(launcher.launch(target().path, null))
+   assertIs<GameLaunchResult.AlreadyRunning>(launcher.launch(target().path, null))
+   assertTrue(assertNotNull(owned).waitFor(10, TimeUnit.SECONDS))
+   assertEquals(GameProcessStatus.Stopped, launcher.status())
+   assertNotNull(launcher.pendingExit(target().path, null))
+   assertTrue(external.waitFor(10, TimeUnit.SECONDS))
+  } finally {
+   listOfNotNull(external, owned).forEach {
+    if (it.isAlive) it.destroyForcibly()
+    it.waitFor(10, TimeUnit.SECONDS)
+   }
+  }
  }
  @Test fun concurrentDoubleClickIsRejectedWhileFirstIsInspecting() {
   val entered = CountDownLatch(1); val proceed = CountDownLatch(1)
@@ -218,7 +303,7 @@ class GameLauncherTest {
   }))
   val children = mutableListOf<Process>()
   try {
-   val launch = GameLauncher({ GameProcessStatus.Stopped }, context(), GameProcessPlatform.current(),
+   val launch = GameLauncher(context(), GameProcessPlatform.current(),
     inspect = { target(it) }, javaExecutable = { consoleJava }, start = { plan ->
      val process = ProcessBuilder(plan.command).directory(plan.directory.toFile())
       .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
@@ -232,7 +317,7 @@ class GameLauncherTest {
     }, startupMillis = 0)
    repeat(2) {
     assertContains(assertIs<GameLaunchResult.Failed>(launch.launch(jar.toString(), null)).message, "已退出")
-    assertEquals(GameProcessStatus.Stopped, launch.status(target(jar)))
+     assertEquals(GameProcessStatus.Stopped, launch.status())
    }
    assertEquals(2, children.size)
   } finally {
