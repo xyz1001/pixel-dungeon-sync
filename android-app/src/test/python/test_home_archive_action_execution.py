@@ -65,7 +65,10 @@ class HomeArchiveActionExecution(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='pdsync-home-archive-host-') as tmp:
             root = Path(tmp)
             fixture = (HERE / 'fixtures/home-archive-action-host.java.txt').read_text()
-            (root / 'MainActivity.java').write_text(fixture.replace('/* PRODUCTION_METHODS */', methods))
+            # The fixture has no HOME name overlay; preserve production guards while
+            # providing the display-only history accessor used by the extracted methods.
+            display_history = 'private SyncHistory displayHomeHistory() { return this.history; }\n'
+            (root / 'MainActivity.java').write_text(fixture.replace('/* PRODUCTION_METHODS */', display_history + methods))
             java = os.environ.get('JAVA_BIN', 'java')
             compiled = subprocess.run(
                 [java, '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-sourcepath', str(HERE.parents[2] / 'core/src/main/java'), '-encoding', 'UTF-8', '-d', tmp,
