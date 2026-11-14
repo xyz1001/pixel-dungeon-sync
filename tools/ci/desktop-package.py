@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import signal
 import subprocess
 import tempfile
 import zipfile
@@ -25,6 +26,44 @@ def linux_image(images):
     linux_launcher(candidates[0])
     return candidates[0]
 
+def linux_timeout_diagnostics(process, java, out, label):
+    """Capture bounded diagnostics before terminating the isolated smoke process group."""
+    diagnostic=out/f'{label}-smoke-diagnostics.txt'
+    with diagnostic.open('w',encoding='utf-8') as log:
+        try:
+            result=subprocess.run(['ps','-eo','pid,ppid,pgid,args'],stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT,text=True,timeout=5,check=False)
+            log.write('Process list:\n'+result.stdout+'\n')
+            jcmd=java.with_name('jcmd')
+            if not jcmd.is_file():
+                java_home=os.environ.get('JAVA_HOME')
+                home_jcmd=Path(java_home)/'bin/jcmd' if java_home else None
+                jcmd=home_jcmd if home_jcmd and home_jcmd.is_file() else shutil.which('jcmd')
+            if jcmd:
+                group_pids={fields[0] for line in result.stdout.splitlines()[1:]
+                            if len(fields := line.strip().split(None,3))==4 and fields[2]==str(process.pid)}
+                listing=subprocess.run([str(jcmd),'-l'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+                                       text=True,timeout=5,check=False)
+                log.write('\nJVM list:\n'+listing.stdout+'\n')
+                for line in listing.stdout.splitlines():
+                    pid=line.split(None,1)[0] if line.strip() else ''
+                    if pid in group_pids:
+                        dump=subprocess.run([str(jcmd),pid,'Thread.print'],stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT,text=True,timeout=5,check=False)
+                        log.write(f'\nThread dump for {pid}:\n{dump.stdout}\n')
+        except (OSError, subprocess.TimeoutExpired) as error:
+            log.write(f'Diagnostics unavailable: {error}\n')
+
+def print_smoke_logs(out, label, system):
+    names=[f'{label}-smoke.txt']
+    if system=='Linux': names.extend([f'{label}-xvfb.txt',f'{label}-smoke-diagnostics.txt'])
+    for name in names:
+        path=out/name
+        try:
+            print(f'--- {name} ---\n{path.read_text(encoding="utf-8",errors="replace")}',flush=True)
+        except OSError as error:
+            print(f'--- {name} unavailable: {error} ---',flush=True)
+
 def smoke(app, system, out, label):
     if system=='Windows':
         launcher=app/'PDSync.exe'; java=app/'runtime/bin/java.exe'
@@ -36,21 +75,35 @@ def smoke(app, system, out, label):
     run(java,'-version')
     with tempfile.TemporaryDirectory(prefix='pdsync-smoke-') as temp:
         # macOS /var is a symlink; use the actual path rather than weakening app path checks.
-        env=dict(os.environ,PDSYNC_SMOKE='1',JAVA_TOOL_OPTIONS='-Dpdsync.workspace='+str(Path(temp).resolve()))
+        options='-Dpdsync.workspace='+str(Path(temp).resolve())
+        if system=='Linux': options+=' -Dskiko.renderApi=SOFTWARE'
+        env=dict(os.environ,PDSYNC_SMOKE='1',JAVA_TOOL_OPTIONS=options)
         command=[str(launcher)]
-        if system=='Linux': command=['xvfb-run','-a','-e','/dev/stderr',*command]
-        try:
-            result=run(*command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=90)
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
-            # Preserve startup/shutdown evidence even when the launcher never returns.
-            # This workspace is an empty CI fixture, not a user's configured account.
-            output=error.stdout or ''
-            if isinstance(output, bytes): output=output.decode('utf-8',errors='replace')
-            (out/f'{label}-smoke.txt').write_text(output,encoding='utf-8')
-            print(f'{label} smoke failed: {type(error).__name__}\n{output}',flush=True)
-            raise
-        (out/f'{label}-smoke.txt').write_text(result.stdout,encoding='utf-8')
-        assert 'PDSYNC_UI_SMOKE_OK' in result.stdout,result.stdout[-4000:]
+        if system=='Linux': command=['xvfb-run','-a','-e',str((out/f'{label}-xvfb.txt').resolve()),*command]
+        log_path=out/f'{label}-smoke.txt'
+        with log_path.open('w',encoding='utf-8') as log:
+            process=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,
+                                     start_new_session=(system=='Linux'))
+            try:
+                returncode=process.wait(timeout=90)
+            except subprocess.TimeoutExpired:
+                if system=='Linux':
+                    try:
+                        linux_timeout_diagnostics(process,java,out,label)
+                    finally:
+                        try: os.killpg(process.pid,signal.SIGKILL)
+                        except ProcessLookupError: pass
+                else:
+                    process.kill()
+                process.wait()
+                log.flush()
+                print_smoke_logs(out,label,system)
+                raise
+        output=log_path.read_text(encoding='utf-8',errors='replace')
+        if returncode:
+            print_smoke_logs(out,label,system)
+            raise subprocess.CalledProcessError(returncode,command,output=output)
+        assert 'PDSYNC_UI_SMOKE_OK' in output,output[-4000:]
 
 def main():
     system=platform.system()

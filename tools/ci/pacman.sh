@@ -18,7 +18,16 @@ docker run --rm -v "$OUT:/work" archlinux:base-devel bash -euc '
   pacman -Qlp ./*.pkg.tar.zst
   pacman -U --noconfirm ./*.pkg.tar.zst
   test -x /opt/pdsync/lib/runtime/bin/java
-  runuser -u builder -- env PDSYNC_SMOKE=1 JAVA_TOOL_OPTIONS=-Dpdsync.workspace=/tmp/pdsync-smoke xvfb-run -a /usr/bin/pdsync > /work/pacman-smoke.txt 2>&1
+  if runuser -u builder -- env PDSYNC_SMOKE=1 JAVA_TOOL_OPTIONS="-Dpdsync.workspace=/tmp/pdsync-smoke -Dskiko.renderApi=SOFTWARE" timeout --kill-after=5s 90s xvfb-run -a -e /work/pacman-xvfb.txt /usr/bin/pdsync > /work/pacman-smoke.txt 2>&1; then
+    :
+  else
+    status=$?
+    echo "--- pacman-smoke.txt ---"
+    cat /work/pacman-smoke.txt || true
+    echo "--- pacman-xvfb.txt ---"
+    cat /work/pacman-xvfb.txt || true
+    exit "$status"
+  fi
   grep PDSYNC_UI_SMOKE_OK /work/pacman-smoke.txt
 '
 cp "$OUT/"*.pkg.tar.zst "dist/PDSync-$VERSION-linux-x64.pkg.tar.zst"
