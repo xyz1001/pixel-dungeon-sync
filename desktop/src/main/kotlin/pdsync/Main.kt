@@ -190,7 +190,7 @@ internal fun runSyncApplication(
 
   val iconTarget = (if (onboardingActive) discoveredTarget ?: targetInfo else targetInfo)?.takeIf { it.trusted }
   val selectedGameIcon = rememberDesktopGameIcon(iconTarget)
-  fun gameIdentity(target: TargetGame) = SharedGameIdentity(DesktopMessages.SHATTERED_PIXEL_DUNGEON.text(), target.displayVersion,
+  fun gameIdentity(target: TargetGame) = SharedGameIdentity(if (target.trusted) DesktopMessages.SHATTERED_PIXEL_DUNGEON.text() else Path.of(target.path).fileName.toString(), target.displayVersion,
    selectedGameIcon.takeIf { target == iconTarget })
 
   fun homeState() = DesktopSharedHomeAdapter.state(DesktopHomeContext(
@@ -201,7 +201,7 @@ internal fun runSyncApplication(
    pendingUpload = pending, hasConflict = conflict != null, remoteTips = remoteTips,
    selectedId = selected, selectedByUser = selectedByUser, restoreIssue = restoreIssue,
    history = graphHistory, historyPage = homeHistoryPage,
-   game = targetInfo?.takeIf { it.trusted }?.let { gameIdentity(it) },
+   game = targetInfo?.let { gameIdentity(it) },
    operation = homeOperation, automaticStatus = automaticStatus, operationStatus = status,
    connectionNotice = connectionNotice, locationIssue = locationIssue,
    launchNotice = launchNotice, deviceLabel = device?.label,
@@ -353,8 +353,7 @@ internal fun runSyncApplication(
      val chosen = NativeGameChooser.choose(window, saved.targetGame)
      if (chosen != null) {
       val checked = withContext(Dispatchers.IO) {
-       val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
-       require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
+       validateSelectedGame(Path.of(chosen))
       }
       val next = saved.copy(targetGame = checked.path, onboardingProgress = OnboardingProgress.PENDING)
       withContext(Dispatchers.IO) { configFile.save(next) }
@@ -700,7 +699,9 @@ internal fun runSyncApplication(
    val found = withContext(Dispatchers.IO) { ShatteredInstallationDiscovery().discover(setupDraft.targetGame) }
    if (appClosed) return
    discovery = found
-   discoveredTarget = found.suggestedTarget
+   discoveredTarget = if (setupDraft.targetGame.isNotBlank()) withContext(Dispatchers.IO) {
+    runCatching { ShatteredInstallationDiscovery().validateJar(Path.of(setupDraft.targetGame)).target }.getOrNull()
+   } ?: found.suggestedTarget else found.suggestedTarget
    discoveryNotice = null
   }
   fun rescanDiscovery() {
@@ -720,10 +721,8 @@ internal fun runSyncApplication(
      val chosen = NativeGameChooser.choose(window, discoveredTarget?.path ?: setupDraft.targetGame)
      if (chosen != null) {
       val verified = withContext(Dispatchers.IO) {
-       val candidate = ShatteredInstallationDiscovery().validateJar(Path.of(chosen))
-       require(candidate.trusted) { candidate.reason }; requireNotNull(candidate.target)
+       validateSelectedGame(Path.of(chosen))
       }
-      require(verified.trusted) { DesktopMessages.SELECTED_GAME_VERSION_NOT_RECOGNIZED_1_S.text(verified.reason) }
       withContext(Dispatchers.IO) { setupSelection.save(verified.path) }
       discoveredTarget = verified; discoveryNotice = null
      }
@@ -739,7 +738,7 @@ internal fun runSyncApplication(
     var proceed = false
     try {
      withContext(Dispatchers.IO) {
-      require(ShatteredInstallationDiscovery().validateJar(Path.of(target.path)).target == target && target.trusted) { DesktopMessages.GAME_FILE_CHANGED_PLEASE_SELECT_IT_AGAIN.text() }
+      require(ShatteredInstallationDiscovery().validateJar(Path.of(target.path)).target == target) { DesktopMessages.GAME_FILE_CHANGED_PLEASE_SELECT_IT_AGAIN.text() }
      }
      val next = desktopSetupDraftForGame(setupDraft, target.path, pathAdapter.state.path)
      withContext(Dispatchers.IO) { setupSelection.save(target.path) }
@@ -804,7 +803,7 @@ internal fun runSyncApplication(
      // Save-directory inspection must not block game selection or service configuration.
      val target = withContext(Dispatchers.IO) {
       runCatching { ShatteredInstallationDiscovery().validateJar(Path.of(saved.targetGame)).target }
-       .getOrNull()?.takeIf { it.trusted }
+       .getOrNull()
      }
      if (target == null) {
       onboardingActive = true; setupDraft = saved.copy(onboardingProgress = OnboardingProgress.PENDING)
@@ -1015,7 +1014,7 @@ internal fun runSyncApplication(
       when (page) {
        Page.DISCOVERY -> {
         val gamePageGeneration = pageGeneration
-        val selectedGame = discoveredTarget?.takeIf { it.trusted }
+        val selectedGame = discoveredTarget
         val discoveryState = SharedGameSelectionState(
          game = selectedGame?.let { gameIdentity(it) },
          selectionId = selectedGame?.path,
@@ -1232,7 +1231,7 @@ internal fun runSyncApplication(
         fun current() = !appClosed && page == Page.CONNECTION && pageGeneration == generation
         DesktopSharedConnectionPage(configFile, if (onboardingActive && !connectionAppreciationOnly) setupDraft else config, password,
          if (connectionReturnPage == Page.DISCOVERY) ConnectionEntryModel.Origin.SETUP else ConnectionEntryModel.Origin.SETTINGS,
-         game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
+         game = (discoveredTarget ?: targetInfo)?.let {
           gameIdentity(it)
          },
          appreciationOnly = connectionAppreciationOnly,
@@ -1292,7 +1291,7 @@ internal fun runSyncApplication(
          override fun changeHistoryPage(page: Int) = Unit
         })
         ConflictDialog(value, overwriteTarget, busy || connectingAtStartup, connected && !serviceExpired,
-         game = (discoveredTarget ?: targetInfo)?.takeIf { it.trusted }?.let {
+         game = (discoveredTarget ?: targetInfo)?.let {
           gameIdentity(it)
          }, pending = pending,
          onSelect = { },

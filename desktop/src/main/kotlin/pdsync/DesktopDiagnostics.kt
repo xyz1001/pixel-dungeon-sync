@@ -9,6 +9,20 @@ import java.util.Locale
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** Log only closed categories, never the selected path or the inspector's free-form reason. */
+internal fun validateSelectedGame(path: Path): TargetGame {
+ val trace = DiagnosticLog.begin(DiagnosticAction.INSPECT, false)
+ try {
+  val candidate = ShatteredInstallationDiscovery().validateJar(path)
+  val target = candidate.target ?: throw IllegalArgumentException(candidate.reason)
+  trace.record(DiagnosticStage.FINISHED, DiagnosticResult.SUCCEEDED)
+  return target
+ } catch (e: Exception) {
+  trace.failure(DiagnosticStage.FINISHED, e)
+  throw e
+ }
+}
+
 /** A separate private log directory; the older operation-events log and all history remain intact. */
 internal fun configureDesktopDiagnostics(directory: Path) {
  val platform = desktopDiagnosticPlatform(System.getProperty("os.name")) ?: return

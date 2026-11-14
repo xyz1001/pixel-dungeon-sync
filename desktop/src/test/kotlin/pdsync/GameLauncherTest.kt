@@ -89,8 +89,8 @@ class GameLauncherTest {
   assertIs<GameLaunchResult.Failed>(result)
   assertFalse(result.message.contains("secret"))
  }
- @Test fun untrustedJarIsNotExecuted() {
-  assertIs<GameLaunchResult.Failed>(launcher(inspect = { target(it, false) }, start = { fail("must not launch") }).launch(target().path, null))
+ @Test fun unknownJarCanBeSelectedForLaunchWhenProcessStatusIsStopped() {
+  assertIs<GameLaunchResult.Started>(launcher(inspect = { target(it, false) }, start = { Child() }).launch(target().path, null))
  }
  @Test fun blankRelativeOrNativeExecutableCannotLaunch() {
   for (path in listOf("", "relative.jar", root.resolve("shattered.exe").toString(), "\u0000.jar")) {

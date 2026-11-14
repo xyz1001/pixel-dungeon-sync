@@ -125,7 +125,7 @@ class GameProcessDetector(
 
  @Synchronized fun status(): GameProcessStatus {
   if (platform == GameProcessPlatform.UNSUPPORTED) return GameProcessStatus.Unknown(CoreMessages.AUTOMATIC_PROCESS_CHECKS_ARE_NOT_SUPPORTED_ON_THIS_SYSTEM.text())
-  if (target == null || !target.trusted) return GameProcessStatus.Unknown(CoreMessages.FIRST_SELECT_A_SHATTERED_GAME_JAR_WITH_A_RECOGNIZABLE_VERSION.text())
+  if (target == null) return GameProcessStatus.Unknown(CoreMessages.FIRST_SELECT_A_SHATTERED_GAME_JAR_WITH_A_RECOGNIZABLE_VERSION.text())
   val targetPath = resolvePath(target.path, null, platform)
    ?: return GameProcessStatus.Unknown(CoreMessages.CANNOT_VERIFY_THE_SELECTED_GAME_JAR_S_PATH.text())
   val observations = try { listOf(inventory.snapshot(), inventory.snapshot()) }
@@ -196,7 +196,7 @@ class GameProcessDetector(
    }
    if (arg == "-m" || arg == "--module") {
     val main = args.getOrNull(index) ?: return Match.UNKNOWN
-    return if (main.substringAfter('/') == SHATTERED_MAIN) Match.RUNNING else Match.UNRELATED
+    return if (main.substringAfter('/') == SHATTERED_MAIN) Match.RUNNING else if (!target!!.trusted) Match.UNKNOWN else Match.UNRELATED
    }
    if (arg in OPTIONS_WITH_VALUE) {
     if (index >= args.size) return Match.UNKNOWN
@@ -208,7 +208,7 @@ class GameProcessDetector(
     arg.startsWith("-ea:") || arg.startsWith("-da:")) {
     // JVM options cannot change the launch target parsed below.
    } else if (arg.startsWith('-')) return Match.UNKNOWN
-   else return if (arg == SHATTERED_MAIN) Match.RUNNING else Match.UNRELATED
+   else return if (arg == SHATTERED_MAIN) Match.RUNNING else if (!target!!.trusted) Match.UNKNOWN else Match.UNRELATED
   }
   return Match.UNKNOWN
  }

@@ -26,6 +26,26 @@ class DesktopDiagnosticsTest {
   Files.createDirectory(outputDirectory)
  }
 
+ @Test fun selectedUnknownFileDiagnosticsDoNotExposePathOrContents() {
+  val path = directory.resolve("PRIVATE_SENTINEL.jar")
+  Files.writeString(path, "PRIVATE_CONTENT_SENTINEL")
+  val target = validateSelectedGame(path)
+  assertFalse(target.trusted)
+  val events = entries(DiagnosticLog.snapshotExport()).getValue("events.jsonl")
+  assertContains(events, "\"action\":\"INSPECT\"")
+  assertContains(events, "\"result\":\"SUCCEEDED\"")
+  assertFalse(events.contains("PRIVATE_SENTINEL"))
+  assertFalse(events.contains("PRIVATE_CONTENT_SENTINEL"))
+ }
+
+ @Test fun failedSelectionDiagnosticsDoNotExposePath() {
+  val path = directory.resolve("PRIVATE_MISSING_SENTINEL.jar")
+  assertFailsWith<IllegalArgumentException> { validateSelectedGame(path) }
+  val events = entries(DiagnosticLog.snapshotExport()).getValue("events.jsonl")
+  assertContains(events, "\"result\":\"FAILED\"")
+  assertFalse(events.contains("PRIVATE_MISSING_SENTINEL"))
+ }
+
  @Test fun platformAndDevelopmentMetadataAreHonestAndLegacyFilesRemainUntouched() {
   val legacy = privateDirectory.resolve("operation-events.log")
   val previous = privateDirectory.resolve("operation-events.log.1")

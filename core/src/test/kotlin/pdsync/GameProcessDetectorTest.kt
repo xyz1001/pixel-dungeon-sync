@@ -96,11 +96,22 @@ class GameProcessDetectorTest {
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(target, ProcessInventory { ProcessInventorySnapshot(emptyList(), false) }, GameProcessPlatform.LINUX).status())
   assertEquals(GameProcessStatus.Stopped, status())
  }
- @Test fun selectedTrustedJarAndSupportedPlatformAreRequired() {
+ @Test fun selectedJarAndSupportedPlatformAreRequired() {
   val empty = ProcessInventory { ProcessInventorySnapshot(emptyList()) }
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(null, empty).status())
-  assertIs<GameProcessStatus.Unknown>(GameProcessDetector(target.copy(trusted = false), empty).status())
+  assertEquals(GameProcessStatus.Stopped, GameProcessDetector(target.copy(trusted = false), empty).status())
   assertIs<GameProcessStatus.Unknown>(GameProcessDetector(target, empty, GameProcessPlatform.UNSUPPORTED).status())
+ }
+ @Test fun unknownTargetUsesExactJarPathAndFailsClosedForClassAndModuleLaunches() {
+  val unknown = target.copy(trusted = false, versionCode = 0, minimumSaveVersion = null)
+  fun check(process: ObservedGameProcess) = GameProcessDetector(unknown,
+   ProcessInventory { ProcessInventorySnapshot(listOf(process)) }, GameProcessPlatform.current(), -1).status()
+  assertIs<GameProcessStatus.Running>(check(java()))
+  val other = root.resolve("different").createDirectories().resolve(jar.fileName).also { it.writeText("not a zip") }
+  assertIs<GameProcessStatus.Unknown>(check(java(args = listOf("-jar", other.toString()))))
+  assertIs<GameProcessStatus.Unknown>(check(java(args = listOf("-cp", jar.toString(), "mod.SomeMain"))))
+  assertIs<GameProcessStatus.Unknown>(check(java(args = listOf("--module", "mod/mod.SomeMain"))))
+  assertIs<GameProcessStatus.Unknown>(check(java(args = null)))
  }
  @Test fun windowsJavawPathsAreCaseInsensitiveAndResolveDotSegments() {
   val nativeWindows = GameProcessPlatform.current() == GameProcessPlatform.WINDOWS

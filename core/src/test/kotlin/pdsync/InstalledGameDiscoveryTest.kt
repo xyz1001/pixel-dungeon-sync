@@ -105,6 +105,36 @@ class InstalledGameDiscoveryTest {
   assertTrue(scanner.discover().trustedTargets.isEmpty()); assertFalse(Files.exists(marker))
  }
 
+ @Test fun manualSelectionAcceptsUnknownReadableFilesWithoutRestoreCompatibility() {
+  val scanner = ShatteredInstallationDiscovery(context(), emptyList())
+  val toolkit = temp.resolve("toolkit.jar")
+  ZipOutputStream(Files.newOutputStream(toolkit)).use { zip ->
+   val manifest = "Manifest-Version: 1.0\r\nMain-Class: com.shatteredpixel.shatteredpixeldungeon.desktop.DesktopLauncher\r\n" +
+    "Specification-Title: SHPD toolkit\r\nImplementation-Title: com.elektrochecker.shatteredtoolkit\r\n" +
+    "Specification-Version: 3.3.3 - 1.5\r\nImplementation-Version: 887\r\n\r\n"
+   zip.putNextEntry(ZipEntry("META-INF/MANIFEST.MF")); zip.write(manifest.toByteArray()); zip.closeEntry()
+  }
+  val noManifest = temp.resolve("no-manifest.jar")
+  ZipOutputStream(Files.newOutputStream(noManifest)).use { zip ->
+   zip.putNextEntry(ZipEntry("some-file")); zip.write(byteArrayOf(1)); zip.closeEntry()
+  }
+  val invalid = file("not-zip.jar")
+  val badVersion = temp.resolve("bad-version.jar")
+  ZipOutputStream(Files.newOutputStream(badVersion)).use { zip ->
+   val manifest = "Manifest-Version: 1.0\r\nMain-Class: com.shatteredpixel.shatteredpixeldungeon.desktop.DesktopLauncher\r\n" +
+    "Specification-Title: Shattered Pixel Dungeon\r\nImplementation-Title: com.shatteredpixel.shatteredpixeldungeon\r\n" +
+    "Specification-Version: 4.0.2\r\nImplementation-Version: invalid\r\n\r\n"
+   zip.putNextEntry(ZipEntry("META-INF/MANIFEST.MF")); zip.write(manifest.toByteArray()); zip.closeEntry()
+  }
+  for (path in listOf(toolkit, noManifest, invalid, badVersion)) {
+   val found = assertNotNull(scanner.validateJar(path).target)
+   assertFalse(found.trusted); assertEquals(0, found.versionCode); assertNull(found.minimumSaveVersion)
+   assertEquals(64, found.sha256.length)
+   assertFailsWith<IllegalArgumentException> { ShatteredVersions.requireCompatible(SaveVersions(mapOf("game1" to 887)), found) }
+  }
+  assertNull(scanner.validateJar(temp.resolve("missing.jar")).target)
+ }
+
  @Test fun scannerNeverRecursesBeyondExplicitSlotsOrReadsRuntimeJars() {
   val direct = file("package/app/desktop.jar")
   file("package/runtime/lib/hidden.jar"); file("package/app/nested/other.jar"); file("package/unrelated/another.jar")

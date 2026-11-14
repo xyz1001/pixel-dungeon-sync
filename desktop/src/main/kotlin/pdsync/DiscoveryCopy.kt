@@ -5,7 +5,7 @@ import pdsync.i18n.DesktopMessages
 /** Presentation only: finding an installation or directory does not verify save contents. */
 internal object DiscoveryCopy {
  fun game(result: InstallationDiscoveryResult?, selected: TargetGame?): String = when {
-  selected?.trusted == true -> if (selected.minimumSaveVersion == null) DesktopMessages.RESTORING_IS_NOT_SUPPORTED_FOR_THIS_GAME_VERSION_YET.text() else ""
+  selected != null -> if (selected.minimumSaveVersion == null) DesktopMessages.RESTORING_IS_NOT_SUPPORTED_FOR_THIS_GAME_VERSION_YET.text() else ""
   result == null -> DesktopMessages.LOOKING_FOR_GAMES.text()
   result.incomplete -> DesktopMessages.SEARCH_INCOMPLETE_SELECT_THE_GAME_MANUALLY.text()
   result.trustedTargets.size > 1 -> DesktopMessages.SELECT_THE_GAME_TO_USE.text()

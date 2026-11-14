@@ -10,6 +10,8 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.Locale
+import java.security.MessageDigest
+import java.nio.file.StandardOpenOption
 
 /** Flat, explicit directory slots, never a recursive directory search. */
 data class InstallationSearchRoot(
@@ -100,8 +102,23 @@ class ShatteredInstallationDiscovery internal constructor(
   const val MAX_EXPANDED_BYTES = 128L * 1024 * 1024
  }
 
- /** Manual selection uses the same authoritative inspector and may inspect one larger valid JAR. */
- fun validateJar(path: Path): InstalledTargetCandidate = probe(path, CoreMessages.MANUAL_SELECTION.text(), ShatteredVersions::target)
+ /** Explicit selection accepts any readable JAR file; identity is best-effort, not a prerequisite. */
+ fun validateJar(path: Path): InstalledTargetCandidate = probe(path, CoreMessages.MANUAL_SELECTION.text()) { checked ->
+  val digest = MessageDigest.getInstance("SHA-256")
+  Files.newInputStream(checked, StandardOpenOption.READ, NOFOLLOW_LINKS).use { input ->
+   val buffer = ByteArray(8192)
+   while (true) {
+    val count = input.read(buffer)
+    if (count < 0) break
+    digest.update(buffer, 0, count)
+   }
+  }
+  val fingerprint = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+  val identified = try { ShatteredVersions.target(checked) } catch (_: IllegalArgumentException) { null }
+  if (identified != null && identified.sha256 == fingerprint) identified else TargetGame(
+   checked.toString(), CoreMessages.UNKNOWN_SOURCE.text(), 0, fingerprint, false, null,
+   CoreMessages.UNKNOWN_SOURCE.text())
+ }
 
  fun discover(configuredTarget: String = ""): InstallationDiscoveryResult {
   val candidates = linkedMapOf<String, InstalledTargetCandidate>()

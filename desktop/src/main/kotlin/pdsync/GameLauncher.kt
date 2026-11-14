@@ -47,7 +47,6 @@ internal fun gameJavaExecutable(
 
 internal fun gameLaunchPlan(target: TargetGame, java: Path, context: SavePathContext, platform: GameProcessPlatform): GameLaunchPlan {
  require(platform != GameProcessPlatform.UNSUPPORTED)
- require(target.trusted)
  val jar = Path.of(target.path)
  require(jar.isAbsolute && java.isAbsolute)
  val home = requireNotNull(context.userHome)
@@ -89,7 +88,7 @@ internal class GameLauncher(
    val target = try {
     val path = Path.of(configuredJar)
     require(configuredJar.isNotBlank() && path.isAbsolute && path.fileName.toString().endsWith(".jar", true))
-    inspect(path)?.takeIf { it.trusted } ?: return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text())
+    inspect(path) ?: return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text())
    } catch (_: Exception) { return GameLaunchResult.Failed(DesktopMessages.GAME_FILE_UNAVAILABLE_SELECT_THE_GAME_AGAIN_IN_SETTINGS.text()) }
    when (val state = status(target)) {
     is GameProcessStatus.Running -> return GameLaunchResult.AlreadyRunning(state)

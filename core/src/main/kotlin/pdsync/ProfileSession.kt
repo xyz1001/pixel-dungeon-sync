@@ -179,7 +179,10 @@ object ShatteredProfileVersions : ProfileVersions {
   return snapshot.copy(manifest = snapshot.manifest.copy(version = detected.summary(), saveVersions = detected,
    gamePackage = GameCloudIdentity.SHATTERED_PACKAGE))
  }
- override fun target(path: String): TargetGame? = if (path.isBlank()) null else ShatteredVersions.target(java.nio.file.Paths.get(path))
+ override fun target(path: String): TargetGame? = if (path.isBlank()) null else {
+  val candidate = ShatteredInstallationDiscovery().validateJar(java.nio.file.Paths.get(path))
+  candidate.target ?: throw IllegalArgumentException(candidate.reason)
+ }
  override fun checkRestore(snapshot: Snapshot, targetPath: String) {
   val actual = ShatteredVersions.detect(Snapshots.verify(snapshot, Shattered))
   checkRestore(snapshot,targetPath,actual)
@@ -188,7 +191,8 @@ object ShatteredProfileVersions : ProfileVersions {
  private fun checkRestore(snapshot:Snapshot,targetPath:String,actual:SaveVersions) {
   snapshot.manifest.saveVersions?.let { require(it == actual) { CoreSessionMessages.SNAPSHOT_VERSION_METADATA_DOES_NOT_MATCH_THE_SAVE_CONTENTS.text() } }
   require(recordedGamePackage(snapshot.manifest) == GameCloudIdentity.SHATTERED_PACKAGE) { CoreSessionMessages.THE_SNAPSHOT_BELONGS_TO_A_DIFFERENT_GAME_PACKAGE_AND_CANNOT.text() }
-  val target = target(targetPath) ?: error(CoreSessionMessages.SELECT_THE_TARGET_GAME_JAR_FIRST_THE_INSTALLED_GAME_VERSION.text())
+  val target = if (targetPath.isBlank()) error(CoreSessionMessages.SELECT_THE_TARGET_GAME_JAR_FIRST_THE_INSTALLED_GAME_VERSION.text())
+   else ShatteredVersions.target(java.nio.file.Paths.get(targetPath))
   ShatteredVersions.requireCompatible(actual, target)
  }
 }
